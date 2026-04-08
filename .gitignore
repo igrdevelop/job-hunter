@@ -1,0 +1,39 @@
+# Secrets
+.env
+.secrets/
+linkedin_storage_state.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Generated application documents (large, per-user)
+Applications/
+
+# Tracker (per-user data)
+tracker.xlsx
+
+# Temp files
+_*.py
+*.tmp
+
+# Personal documents (templates)
+*.docx
+*.pdf
+!templates/*.docx

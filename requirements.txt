@@ -1,0 +1,15 @@
+# Core
+requests
+python-dotenv
+openpyxl
+python-docx
+
+# Telegram bot
+python-telegram-bot
+
+# LLM providers (install at least one)
+anthropic
+# openai
+
+# Optional: better HTML extraction for generic job pages
+beautifulsoup4
