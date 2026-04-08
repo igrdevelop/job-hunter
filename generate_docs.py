@@ -19,13 +19,13 @@ Expects a JSON file with the following schema:
       {
         "title": "Senior Frontend Developer (Angular)",
         "company": "Fairmarkit (via contractor)",
-        "period": "Jun 2025 – March 2026",
+        "period": "Jun 2025 - March 2026",
         "subtitle": "AI-powered Enterprise Procurement Platform | USA (Global)",
         "bullets": ["bullet 1", "bullet 2"],
         "stack_line": "Stack: Angular 19, TypeScript, ..."
       }
     ],
-    "education": "Belarusian State Technological University — Bachelor, PE and Systems of Information Processing",
+    "education": "Belarusian State Technological University - Bachelor, PE and Systems of Information Processing",
     "courses": "Angular Updates Course, Angular Advanced Course, ..."
   },
   "resume_pl": null,
@@ -303,11 +303,20 @@ def update_tracker(content):
         wb = _create_tracker()
         ws = wb.active
 
+    from hunter.tracker import normalize_url, has_successful_entry
+    norm_url = normalize_url(apply_url) if apply_url else ""
+
+    # Don't add a duplicate row if docs were already generated for this URL
+    if norm_url and has_successful_entry(apply_url):
+        print(f"  [tracker] Skipping — successful entry already exists for {apply_url[:60]}")
+        wb.close()
+        return
+
     # Check if this URL was already applied to → mark as re-application
     is_reapply = any(
-        row[4] == apply_url
+        normalize_url(str(row[5] or "")) == norm_url
         for row in ws.iter_rows(min_row=2, values_only=True)
-        if apply_url and row[4]
+        if norm_url and row and len(row) > 5 and row[5]
     )
 
     next_row = ws.max_row + 1
@@ -316,7 +325,7 @@ def update_tracker(content):
     for col, val in enumerate(values, 1):
         cell = ws.cell(row=next_row, column=col, value=val)
         cell.font = row_font
-        if col == 5 and val:  # URL — hyperlink
+        if col == 6 and val:  # URL — hyperlink
             cell.hyperlink = val
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
         if col == 5 and ats_score:  # ATS % — color coded

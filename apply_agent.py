@@ -54,11 +54,36 @@ APPLY_USE_CLI = os.environ.get("APPLY_USE_CLI", "false").lower() in ("true", "1"
 CLI_MAX_RETRIES = int(os.environ.get("CLI_MAX_RETRIES", "3"))
 CLI_RETRY_DELAY = int(os.environ.get("CLI_RETRY_DELAY", "30"))
 
+GENERATE_PL_RESUME = os.environ.get("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
+
 REQUIRED_JSON_KEYS = [
     "company_name", "stack", "lang", "job_title",
     "resume_en", "cover_letter_en", "cover_letter_pl",
     "about_me_en", "about_me_pl",
 ]
+if GENERATE_PL_RESUME:
+    REQUIRED_JSON_KEYS.append("resume_pl")
+
+_SKIP_DEDUP = False
+
+
+# ── Tracker dedup check (avoid wasting LLM tokens) ──────────────────────────
+
+def _already_processed(url: str) -> bool:
+    """Check tracker.xlsx before calling LLM.
+
+    Returns True only if a SUCCESSFUL entry exists (ATS score is a real value,
+    not FAIL/SKIP). This way retries of FAIL jobs are not blocked.
+    Skipped entirely when --force flag is used.
+    """
+    if _SKIP_DEDUP:
+        return False
+    try:
+        sys.path.insert(0, str(PROJECT_DIR))
+        from hunter.tracker import has_successful_entry
+        return has_successful_entry(url)
+    except Exception:
+        return False
 
 
 # ── Telegram helper ───────────────────────────────────────────────────────────
@@ -123,6 +148,10 @@ def validate_content(data: dict) -> list[str]:
 
 def main_api(url: str) -> None:
     print(f"\n[apply_agent] API mode | URL: {url}\n")
+
+    if _already_processed(url):
+        print(f"[apply_agent] SKIP — already in tracker: {url}")
+        return
 
     notify(
         f"⏳ <b>Generating docs (API)...</b>\n"
@@ -280,6 +309,10 @@ def _find_new_folder(before: set[str], timeout: int = 300) -> str | None:
 def main_cli(url: str) -> None:
     print(f"\n[apply_agent] CLI mode | URL: {url}\n")
 
+    if _already_processed(url):
+        print(f"[apply_agent] SKIP — already in tracker: {url}")
+        return
+
     folders_before = _get_existing_folders()
 
     notify(
@@ -395,9 +428,12 @@ def main_cli(url: str) -> None:
 # Entry point
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main(url: str, force_cli: bool = False) -> None:
-    use_cli = force_cli or APPLY_USE_CLI
+def main(url: str, force_cli: bool = False, force: bool = False) -> None:
+    if force:
+        global _SKIP_DEDUP
+        _SKIP_DEDUP = True
 
+    use_cli = force_cli or APPLY_USE_CLI
     if use_cli:
         main_cli(url)
     else:
@@ -410,9 +446,10 @@ def main(url: str, force_cli: bool = False) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python apply_agent.py <job_url> [--cli]")
+        print("Usage: python apply_agent.py <job_url> [--cli] [--force]")
         sys.exit(1)
 
     force_cli = "--cli" in sys.argv
+    force = "--force" in sys.argv
     url = [a for a in sys.argv[1:] if not a.startswith("--")][0]
-    main(url, force_cli=force_cli)
+    main(url, force_cli=force_cli, force=force)

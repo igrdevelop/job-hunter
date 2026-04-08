@@ -117,6 +117,13 @@ class LinkedInSource(BaseSource):
             if not title:
                 continue
 
+            # Strip company name suffix: "Senior Dev / VBET" -> "Senior Dev"
+            if company:
+                title = re.sub(
+                    r'\s*[-/|]\s*' + re.escape(company.strip()) + r'\s*$',
+                    '', title, flags=re.I,
+                ).strip()
+
             jobs.append(Job(
                 title=title,
                 company=company,

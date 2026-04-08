@@ -12,6 +12,7 @@ import re
 import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
@@ -27,12 +28,49 @@ TRACKER_HEADERS = [
 URL_COL_INDEX = 5       # 1-based column index for "URL" in tracker (column F)
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
+ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
+
+
+def normalize_url(url: str) -> str:
+    """Canonical form: lowercase host, strip trailing slash, drop tracking params."""
+    url = url.strip()
+    if not url:
+        return url
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    path = p.path.rstrip("/") or "/"
+    # Drop common tracking query params
+    drop_params = {
+        "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+        "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
+        "originToLandingJobPostings", "origin",
+    }
+    qs = parse_qs(p.query, keep_blank_values=False)
+    clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
+    query = urlencode(clean_qs, doseq=True) if clean_qs else ""
+    # For LinkedIn /jobs/view/{id}/ — keep only path
+    if "linkedin.com" in host and "/jobs/view/" in path:
+        m = re.search(r"/jobs/view/(\d+)", path)
+        if m:
+            path = f"/jobs/view/{m.group(1)}"
+            query = ""
+    return urlunparse((p.scheme, host, path, "", query, ""))
+
+
+def normalize_company(company: str) -> str:
+    """Normalized company name for dedup."""
+    s = company.lower()
+    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
+    s = re.sub(r'\b(sp\.?\s*z\.?\s*o\.?\s*o\.?|s\.a\.|ltd\.?|gmbh|inc\.?)\b', '', s)
+    s = re.sub(r'[^a-z0-9]', '', s)
+    return s
 
 
 def dedup_key(company: str, title: str) -> str:
     """Normalized key for company+title dedup (cross-source, cross-URL)."""
     def _norm(s: str) -> str:
         s = s.lower()
+        s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
         s = re.sub(r'\b(sp\.?\s*z\.?\s*o\.?\s*o\.?|s\.a\.|ltd\.?|gmbh|inc\.?)\b', '', s)
         s = re.sub(r'[^a-z0-9]', '', s)
         return s
@@ -88,7 +126,7 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def get_known_urls() -> set[str]:
-    """Return all URLs stored in tracker — used for deduplication."""
+    """Return all normalized URLs stored in tracker — used for deduplication."""
     if not TRACKER_PATH.exists():
         return set()
 
@@ -99,7 +137,7 @@ def get_known_urls() -> set[str]:
         if row and len(row) >= URL_COL_INDEX:
             val = row[URL_COL_INDEX - 1]  # 0-based
             if val:
-                urls.add(str(val).strip())
+                urls.add(normalize_url(str(val)))
     wb.close()
     return urls
 
@@ -122,8 +160,192 @@ def get_known_company_titles() -> set[str]:
     return keys
 
 
+SENT_COL_INDEX = 8  # "Sent" column (1-based)
+
+
+def get_sent_companies() -> set[str]:
+    """Return normalized company names for rows that have Sent info."""
+    if not TRACKER_PATH.exists():
+        return set()
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    companies = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < SENT_COL_INDEX:
+            continue
+        sent = str(row[SENT_COL_INDEX - 1] or "").strip()
+        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+        if sent and company:
+            companies.add(normalize_company(company))
+    wb.close()
+    return companies
+
+
+def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
+    """Fuzzy company match: 'scalo' matches 'scalowroclaw' and vice versa.
+
+    True if comp_key is a substring of any sent company, or any sent company
+    is a substring of comp_key. Minimum 3 chars to avoid false positives.
+    """
+    if not comp_key or len(comp_key) < 3:
+        return False
+    if comp_key in sent_companies:
+        return True
+    for sc in sent_companies:
+        if len(sc) < 3:
+            continue
+        if comp_key in sc or sc in comp_key:
+            return True
+    return False
+
+
+def get_failed_jobs() -> list[Job]:
+    """Return Job objects for all rows with ATS status 'FAIL'."""
+    if not TRACKER_PATH.exists():
+        return []
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    jobs = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < URL_COL_INDEX:
+            continue
+        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+        if ats != "FAIL":
+            continue
+        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+        title = str(row[TITLE_COL_INDEX - 1] or "").strip()
+        url = str(row[URL_COL_INDEX - 1] or "").strip()
+        if url:
+            jobs.append(Job(
+                title=title,
+                company=company,
+                location="",
+                salary=None,
+                url=url,
+                source="retry",
+            ))
+    wb.close()
+    return jobs
+
+
+def remove_failed(url: str) -> None:
+    """Remove a FAIL row from tracker (so it can be re-added as a proper entry)."""
+    if not TRACKER_PATH.exists():
+        return
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+
+    norm = normalize_url(url)
+    rows_to_delete = []
+    for row_num in range(2, ws.max_row + 1):
+        ats = str(ws.cell(row=row_num, column=ATS_COL_INDEX).value or "").strip()
+        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
+        if ats == "FAIL" and normalize_url(row_url) == norm:
+            rows_to_delete.append(row_num)
+
+    for row_num in reversed(rows_to_delete):
+        ws.delete_rows(row_num)
+
+    if rows_to_delete:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+
+
+def has_successful_entry(url: str) -> bool:
+    """True if tracker has a non-FAIL, non-SKIP entry for this URL (= docs were generated)."""
+    if not TRACKER_PATH.exists():
+        return False
+    norm = normalize_url(url)
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < URL_COL_INDEX:
+            continue
+        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
+        if not row_url:
+            continue
+        if normalize_url(row_url) != norm:
+            continue
+        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+        if ats not in ("FAIL", "SKIP", "?", ""):
+            wb.close()
+            return True
+    wb.close()
+    return False
+
+
+def lookup_url(url: str) -> list[dict]:
+    """Find all tracker entries matching this URL (normalized). Returns row details."""
+    if not TRACKER_PATH.exists():
+        return []
+    norm = normalize_url(url)
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results = []
+    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or len(row) < URL_COL_INDEX:
+            continue
+        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
+        if row_url and normalize_url(row_url) == norm:
+            results.append({
+                "row": row_num,
+                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
+                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
+                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
+                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
+                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
+            })
+    wb.close()
+    return results
+
+
+def lookup_company(company: str) -> list[dict]:
+    """Find all tracker entries matching this company (normalized). Returns row details."""
+    if not TRACKER_PATH.exists():
+        return []
+    norm = normalize_company(company)
+    if not norm:
+        return []
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results = []
+    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or len(row) < URL_COL_INDEX:
+            continue
+        row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+        if row_company and normalize_company(row_company) == norm:
+            results.append({
+                "row": row_num,
+                "company": row_company,
+                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
+                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
+                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
+                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
+            })
+    wb.close()
+    return results
+
+
+def is_known(url: str, company: str = "", title: str = "") -> bool:
+    """Check if a job is already in tracker (by URL or company+title)."""
+    known_urls = get_known_urls()
+    if normalize_url(url) in known_urls:
+        return True
+    if company and title:
+        known_ct = get_known_company_titles()
+        if dedup_key(company, title) in known_ct:
+            return True
+    return False
+
+
 def add_skipped(job: Job) -> None:
     """Append a SKIP row to tracker so the job is never shown again."""
+    if is_known(job.url, job.company, job.title):
+        return
     wb, ws = _load_or_create()
     today = date.today().strftime("%Y-%m-%d")
     next_row = ws.max_row + 1
@@ -158,6 +380,8 @@ def add_skipped(job: Job) -> None:
 def add_failed(job: Job) -> None:
     """Append a FAIL row so the job is not retried on next hunt.
     User can delete the row from Excel to retry manually."""
+    if is_known(job.url, job.company, job.title):
+        return
     wb, ws = _load_or_create()
     today = date.today().strftime("%Y-%m-%d")
     next_row = ws.max_row + 1

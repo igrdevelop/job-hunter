@@ -30,7 +30,7 @@ from hunter.config import (
     SCHEDULE_TIMES,
 )
 from hunter.models import Job
-from hunter.tracker import add_skipped
+from hunter.tracker import add_skipped, lookup_url, lookup_company, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🤖 <b>Job Hunter Bot</b>\n\n"
         "Commands:\n"
-        "/hunt — run search now\n"
-        "/status — show schedule\n",
+        "/hunt - run search now\n"
+        "/status - show schedule\n"
+        "/force &lt;url&gt; - process URL even if already in tracker\n\n"
+        "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -87,9 +89,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manual trigger — runs the full hunt cycle immediately."""
     await update.message.reply_text("🔍 Running hunt now...")
-    # Import here to avoid circular import
     from hunter.main import run_hunt
     await run_hunt(context)
+
+
+async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Force-process a URL even if it's already in tracker."""
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /force <url>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    url = args[0].strip()
+    if not url.startswith("http"):
+        await update.message.reply_text("URL must start with http")
+        return
+
+    await update.message.reply_text(
+        f"⏳ <b>Force: запускаю генерацию...</b>\n🔗 {url}",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    logger.info(f"[Force] Launching apply_agent --force for: {url}")
+    asyncio.create_task(_run_apply_agent(url, force=True))
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,13 +190,14 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
     asyncio.create_task(_run_apply_agent(job.url))
 
 
-async def _run_apply_agent(url: str) -> None:
+async def _run_apply_agent(url: str, force: bool = False) -> None:
     """Run apply_agent.py in the background, don't block the event loop."""
     try:
+        cmd = [sys.executable, str(APPLY_AGENT_PATH), url]
+        if force:
+            cmd.append("--force")
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            url,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -231,7 +256,28 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(_run_linkedin_batch(capped, update))
         return
 
-    # Single job URL
+    # Single job URL — check tracker first
+    entries = await asyncio.to_thread(lookup_url, text)
+    if entries:
+        lines = []
+        for e in entries:
+            status = "Sent" if e["sent"] else e["ats"] or "?"
+            sent_info = f' | Sent: {e["sent"]}' if e["sent"] else ""
+            folder_info = f'\n    Folder: <code>{e["folder"]}</code>' if e["folder"] else ""
+            lines.append(
+                f'  Row {e["row"]}: <b>{e["company"]}</b> - {e["title"]}\n'
+                f'    ATS: {e["ats"]}{sent_info}{folder_info}'
+            )
+        detail = "\n".join(lines)
+        await update.message.reply_text(
+            f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
+            f"{detail}\n\n"
+            f"Отправь /force {text}\nесли хочешь обработать заново.",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return
+
     await update.message.reply_text(
         f"⏳ <b>Запускаю генерацию...</b>\n🔗 {text}\n\nЭто займёт 1-2 минуты.",
         parse_mode=ParseMode.HTML,
@@ -296,6 +342,7 @@ def build_application() -> Application:
     # Command handlers
     app.add_handler(CommandHandler("start",  cmd_start))
     app.add_handler(CommandHandler("hunt",   cmd_hunt))
+    app.add_handler(CommandHandler("force",  cmd_force))
     app.add_handler(CommandHandler("status", cmd_status))
 
     # Button callbacks
