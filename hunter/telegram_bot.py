@@ -28,6 +28,7 @@ from hunter.config import (
     TELEGRAM_CHAT_ID,
     TIMEZONE,
     SCHEDULE_TIMES,
+    SCHEDULE_SOURCE_OFFSET_MIN,
 )
 from hunter.models import Job
 from hunter.tracker import add_skipped, lookup_url, lookup_company, normalize_url
@@ -119,13 +120,27 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from hunter.main import _hunt_lock
     from hunter.config import AUTO_APPLY
+    from hunter.sources import ALL_SOURCES
 
-    times_str = " / ".join(SCHEDULE_TIMES)
     pending = len(_pending_jobs)
     lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
     mode = "AUTO" if AUTO_APPLY else "MANUAL"
+
+    # Build per-source schedule table
+    schedule_lines = []
+    for idx, source in enumerate(ALL_SOURCES):
+        times = []
+        for base_time in SCHEDULE_TIMES:
+            h, m = map(int, base_time.split(":"))
+            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
+            total %= 24 * 60
+            times.append(f"{total // 60:02d}:{total % 60:02d}")
+        schedule_lines.append(f"  <b>{source.name}</b>: {' / '.join(times)}")
+
+    schedule_str = "\n".join(schedule_lines)
     await update.message.reply_text(
-        f"⏰ Schedule: {times_str} ({TIMEZONE})\n"
+        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset={SCHEDULE_SOURCE_OFFSET_MIN}min):\n"
+        f"{schedule_str}\n\n"
         f"🔧 Mode: {mode}\n"
         f"{lock_status}\n"
         f"📋 Pending decisions: {pending} jobs",
@@ -351,20 +366,34 @@ def build_application() -> Application:
     # Plain URL messages → auto-apply
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_url))
 
-    # Scheduled hunts
+    # Staggered per-source scheduled hunts.
+    # Each source gets its own daily job at: base_time + source_index * offset_min.
+    # Times wrap past midnight with modulo 24h.
     tz = pytz.timezone(TIMEZONE)
-    for time_str in SCHEDULE_TIMES:
-        hour, minute = map(int, time_str.split(":"))
-        app.job_queue.run_daily(
-            callback=_scheduled_hunt,
-            time=dt_time(hour, minute, tzinfo=tz),
-            name=f"hunt_{time_str}",
-        )
-        logger.info(f"[Schedule] Hunt registered at {time_str} {TIMEZONE}")
+    from hunter.sources import ALL_SOURCES
+
+    for idx, source in enumerate(ALL_SOURCES):
+        for base_time in SCHEDULE_TIMES:
+            h, m = map(int, base_time.split(":"))
+            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
+            total %= 24 * 60
+            fire_hour, fire_min = total // 60, total % 60
+
+            app.job_queue.run_daily(
+                callback=_scheduled_hunt,
+                time=dt_time(fire_hour, fire_min, tzinfo=tz),
+                name=f"hunt_{source.name}_{base_time}",
+                data={"source_names": [source.name]},
+            )
+            logger.info(
+                f"[Schedule] {source.name} at "
+                f"{fire_hour:02d}:{fire_min:02d} {TIMEZONE}"
+            )
 
     return app
 
 
 async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
     from hunter.main import run_hunt
-    await run_hunt(context)
+    source_names = context.job.data.get("source_names") if context.job.data else None
+    await run_hunt(context, source_names=source_names)

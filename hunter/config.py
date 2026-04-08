@@ -33,7 +33,13 @@ GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
+# Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
+# E.g. with times ["08:00","13:00","19:00"] and offset 60 min, 4 sources run at:
+#   08:00 / 09:00 / 10:00 / 11:00
+#   13:00 / 14:00 / 15:00 / 16:00
+#   19:00 / 20:00 / 21:00 / 22:00
 SCHEDULE_TIMES = ["08:00", "13:00", "19:00"]
+SCHEDULE_SOURCE_OFFSET_MIN: int = int(os.getenv("SCHEDULE_SOURCE_OFFSET_MIN", "60"))
 TIMEZONE = "Europe/Warsaw"
 
 # ── Job filters ───────────────────────────────────────────────────────────────

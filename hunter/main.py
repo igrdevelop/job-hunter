@@ -35,15 +35,23 @@ logger = logging.getLogger(__name__)
 _hunt_lock = asyncio.Lock()
 
 
-async def run_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Entry point for scheduled and manual hunts. Acquires lock to prevent overlap."""
+async def run_hunt(
+    context: ContextTypes.DEFAULT_TYPE,
+    source_names: list[str] | None = None,
+) -> None:
+    """Entry point for scheduled and manual hunts.
+
+    Args:
+        source_names: if given, only run sources whose .name is in this list.
+                      None (default) runs all registered sources.
+    """
     if _hunt_lock.locked():
         logger.info("[Hunt] Skipped — previous hunt/auto-apply still running")
         await send_text(context, "⏭ Hunt skipped — auto-apply still processing.")
         return
 
     async with _hunt_lock:
-        await _run_hunt_impl(context)
+        await _run_hunt_impl(context, source_names=source_names)
 
 
 def _check_apply_ready() -> str | None:
@@ -74,23 +82,33 @@ def _check_apply_ready() -> str | None:
         return None
 
 
-async def _run_hunt_impl(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _run_hunt_impl(
+    context: ContextTypes.DEFAULT_TYPE,
+    source_names: list[str] | None = None,
+) -> None:
     """
     Full hunt cycle:
-      1. Fetch jobs from all registered sources
+      1. Fetch jobs from selected sources (all by default, subset when staggered)
       2. Apply keyword/level/location filters
       3. Deduplicate against tracker.xlsx
       4. AUTO_APPLY=true  → generate docs (with delay between jobs)
          AUTO_APPLY=false → send Telegram cards with Apply/Skip buttons
     """
     ts = datetime.now().strftime("%d.%m.%Y %H:%M")
-    logger.info(f"[Hunt] Starting at {ts}")
+    logger.info(f"[Hunt] Starting at {ts} sources={source_names or 'all'}")
     mode = "CLI" if (APPLY_USE_CLI or not LLM_API_KEY) else f"API ({LLM_MODEL})"
+
+    # Select sources for this run
+    active_sources = (
+        [s for s in ALL_SOURCES if s.name in source_names]
+        if source_names
+        else ALL_SOURCES
+    )
 
     # ── Step 1: Fetch ────────────────────────────────────────────────────────
     all_jobs: list[Job] = []
     fetch_stats: dict[str, int | str] = {}
-    for source in ALL_SOURCES:
+    for source in active_sources:
         try:
             jobs = await asyncio.to_thread(source.search)
             all_jobs.extend(jobs)
