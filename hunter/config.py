@@ -92,6 +92,9 @@ FILTER = {
 # ── LinkedIn source config ────────────────────────────────────────────────────
 LINKEDIN_ENABLED: bool = os.getenv("LINKEDIN_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── Bulldogjob source config ──────────────────────────────────────────────────
+BULLDOGJOB_ENABLED: bool = os.getenv("BULLDOGJOB_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",
