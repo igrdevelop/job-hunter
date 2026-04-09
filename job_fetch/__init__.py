@@ -43,5 +43,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.bulldogjob import fetch_bulldogjob
         return fetch_bulldogjob(url)
 
+    if "pracuj.pl" in domain:
+        logger.info(f"[job_fetch] Pracuj.pl detected: {url}")
+        from job_fetch.pracuj import fetch_pracuj
+        return fetch_pracuj(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)
