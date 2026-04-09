@@ -366,19 +366,22 @@ def update_tracker(content):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python generate_docs.py <content.json>")
+        print("Usage: python generate_docs.py <content.json> [--full]")
         sys.exit(1)
 
     json_path = sys.argv[1]
+    full_mode = "--full" in sys.argv
+
     with open(json_path, "r", encoding="utf-8") as f:
         content = json.load(f)
 
     output_folder = content["output_folder"]
     stack = content["stack"]
-    lang = content.get("lang", "EN")
 
     os.makedirs(output_folder, exist_ok=True)
-    print(f"\nOutput folder: {output_folder}\n")
+    mode_label = "FULL" if full_mode else "SHORT (PDF-only, EN CV)"
+    print(f"\nOutput folder: {output_folder}")
+    print(f"Mode: {mode_label}\n")
 
     # --- Resume EN ---
     if content.get("resume_en"):
@@ -388,8 +391,8 @@ def main():
         fname = f"Ihar Petrasheuski CV Senior Frontend Developer ({stack}) 2026.docx"
         save_docx(doc, Path(output_folder) / fname)
 
-    # --- Resume PL (only if provided) ---
-    if content.get("resume_pl"):
+    # --- Resume PL (full mode only) ---
+    if full_mode and content.get("resume_pl"):
         doc = Document()
         set_margins(doc)
         build_resume(doc, content["resume_pl"], stack)
@@ -410,19 +413,26 @@ def main():
         build_cover_letter(doc, content["cover_letter_pl"])
         save_docx(doc, Path(output_folder) / "Cover_Letter_PL.docx")
 
-    # --- About Me (plain text) ---
-    if content.get("about_me_en"):
-        p = Path(output_folder) / "About_Me_EN.txt"
-        p.write_text(content["about_me_en"], encoding="utf-8")
-        print(f"  [OK] TXT:  {p}")
+    # --- About Me (full mode only) ---
+    if full_mode:
+        if content.get("about_me_en"):
+            p = Path(output_folder) / "About_Me_EN.txt"
+            p.write_text(content["about_me_en"], encoding="utf-8")
+            print(f"  [OK] TXT:  {p}")
 
-    if content.get("about_me_pl"):
-        p = Path(output_folder) / "About_Me_PL.txt"
-        p.write_text(content["about_me_pl"], encoding="utf-8")
-        print(f"  [OK] TXT:  {p}")
+        if content.get("about_me_pl"):
+            p = Path(output_folder) / "About_Me_PL.txt"
+            p.write_text(content["about_me_pl"], encoding="utf-8")
+            print(f"  [OK] TXT:  {p}")
 
     # --- Convert all DOCX to PDF in one shot ---
     convert_all_to_pdf(output_folder)
+
+    # --- Short mode: remove DOCX intermediates, keep only PDFs ---
+    if not full_mode:
+        for docx_file in Path(output_folder).glob("*.docx"):
+            docx_file.unlink()
+            print(f"  [cleanup] Removed intermediate: {docx_file.name}")
 
     # --- Update tracker.xlsx ---
     update_tracker(content)

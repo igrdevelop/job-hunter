@@ -233,8 +233,8 @@ Store final score in `"ats_score"` field in content.json.
 ```
 
 Rules for the JSON:
-- `resume_pl`: ALWAYS populate with full Polish-translated resume data (same structure as resume_en but in Polish)
-- `cover_letter_pl` and `about_me_pl`: always populate (useful for all applications)
+- `resume_pl`: set to `null` by default (short mode skips PL CV). Only populate with full Polish-translated resume data when `--full` flag is used.
+- `cover_letter_pl` and `about_me_pl`: always populate (cover letter PL is still generated in short mode; about_me_pl is kept in JSON for reference even though the .txt file is only created in full mode)
 - Experience array must include ALL 6 jobs from Ihar's background, in reverse chronological order
 - Use `\n` for paragraph breaks in cover letter text
 
@@ -250,12 +250,13 @@ python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/App
 ```
 Package ready: Applications/{CompanyName}_{date}/
 
+Mode: SHORT (default) — PDF only, EN CV only
 Files created:
-  - Ihar Petrasheuski CV Senior Frontend Developer ({Stack}) 2026.docx + .pdf
-  - Cover_Letter_EN.docx + .pdf
-  - Cover_Letter_PL.docx + .pdf
-  - About_Me_EN.txt
-  - About_Me_PL.txt
+  - Ihar Petrasheuski CV Senior Frontend Developer ({Stack}) 2026.pdf
+  - Cover_Letter_EN.pdf
+  - Cover_Letter_PL.pdf
+
+(With --full flag: adds DOCX files, PL CV, About_Me_EN.txt, About_Me_PL.txt)
 
 ATS keywords matched: [list 8-10 from job that are in resume]
 

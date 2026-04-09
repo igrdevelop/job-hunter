@@ -2,14 +2,21 @@
 """
 apply_agent.py — Autonomous apply agent.
 
-Two modes (controlled by APPLY_USE_CLI in .env):
-  1. API mode (default): fetch job text → LLM API → content.json → generate_docs.py
-  2. CLI mode (fallback): claude -p "/apply {url}" — uses Claude Pro subscription
+Auth priority:
+  1. CLI first (Claude Pro subscription) — if `claude` CLI is installed & logged in
+  2. API fallback — uses LLM_API_KEY / ANTHROPIC_API_KEY from .env
+  Override: --cli forces CLI-only; APPLY_USE_CLI=true in .env does the same.
+
+Doc generation:
+  Default (short mode): PDF-only, EN CV only (no PL CV, no .txt files)
+  --full flag: all files (DOCX + PDF, PL CV, About_Me .txt files)
 
 Usage:
   python apply_agent.py "https://justjoin.it/job-offer/company-role-city-tech"
   python apply_agent.py "https://nofluffjobs.com/job/some-slug"
-  python apply_agent.py --cli "https://..."   # force CLI mode for this run
+  python apply_agent.py --cli "https://..."      # force CLI mode
+  python apply_agent.py --full "https://..."     # generate all file types
+  python apply_agent.py --force "https://..."    # skip tracker dedup
 """
 
 import json
@@ -65,6 +72,7 @@ if GENERATE_PL_RESUME:
     REQUIRED_JSON_KEYS.append("resume_pl")
 
 _SKIP_DEDUP = False
+_FULL_MODE = False
 
 
 # ── Tracker dedup check (avoid wasting LLM tokens) ──────────────────────────
@@ -231,10 +239,14 @@ def main_api(url: str) -> None:
     print(f"[apply_agent] Wrote {content_path}")
 
     # Step 7 — Run generate_docs.py
-    print("[apply_agent] Step 4: Generating DOCX/PDF...")
+    gen_cmd = [sys.executable, str(GENERATE_DOCS_SCRIPT), str(content_path)]
+    if _FULL_MODE:
+        gen_cmd.append("--full")
+    mode_label = "FULL" if _FULL_MODE else "SHORT"
+    print(f"[apply_agent] Step 4: Generating docs ({mode_label})...")
     try:
         result = subprocess.run(
-            [sys.executable, str(GENERATE_DOCS_SCRIPT), str(content_path)],
+            gen_cmd,
             cwd=str(PROJECT_DIR),
             capture_output=True,
             text=True,
@@ -265,6 +277,7 @@ def main_api(url: str) -> None:
             f"📁 <code>Applications/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"ATS: {ats}% | Stack: {content.get('stack', '?')}\n"
+            f"Via: API ({LLM_MODEL})\n"
             f"Review and send when ready."
         )
         print(f"\n[apply_agent] Done! Folder: Applications/{output_folder.name}/ ({len(created_files)} files)")
@@ -360,7 +373,7 @@ def main_cli(url: str) -> None:
             else:
                 notify(f"⏱ <b>apply_agent timeout (10 min)</b>\nURL: {url}")
                 print(f"\n[apply_agent] Timeout — no folder created.")
-                sys.exit(1)
+                raise ApplyError("CLI timeout — no folder created")
 
         if result.returncode == 0:
             break
@@ -389,7 +402,7 @@ def main_cli(url: str) -> None:
             + f"\n\n<pre>{error_detail}</pre>"
         )
         print(f"\n[apply_agent] claude exited with code {result.returncode}")
-        sys.exit(1)
+        raise ApplyError(f"CLI exited with code {result.returncode}")
 
     if result is not None and result.returncode == 0:
         if result.stdout:
@@ -408,6 +421,7 @@ def main_cli(url: str) -> None:
                 f"✅ <b>Docs ready!</b>\n\n"
                 f"📁 <code>Applications/{new_folder}/</code>\n\n"
                 f"{file_names}\n\n"
+                f"Via: CLI (Pro subscription)\n"
                 f"Review and send when ready."
             )
             print(f"\n[apply_agent] Done! Folder: Applications/{new_folder}/ ({len(created_files)} files)")
@@ -417,39 +431,78 @@ def main_cli(url: str) -> None:
                 f"📁 <code>Applications/{new_folder}/</code>"
             )
             print(f"\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
-            sys.exit(1)
+            raise ApplyError("Folder created but no docs found")
     else:
         notify(f"❌ <b>No output folder created!</b>\nURL: {url}")
         print(f"\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
-        sys.exit(1)
+        raise ApplyError("No output folder created")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main(url: str, force_cli: bool = False, force: bool = False) -> None:
+def _is_cli_available() -> bool:
+    """Check if Claude CLI is installed and logged in (Pro subscription)."""
+    try:
+        r = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=15,
+        )
+        if r.returncode != 0:
+            return False
+        output = (r.stdout + r.stderr).lower()
+        if "not logged in" in output or "unauthorized" in output:
+            return False
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+class ApplyError(RuntimeError):
+    """Raised when an apply attempt fails and fallback should be tried."""
+
+
+def main(url: str, force_cli: bool = False, force: bool = False, full: bool = False) -> None:
     if force:
         global _SKIP_DEDUP
         _SKIP_DEDUP = True
+    if full:
+        global _FULL_MODE
+        _FULL_MODE = True
 
-    use_cli = force_cli or APPLY_USE_CLI
-    if use_cli:
+    if force_cli or APPLY_USE_CLI:
         main_cli(url)
-    else:
-        if not LLM_API_KEY:
-            print("[apply_agent] WARNING: No LLM_API_KEY set — falling back to CLI mode")
+        return
+
+    cli_ok = _is_cli_available()
+    if cli_ok:
+        print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
+        try:
             main_cli(url)
-        else:
-            main_api(url)
+            return
+        except (ApplyError, SystemExit) as e:
+            if LLM_API_KEY:
+                print(f"[apply_agent] CLI failed ({e}), falling back to API mode")
+            else:
+                print(f"[apply_agent] CLI failed and no API key available")
+                sys.exit(1)
+
+    if LLM_API_KEY:
+        main_api(url)
+    else:
+        print("[apply_agent] ERROR: No Claude CLI login and no LLM_API_KEY set. Cannot proceed.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python apply_agent.py <job_url> [--cli] [--force]")
+        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full]")
         sys.exit(1)
 
     force_cli = "--cli" in sys.argv
     force = "--force" in sys.argv
+    full = "--full" in sys.argv
     url = [a for a in sys.argv[1:] if not a.startswith("--")][0]
-    main(url, force_cli=force_cli, force=force)
+    main(url, force_cli=force_cli, force=force, full=full)
