@@ -239,10 +239,12 @@ def main_api(url: str) -> None:
     print(f"[apply_agent] Wrote {content_path}")
 
     # Step 7 — Run generate_docs.py
+    # Auto-full for theprotocol.it (Polish site — always generate full EN+PL package)
+    use_full = _FULL_MODE or "theprotocol.it" in url
     gen_cmd = [sys.executable, str(GENERATE_DOCS_SCRIPT), str(content_path)]
-    if _FULL_MODE:
+    if use_full:
         gen_cmd.append("--full")
-    mode_label = "FULL" if _FULL_MODE else "SHORT"
+    mode_label = "FULL" if use_full else "SHORT"
     print(f"[apply_agent] Step 4: Generating docs ({mode_label})...")
     try:
         result = subprocess.run(

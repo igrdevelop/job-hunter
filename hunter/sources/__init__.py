@@ -1,4 +1,4 @@
-from hunter.config import LINKEDIN_ENABLED, BULLDOGJOB_ENABLED, PRACUJ_ENABLED
+from hunter.config import LINKEDIN_ENABLED, BULLDOGJOB_ENABLED, PRACUJ_ENABLED, THEPROTOCOL_ENABLED
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
 
@@ -19,3 +19,7 @@ if BULLDOGJOB_ENABLED:
 if PRACUJ_ENABLED:
     from hunter.sources.pracuj import PracujSource
     ALL_SOURCES.append(PracujSource())
+
+if THEPROTOCOL_ENABLED:
+    from hunter.sources.theprotocol import TheProtocolSource
+    ALL_SOURCES.append(TheProtocolSource())
