@@ -37,7 +37,7 @@ class LinkedInSource(BaseSource):
     name = "linkedin"
 
     def search(self) -> list[Job]:
-        keywords_raw = os.environ.get("LINKEDIN_KEYWORDS", "angular,frontend developer")
+        keywords_raw = os.environ.get("LINKEDIN_KEYWORDS", "angular,angular developer,frontend angular")
         geo_id = os.environ.get("LINKEDIN_GEO_ID", "105072130")  # Poland
         keywords_list = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
 

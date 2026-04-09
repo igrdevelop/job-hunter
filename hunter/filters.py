@@ -59,14 +59,7 @@ def _is_react_without_angular(job: Job) -> bool:
 
 
 def _matches_location(job: Job) -> bool:
-    """Check if job location matches allowed locations.
-
-    LinkedIn results skip this check — they are already geo-filtered by the API
-    (geoId parameter restricts to Poland).
-    """
-    if job.source == "linkedin":
-        return True
-
+    """Check if job location matches allowed locations (all sources including LinkedIn)."""
     locations = FILTER.get("locations", [])
     if not locations:
         return True
