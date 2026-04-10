@@ -53,5 +53,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.theprotocol import fetch_theprotocol
         return fetch_theprotocol(url)
 
+    if "solid.jobs" in domain:
+        logger.info(f"[job_fetch] Solid.Jobs detected: {url}")
+        from job_fetch.solidjobs import fetch_solidjobs
+        return fetch_solidjobs(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)
