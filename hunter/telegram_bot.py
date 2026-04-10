@@ -80,7 +80,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🤖 <b>Job Hunter Bot</b>\n\n"
         "Commands:\n"
         "/hunt - run search now\n"
-        "/status - show schedule\n"
+        "/schedule - show source schedule\n"
+        "/status - show schedule + bot status\n"
         "/force &lt;url&gt; - process URL even if already in tracker\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
@@ -126,8 +127,28 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
     mode = "AUTO" if AUTO_APPLY else "MANUAL"
 
-    # Build per-source schedule table
-    schedule_lines = []
+    schedule_str = _build_schedule_text()
+    await update.message.reply_text(
+        f"{schedule_str}\n\n"
+        f"🔧 Mode: {mode}\n"
+        f"{lock_status}\n"
+        f"📋 Pending decisions: {pending} jobs",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the full source schedule as a clean table."""
+    await update.message.reply_text(
+        _build_schedule_text(),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+def _build_schedule_text() -> str:
+    from hunter.sources import ALL_SOURCES
+
+    lines = []
     for idx, source in enumerate(ALL_SOURCES):
         times = []
         for base_time in SCHEDULE_TIMES:
@@ -135,16 +156,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
             total %= 24 * 60
             times.append(f"{total // 60:02d}:{total % 60:02d}")
-        schedule_lines.append(f"  <b>{source.name}</b>: {' / '.join(times)}")
+        lines.append(f"  <b>{source.name}</b>: {' / '.join(times)}")
 
-    schedule_str = "\n".join(schedule_lines)
-    await update.message.reply_text(
-        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset={SCHEDULE_SOURCE_OFFSET_MIN}min):\n"
-        f"{schedule_str}\n\n"
-        f"🔧 Mode: {mode}\n"
-        f"{lock_status}\n"
-        f"📋 Pending decisions: {pending} jobs",
-        parse_mode=ParseMode.HTML,
+    schedule_str = "\n".join(lines)
+    return (
+        f"⏰ <b>Расписание</b> ({TIMEZONE}, интервал {SCHEDULE_SOURCE_OFFSET_MIN} мин):\n"
+        f"{schedule_str}"
     )
 
 
@@ -355,10 +372,11 @@ def build_application() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Command handlers
-    app.add_handler(CommandHandler("start",  cmd_start))
-    app.add_handler(CommandHandler("hunt",   cmd_hunt))
-    app.add_handler(CommandHandler("force",  cmd_force))
-    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("hunt",     cmd_hunt))
+    app.add_handler(CommandHandler("force",    cmd_force))
+    app.add_handler(CommandHandler("status",   cmd_status))
+    app.add_handler(CommandHandler("schedule", cmd_schedule))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
