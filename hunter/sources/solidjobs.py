@@ -2,22 +2,18 @@
 solid.jobs source — Polish developer-focused IT job board.
 
 Strategy:
-  1. Fetch listing pages for frontend/angular jobs in Wroclaw + remote.
-     Uses matrix-style URL parameters (;keywords=...;cities=...).
-     Pages are server-rendered HTML with job cards.
-  2. Parse job data from the listing HTML using BeautifulSoup.
-  3. Individual job text is fetched lazily by job_fetch/solidjobs.py
-     when LLM processing is triggered.
+  The site is an Angular SPA — HTML scraping returns an empty shell.
+  Instead, we parse the public RSS feed (https://solid.jobs/rss/job-offers)
+  which contains all active listings with title, company, location, salary.
 
-Listing URLs:
-  https://solid.jobs/offers/it;keywords=angular;cities=Wrocław
-  https://solid.jobs/offers/it;keywords=angular
-  https://solid.jobs/offers/it;keywords=frontend;cities=Wrocław
+  We filter locally by title keywords and location since the RSS
+  doesn't support server-side filtering.
 """
 
 import logging
 import re
 from typing import Optional
+from xml.etree import ElementTree
 
 import requests
 
@@ -27,168 +23,131 @@ from hunter.sources.base import BaseSource
 
 logger = logging.getLogger(__name__)
 
-BASE = "https://solid.jobs"
-
-LISTING_URLS = [
-    f"{BASE}/offers/it;keywords=angular;cities=Wrocław",
-    f"{BASE}/offers/it;keywords=angular",
-    f"{BASE}/offers/it;keywords=frontend;cities=Wrocław",
-]
+RSS_URL = "https://solid.jobs/rss/job-offers"
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": f"{BASE}/",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
-TIMEOUT = 25
+TIMEOUT = 30
 
 
 class SolidJobsSource(BaseSource):
     name = "solidjobs"
 
     def search(self) -> list[Job]:
+        raw_items = self._fetch_rss()
+        logger.info(f"[solidjobs] RSS returned {len(raw_items)} total items")
+
         seen_urls: set[str] = set()
         jobs: list[Job] = []
 
-        for url in LISTING_URLS:
-            parsed = self._fetch_listing(url)
-            logger.info(f"[solidjobs] {url} -> {len(parsed)} raw jobs")
-            for raw in parsed:
-                job = self._parse(raw)
-                if not job or job.url in seen_urls:
-                    continue
-                if not self._is_relevant(raw, job):
-                    continue
-                seen_urls.add(job.url)
-                jobs.append(job)
+        for raw in raw_items:
+            job = self._parse(raw)
+            if not job or job.url in seen_urls:
+                continue
+            if not self._is_relevant(raw, job):
+                continue
+            seen_urls.add(job.url)
+            jobs.append(job)
 
         logger.info(f"[solidjobs] {len(jobs)} jobs after pre-filter")
         return jobs
 
-    # -- Listing fetch ---------------------------------------------------------
+    # -- RSS fetch -------------------------------------------------------------
 
-    def _fetch_listing(self, url: str) -> list[dict]:
+    def _fetch_rss(self) -> list[dict]:
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            resp = requests.get(RSS_URL, headers=HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
         except Exception as e:
-            logger.error(f"[solidjobs] fetch listing {url}: {e}")
+            logger.error(f"[solidjobs] RSS fetch failed: {e}")
             return []
 
-        return self._parse_listing_html(resp.text)
+        return self._parse_rss_xml(resp.text)
 
-    def _parse_listing_html(self, html: str) -> list[dict]:
+    @staticmethod
+    def _parse_rss_xml(xml_text: str) -> list[dict]:
         try:
-            from bs4 import BeautifulSoup
-        except ImportError:
-            logger.error("[solidjobs] beautifulsoup4 not installed")
+            root = ElementTree.fromstring(xml_text)
+        except ElementTree.ParseError as e:
+            logger.error(f"[solidjobs] RSS parse error: {e}")
             return []
 
-        soup = BeautifulSoup(html, "html.parser")
         results = []
+        for item in root.iter("item"):
+            title_el = item.find("title")
+            link_el = item.find("link")
+            desc_el = item.find("description")
 
-        offer_links = soup.find_all("a", href=re.compile(r"/offer/\d+/"))
-        seen_hrefs: set[str] = set()
+            title = title_el.text.strip() if title_el is not None and title_el.text else ""
+            link = link_el.text.strip() if link_el is not None and link_el.text else ""
+            desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
 
-        for a_tag in offer_links:
-            href = a_tag.get("href", "")
-            if not href or href in seen_hrefs:
+            categories = []
+            for cat_el in item.findall("category"):
+                if cat_el.text:
+                    categories.append(cat_el.text.strip())
+
+            if not title or not link:
                 continue
-            seen_hrefs.add(href)
 
-            link_text = a_tag.get_text(separator="\n", strip=True)
-            if not link_text or len(link_text) < 5:
-                continue
+            # Description format: "Company • Location\nSalary"
+            company = ""
+            location = ""
+            salary = ""
 
-            raw = self._extract_card_data(a_tag, link_text, href)
-            if raw:
-                results.append(raw)
+            desc_lines = desc.split("\n")
+            if desc_lines:
+                first_line = desc_lines[0].strip()
+                if " \u2022 " in first_line:
+                    parts = first_line.split(" \u2022 ", 1)
+                    company = parts[0].strip()
+                    location = parts[1].strip() if len(parts) > 1 else ""
+                elif "\u2022" in first_line:
+                    parts = first_line.split("\u2022", 1)
+                    company = parts[0].strip()
+                    location = parts[1].strip() if len(parts) > 1 else ""
+                else:
+                    company = first_line
+
+            if len(desc_lines) > 1:
+                salary = desc_lines[1].strip()
+
+            # Detect work mode from title or location
+            title_lower = title.lower()
+            loc_lower = location.lower()
+            work_mode = ""
+            if "(remote)" in title_lower or "remote" in loc_lower:
+                work_mode = "remote"
+            elif "hybrid" in loc_lower or "hybrydowa" in loc_lower:
+                work_mode = "hybrid"
+
+            # Clean location — remove leading dash/comma
+            location = re.sub(r"^[-,]\s*", "", location).strip()
+
+            if work_mode == "remote" and location:
+                location = f"{location} (Remote)"
+            elif work_mode == "remote":
+                location = "Remote"
+            elif work_mode == "hybrid" and location:
+                location = f"{location} (Hybrid)"
+
+            results.append({
+                "title": title,
+                "company": company,
+                "location": location or "Unknown",
+                "salary": salary,
+                "work_mode": work_mode,
+                "categories": categories,
+                "url": link,
+                "_text": f"{title} {company} {location} {' '.join(categories)}",
+            })
 
         return results
-
-    def _extract_card_data(self, a_tag, link_text: str, href: str) -> Optional[dict]:
-        """Extract structured data from a job card."""
-        lines = [l.strip() for l in link_text.split("\n") if l.strip()]
-        if not lines:
-            return None
-
-        title = ""
-        title_el = a_tag.find(["h2", "h3"])
-        if title_el:
-            title = title_el.get_text(strip=True)
-        if not title and lines:
-            title = lines[0]
-
-        company = ""
-        for line in lines:
-            if line == title:
-                continue
-            if line.startswith("#"):
-                continue
-            skip_words = (
-                "remote", "zdalnie", "hybrid", "hybrydowa",
-                "stacjonarna", "on-site", "new", "nowe",
-            )
-            if line.lower() in skip_words:
-                continue
-            if len(line) > 2 and not re.match(r"^[\d.,\s]+$", line):
-                company = line
-                break
-
-        text_lower = link_text.lower()
-        work_mode = ""
-        if "remote" in text_lower or "zdalnie" in text_lower or "100% remote" in text_lower:
-            work_mode = "remote"
-        elif "hybrid" in text_lower or "hybrydowa" in text_lower:
-            work_mode = "hybrid"
-        elif "stacjonarna" in text_lower or "on-site" in text_lower:
-            work_mode = "on-site"
-
-        location = ""
-        city_pattern = re.compile(
-            r"(Wrocław|Warszawa|Kraków|Gdańsk|Poznań|Łódź|Katowice|"
-            r"Szczecin|Lublin|Bydgoszcz|Białystok|Toruń|Rzeszów|Kielce|Olsztyn)",
-            re.I,
-        )
-        city_match = city_pattern.search(link_text)
-        if city_match:
-            location = city_match.group(1)
-        if work_mode == "remote":
-            location = f"{location} (Remote)" if location else "Remote"
-        elif work_mode == "hybrid" and location:
-            location = f"{location} (Hybrid)"
-
-        salary = ""
-        sal_match = re.search(
-            r"(\d[\d\s.,]*\s*[-–]\s*\d[\d\s.,]*\s*(?:zł|PLN|EUR|USD)(?:\s*(?:net|gross|netto|brutto))?(?:\s*\([^)]+\))?)",
-            link_text, re.I,
-        )
-        if sal_match:
-            salary = sal_match.group(1).strip()
-
-        # Tech tags on solid.jobs appear as #Technology tokens
-        techs = []
-        tech_matches = re.findall(r"#([A-Za-z0-9.+]+)", link_text)
-        for t in tech_matches:
-            techs.append(t)
-
-        offer_url = href if href.startswith("http") else f"{BASE}{href}"
-        offer_url = offer_url.split("?")[0]
-
-        return {
-            "title": title,
-            "company": company,
-            "location": location or "Unknown",
-            "work_mode": work_mode,
-            "salary": salary,
-            "techs": techs,
-            "url": offer_url,
-            "_text": link_text,
-        }
 
     # -- Pre-filter ------------------------------------------------------------
 
@@ -220,10 +179,10 @@ class SolidJobsSource(BaseSource):
         if not url:
             return None
 
-        techs = raw.get("techs", [])
+        categories = raw.get("categories", [])
         raw_data = dict(raw)
-        if techs:
-            raw_data["technology"] = [{"name": t} for t in techs]
+        if categories:
+            raw_data["technology"] = [{"name": c} for c in categories]
 
         return Job(
             title=title,

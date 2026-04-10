@@ -105,7 +105,9 @@ BULLDOGJOB_ENABLED: bool = os.getenv("BULLDOGJOB_ENABLED", "true").lower() in ("
 PRACUJ_ENABLED: bool = os.getenv("PRACUJ_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── theprotocol.it source config ─────────────────────────────────────────────
-THEPROTOCOL_ENABLED: bool = os.getenv("THEPROTOCOL_ENABLED", "true").lower() in ("true", "1", "yes")
+# Disabled by default: site is a full SPA behind Cloudflare, listing scraper
+# cannot extract data without a headless browser. Manual URL fetch still works.
+THEPROTOCOL_ENABLED: bool = os.getenv("THEPROTOCOL_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # ── Solid.Jobs source config ─────────────────────────────────────────────────
 SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("true", "1", "yes")

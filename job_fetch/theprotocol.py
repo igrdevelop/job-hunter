@@ -15,20 +15,13 @@ import json
 import re
 import logging
 
-import requests
+import cloudscraper
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://theprotocol.it/",
-}
 TIMEOUT = 25
+
+_scraper = cloudscraper.create_scraper()
 
 
 def _strip_html(html: str) -> str:
@@ -47,7 +40,7 @@ def _strip_html(html: str) -> str:
 def fetch_theprotocol(url: str) -> str:
     """Fetch theprotocol.it offer and return plain text for LLM consumption."""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+        resp = _scraper.get(url, timeout=TIMEOUT)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:

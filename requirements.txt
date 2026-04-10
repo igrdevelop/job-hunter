@@ -1,5 +1,6 @@
 # Core
 requests
+cloudscraper
 python-dotenv
 openpyxl
 python-docx

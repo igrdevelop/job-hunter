@@ -19,7 +19,7 @@ import logging
 import re
 from typing import Optional
 
-import requests
+import cloudscraper
 
 from hunter.config import FILTER
 from hunter.models import Job
@@ -36,16 +36,9 @@ LISTING_URLS = [
     f"{BASE}/praca/frontend;kw?rd=0&remote=true",
 ]
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": f"{BASE}/",
-}
 TIMEOUT = 25
+
+_scraper = cloudscraper.create_scraper()
 
 
 class PracujSource(BaseSource):
@@ -74,7 +67,7 @@ class PracujSource(BaseSource):
 
     def _fetch_listing(self, url: str) -> list[dict]:
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            resp = _scraper.get(url, timeout=TIMEOUT)
             resp.raise_for_status()
         except Exception as e:
             logger.error(f"[Pracuj] fetch listing {url}: {e}")
@@ -108,20 +101,44 @@ class PracujSource(BaseSource):
 
         page_props = data.get("props", {}).get("pageProps", {})
 
-        # Pracuj stores offers under various keys depending on page version
+        # Legacy format: offers directly in pageProps
         for key in ("offers", "data", "groupedOffers", "results"):
             offers = page_props.get(key)
             if isinstance(offers, list) and offers:
                 return offers
             if isinstance(offers, dict):
-                # Sometimes nested: {"groupedOffers": [{"offers": [...]}]}
                 for sub_key in ("offers", "items", "results"):
                     sub = offers.get(sub_key)
                     if isinstance(sub, list) and sub:
                         return sub
 
-        # Try to find any list of dicts that look like job offers
+        # Current format (2025+): React Query dehydratedState
+        offers = self._extract_dehydrated_state(page_props)
+        if offers:
+            return offers
+
         return self._find_offers_in_props(page_props)
+
+    @staticmethod
+    def _extract_dehydrated_state(page_props: dict) -> list[dict]:
+        """Extract offers from React Query dehydratedState cache."""
+        ds = page_props.get("dehydratedState", {})
+        queries = ds.get("queries", [])
+
+        all_offers = []
+        for query in queries:
+            state = query.get("state", {})
+            qdata = state.get("data")
+            if not isinstance(qdata, dict):
+                continue
+            for key in ("groupedOffers", "offers", "results", "items"):
+                items = qdata.get(key)
+                if isinstance(items, list) and items:
+                    if isinstance(items[0], dict) and any(
+                        k in items[0] for k in ("jobTitle", "title", "companyName", "offerUrl")
+                    ):
+                        all_offers.extend(items)
+        return all_offers
 
     @staticmethod
     def _find_offers_in_props(props: dict) -> list[dict]:
@@ -265,6 +282,15 @@ class PracujSource(BaseSource):
                 if val.startswith("/"):
                     return f"{OFFER_BASE}{val}"
                 return f"{OFFER_BASE}/praca/{val}"
+
+        # dehydratedState format: URL is inside nested "offers" list
+        nested = raw.get("offers") or []
+        if isinstance(nested, list):
+            for o in nested:
+                if isinstance(o, dict):
+                    uri = o.get("offerAbsoluteUri") or o.get("offerUrl") or ""
+                    if uri:
+                        return uri if uri.startswith("http") else f"{OFFER_BASE}{uri}"
 
         # JSON-LD format
         if raw.get("@type") == "JobPosting" and raw.get("url"):
