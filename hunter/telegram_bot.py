@@ -414,4 +414,16 @@ def build_application() -> Application:
 async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
     from hunter.main import run_hunt
     source_names = context.job.data.get("source_names") if context.job.data else None
-    await run_hunt(context, source_names=source_names)
+    try:
+        await run_hunt(context, source_names=source_names)
+    except Exception as e:
+        label = ", ".join(source_names) if source_names else "all"
+        logger.exception(f"[scheduled_hunt] Unhandled error for {label}")
+        try:
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=f"⚠️ <b>Hunt error</b> ({label}):\n<pre>{str(e)[:500]}</pre>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
