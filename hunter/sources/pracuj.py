@@ -24,6 +24,7 @@ import cloudscraper
 from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.tracker import normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,8 @@ class PracujSource(BaseSource):
     name = "pracuj"
 
     def search(self) -> list[Job]:
-        seen_urls: set[str] = set()
+        seen_norm_urls: set[str] = set()
+        seen_group_ids: set[str] = set()
         jobs: list[Job] = []
 
         for url in LISTING_URLS:
@@ -53,11 +55,20 @@ class PracujSource(BaseSource):
             logger.info(f"[Pracuj] {url} -> {len(raw_jobs)} raw jobs")
             for raw in raw_jobs:
                 job = self._parse(raw)
-                if not job or job.url in seen_urls:
+                if not job:
                     continue
                 if not self._is_relevant(raw, job):
                     continue
-                seen_urls.add(job.url)
+                gid = raw.get("groupId")
+                if gid is not None and str(gid).strip():
+                    gs = str(gid).strip()
+                    if gs in seen_group_ids:
+                        continue
+                    seen_group_ids.add(gs)
+                nu = normalize_url(job.url)
+                if nu in seen_norm_urls:
+                    continue
+                seen_norm_urls.add(nu)
                 jobs.append(job)
 
         logger.info(f"[Pracuj] {len(jobs)} jobs after pre-filter")

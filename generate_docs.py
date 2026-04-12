@@ -38,6 +38,7 @@ Expects a JSON file with the following schema:
 
 import json
 import os
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -285,8 +286,20 @@ def _create_tracker():
     return wb
 
 
+def _tracker_company_name(content: dict) -> str:
+    """Company column: use LLM company_name, not folder basename (avoids Upvanta_2026-04-11 from collisions)."""
+    cn = (content.get("company_name") or "").strip()
+    if cn:
+        return cn
+    folder_name = Path(content["output_folder"]).name
+    # Legacy: strip trailing _2, _3 collision suffix, then strip trailing _YYYY-MM-DD
+    s = re.sub(r"_(\d+)$", "", folder_name)
+    m = re.search(r"^(.+)_[0-9]{4}-[0-9]{2}-[0-9]{2}$", s)
+    return m.group(1) if m else s
+
+
 def update_tracker(content):
-    company = Path(content["output_folder"]).name.rsplit("_", 1)[0]
+    company = _tracker_company_name(content)
     job_title = content.get("job_title", "")
     stack = content.get("stack", "")
     apply_url = content.get("apply_url", "")
