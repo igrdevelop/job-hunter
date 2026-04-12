@@ -25,7 +25,8 @@ TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
     "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn",
 ]
-URL_COL_INDEX = 5       # 1-based column index for "URL" in tracker (column F)
+# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, ...
+URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedup)
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
