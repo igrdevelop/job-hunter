@@ -160,7 +160,13 @@ class SolidJobsSource(BaseSource):
                 return False
 
         keywords = [kw.lower() for kw in FILTER.get("title_keywords", [])]
-        text = raw.get("_text", "").lower()
+        blob = raw.get("_text", "")
+        if isinstance(blob, str):
+            text = blob.lower()
+        elif isinstance(blob, (list, tuple)):
+            text = " ".join(str(x) for x in blob).lower()
+        else:
+            text = str(blob).lower()
         combined = title + " " + text
         return any(kw in combined for kw in keywords)
 

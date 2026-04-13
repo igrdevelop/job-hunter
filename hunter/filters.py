@@ -27,6 +27,19 @@ def _matches_exclude_pattern(title: str) -> bool:
     return any(re.search(p, title, re.IGNORECASE) for p in patterns)
 
 
+def _lower_text_fragment(val) -> str:
+    """Turn API-ish values (str, list, dict) into one lowercased string for matching."""
+    if val is None or val == "":
+        return ""
+    if isinstance(val, str):
+        return val.lower()
+    if isinstance(val, (list, tuple)):
+        return " ".join(_lower_text_fragment(x) for x in val)
+    if isinstance(val, dict):
+        return _lower_text_fragment(val.get("name", val.get("value", "")))
+    return str(val).lower()
+
+
 def _append_technology_field(tech_texts: list[str], technology) -> None:
     """Normalize raw['technology']: str, dict, or list of str/dict (e.g. SolidJobs categories)."""
     if technology is None:
@@ -34,13 +47,13 @@ def _append_technology_field(tech_texts: list[str], technology) -> None:
     if isinstance(technology, str):
         tech_texts.append(technology.lower())
     elif isinstance(technology, dict):
-        tech_texts.append((technology.get("name") or "").lower())
+        tech_texts.append(_lower_text_fragment(technology.get("name")))
     elif isinstance(technology, list):
         for item in technology:
             if isinstance(item, dict):
-                tech_texts.append((item.get("name") or "").lower())
-            elif isinstance(item, str):
-                tech_texts.append(item.lower())
+                tech_texts.append(_lower_text_fragment(item.get("name")))
+            else:
+                tech_texts.append(_lower_text_fragment(item))
 
 
 def _is_react_without_angular(job: Job) -> bool:
@@ -54,19 +67,30 @@ def _is_react_without_angular(job: Job) -> bool:
     # Collect all tech-related text from raw API data
     tech_texts = [title]
 
-    # JustJoin: raw["skills"] = [{"name": "React.js", "level": "senior"}, ...]
-    for skill in raw.get("skills", []):
-        tech_texts.append((skill.get("name") or "").lower())
+    # JustJoin: raw["skills"] = [{"name": "React.js", ...}, ...]; name may be nested
+    for skill in raw.get("skills") or []:
+        if isinstance(skill, dict):
+            tech_texts.append(_lower_text_fragment(skill.get("name")))
+        else:
+            tech_texts.append(_lower_text_fragment(skill))
 
     # NoFluffJobs: raw["technology"] = str; SolidJobs: list[{"name": "IT"}, ...]
     _append_technology_field(tech_texts, raw.get("technology"))
-    for tile in raw.get("tiles", {}).get("values", []):
-        tech_texts.append((tile.get("value") or "").lower())
+    for tile in raw.get("tiles", {}).get("values", []) or []:
+        if isinstance(tile, dict):
+            tech_texts.append(_lower_text_fragment(tile.get("value")))
+        else:
+            tech_texts.append(_lower_text_fragment(tile))
 
-    # NoFluffJobs: raw["category"] can be string or dict
+    # NoFluffJobs: category str | dict | list
     cat = raw.get("category", "")
     if isinstance(cat, str):
         tech_texts.append(cat.lower())
+    elif isinstance(cat, (list, tuple)):
+        for c in cat:
+            tech_texts.append(_lower_text_fragment(c))
+    elif isinstance(cat, dict):
+        tech_texts.append(_lower_text_fragment(cat.get("name")))
 
     combined = " ".join(tech_texts)
     has_react = bool(re.search(r"\breact\b", combined))
@@ -79,7 +103,7 @@ def _matches_location(job: Job) -> bool:
     locations = FILTER.get("locations", [])
     if not locations:
         return True
-    loc = job.location.lower()
+    loc = job.location.lower() if isinstance(job.location, str) else str(job.location).lower()
     return any(token in loc for token in locations)
 
 
