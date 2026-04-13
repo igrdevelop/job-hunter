@@ -27,6 +27,22 @@ def _matches_exclude_pattern(title: str) -> bool:
     return any(re.search(p, title, re.IGNORECASE) for p in patterns)
 
 
+def _append_technology_field(tech_texts: list[str], technology) -> None:
+    """Normalize raw['technology']: str, dict, or list of str/dict (e.g. SolidJobs categories)."""
+    if technology is None:
+        return
+    if isinstance(technology, str):
+        tech_texts.append(technology.lower())
+    elif isinstance(technology, dict):
+        tech_texts.append((technology.get("name") or "").lower())
+    elif isinstance(technology, list):
+        for item in technology:
+            if isinstance(item, dict):
+                tech_texts.append((item.get("name") or "").lower())
+            elif isinstance(item, str):
+                tech_texts.append(item.lower())
+
+
 def _is_react_without_angular(job: Job) -> bool:
     """Skip React-only jobs: check title AND raw skills/tech data from API."""
     if not FILTER.get("exclude_react_without_angular", False):
@@ -42,8 +58,8 @@ def _is_react_without_angular(job: Job) -> bool:
     for skill in raw.get("skills", []):
         tech_texts.append((skill.get("name") or "").lower())
 
-    # NoFluffJobs: raw["technology"] = "react" and raw["tiles"] with values
-    tech_texts.append((raw.get("technology") or "").lower())
+    # NoFluffJobs: raw["technology"] = str; SolidJobs: list[{"name": "IT"}, ...]
+    _append_technology_field(tech_texts, raw.get("technology"))
     for tile in raw.get("tiles", {}).get("values", []):
         tech_texts.append((tile.get("value") or "").lower())
 
