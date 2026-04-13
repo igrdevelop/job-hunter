@@ -223,6 +223,17 @@ def main_api(url: str) -> None:
         )
         # Continue anyway — partial content is better than nothing
 
+    # Step 4.5 — Skip React-only jobs (no Angular mentioned in stack)
+    stack = (content.get("stack") or "").lower()
+    if "react" in stack and "angular" not in stack:
+        notify(
+            f"⏭ <b>Skipped — React-only stack</b>\n"
+            f"🔗 {url}\n"
+            f"Stack: {content.get('stack', '?')}"
+        )
+        print(f"[apply_agent] SKIP — React-only stack: {content.get('stack')}")
+        return
+
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")
     output_folder = compute_output_folder(company)
@@ -416,6 +427,24 @@ def main_cli(url: str) -> None:
 
     if new_folder:
         folder_path = APPLICATIONS_DIR / new_folder
+
+        # Check React-only stack from content.json written by Claude
+        content_json_path = folder_path / "content.json"
+        if content_json_path.exists():
+            try:
+                _cli_content = json.loads(content_json_path.read_text(encoding="utf-8"))
+                _cli_stack = (_cli_content.get("stack") or "").lower()
+                if "react" in _cli_stack and "angular" not in _cli_stack:
+                    notify(
+                        f"⏭ <b>Skipped — React-only stack</b>\n"
+                        f"🔗 {url}\n"
+                        f"Stack: {_cli_content.get('stack', '?')}"
+                    )
+                    print(f"[apply_agent] SKIP — React-only stack: {_cli_content.get('stack')}")
+                    return
+            except Exception:
+                pass  # If we can't read content.json, proceed normally
+
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:
             file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))

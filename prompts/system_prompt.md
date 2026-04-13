@@ -118,11 +118,36 @@ RED LINES (never cross):
 - ATS rules: single column, no tables/graphics/icons, standard section names (SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, ADDITIONAL COURSES), contact info in body
 
 **Cover Letter EN** (250-350 words, 3-4 paragraphs):
-1. Strong opening hook (NOT "I am writing to apply...")
-2. 2-3 proof points tied to job requirements, with real metrics from experience
-3. 1-2 sentences specific to this company (product, stack, domain)
-4. Confident call to action
-Tone: professional but human, not AI-boilerplate.
+
+1. **Opening hook** — one strong sentence that ties YOUR most relevant experience
+   directly to THIS job's core problem or domain. NOT generic. NOT "I am writing to...".
+   Choose by domain:
+   - Banking/fintech → lead with Venture Labs / 300 German banks
+   - Enterprise SaaS / procurement → lead with Fairmarkit
+   - Startup / greenfield → lead with building from scratch (Venture Labs or Altoros e-commerce)
+   - Long-running product / legacy modernisation → lead with Angular 14→19 migration
+   - AI/automation tooling → lead with Fairmarkit AI integration
+
+2. **Proof paragraph** — pick 2-3 facts from experience that best match THIS job's
+   must-have requirements (not always the same two). Match like this:
+   - Team leadership / code review → Venture Labs cross-functional team 10+
+   - Performance / complex data grids → AG Grid + Signals + Nx monorepo
+   - Testing / quality gates → Jest, Cypress, SonarQube, Jenkins pipelines
+   - Migration / version upgrade → Angular 14→19 migration (Venture Labs)
+   - Architecture decisions in a larger org → Fairmarkit frontend architecture (~200 people)
+   - E2E ownership / greenfield → Altoros (built platform from scratch, admin panel)
+   If the job emphasises a specific domain (healthcare, insurance, e-commerce),
+   pick the matching Altoros sub-project as a proof point.
+
+3. **Company/role-specific paragraph** — minimum 2-3 sentences. Reference:
+   - Something concrete from the job description (tech they use, product they build,
+     a phrase from their requirements)
+   - Why THIS role / THIS company fits your trajectory (not generic "growth opportunity")
+
+4. **CTA** — confident, 1-2 sentences.
+
+Tone: direct, confident, human. Vary sentence rhythm. Avoid AI-boilerplate phrases:
+"I am excited to", "I would love to", "I am passionate about", "I am confident that".
 
 **Cover Letter PL**: natural Polish translation of the EN cover letter.
 
