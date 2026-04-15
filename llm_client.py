@@ -150,14 +150,18 @@ def _parse_json(raw: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Try parsing any JSON object candidate in text (left-to-right).
-    # This avoids greedy over-capture when multiple objects are present.
-    for brace_match in re.finditer(r"\{.*?\}", raw, re.DOTALL):
-        candidate = brace_match.group(0)
+    # Try decoding from each possible JSON-object start position.
+    # raw_decode correctly handles nested braces, unlike regex extraction.
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(raw):
+        if ch != "{":
+            continue
         try:
-            return json.loads(candidate)
+            obj, _ = decoder.raw_decode(raw[idx:])
         except json.JSONDecodeError:
             continue
+        if isinstance(obj, dict):
+            return obj
 
     raise LLMError(f"Could not parse JSON from LLM response (first 500 chars): {raw[:500]}")
 

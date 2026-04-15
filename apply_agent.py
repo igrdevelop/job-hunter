@@ -65,6 +65,16 @@ _SKIP_DEDUP = False
 _FULL_MODE = False
 
 
+def _build_generate_docs_cmd(content_json_path: Path, use_full: bool, force: bool) -> list[str]:
+    """Build generate_docs.py command from a concrete content.json path."""
+    cmd = [sys.executable, str(GENERATE_DOCS_SCRIPT), str(content_json_path)]
+    if use_full:
+        cmd.append("--full")
+    if force:
+        cmd.append("--force")
+    return cmd
+
+
 # ── Tracker dedup check (avoid wasting LLM tokens) ──────────────────────────
 
 def _already_processed(url: str) -> bool:
@@ -380,11 +390,7 @@ def main_api(url: str) -> None:
     # Step 7 — Run generate_docs.py
     # Auto-full for theprotocol.it (Polish site — always generate full EN+PL package)
     use_full = _FULL_MODE or "theprotocol.it" in url
-    gen_cmd = [sys.executable, str(GENERATE_DOCS_SCRIPT), str(content_path)]
-    if use_full:
-        gen_cmd.append("--full")
-    if _SKIP_DEDUP:
-        gen_cmd.append("--force")
+    gen_cmd = _build_generate_docs_cmd(content_path, use_full=use_full, force=_SKIP_DEDUP)
     mode_label = "FULL" if use_full else "SHORT"
     print(f"[apply_agent] Step 4: Generating docs ({mode_label})...")
     try:
@@ -646,11 +652,11 @@ def main_cli(url: str) -> None:
                         encoding="utf-8",
                     )
                     print("[apply_agent] Regenerating docs with rewritten cover letter...")
-                    gen_cmd = [sys.executable, str(GENERATE_DOCS_SCRIPT), str(folder_path)]
-                    if _FULL_MODE:
-                        gen_cmd.append("--full")
-                    if _SKIP_DEDUP:
-                        gen_cmd.append("--force")
+                    gen_cmd = _build_generate_docs_cmd(
+                        content_json_path,
+                        use_full=_FULL_MODE,
+                        force=_SKIP_DEDUP,
+                    )
                     subprocess.run(gen_cmd, cwd=str(PROJECT_DIR), check=False)
 
             except Exception as e:

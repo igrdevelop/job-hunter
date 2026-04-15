@@ -12,6 +12,11 @@ def test_parse_json_extracts_first_valid_object_when_multiple_present() -> None:
     assert _parse_json(raw) == {"score": 7}
 
 
+def test_parse_json_handles_nested_object_without_returning_inner_fragment() -> None:
+    raw = 'noise {"score": 7, "meta": {"source": "llm"}} tail'
+    assert _parse_json(raw) == {"score": 7, "meta": {"source": "llm"}}
+
+
 def test_parse_json_raises_for_invalid_payload() -> None:
     with pytest.raises(LLMError):
         _parse_json("no-json-here")
