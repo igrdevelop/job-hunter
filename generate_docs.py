@@ -4,7 +4,7 @@ Usage: python generate_docs.py <path_to_content.json>
 
 Expects a JSON file with the following schema:
 {
-  "output_folder": "D:/LearningProject/Claude/Applications/CompanyName_2026-04-06",
+  "output_folder": "/path/to/project/Applications/2026-04-16/CompanyName",
   "stack": "Angular",
   "lang": "EN",
   "resume_en": {
