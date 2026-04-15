@@ -372,6 +372,21 @@ def _company_from_content(content: dict) -> str:
     return (m.group(1) if m else s) or "Unknown"
 
 
+def _parse_ats_score(raw: str) -> tuple[str, int | None]:
+    """Normalize ATS score for tracker display and optional color coding."""
+    value = (raw or "").strip()
+    if not value:
+        return "", None
+
+    # Support common LLM variants: "85", "85%", "score: 85/100"
+    m = re.search(r"\d{1,3}", value)
+    if not m:
+        return value, None
+
+    score = max(0, min(int(m.group(0)), 100))
+    return f"{score}%", score
+
+
 def add_applied(content: dict, force: bool = False) -> bool:
     """Append a successful apply row. Returns True when a row was written."""
     company = _company_from_content(content)
@@ -380,8 +395,8 @@ def add_applied(content: dict, force: bool = False) -> bool:
     apply_url = str(content.get("apply_url", "") or "")
     folder = str(content.get("output_folder", "") or "")
     to_learn = str(content.get("to_learn", "") or "")
-    ats_score = str(content.get("ats_score", "") or "")
-    ats_display = f"{ats_score}%" if ats_score else ""
+    ats_raw = str(content.get("ats_score", "") or "")
+    ats_display, ats_numeric = _parse_ats_score(ats_raw)
     today = date.today().strftime("%Y-%m-%d")
     norm_url = normalize_url(apply_url) if apply_url else ""
 
@@ -418,18 +433,18 @@ def add_applied(content: dict, force: bool = False) -> bool:
         if col == URL_COL_INDEX and val:
             cell.hyperlink = str(val)
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-        if col == ATS_COL_INDEX and ats_score:
+        if col == ATS_COL_INDEX and ats_display:
             cell.alignment = Alignment(horizontal="center")
-            score = int(ats_score)
-            if score >= 80:
-                cell.fill = PatternFill("solid", fgColor="C6EFCE")
-                cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
-            elif score >= 60:
-                cell.fill = PatternFill("solid", fgColor="FFEB9C")
-                cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
-            else:
-                cell.fill = PatternFill("solid", fgColor="FFC7CE")
-                cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
+            if ats_numeric is not None:
+                if ats_numeric >= 80:
+                    cell.fill = PatternFill("solid", fgColor="C6EFCE")
+                    cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
+                elif ats_numeric >= 60:
+                    cell.fill = PatternFill("solid", fgColor="FFEB9C")
+                    cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
+                else:
+                    cell.fill = PatternFill("solid", fgColor="FFC7CE")
+                    cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
         if col in (SENT_COL_INDEX, 9):
             cell.alignment = Alignment(horizontal="center")
 

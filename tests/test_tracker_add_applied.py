@@ -77,3 +77,24 @@ def test_add_applied_marks_reapplication_when_forced(tmp_path, monkeypatch) -> N
     assert len(rows) == 2
     # Re-application column should be marked on the second row.
     assert rows[1][8] == "+"
+
+
+def test_add_applied_accepts_non_numeric_ats_score(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    content = _build_content(
+        "https://example.com/jobs/4",
+        tmp_path / "Applications" / "2026-04-16" / "Acme",
+    )
+    content["ats_score"] = "N/A"
+
+    assert tracker.add_applied(content, force=False) is True
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+
+    assert len(rows) == 1
+    assert rows[0][4] == "N/A"
