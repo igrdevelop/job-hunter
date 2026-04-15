@@ -40,15 +40,18 @@ Extract:
 ## Step 3 - Create output folder
 
 ```
-D:/LearningProject/Claude/Applications/{CompanyName}_{YYYY-MM-DD}/
+D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/
 ```
 
-Use today's date. If that folder already exists (company applied twice today), append `_2`, `_3`, etc.:
+Use today's date as the parent folder. If a folder for this company already exists today, append `_2`, `_3`, etc. to the company name:
 ```
-D:/LearningProject/Claude/Applications/{CompanyName}_{YYYY-MM-DD}_2/
+D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}_2/
 ```
 
-Create the folder using Bash: `mkdir -p "D:/LearningProject/Claude/Applications/{CompanyName}_{date}"`
+Create the folder using Bash:
+```bash
+mkdir -p "D:/LearningProject/Claude/Applications/{date}/{CompanyName}"
+```
 (adjust the suffix if needed after checking with `ls` or `Test-Path`)
 
 ---
@@ -192,11 +195,11 @@ Store final score in `"ats_score"` field in content.json.
 
 ⚠️ CRITICAL: Save content.json INSIDE the output folder, not in the project root.
 
-1. Write the file to `D:/LearningProject/Claude/Applications/{CompanyName}_{YYYY-MM-DD}/content.json` with this schema:
+1. Write the file to `D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json` with this schema:
 
 ```json
 {
-  "output_folder": "D:/LearningProject/Claude/Applications/{CompanyName}_{YYYY-MM-DD}",
+  "output_folder": "D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}",
   "stack": "Angular|React|JavaScript",
   "lang": "EN|PL",
   "job_title": "exact job title from posting",
@@ -240,7 +243,7 @@ Rules for the JSON:
 
 2. Run the generator (use the path to the content.json you just created):
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/Applications/{CompanyName}_{YYYY-MM-DD}/content.json"
+python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json"
 ```
 
 ---
@@ -248,7 +251,7 @@ python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/App
 ## Step 6 - Print summary
 
 ```
-Package ready: Applications/{CompanyName}_{date}/
+Package ready: Applications/{date}/{CompanyName}/
 
 Mode: SHORT (default) — PDF only, EN CV only
 Files created:

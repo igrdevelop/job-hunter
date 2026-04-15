@@ -58,5 +58,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.solidjobs import fetch_solidjobs
         return fetch_solidjobs(url)
 
+    if "inhire.io" in domain:
+        logger.info(f"[job_fetch] Inhire.io detected: {url}")
+        from job_fetch.inhire import fetch_inhire
+        return fetch_inhire(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

@@ -222,25 +222,57 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
     asyncio.create_task(_run_apply_agent(job.url))
 
 
+_APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
+
+
+async def _tg_notify(text: str) -> None:
+    """Send a message to the configured chat via bot token (no context needed)."""
+    from telegram import Bot
+    try:
+        async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
+            await bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+    except Exception as e:
+        logger.error(f"[tg_notify] failed: {e}")
+
+
 async def _run_apply_agent(url: str, force: bool = False) -> None:
     """Run apply_agent.py in the background, don't block the event loop."""
+    cmd = [sys.executable, str(APPLY_AGENT_PATH), url]
+    if force:
+        cmd.append("--force")
+
     try:
-        cmd = [sys.executable, str(APPLY_AGENT_PATH), url]
-        if force:
-            cmd.append("--force")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=_APPLY_AGENT_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.error(f"[apply_agent] hard timeout ({_APPLY_AGENT_TIMEOUT}s) for {url}")
+            await _tg_notify(
+                f"⏱ <b>apply_agent завис — принудительно остановлен</b>\n"
+                f"Таймаут {_APPLY_AGENT_TIMEOUT // 60} мин\n🔗 {url}"
+            )
+            return
 
         if proc.returncode != 0:
-            logger.error(f"[apply_agent] failed:\n{stderr.decode()}")
+            logger.error(f"[apply_agent] failed (rc={proc.returncode}):\n{stderr.decode(errors='replace')}")
         else:
             logger.info(f"[apply_agent] done for {url}")
+
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
+        await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {url}")
 
 
 # ── URL message handler ───────────────────────────────────────────────────────

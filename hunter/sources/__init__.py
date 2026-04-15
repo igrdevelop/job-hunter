@@ -1,4 +1,4 @@
-from hunter.config import LINKEDIN_ENABLED, BULLDOGJOB_ENABLED, PRACUJ_ENABLED, THEPROTOCOL_ENABLED, SOLIDJOBS_ENABLED
+from hunter.config import LINKEDIN_ENABLED, BULLDOGJOB_ENABLED, PRACUJ_ENABLED, THEPROTOCOL_ENABLED, SOLIDJOBS_ENABLED, INHIRE_ENABLED
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
 
@@ -27,3 +27,7 @@ if THEPROTOCOL_ENABLED:
 if SOLIDJOBS_ENABLED:
     from hunter.sources.solidjobs import SolidJobsSource
     ALL_SOURCES.append(SolidJobsSource())
+
+if INHIRE_ENABLED:
+    from hunter.sources.inhire import InhireSource
+    ALL_SOURCES.append(InhireSource())
