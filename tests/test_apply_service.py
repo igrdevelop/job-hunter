@@ -119,3 +119,47 @@ def test_run_apply_agent_subprocess_times_out_and_kills_process(monkeypatch) -> 
     )
     assert result is False
     assert proc.killed is True
+
+
+def test_run_apply_agent_subprocess_returns_false_on_oserror(monkeypatch) -> None:
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise OSError("cannot spawn process")
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            _job("https://example.com/jobs/4"),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result is False
+
+
+def test_run_apply_agent_subprocess_does_not_swallow_unexpected_errors(monkeypatch) -> None:
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("unexpected bug")
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    try:
+        asyncio.run(
+            run_apply_agent_subprocess(
+                _job("https://example.com/jobs/5"),
+                timeout_sec=1,
+                apply_agent_path=Path("apply_agent.py"),
+                python_executable="python",
+            )
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("RuntimeError should bubble up for unexpected failures")

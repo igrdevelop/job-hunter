@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
 
 from hunter.models import Job
@@ -40,27 +41,28 @@ async def run_apply_agent_subprocess(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_sec,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            logger.error(f"[auto-apply] TIMEOUT ({timeout_sec}s) for {job.url}")
-            return False
-
-        if proc.returncode != 0:
-            logger.error(
-                f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
-            )
-            return False
-
-        if stdout:
-            logger.debug(f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}")
-        logger.info(f"[auto-apply] OK {job.company} — {job.title}")
-        return True
-    except Exception as e:
-        logger.error(f"[auto-apply] exception for {job.url}: {e}")
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.error(f"[auto-apply] failed to start subprocess for {job.url}: {e}")
         return False
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=timeout_sec,
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        logger.error(f"[auto-apply] TIMEOUT ({timeout_sec}s) for {job.url}")
+        return False
+
+    if proc.returncode != 0:
+        logger.error(
+            f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
+        )
+        return False
+
+    if stdout:
+        logger.debug(f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}")
+    logger.info(f"[auto-apply] OK {job.company} — {job.title}")
+    return True
