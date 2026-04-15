@@ -98,3 +98,24 @@ def test_add_applied_accepts_non_numeric_ats_score(tmp_path, monkeypatch) -> Non
 
     assert len(rows) == 1
     assert rows[0][4] == "N/A"
+
+
+def test_add_applied_converts_10_point_scale_to_percent(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    content = _build_content(
+        "https://example.com/jobs/5",
+        tmp_path / "Applications" / "2026-04-16" / "Acme",
+    )
+    content["ats_score"] = "8/10"
+
+    assert tracker.add_applied(content, force=False) is True
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+
+    assert len(rows) == 1
+    assert rows[0][4] == "80%"

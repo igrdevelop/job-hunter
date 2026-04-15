@@ -379,6 +379,13 @@ def _parse_ats_score(raw: str) -> tuple[str, int | None]:
     if not value:
         return "", None
 
+    # Support 10-point scales from LLM output: "8/10", "8.5 / 10".
+    m10 = re.search(r"(\d{1,2}(?:[.,]\d+)?)\s*/\s*10\b", value)
+    if m10:
+        base = float(m10.group(1).replace(",", "."))
+        score = max(0, min(int(round(base * 10)), 100))
+        return f"{score}%", score
+
     # Support common LLM variants: "85", "85%", "score: 85/100"
     m = re.search(r"\d{1,3}", value)
     if not m:
