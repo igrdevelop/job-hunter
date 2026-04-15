@@ -150,13 +150,14 @@ def _parse_json(raw: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Try finding the outermost {...}
-    brace_match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if brace_match:
+    # Try parsing any JSON object candidate in text (left-to-right).
+    # This avoids greedy over-capture when multiple objects are present.
+    for brace_match in re.finditer(r"\{.*?\}", raw, re.DOTALL):
+        candidate = brace_match.group(0)
         try:
-            return json.loads(brace_match.group(0))
+            return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            continue
 
     raise LLMError(f"Could not parse JSON from LLM response (first 500 chars): {raw[:500]}")
 
