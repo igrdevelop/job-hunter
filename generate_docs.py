@@ -46,7 +46,7 @@ from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from hunter.tracker import add_applied
+from hunter.services.tracker_service import record_successful_apply
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
@@ -254,7 +254,7 @@ def convert_all_to_pdf(output_folder):
 
 def update_tracker(content: dict, force_mode: bool = False) -> None:
     """Write successful apply record through centralized tracker API."""
-    written = add_applied(content, force=force_mode)
+    written = record_successful_apply(content, force=force_mode)
     if written:
         print("  [OK] Tracker updated")
     else:

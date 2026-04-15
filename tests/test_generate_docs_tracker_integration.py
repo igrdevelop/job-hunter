@@ -1,14 +1,14 @@
 import generate_docs
 
 
-def test_update_tracker_delegates_to_tracker_module(monkeypatch) -> None:
+def test_update_tracker_delegates_to_tracker_service(monkeypatch) -> None:
     calls: list[tuple[dict, bool]] = []
 
-    def _fake_add_applied(content: dict, force: bool = False) -> bool:
+    def _fake_record_successful_apply(content: dict, force: bool = False) -> bool:
         calls.append((content, force))
         return True
 
-    monkeypatch.setattr(generate_docs, "add_applied", _fake_add_applied)
+    monkeypatch.setattr(generate_docs, "record_successful_apply", _fake_record_successful_apply)
 
     payload = {
         "company_name": "Acme",
