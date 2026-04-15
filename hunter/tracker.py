@@ -259,25 +259,40 @@ def remove_failed(url: str) -> None:
 
 def has_successful_entry(url: str) -> bool:
     """True if tracker has a non-FAIL, non-SKIP entry for this URL (= docs were generated)."""
+    return get_url_status_flags(url)["has_success"]
+
+
+def get_url_status_flags(url: str) -> dict[str, bool]:
+    """Return status flags for URL: successful entry and React-only skip marker."""
     if not TRACKER_PATH.exists():
-        return False
+        return {"has_success": False, "is_react_skip": False}
     norm = normalize_url(url)
     wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
     ws = wb.active
+
+    has_success = False
+    is_react_skip = False
+
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or len(row) < URL_COL_INDEX:
             continue
         row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if not row_url:
+        if not row_url or normalize_url(row_url) != norm:
             continue
-        if normalize_url(row_url) != norm:
-            continue
+
         ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+        sent = str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else ""
+
         if ats not in ("FAIL", "SKIP", "?", ""):
-            wb.close()
-            return True
+            has_success = True
+        elif ats == "SKIP" and sent == "—":
+            is_react_skip = True
+
+        if has_success and is_react_skip:
+            break
+
     wb.close()
-    return False
+    return {"has_success": has_success, "is_react_skip": is_react_skip}
 
 
 def lookup_url(url: str) -> list[dict]:
@@ -465,24 +480,7 @@ def add_skipped(job: Job) -> None:
 
 def is_react_skipped(url: str) -> bool:
     """True if tracker already has a React-skip row (SKIP + Sent='—') for this URL."""
-    if not TRACKER_PATH.exists():
-        return False
-    norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < SENT_COL_INDEX:
-            continue
-        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if not row_url or normalize_url(row_url) != norm:
-            continue
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
-        sent = str(row[SENT_COL_INDEX - 1] or "").strip()
-        if ats == "SKIP" and sent == "—":
-            wb.close()
-            return True
-    wb.close()
-    return False
+    return get_url_status_flags(url)["is_react_skip"]
 
 
 def add_react_skipped(content: dict, url: str) -> None:

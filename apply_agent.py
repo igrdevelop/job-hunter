@@ -79,8 +79,9 @@ def _already_processed(url: str) -> bool:
     if _SKIP_DEDUP:
         return False
     try:
-        from hunter.tracker import has_successful_entry, is_react_skipped
-        return has_successful_entry(url) or is_react_skipped(url)
+        from hunter.tracker import get_url_status_flags
+        flags = get_url_status_flags(url)
+        return flags["has_success"] or flags["is_react_skip"]
     except Exception:
         return False
 
