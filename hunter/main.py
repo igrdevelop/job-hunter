@@ -22,6 +22,7 @@ from hunter.config import (
 )
 from hunter.filters import apply_filters
 from hunter.models import Job
+from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
     get_known_urls, get_known_company_titles,
@@ -291,37 +292,10 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _run_apply_agent(job: Job) -> bool:
-    """Run apply_agent.py as async subprocess, return True on success."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            job.url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=APPLY_AGENT_TIMEOUT_SEC,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            logger.error(
-                f"[auto-apply] TIMEOUT ({APPLY_AGENT_TIMEOUT_SEC}s) for {job.url}"
-            )
-            return False
-
-        if proc.returncode != 0:
-            logger.error(
-                f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
-            )
-            return False
-
-        logger.info(f"[auto-apply] OK {job.company} — {job.title}")
-        return True
-
-    except Exception as e:
-        logger.error(f"[auto-apply] exception for {job.url}: {e}")
-        return False
+    """Run apply_agent.py via service wrapper and return True on success."""
+    return await run_apply_agent_subprocess(
+        job=job,
+        timeout_sec=APPLY_AGENT_TIMEOUT_SEC,
+        apply_agent_path=APPLY_AGENT_PATH,
+        python_executable=sys.executable,
+    )
