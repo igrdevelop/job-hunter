@@ -270,6 +270,8 @@ project-root/
 - Нормализована семантика статусов URL (case-insensitive `FAIL/SKIP`, поддержка разных dash-маркеров React-skip).
 - Добавлен сервисный слой `hunter.services.tracker_service` и интеграция `apply_agent`/`generate_docs` через него.
 - Улучшен парсинг JSON в `llm_client` для смешанных ответов с несколькими JSON-объектами.
+- Закрыт high-risk в CLI post-process: регенерация docs теперь запускается от `content.json`, а не от folder path.
+- Закрыт high-risk в JSON extraction: вложенные JSON-объекты корректно парсятся через `JSONDecoder.raw_decode`.
 
 ### Частично выполнено / отложено
 
@@ -303,4 +305,12 @@ project-root/
   2) контрактные тесты парсеров,  
   3) дальнейшее выделение сервисов (`apply_service`, `hunt_service`).
 - До начала крупных перемещений файлов желательно очистить рабочее дерево и стабилизировать ветку.
+
+---
+
+## 10) Stabilization Update (2026-04-16)
+
+- В ignore-правила добавлен шаблон `tracker.backup.*.xlsx`, чтобы backup артефакты не попадали в кодовые коммиты.
+- Выполнен baseline-прогон тестов: `33 passed`.
+- Ветка подготовлена к следующему шагу: контрактные тесты source-парсеров.
 
