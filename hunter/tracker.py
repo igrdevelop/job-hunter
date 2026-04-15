@@ -29,6 +29,7 @@ URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedu
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
+REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 
 def normalize_url(url: str) -> str:
@@ -280,12 +281,12 @@ def get_url_status_flags(url: str) -> dict[str, bool]:
         if not row_url or normalize_url(row_url) != norm:
             continue
 
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+        ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
         sent = str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else ""
 
         if ats not in ("FAIL", "SKIP", "?", ""):
             has_success = True
-        elif ats == "SKIP" and sent == "—":
+        elif ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
             is_react_skip = True
 
         if has_success and is_react_skip:
