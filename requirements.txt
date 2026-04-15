@@ -14,3 +14,4 @@ anthropic
 
 # Optional: better HTML extraction for generic job pages
 beautifulsoup4
+pytest

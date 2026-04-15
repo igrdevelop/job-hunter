@@ -18,14 +18,14 @@ from telegram.ext import ContextTypes
 from hunter.config import (
     AUTO_APPLY, APPLY_AGENT_PATH, APPLY_USE_CLI,
     LLM_API_KEY, LLM_PROVIDER, LLM_MODEL,
-    APPLY_DELAY_SEC, MAX_JOBS_PER_RUN,
+    APPLY_DELAY_SEC, MAX_JOBS_PER_RUN, APPLY_AGENT_TIMEOUT_SEC,
 )
 from hunter.filters import apply_filters
 from hunter.models import Job
 from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
-    get_known_urls, get_known_company_titles, get_sent_companies,
-    dedup_key, normalize_url, normalize_company, company_matches_sent,
+    get_known_urls, get_known_company_titles,
+    dedup_key, normalize_url,
     add_failed, get_failed_jobs, remove_failed, is_known,
 )
 from hunter.telegram_bot import send_job_cards, send_text
@@ -129,17 +129,17 @@ async def _run_hunt_impl(
     filtered_out = len(all_jobs) - len(filtered)
     logger.info(f"[Hunt] After filter: {len(filtered)} jobs")
 
-    # ── Step 3: Dedup (URL + company+title + sent-company) ───────────────────
+    # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
+    # sent-company filter is intentionally disabled: a company may have multiple
+    # open roles and we don't want to block all of them just because one was sent.
     known_urls = await asyncio.to_thread(get_known_urls)
     known_ct = await asyncio.to_thread(get_known_company_titles)
-    sent_companies = await asyncio.to_thread(get_sent_companies)
 
     seen_urls_this_run: set[str] = set()
     seen_ct_this_run: set[str] = set()
     new_jobs: list[Job] = []
     dup_url = 0
     dup_ct = 0
-    dup_sent_company = 0
     for j in filtered:
         norm = normalize_url(j.url)
         if norm in known_urls or norm in seen_urls_this_run:
@@ -150,17 +150,12 @@ async def _run_hunt_impl(
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
             continue
-        comp_key = normalize_company(j.company)
-        if company_matches_sent(comp_key, sent_companies):
-            logger.info(f"[Hunt] Dup sent-company: {j.company} / {j.title}")
-            dup_sent_company += 1
-            continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
         new_jobs.append(j)
 
-    skipped_total = dup_url + dup_ct + dup_sent_company
-    logger.info(f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct}, dup_sent={dup_sent_company})")
+    skipped_total = dup_url + dup_ct
+    logger.info(f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct})")
 
     # ── Send detailed report ─────────────────────────────────────────────────
     report = (
@@ -173,7 +168,7 @@ async def _run_hunt_impl(
         f"  {total_raw} raw -> <b>{len(filtered)}</b> passed ({filtered_out} filtered out)\n\n"
         f"<b>--- Dedup ---</b>\n"
         f"  {len(filtered)} passed -> <b>{len(new_jobs)}</b> new\n"
-        f"  Skipped: {dup_url} by URL, {dup_ct} by company+title, {dup_sent_company} by sent-company"
+        f"  Skipped: {dup_url} by URL, {dup_ct} by company+title"
     )
     await send_text(context, report)
 
@@ -305,7 +300,18 @@ async def _run_apply_agent(job: Job) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=APPLY_AGENT_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            logger.error(
+                f"[auto-apply] TIMEOUT ({APPLY_AGENT_TIMEOUT_SEC}s) for {job.url}"
+            )
+            return False
 
         if proc.returncode != 0:
             logger.error(
@@ -316,9 +322,6 @@ async def _run_apply_agent(job: Job) -> bool:
         logger.info(f"[auto-apply] OK {job.company} — {job.title}")
         return True
 
-    except asyncio.TimeoutError:
-        logger.error(f"[auto-apply] TIMEOUT for {job.url}")
-        return False
     except Exception as e:
         logger.error(f"[auto-apply] exception for {job.url}: {e}")
         return False

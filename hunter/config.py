@@ -23,6 +23,7 @@ GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in (
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
 MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "10"))
+APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
@@ -107,10 +108,15 @@ PRACUJ_ENABLED: bool = os.getenv("PRACUJ_ENABLED", "true").lower() in ("true", "
 # ── theprotocol.it source config ─────────────────────────────────────────────
 # Disabled by default: site is a full SPA behind Cloudflare, listing scraper
 # cannot extract data without a headless browser. Manual URL fetch still works.
-THEPROTOCOL_ENABLED: bool = os.getenv("THEPROTOCOL_ENABLED", "false").lower() in ("true", "1", "yes")
+THEPROTOCOL_ENABLED: bool = os.getenv("THEPROTOCOL_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── Solid.Jobs source config ─────────────────────────────────────────────────
 SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# ── Inhire.io source config ───────────────────────────────────────────────────
+# Requires Playwright: pip install playwright && python -m playwright install chromium
+# Disabled by default until Playwright is installed on the host machine.
+INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
