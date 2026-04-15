@@ -38,20 +38,15 @@ Expects a JSON file with the following schema:
 
 import json
 import os
-import re
 import sys
-from datetime import date
 from pathlib import Path
-
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils import get_column_letter
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from hunter.tracker import add_applied
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
@@ -257,133 +252,24 @@ def convert_all_to_pdf(output_folder):
         print(f"  [WARN] PDF conversion failed: {result.stderr.strip()}")
 
 
-TRACKER_PATH = Path("D:/LearningProject/Claude/tracker.xlsx")
-TRACKER_HEADERS = ["Date", "Company", "Job Title", "Stack", "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn"]
-
-
-def _create_tracker():
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Applications"
-
-    header_fill = PatternFill("solid", fgColor="2B579A")
-    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-
-    for col, header in enumerate(TRACKER_HEADERS, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    # Column widths
-    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35]
-    for col, width in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(col)].width = width
-
-    ws.row_dimensions[1].height = 20
-    ws.freeze_panes = "A2"
-    wb.save(TRACKER_PATH)
-    return wb
-
-
-def _tracker_company_name(content: dict) -> str:
-    """Company column: use LLM company_name, not folder basename (avoids Upvanta_2026-04-11 from collisions)."""
-    cn = (content.get("company_name") or "").strip()
-    if cn:
-        return cn
-    folder_name = Path(content["output_folder"]).name
-    # Legacy: strip trailing _2, _3 collision suffix, then strip trailing _YYYY-MM-DD
-    s = re.sub(r"_(\d+)$", "", folder_name)
-    m = re.search(r"^(.+)_[0-9]{4}-[0-9]{2}-[0-9]{2}$", s)
-    return m.group(1) if m else s
-
-
-def update_tracker(content):
-    company = _tracker_company_name(content)
-    job_title = content.get("job_title", "")
-    stack = content.get("stack", "")
-    apply_url = content.get("apply_url", "")
-    folder = content["output_folder"]
-    to_learn = content.get("to_learn", "")
-    ats_score = content.get("ats_score", "")
-    ats_display = f"{ats_score}%" if ats_score else ""
-    today = date.today().strftime("%Y-%m-%d")
-
-    if TRACKER_PATH.exists():
-        wb = openpyxl.load_workbook(TRACKER_PATH)
-        ws = wb.active
+def update_tracker(content: dict, force_mode: bool = False) -> None:
+    """Write successful apply record through centralized tracker API."""
+    written = add_applied(content, force=force_mode)
+    if written:
+        print("  [OK] Tracker updated")
     else:
-        wb = _create_tracker()
-        ws = wb.active
-
-    from hunter.tracker import normalize_url, has_successful_entry
-    norm_url = normalize_url(apply_url) if apply_url else ""
-
-    # Don't add a duplicate row if docs were already generated for this URL
-    if norm_url and has_successful_entry(apply_url):
-        print(f"  [tracker] Skipping — successful entry already exists for {apply_url[:60]}")
-        wb.close()
-        return
-
-    # Check if this URL was already applied to → mark as re-application
-    is_reapply = any(
-        normalize_url(str(row[5] or "")) == norm_url
-        for row in ws.iter_rows(min_row=2, values_only=True)
-        if norm_url and row and len(row) > 5 and row[5]
-    )
-
-    next_row = ws.max_row + 1
-    row_font = Font(name="Calibri", size=11)
-    values = [today, company, job_title, stack, ats_display, apply_url, folder, "", "+" if is_reapply else "", to_learn]
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        if col == 6 and val:  # URL — hyperlink
-            cell.hyperlink = val
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-        if col == 5 and ats_score:  # ATS % — color coded
-            cell.alignment = Alignment(horizontal="center")
-            score = int(ats_score)
-            if score >= 80:
-                cell.fill = PatternFill("solid", fgColor="C6EFCE")  # green
-                cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
-            elif score >= 60:
-                cell.fill = PatternFill("solid", fgColor="FFEB9C")  # yellow
-                cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
-            else:
-                cell.fill = PatternFill("solid", fgColor="FFC7CE")  # red
-                cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
-        if col in (8, 9):  # Sent / Re-application — centered
-            cell.alignment = Alignment(horizontal="center")
-
-    # Alternate row color
-    if next_row % 2 == 0:
-        fill = PatternFill("solid", fgColor="EEF2FA")
-        for col in range(1, len(TRACKER_HEADERS) + 1):
-            ws.cell(row=next_row, column=col).fill = fill
-
-    # Retry save — tracker.xlsx may be open in Excel
-    for attempt in range(1, 6):
-        try:
-            wb.save(TRACKER_PATH)
-            print(f"  [OK] Tracker updated: {TRACKER_PATH}")
-            break
-        except PermissionError:
-            if attempt == 5:
-                print(f"  [WARN] Could not save tracker (file locked after 5 attempts). Close Excel and re-run.")
-                return
-            import time as _time
-            print(f"  [tracker] Locked by Excel — retry {attempt}/5 in 3s...")
-            _time.sleep(3)
+        apply_url = content.get("apply_url", "")
+        print(f"  [tracker] Skipping — successful entry already exists for {str(apply_url)[:60]}")
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python generate_docs.py <content.json> [--full]")
+        print("Usage: python generate_docs.py <content.json> [--full] [--force]")
         sys.exit(1)
 
     json_path = sys.argv[1]
     full_mode = "--full" in sys.argv
+    force_mode = "--force" in sys.argv
 
     with open(json_path, "r", encoding="utf-8") as f:
         content = json.load(f)
@@ -448,7 +334,7 @@ def main():
             print(f"  [cleanup] Removed intermediate: {docx_file.name}")
 
     # --- Update tracker.xlsx ---
-    update_tracker(content)
+    update_tracker(content, force_mode=force_mode)
 
     print("\nDone!\n")
 

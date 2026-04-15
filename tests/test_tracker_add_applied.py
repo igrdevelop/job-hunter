@@ -1,0 +1,79 @@
+from pathlib import Path
+
+import openpyxl
+
+from hunter import tracker
+
+
+def _build_content(url: str, output_folder: Path) -> dict:
+    return {
+        "company_name": "Acme",
+        "job_title": "Senior Frontend Developer",
+        "stack": "Angular",
+        "ats_score": "85",
+        "apply_url": url,
+        "output_folder": str(output_folder),
+        "to_learn": "State management",
+    }
+
+
+def test_add_applied_writes_success_row(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    content = _build_content(
+        "https://example.com/jobs/1?utm_source=mail",
+        tmp_path / "Applications" / "2026-04-16" / "Acme",
+    )
+    written = tracker.add_applied(content, force=False)
+
+    assert written is True
+    assert tracker.has_successful_entry("https://example.com/jobs/1")
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+    assert len(rows) == 1
+    assert rows[0][1] == "Acme"
+    assert rows[0][2] == "Senior Frontend Developer"
+    assert rows[0][4] == "85%"
+
+
+def test_add_applied_skips_duplicate_success_when_not_forced(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    content = _build_content(
+        "https://example.com/jobs/2?utm_source=mail",
+        tmp_path / "Applications" / "2026-04-16" / "Acme",
+    )
+    assert tracker.add_applied(content, force=False) is True
+    assert tracker.add_applied(content, force=False) is False
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+    assert len(rows) == 1
+
+
+def test_add_applied_marks_reapplication_when_forced(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    content = _build_content(
+        "https://example.com/jobs/3",
+        tmp_path / "Applications" / "2026-04-16" / "Acme",
+    )
+    assert tracker.add_applied(content, force=False) is True
+    assert tracker.add_applied(content, force=True) is True
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    wb.close()
+
+    assert len(rows) == 2
+    # Re-application column should be marked on the second row.
+    assert rows[1][8] == "+"

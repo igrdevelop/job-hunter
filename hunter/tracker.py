@@ -4,8 +4,7 @@ tracker.py — read/write tracker.xlsx for the hunter.
 Responsibilities:
   - get_known_urls()     → set of URLs already in tracker (for dedup)
   - add_skipped(job)     → append a row with status "SKIP"
-  - add_applied(...)     → generate_docs.py handles the "applied" row,
-                           but this module owns the skip path
+  - add_applied(...)     → append a successful generated-docs row
 """
 
 import re
@@ -45,6 +44,8 @@ def normalize_url(url: str) -> str:
         "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
         "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
         "originToLandingJobPostings", "origin",
+        # Pracuj.pl tracking params (email alerts, suggested jobs)
+        "sendid", "send_date", "sug",
     }
     qs = parse_qs(p.query, keep_blank_values=False)
     clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
@@ -343,6 +344,90 @@ def is_known(url: str, company: str = "", title: str = "") -> bool:
     return False
 
 
+def _company_from_content(content: dict) -> str:
+    """Prefer explicit company_name; fall back to output folder name."""
+    cn = (content.get("company_name") or "").strip()
+    if cn:
+        return cn
+    folder_name = Path(str(content.get("output_folder") or "")).name
+    # Remove collision suffixes: Company_2, Company_3...
+    s = re.sub(r"_(\d+)$", "", folder_name)
+    # Legacy flat structure: Company_YYYY-MM-DD
+    m = re.search(r"^(.+)_[0-9]{4}-[0-9]{2}-[0-9]{2}$", s)
+    return (m.group(1) if m else s) or "Unknown"
+
+
+def add_applied(content: dict, force: bool = False) -> bool:
+    """Append a successful apply row. Returns True when a row was written."""
+    company = _company_from_content(content)
+    job_title = str(content.get("job_title", "") or "")
+    stack = str(content.get("stack", "") or "")
+    apply_url = str(content.get("apply_url", "") or "")
+    folder = str(content.get("output_folder", "") or "")
+    to_learn = str(content.get("to_learn", "") or "")
+    ats_score = str(content.get("ats_score", "") or "")
+    ats_display = f"{ats_score}%" if ats_score else ""
+    today = date.today().strftime("%Y-%m-%d")
+    norm_url = normalize_url(apply_url) if apply_url else ""
+
+    # Keep historical behavior: do not duplicate successful rows unless force mode.
+    if norm_url and has_successful_entry(apply_url) and not force:
+        return False
+
+    wb, ws = _load_or_create()
+
+    is_reapply = any(
+        normalize_url(str(row[URL_COL_INDEX - 1] or "")) == norm_url
+        for row in ws.iter_rows(min_row=2, values_only=True)
+        if norm_url and row and len(row) >= URL_COL_INDEX and row[URL_COL_INDEX - 1]
+    )
+
+    next_row = ws.max_row + 1
+    row_font = Font(name="Calibri", size=11)
+    values = [
+        today,
+        company,
+        job_title,
+        stack,
+        ats_display,
+        apply_url,
+        folder,
+        "",
+        "+" if is_reapply else "",
+        to_learn,
+    ]
+
+    for col, val in enumerate(values, 1):
+        cell = ws.cell(row=next_row, column=col, value=val)
+        cell.font = row_font
+        if col == URL_COL_INDEX and val:
+            cell.hyperlink = str(val)
+            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+        if col == ATS_COL_INDEX and ats_score:
+            cell.alignment = Alignment(horizontal="center")
+            score = int(ats_score)
+            if score >= 80:
+                cell.fill = PatternFill("solid", fgColor="C6EFCE")
+                cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
+            elif score >= 60:
+                cell.fill = PatternFill("solid", fgColor="FFEB9C")
+                cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
+            else:
+                cell.fill = PatternFill("solid", fgColor="FFC7CE")
+                cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
+        if col in (SENT_COL_INDEX, 9):
+            cell.alignment = Alignment(horizontal="center")
+
+    # Alternate row color for readability.
+    if next_row % 2 == 0:
+        fill = PatternFill("solid", fgColor="EEF2FA")
+        for col in range(1, len(TRACKER_HEADERS) + 1):
+            ws.cell(row=next_row, column=col).fill = fill
+
+    _save_with_retry(wb)
+    return True
+
+
 def add_skipped(job: Job) -> None:
     """Append a SKIP row to tracker so the job is never shown again."""
     if is_known(job.url, job.company, job.title):
@@ -373,6 +458,69 @@ def add_skipped(job: Job) -> None:
         cell.fill = skip_fill
         if col == URL_COL_INDEX:
             cell.hyperlink = job.url
+            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+
+    _save_with_retry(wb)
+
+
+def is_react_skipped(url: str) -> bool:
+    """True if tracker already has a React-skip row (SKIP + Sent='—') for this URL."""
+    if not TRACKER_PATH.exists():
+        return False
+    norm = normalize_url(url)
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < SENT_COL_INDEX:
+            continue
+        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
+        if not row_url or normalize_url(row_url) != norm:
+            continue
+        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+        sent = str(row[SENT_COL_INDEX - 1] or "").strip()
+        if ats == "SKIP" and sent == "—":
+            wb.close()
+            return True
+    wb.close()
+    return False
+
+
+def add_react_skipped(content: dict, url: str) -> None:
+    """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered.
+
+    Light yellow fill distinguishes these rows from geo/tech SKIP rows (grey).
+    The URL is recorded so the job is never re-surfaced by the hunter or apply_agent.
+    """
+    company = (content.get("company_name") or "").strip()
+    title   = (content.get("job_title")    or "").strip()
+    if is_known(url, company, title):
+        return
+    wb, ws = _load_or_create()
+    today = date.today().strftime("%Y-%m-%d")
+    next_row = ws.max_row + 1
+
+    values = [
+        today,                          # Date
+        company,                        # Company
+        title,                          # Job Title
+        content.get("stack", ""),       # Stack
+        "SKIP",                         # ATS %
+        url,                            # URL
+        "",                             # Folder
+        "—",                            # Sent  ← marks React-skip
+        "",                             # Re-application
+        "",                             # To Learn
+    ]
+
+    row_font = Font(name="Calibri", size=11)
+    row_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
+
+    for col, val in enumerate(values, 1):
+        cell = ws.cell(row=next_row, column=col, value=val)
+        cell.font = row_font
+        cell.fill = row_fill
+        if col == URL_COL_INDEX:
+            cell.hyperlink = url
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
 
     _save_with_retry(wb)
