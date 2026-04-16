@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "angular-cli": {
+      "command": "C:\\Program Files\\nodejs\\npx.cmd",
+      "args": ["-y", "@angular/cli", "mcp", "--read-only"],
+      "cwd": "D:\\LearningProject\\Teach and interview\\sandbox\\playground"
+    }
+  }
+}
