@@ -35,6 +35,15 @@ HEADERS = {
 TIMEOUT = 30
 
 
+def normalize_solidjobs_offer_url(url: str) -> str:
+    """Normalize RSS-style offer links to canonical Solid.Jobs offer paths."""
+    u = (url or "").strip()
+    if not u:
+        return u
+    u = u.split("?", 1)[0]
+    return re.sub(r"(https://solid\.jobs/o/[^/]+)/rss/?$", r"\1", u, flags=re.I)
+
+
 class SolidJobsSource(BaseSource):
     name = "solidjobs"
 
@@ -85,6 +94,7 @@ class SolidJobsSource(BaseSource):
 
             title = title_el.text.strip() if title_el is not None and title_el.text else ""
             link = link_el.text.strip() if link_el is not None and link_el.text else ""
+            link = normalize_solidjobs_offer_url(link)
             desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
 
             categories = []
@@ -180,7 +190,7 @@ class SolidJobsSource(BaseSource):
         company = (raw.get("company") or "Unknown").strip()
         location = (raw.get("location") or "Unknown").strip()
         salary = raw.get("salary") or None
-        url = raw.get("url", "")
+        url = normalize_solidjobs_offer_url(raw.get("url", ""))
 
         if not url:
             return None

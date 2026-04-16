@@ -51,3 +51,12 @@ def test_apply_filters_rejects_disallowed_location() -> None:
     jobs = [_job(title="Senior Frontend Developer (Angular)", location="Berlin (On-site)")]
     filtered = apply_filters(jobs)
     assert filtered == []
+
+
+def test_apply_filters_rejects_qa_automation_roles() -> None:
+    jobs = [
+        _job(title="QA Automation Engineer (JavaScript)", location="Remote"),
+        _job(title="SDET Frontend Engineer", location="Wroclaw (Hybrid)"),
+    ]
+    filtered = apply_filters(jobs)
+    assert filtered == []

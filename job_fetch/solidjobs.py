@@ -29,6 +29,15 @@ HEADERS = {
 TIMEOUT = 25
 
 
+def normalize_solidjobs_offer_url(url: str) -> str:
+    """Normalize RSS-style offer links before fetching job page content."""
+    u = (url or "").strip()
+    if not u:
+        return u
+    u = u.split("?", 1)[0]
+    return re.sub(r"(https://solid\.jobs/o/[^/]+)/rss/?$", r"\1", u, flags=re.I)
+
+
 def _strip_html(html: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", html)
     text = re.sub(r"<li[^>]*>", "- ", text)
@@ -44,6 +53,7 @@ def _strip_html(html: str) -> str:
 
 def fetch_solidjobs(url: str) -> str:
     """Fetch solid.jobs offer and return plain text for LLM consumption."""
+    url = normalize_solidjobs_offer_url(url)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
