@@ -38,3 +38,6 @@ _*.py
 *.docx
 *.pdf
 !templates/*.docx
+
+# Claude Code local settings (personal, not for repo)
+.claude/settings.local.json
