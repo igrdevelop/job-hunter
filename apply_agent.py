@@ -288,12 +288,19 @@ def main_api(url: str) -> None:
         print(f"[apply_agent] FETCH ERROR: {e}")
         sys.exit(1)
 
-    # Step 2 — Read system prompt
+    # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "system_prompt.md"
+    profile_path = PROMPTS_DIR / "candidate_profile.md"
     if not prompt_path.exists():
         print(f"[apply_agent] ERROR: {prompt_path} not found")
         sys.exit(1)
-    system_prompt = prompt_path.read_text(encoding="utf-8")
+    instructions = prompt_path.read_text(encoding="utf-8")
+    if profile_path.exists():
+        profile = profile_path.read_text(encoding="utf-8")
+        system_prompt = profile + "\n\n---\n\n" + instructions
+    else:
+        print(f"[apply_agent] WARNING: {profile_path} not found, using system_prompt.md only")
+        system_prompt = instructions
 
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 2: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
@@ -379,8 +386,7 @@ def main_api(url: str) -> None:
         print(f"[apply_agent] Warning: could not save job_posting.txt: {e}")
 
     # Step 7 — Run generate_docs.py
-    # Auto-full for theprotocol.it (Polish site — always generate full EN+PL package)
-    use_full = _FULL_MODE or "theprotocol.it" in url
+    use_full = _FULL_MODE
     gen_cmd = build_generate_docs_cmd(
         generate_docs_script=GENERATE_DOCS_SCRIPT,
         content_json_path=content_path,

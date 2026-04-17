@@ -31,13 +31,22 @@ BASE = "https://theprotocol.it"
 
 LISTING_URLS = [
     f"{BASE}/filtry/frontend;sp/wroclaw;wp",
-    f"{BASE}/filtry/angular;sp/wroclaw;wp",
+    f"{BASE}/filtry/angular;sp?remote=true",
     f"{BASE}/filtry/frontend;sp?remote=true",
 ]
 
 TIMEOUT = 25
 
 _scraper = cloudscraper.create_scraper()
+# theprotocol.it rejects old browser UAs with an "unsupportedBrowser" page.
+# Override to a modern Chrome UA while keeping cloudscraper's Cloudflare bypass.
+_scraper.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+})
 
 
 class TheProtocolSource(BaseSource):
@@ -110,7 +119,15 @@ class TheProtocolSource(BaseSource):
 
         page_props = data.get("props", {}).get("pageProps", {})
 
-        # Direct listing keys
+        # theprotocol.it current format: pageProps.offersResponse.offers
+        offers_resp = page_props.get("offersResponse")
+        if isinstance(offers_resp, dict):
+            for sub in ("offers", "items", "results"):
+                sub_val = offers_resp.get(sub)
+                if isinstance(sub_val, list) and sub_val:
+                    return sub_val
+
+        # Direct listing keys (legacy / fallback)
         for key in ("offers", "data", "items", "results", "postings", "jobs"):
             val = page_props.get(key)
             if isinstance(val, list) and val:
@@ -253,15 +270,15 @@ class TheProtocolSource(BaseSource):
     # -- Parser ----------------------------------------------------------------
 
     def _parse(self, raw: dict) -> Optional[Job]:
-        # Support both __NEXT_DATA__ field names and the BS4 fallback format
+        # Support current API format, legacy __NEXT_DATA__ field names, and BS4 fallback
         title = (
-            raw.get("jobTitle") or raw.get("title") or raw.get("name") or ""
+            raw.get("title") or raw.get("jobTitle") or raw.get("name") or ""
         ).strip()
         if not title:
             return None
 
         company_raw = (
-            raw.get("companyName") or raw.get("company") or raw.get("employer") or "Unknown"
+            raw.get("employer") or raw.get("companyName") or raw.get("company") or "Unknown"
         )
         company = (
             company_raw.get("name", "Unknown")
@@ -288,6 +305,11 @@ class TheProtocolSource(BaseSource):
 
     @staticmethod
     def _build_url(raw: dict) -> str:
+        # Current API format: offerUrlName slug → construct canonical URL
+        slug = raw.get("offerUrlName", "")
+        if slug:
+            return f"{BASE}/szczegoly/praca/{slug}"
+
         for key in ("offerAbsoluteUri", "offerUrl", "url", "uri", "href"):
             val = raw.get(key, "")
             if val:
@@ -299,26 +321,58 @@ class TheProtocolSource(BaseSource):
 
     @staticmethod
     def _parse_location(raw: dict) -> str:
-        # BS4 fallback format already has a 'location' string
-        loc = raw.get("location") or raw.get("displayWorkplace") or ""
-        if isinstance(loc, dict):
-            loc = loc.get("label") or loc.get("city") or ""
-        loc = str(loc).strip()
-        if loc and loc != "Unknown":
-            return loc
+        # Current API format: workplace=[{city, location, region}], workModes=["zdalna",...]
+        work_modes = raw.get("workModes") or []
+        is_remote = any(m in ("zdalna", "remote") for m in work_modes)
+        is_hybrid = any(m in ("hybrydowa", "hybrid") for m in work_modes)
 
-        remote = raw.get("remoteWork") or raw.get("fullyRemote") or raw.get("remote", False)
-        city = (raw.get("city") or "").strip()
-        if city and remote:
+        city = ""
+        workplace = raw.get("workplace")
+        if isinstance(workplace, list) and workplace:
+            first = workplace[0]
+            city = (first.get("city") or first.get("location") or "").strip()
+        elif isinstance(workplace, str):
+            city = workplace.strip()
+
+        # BS4 fallback: flat 'location' string
+        if not city:
+            loc = raw.get("location") or raw.get("displayWorkplace") or ""
+            if isinstance(loc, dict):
+                loc = loc.get("label") or loc.get("city") or ""
+            city = str(loc).strip()
+
+        # Legacy fields
+        if not city:
+            city = (raw.get("city") or "").strip()
+        if not is_remote:
+            is_remote = bool(raw.get("remoteWork") or raw.get("fullyRemote") or raw.get("remote"))
+
+        if city and is_remote:
             return f"{city} (Remote)"
+        if city and is_hybrid:
+            return f"{city} (Hybrid)"
         if city:
             return city
-        if remote:
+        if is_remote:
             return "Remote"
         return "Unknown"
 
     @staticmethod
     def _parse_salary(raw: dict) -> Optional[str]:
+        # Current API: typesOfContracts=[{id, salary: {from, to, currency, type}}]
+        contracts = raw.get("typesOfContracts") or []
+        for contract in contracts:
+            if not isinstance(contract, dict):
+                continue
+            sal = contract.get("salary")
+            if isinstance(sal, dict):
+                lo = sal.get("from") or sal.get("min")
+                hi = sal.get("to") or sal.get("max")
+                currency = sal.get("currency", "PLN")
+                if lo or hi:
+                    return f"{lo or '?'}-{hi or '?'} {currency}"
+
+        # Legacy / fallback fields
         sal = raw.get("salaryDisplayText") or raw.get("salary") or raw.get("salaryText") or ""
         if isinstance(sal, str) and sal.strip():
             return sal.strip()

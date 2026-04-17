@@ -57,6 +57,9 @@ def normalize_url(url: str) -> str:
         if m:
             path = f"/jobs/view/{m.group(1)}"
             query = ""
+    # Strip /rss suffix (solid.jobs RSS feed vs regular URL are the same job)
+    if path.endswith("/rss"):
+        path = path[:-4] or "/"
     return urlunparse((p.scheme, host, path, "", query, ""))
 
 

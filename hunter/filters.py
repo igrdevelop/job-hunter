@@ -76,6 +76,10 @@ def _is_react_without_angular(job: Job) -> bool:
 
     # NoFluffJobs: raw["technology"] = str; SolidJobs: list[{"name": "IT"}, ...]
     _append_technology_field(tech_texts, raw.get("technology"))
+
+    # theprotocol.it: raw["technologies"] = ["JavaScript", "Angular", ...]
+    for t in raw.get("technologies") or []:
+        tech_texts.append(_lower_text_fragment(t))
     for tile in raw.get("tiles", {}).get("values", []) or []:
         if isinstance(tile, dict):
             tech_texts.append(_lower_text_fragment(tile.get("value")))

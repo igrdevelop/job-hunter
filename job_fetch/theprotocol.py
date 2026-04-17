@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 25
 
 _scraper = cloudscraper.create_scraper()
+# theprotocol.it rejects old browser UAs with an "unsupportedBrowser" page.
+_scraper.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+})
 
 
 def _strip_html(html: str) -> str:
@@ -154,6 +162,34 @@ def _try_bs4(html: str) -> str:
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
             parts.append(f"Job Title: {og_title['content']}")
+
+    # Company name — try specific theprotocol.it selector first, then generic fallbacks
+    company_name = None
+    # Most reliable: <a data-test="anchor-company-link">Company: NAME</a>
+    anchor = soup.find("a", attrs={"data-test": "anchor-company-link"})
+    if anchor:
+        # Strip the "Company: " label span if present
+        label = anchor.find("span")
+        if label:
+            label.decompose()
+        company_name = anchor.get_text(strip=True)
+
+    if not company_name:
+        for sel in [
+            {"itemprop": "hiringOrganization"},
+            {"data-cy": "company-name"},
+            {"data-testid": "company-name"},
+        ]:
+            el = soup.find(attrs=sel)
+            if el:
+                name_el = el.find(itemprop="name") or el
+                text = name_el.get_text(strip=True)
+                if text and len(text) < 100:
+                    company_name = text
+                    break
+
+    if company_name:
+        parts.append(f"Company: {company_name}")
 
     og_desc = soup.find("meta", property="og:description")
     if og_desc and og_desc.get("content"):
