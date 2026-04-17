@@ -63,5 +63,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.inhire import fetch_inhire
         return fetch_inhire(url)
 
+    if "jobleads.com" in domain:
+        logger.info(f"[job_fetch] JobLeads detected: {url}")
+        from job_fetch.jobleads import fetch_jobleads
+        return fetch_jobleads(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

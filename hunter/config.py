@@ -125,8 +125,10 @@ SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("tr
 
 # ── Inhire.io source config ───────────────────────────────────────────────────
 # Requires Playwright: pip install playwright && python -m playwright install chromium
-# Disabled by default until Playwright is installed on the host machine.
 INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# ── JobLeads source config ────────────────────────────────────────────────────
+JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
