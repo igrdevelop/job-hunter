@@ -34,9 +34,37 @@ HEADERS = {
     "Referer": "https://www.jobleads.com/",
 }
 
+# Stub written by apply_agent when Cloudflare blocks the detail page; user pastes below this line.
+JOBLEADS_PASTE_MARKER = "=== Paste the full job description below this line ==="
+MIN_MANUAL_BODY_LEN = 200
+
+
+def try_load_manual_job_posting(url: str) -> str | None:
+    """Use job_posting.txt from a MANUAL tracker row when the user has pasted the description."""
+    try:
+        from hunter.tracker import manual_jobleads_job_posting_path
+    except ImportError:
+        return None
+    path = manual_jobleads_job_posting_path(url)
+    if not path or not path.is_file():
+        return None
+    data = path.read_text(encoding="utf-8", errors="replace")
+    if JOBLEADS_PASTE_MARKER in data:
+        body = data.split(JOBLEADS_PASTE_MARKER, 1)[1].strip()
+    else:
+        body = re.sub(r"^URL:\s*\S+\s*", "", data, count=1, flags=re.MULTILINE).strip()
+    if len(body) < MIN_MANUAL_BODY_LEN:
+        return None
+    return f"URL: {url}\n\n{body}"
+
 
 def fetch_jobleads(url: str) -> str:
     """Fetch jobleads.com offer and return plain text for LLM consumption."""
+    manual = try_load_manual_job_posting(url)
+    if manual:
+        logger.info("[jobleads] using pasted job_posting.txt (MANUAL tracker flow)")
+        return manual
+
     html = ""
     try:
         resp = _scraper.get(url, headers=HEADERS, timeout=TIMEOUT)
@@ -66,9 +94,16 @@ def fetch_jobleads(url: str) -> str:
     if text and len(text) > 150:
         return text
 
-    logger.warning("[jobleads] all strategies returned too little text, using html_fallback")
+    logger.warning("[jobleads] all strategies returned too little text, trying html_fallback")
     from job_fetch.html_fallback import fetch_html
-    return fetch_html(url)
+
+    last = fetch_html(url)
+    if last and len(last) > 150 and "just a moment" not in last.lower():
+        return last
+    raise RuntimeError(
+        f"jobleads.com: could not load job description ({len(last or '')} chars). "
+        "Cloudflare often blocks automated fetches — use MANUAL flow (tracker + job_posting.txt)."
+    )
 
 
 # ── JSON-LD ────────────────────────────────────────────────────────────────────

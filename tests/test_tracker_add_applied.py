@@ -100,6 +100,29 @@ def test_add_applied_accepts_non_numeric_ats_score(tmp_path, monkeypatch) -> Non
     assert rows[0][4] == "N/A"
 
 
+def test_add_applied_removes_manual_pending_row_first(tmp_path, monkeypatch) -> None:
+    tracker_path = tmp_path / "tracker.xlsx"
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+
+    folder = tmp_path / "Applications" / "2026-04-21" / "GammaInc"
+    folder.mkdir(parents=True)
+    url = "https://www.jobleads.com/pl/job/x--poland--aaa111deadbeef0000000000000000"
+    assert tracker.add_manual_jobleads_pending(
+        url=url, company="GammaInc", title="Dev", folder_abs=folder,
+    ) is True
+
+    content = _build_content(url, folder)
+    assert tracker.add_applied(content, force=False) is True
+
+    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = [tuple(r) for r in ws.iter_rows(min_row=2, values_only=True)]
+    wb.close()
+    assert len(rows) == 1
+    assert rows[0][4] == "85%"
+    assert rows[0][5] == url
+
+
 def test_add_applied_converts_10_point_scale_to_percent(tmp_path, monkeypatch) -> None:
     tracker_path = tmp_path / "tracker.xlsx"
     monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)

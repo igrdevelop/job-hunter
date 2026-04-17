@@ -18,10 +18,10 @@ def test_run_apply_agent_delegates_to_apply_service(monkeypatch) -> None:
 
     async def _fake_runner(**kwargs):  # noqa: ANN003
         captured.update(kwargs)
-        return True
+        return "ok"
 
     monkeypatch.setattr("hunter.main.run_apply_agent_subprocess", _fake_runner)
 
     result = asyncio.run(_run_apply_agent(job))
-    assert result is True
+    assert result == "ok"
     assert captured["job"].url == "https://example.com/jobs/1"

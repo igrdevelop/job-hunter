@@ -64,7 +64,7 @@ def test_run_apply_agent_subprocess_returns_true_on_success(monkeypatch) -> None
             python_executable="python",
         )
     )
-    assert result is True
+    assert result == "ok"
 
 
 def test_run_apply_agent_subprocess_returns_false_on_nonzero_exit(monkeypatch) -> None:
@@ -84,7 +84,7 @@ def test_run_apply_agent_subprocess_returns_false_on_nonzero_exit(monkeypatch) -
             python_executable="python",
         )
     )
-    assert result is False
+    assert result == "fail"
 
 
 def test_run_apply_agent_subprocess_times_out_and_kills_process(monkeypatch) -> None:
@@ -117,7 +117,7 @@ def test_run_apply_agent_subprocess_times_out_and_kills_process(monkeypatch) -> 
             python_executable="python",
         )
     )
-    assert result is False
+    assert result == "fail"
     assert proc.killed is True
 
 
@@ -138,7 +138,37 @@ def test_run_apply_agent_subprocess_returns_false_on_oserror(monkeypatch) -> Non
             python_executable="python",
         )
     )
-    assert result is False
+    assert result == "fail"
+
+
+def test_run_apply_agent_subprocess_returns_manual_on_exit_44(monkeypatch) -> None:
+    async def _fake_create_subprocess_exec(program, *args, **kwargs):  # noqa: ANN002, ANN003
+        assert "--company" in args
+        return _FakeProc(returncode=44)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    jl = Job(
+        title="Angular Dev",
+        company="Acme",
+        location="Remote",
+        salary=None,
+        url="https://www.jobleads.com/pl/job/test--poland--abc123deadbeef000000000000000",
+        source="test",
+    )
+
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            jl,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result == "manual"
 
 
 def test_run_apply_agent_subprocess_does_not_swallow_unexpected_errors(monkeypatch) -> None:

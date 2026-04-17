@@ -65,6 +65,13 @@ if GENERATE_PL_RESUME:
 _SKIP_DEDUP = False
 _FULL_MODE = False
 
+# Optional context from hunter when URL is jobleads.com (see apply_service subprocess argv)
+_APPLY_META_COMPANY = ""
+_APPLY_META_TITLE = ""
+
+# Exit code: JobLeads fetch blocked — MANUAL tracker row + stub job_posting.txt written
+APPLY_MANUAL_EXIT_CODE = 44
+
 
 # ── Tracker dedup check (avoid wasting LLM tokens) ──────────────────────────
 
@@ -232,6 +239,87 @@ def compute_output_folder(company_name: str) -> Path:
         suffix += 1
 
 
+_INVALID_FOLDER_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitize_folder_company(name: str) -> str:
+    """Safe folder segment from company name (Windows / macOS)."""
+    s = _INVALID_FOLDER_CHARS.sub("_", (name or "").strip())
+    s = s.strip("._ ")[:120] or "Unknown"
+    return s
+
+
+def _handle_jobleads_fetch_blocked(url: str, err: str) -> None:
+    """Stub job_posting.txt + MANUAL tracker row; Telegram instructs user; process exits 44."""
+    from hunter.tracker import (
+        add_manual_jobleads_pending,
+        has_manual_pending,
+        lookup_url,
+        manual_jobleads_job_posting_path,
+    )
+    from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
+
+    if has_manual_pending(url):
+        jp = manual_jobleads_job_posting_path(url)
+        hint = f"\nФайл: <code>{jp}</code>" if jp else ""
+        notify(
+            "📋 <b>JobLeads — запись MANUAL уже есть</b>\n"
+            "Вставь текст вакансии в <code>job_posting.txt</code> (ниже маркера) и снова запусти apply "
+            "с той же ссылкой.\n"
+            f"🔗 {url}{hint}\n"
+            "<i>Dedup: строка уже в tracker.xlsx</i>"
+        )
+        print(f"[apply_agent] MANUAL_PENDING (existing) exit={APPLY_MANUAL_EXIT_CODE}")
+        sys.exit(APPLY_MANUAL_EXIT_CODE)
+
+    if lookup_url(url):
+        notify(
+            "📋 <b>JobLeads — URL уже в tracker.xlsx</b> (дедуп).\n"
+            f"🔗 {url}\n"
+            "Если там статус FAIL и хочешь MANUAL-режим — удали эту строку в Excel и повтори."
+        )
+        print(f"[apply_agent] MANUAL_PENDING (URL already tracked) exit={APPLY_MANUAL_EXIT_CODE}")
+        sys.exit(APPLY_MANUAL_EXIT_CODE)
+
+    company_folder = _sanitize_folder_company(_APPLY_META_COMPANY or "Unknown")
+    title = (_APPLY_META_TITLE or "Unknown").strip() or "Unknown"
+    output_folder = compute_output_folder(company_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    stub = output_folder / "job_posting.txt"
+    stub.write_text(
+        f"URL: {url}\n\n"
+        f"Company (from listing): {_APPLY_META_COMPANY or '—'}\n"
+        f"Title (from listing): {_APPLY_META_TITLE or '—'}\n\n"
+        "JobLeads blocks automatic download (Cloudflare).\n"
+        "Open the job in your browser, copy the full posting, and paste it below the marker line.\n\n"
+        f"{JOBLEADS_PASTE_MARKER}\n\n",
+        encoding="utf-8",
+    )
+
+    written = add_manual_jobleads_pending(
+        url=url,
+        company=_APPLY_META_COMPANY or "Unknown",
+        title=title,
+        folder_abs=output_folder,
+    )
+    folder_display = str(output_folder).replace("\\", "/")
+    notify(
+        "📋 <b>JobLeads — нужно вручную дописать описание</b>\n\n"
+        "Страница недоступна для бота (Cloudflare). Создана строка в <b>tracker.xlsx</b> "
+        "(ATS = <code>MANUAL</code>) и папка:\n"
+        f"📁 <code>{folder_display}/</code>\n\n"
+        "1. Открой <code>job_posting.txt</code> в этой папке\n"
+        "2. Вставь полный текст вакансии <b>под</b> строкой-маркером\n"
+        "3. Сохрани файл и снова запусти apply <b>с той же ссылкой</b>\n\n"
+        f"🔗 {url}\n\n"
+        f"<pre>{(err or '')[:280]}</pre>"
+        + ("" if written else "\n\n<i>Строка tracker не добавлена (редкий конфликт).</i>"),
+    )
+    print(f"[apply_agent] MANUAL_PENDING exit={APPLY_MANUAL_EXIT_CODE} tracker_row={written}")
+    sys.exit(APPLY_MANUAL_EXIT_CODE)
+
+
 def validate_content(data: dict) -> list[str]:
     """Return list of missing/invalid fields."""
     errors = []
@@ -284,6 +372,8 @@ def main_api(url: str) -> None:
         job_text = fetch_job_text(url)
         print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
     except Exception as e:
+        if "jobleads.com" in url.lower():
+            _handle_jobleads_fetch_blocked(url, str(e))
         notify(f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>")
         print(f"[apply_agent] FETCH ERROR: {e}")
         sys.exit(1)
@@ -756,13 +846,46 @@ def main(url: str, force_cli: bool = False, force: bool = False, full: bool = Fa
         sys.exit(1)
 
 
+def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, str]:
+    """Parse argv (including script name) → url, force_cli, force, full, company, title."""
+    args = argv[1:]
+    force_cli = "--cli" in args
+    force = "--force" in args
+    full = "--full" in args
+    company, title = "", ""
+    pos: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--company" and i + 1 < len(args):
+            company = args[i + 1]
+            i += 2
+            continue
+        if a == "--title" and i + 1 < len(args):
+            title = args[i + 1]
+            i += 2
+            continue
+        if a.startswith("--"):
+            i += 1
+            continue
+        pos.append(a)
+        i += 1
+    url = pos[0] if pos else ""
+    return url, force_cli, force, full, company, title
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full]")
+        print(
+            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
+            "[--company NAME] [--title TITLE]",
+        )
         sys.exit(1)
 
-    force_cli = "--cli" in sys.argv
-    force = "--force" in sys.argv
-    full = "--full" in sys.argv
-    url = [a for a in sys.argv[1:] if not a.startswith("--")][0]
+    url, force_cli, force, full, co, ti = parse_apply_cli_argv(sys.argv)
+    if not url:
+        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] ...")
+        sys.exit(1)
+    _APPLY_META_COMPANY = co
+    _APPLY_META_TITLE = ti
     main(url, force_cli=force_cli, force=force, full=full)

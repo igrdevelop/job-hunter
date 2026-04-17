@@ -209,7 +209,7 @@ async def _run_hunt_impl(
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
     """Process all jobs sequentially with configurable delay between them."""
     total = len(jobs)
-    ok, failed, consecutive_fails = 0, 0, 0
+    ok, failed, manual_n, consecutive_fails = 0, 0, 0, 0
 
     for i, job in enumerate(jobs, 1):
         await send_text(
@@ -219,12 +219,21 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             f"🔗 {job.url}",
         )
 
-        success = await _run_apply_agent(job)
+        outcome = await _run_apply_agent(job)
 
-        if success:
+        if outcome == "ok":
             ok += 1
             consecutive_fails = 0
             await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
+        elif outcome == "manual":
+            manual_n += 1
+            consecutive_fails = 0
+            await send_text(
+                context,
+                f"📋 [{i}/{total}] <b>JobLeads — MANUAL</b>: {job.company} — {job.title}\n"
+                "См. сообщение выше: допиши <code>job_posting.txt</code> и снова Apply по той же ссылке.\n"
+                "<i>tracker.xlsx обновлён, дедуп по URL включён.</i>",
+            )
         else:
             failed += 1
             consecutive_fails += 1
@@ -248,6 +257,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
         context,
         f"🏁 <b>Auto-apply complete</b>\n"
         f"✅ Success: {ok}\n"
+        f"📋 MANUAL (JobLeads): {manual_n}\n"
         f"❌ Failed: {failed}\n"
         f"Total: {total}",
     )
@@ -267,32 +277,40 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     ok = 0
+    manual = 0
     for i, job in enumerate(capped, 1):
         await send_text(
             context,
             f"🔄 [{i}/{len(capped)}] Retry: {job.company} - {job.title}",
         )
 
-        success = await _run_apply_agent(job)
-        if success:
+        outcome = await _run_apply_agent(job)
+        if outcome == "ok":
             ok += 1
             await asyncio.to_thread(remove_failed, job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
+        elif outcome == "manual":
+            manual += 1
+            await send_text(
+                context,
+                f"📋 Retry → MANUAL: {job.company} — {job.title}\n"
+                "(JobLeads: см. сообщение apply_agent про job_posting.txt)",
+            )
         else:
             logger.info(f"[retry] Still failing: {job.company} - {job.title}")
 
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)
 
-    still_failed = len(capped) - ok
+    still_failed = len(capped) - ok - manual
     await send_text(
         context,
-        f"🔄 <b>Retry done</b>: ✅ {ok} fixed / ❌ {still_failed} still failing",
+        f"🔄 <b>Retry done</b>: ✅ {ok} fixed / 📋 {manual} manual / ❌ {still_failed} still failing",
     )
 
 
-async def _run_apply_agent(job: Job) -> bool:
-    """Run apply_agent.py via service wrapper and return True on success."""
+async def _run_apply_agent(job: Job):
+    """Run apply_agent.py via service wrapper. Returns ``ok`` | ``manual`` | ``fail``."""
     return await run_apply_agent_subprocess(
         job=job,
         timeout_sec=APPLY_AGENT_TIMEOUT_SEC,

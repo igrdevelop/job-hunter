@@ -5,6 +5,7 @@ Responsibilities:
   - get_known_urls()     → set of URLs already in tracker (for dedup)
   - add_skipped(job)     → append a row with status "SKIP"
   - add_applied(...)     → append a successful generated-docs row
+  - add_manual_jobleads_pending(...) → MANUAL row when JobLeads text cannot be fetched
 """
 
 import re
@@ -30,6 +31,10 @@ COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
+
+# ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
+# into Applications/.../job_posting.txt then re-runs apply on the same URL.
+MANUAL_PENDING_ATS = "MANUAL"
 
 
 def normalize_url(url: str) -> str:
@@ -331,7 +336,7 @@ def get_url_status_flags(url: str) -> dict[str, bool]:
         ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
         sent = str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else ""
 
-        if ats not in ("FAIL", "SKIP", "?", ""):
+        if ats.upper() not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
             has_success = True
         elif ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
             is_react_skip = True
@@ -442,12 +447,120 @@ def _parse_ats_score(raw: str) -> tuple[str, int | None]:
     return f"{score}%", score
 
 
+def remove_manual_pending_rows(url: str) -> int:
+    """Delete tracker rows for this URL where ATS is MANUAL (successful apply supersedes)."""
+    if not TRACKER_PATH.exists():
+        return 0
+    norm = normalize_url(url)
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    deleted = 0
+    for row_num in range(ws.max_row, 1, -1):
+        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
+        if not row_url or normalize_url(row_url) != norm:
+            continue
+        ats = str(ws.cell(row=row_num, column=ATS_COL_INDEX).value or "").strip().upper()
+        if ats == MANUAL_PENDING_ATS:
+            ws.delete_rows(row_num)
+            deleted += 1
+    if deleted:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+    return deleted
+
+
+def manual_jobleads_job_posting_path(url: str) -> Path | None:
+    """Return path to job_posting.txt for a MANUAL JobLeads row, or None."""
+    if not TRACKER_PATH.exists():
+        return None
+    norm = normalize_url(url)
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < URL_COL_INDEX:
+                continue
+            row_url = str(row[URL_COL_INDEX - 1] or "").strip()
+            if not row_url or normalize_url(row_url) != norm:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats != MANUAL_PENDING_ATS:
+                continue
+            if len(row) <= URL_COL_INDEX:
+                return None
+            folder_raw = str(row[URL_COL_INDEX] or "").strip()
+            if not folder_raw:
+                return None
+            p = Path(folder_raw)
+            if not p.is_absolute():
+                p = Path(TRACKER_PATH).parent / folder_raw
+            return p / "job_posting.txt"
+    finally:
+        wb.close()
+    return None
+
+
+def has_manual_pending(url: str) -> bool:
+    """True if tracker already has a MANUAL row for this URL."""
+    return any(
+        (r.get("ats") or "").strip().upper() == MANUAL_PENDING_ATS
+        for r in lookup_url(url)
+    )
+
+
+def add_manual_jobleads_pending(
+    *,
+    url: str,
+    company: str,
+    title: str,
+    folder_abs: Path,
+) -> bool:
+    """Append MANUAL row for JobLeads when description cannot be fetched.
+
+    Skips when URL already has a success row or any tracker row (dedup / FAIL / MANUAL).
+    """
+    if has_successful_entry(url) or lookup_url(url):
+        return False
+    wb, ws = _load_or_create()
+    today = date.today().strftime("%Y-%m-%d")
+    next_row = ws.max_row + 1
+    folder_str = str(folder_abs).replace("\\", "/")
+    values = [
+        today,
+        company.strip() or "Unknown",
+        title.strip() or "Unknown",
+        "",
+        MANUAL_PENDING_ATS,
+        url,
+        folder_str,
+        "",
+        "",
+        "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
+    ]
+    row_font = Font(name="Calibri", size=11)
+    manual_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
+
+    for col, val in enumerate(values, 1):
+        cell = ws.cell(row=next_row, column=col, value=val)
+        cell.font = row_font
+        cell.fill = manual_fill
+        if col == URL_COL_INDEX and val:
+            cell.hyperlink = str(val)
+            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+
+    _save_with_retry(wb)
+    return True
+
+
 def add_applied(content: dict, force: bool = False) -> bool:
     """Append a successful apply row. Returns True when a row was written."""
     company = _company_from_content(content)
     job_title = str(content.get("job_title", "") or "")
     stack = str(content.get("stack", "") or "")
     apply_url = str(content.get("apply_url", "") or "")
+    if apply_url:
+        remove_manual_pending_rows(apply_url)
     folder = str(content.get("output_folder", "") or "")
     to_learn = str(content.get("to_learn", "") or "")
     ats_raw = str(content.get("ats_score", "") or "")

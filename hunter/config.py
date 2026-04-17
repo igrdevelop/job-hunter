@@ -128,11 +128,9 @@ SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("tr
 INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── JobLeads source config ────────────────────────────────────────────────────
-# NOTE: jobleads.com detail pages are hard-blocked by Cloudflare Turnstile.
-# Listing scrape works but job descriptions cannot be fetched, causing 100% FAIL
-# rate in the apply pipeline. Disabled by default until the site relaxes protection.
-# To re-enable: set JOBLEADS_ENABLED=true in .env
-JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "false").lower() in ("true", "1", "yes")
+# Detail pages are often Cloudflare-blocked; apply_agent then writes MANUAL tracker
+# rows + stub job_posting.txt — paste description and re-run apply on the same URL.
+JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
