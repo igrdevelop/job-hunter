@@ -15,3 +15,7 @@ anthropic
 # Optional: better HTML extraction for generic job pages
 beautifulsoup4
 pytest
+
+# Optional: headless browser for JS-heavy / SPA job boards (inhire.io etc.)
+# playwright  # install separately: pip install playwright && playwright install chromium
+# playwright-stealth  # reduces bot-detection fingerprint for headless Playwright
