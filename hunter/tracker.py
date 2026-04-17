@@ -63,11 +63,54 @@ def normalize_url(url: str) -> str:
     return urlunparse((p.scheme, host, path, "", query, ""))
 
 
+def _strip_diacritics(s: str) -> str:
+    """Transliterate Polish/accented chars to ASCII equivalents.
+
+    Note: ł/Ł (U+0142/U+0141) are NOT NFKD-decomposable, so they must be
+    replaced explicitly before the standard normalization step.
+    """
+    import unicodedata
+    s = s.replace('\u0142', 'l').replace('\u0141', 'L')   # ł → l, Ł → L
+    return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+
+
+def _strip_legal_suffixes(s: str) -> str:
+    """Remove Polish/international legal-form suffixes in all common representations.
+
+    Must be called AFTER lowercasing and diacritic-stripping (so 'ł' is already 'l').
+
+    Handles both properly formatted ("Sp. z o.o.", "S.A.") and squished/CamelCase
+    variants that appear in LLM-generated folder names:
+      MindboxSpZOo  → mindbox
+      UpvantaSpólkaZOgraniczonąOdpowiedzialnoś → upvanta  (after diacritics → spolka...)
+    """
+    # "sp. z o.o." and variants (spaces/dots optional) — no \b needed, dots are specific enough
+    s = re.sub(r'sp\.?\s*z\.?\s*o\.?\s*o\.?', '', s)
+    # "S.A." — trailing \b doesn't work after a dot, use (?![a-z]) lookahead
+    s = re.sub(r's\.a\.(?![a-z])', '', s)
+    # Other international forms — use \b where safe (all-alpha, no trailing dots)
+    s = re.sub(r'\b(ltd|gmbh|inc|llc)\b\.?', '', s)
+    # "Spółka..." / "Spolka..." — remove from this word to end of string
+    # After diacritic-strip: ł→l, ó→o, so "Spółka" → "Spolka"
+    s = re.sub(r'spol?ka.*', '', s)
+    # Squished forms: SpZOo, SpZoo, spzoo (sp + z + oo)
+    s = re.sub(r'spzo+', '', s)
+    return s
+
+
 def normalize_company(company: str) -> str:
-    """Normalized company name for dedup."""
+    """Normalized company name for dedup.
+
+    Produces the same key for all of these:
+      - "Mindbox Sp. z o.o."
+      - "MindboxSpZOo"   (LLM folder-safe form)
+      - "Upvanta Spółka z o.o."
+      - "UpvantaSpółkaZOgraniczonąOdpowiedzialnoś"
+    """
     s = company.lower()
     s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
-    s = re.sub(r'\b(sp\.?\s*z\.?\s*o\.?\s*o\.?|s\.a\.|ltd\.?|gmbh|inc\.?)\b', '', s)
+    s = _strip_diacritics(s)
+    s = _strip_legal_suffixes(s)
     s = re.sub(r'[^a-z0-9]', '', s)
     return s
 
@@ -77,7 +120,8 @@ def dedup_key(company: str, title: str) -> str:
     def _norm(s: str) -> str:
         s = s.lower()
         s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
-        s = re.sub(r'\b(sp\.?\s*z\.?\s*o\.?\s*o\.?|s\.a\.|ltd\.?|gmbh|inc\.?)\b', '', s)
+        s = _strip_diacritics(s)
+        s = _strip_legal_suffixes(s)
         s = re.sub(r'[^a-z0-9]', '', s)
         return s
     return _norm(company) + "|" + _norm(title)
