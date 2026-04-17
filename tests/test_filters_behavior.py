@@ -53,6 +53,57 @@ def test_apply_filters_rejects_disallowed_location() -> None:
     assert filtered == []
 
 
+# ── Hybrid city logic ─────────────────────────────────────────────────────────
+
+def test_apply_filters_accepts_wroclaw_hybrid() -> None:
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Wrocław (Hybrid)")]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 1
+
+
+def test_apply_filters_accepts_wroclaw_hybrid_ascii() -> None:
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Wroclaw (Hybrid)")]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 1
+
+
+def test_apply_filters_rejects_krakow_hybrid() -> None:
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Kraków (Hybrid)")]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_rejects_warszawa_hybrid() -> None:
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Warszawa (Hybrid)")]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_accepts_remote_any_city() -> None:
+    """Fully remote jobs are always accepted regardless of listed city."""
+    jobs = [
+        _job(title="Senior Frontend Developer (Angular)", location="Remote"),
+        _job(title="Senior Angular Developer", location="Kraków (Remote)"),
+        _job(title="Frontend Developer Angular", location="zdalnie"),
+    ]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 3
+
+
+def test_apply_filters_rejects_pracuj_hybrydowa_krakow() -> None:
+    """Regression: Pracuj-style 'Kraków - praca hybrydowa' must be rejected."""
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Kraków - praca hybrydowa")]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_accepts_pracuj_hybrydowa_wroclaw() -> None:
+    """Pracuj-style 'Wrocław - praca hybrydowa' must be accepted."""
+    jobs = [_job(title="Senior Frontend Developer (Angular)", location="Wrocław - praca hybrydowa")]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 1
+
+
 def test_apply_filters_rejects_qa_automation_roles() -> None:
     jobs = [
         _job(title="QA Automation Engineer (JavaScript)", location="Remote"),

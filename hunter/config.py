@@ -72,13 +72,13 @@ FILTER = {
     ],
 
     "locations": [
-        "wrocław",
-        "wroclaw",
+        # Always accept: fully remote regardless of city
         "remote",
         "zdalnie",
-        "hybrid",
-        "hybrydowo",
-        "hybrydowa",
+        "zdalna",
+        # Accept Wrocław (on-site OR hybrid — hybrid elsewhere is rejected)
+        "wrocław",
+        "wroclaw",
     ],
 
     # Title matching ANY regex → skip
