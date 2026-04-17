@@ -1,0 +1,8 @@
+{
+  "name": "Senior Frontend Developer",
+  "company": {"name": "Inhire Corp", "id": 42},
+  "offerUrl": "https://app.inhire.io/oferty-pracy/senior-frontend-developer,oferta,999",
+  "location": {"name": "Wrocław", "city": "Wrocław"},
+  "hybrid": true,
+  "salary": {"from": 20000, "to": 28000, "currency": "PLN"}
+}

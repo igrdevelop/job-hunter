@@ -96,6 +96,10 @@ FILTER = {
         r"\bfull stack\b",
         r"\bbackend\b",
         r"\bback-end\b",
+        r"\bvue\b",
+        r"\bnuxt\b",
+        r"\bmagento\b",
+        r"\bruby\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
@@ -122,7 +126,7 @@ SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("tr
 # ── Inhire.io source config ───────────────────────────────────────────────────
 # Requires Playwright: pip install playwright && python -m playwright install chromium
 # Disabled by default until Playwright is installed on the host machine.
-INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "false").lower() in ("true", "1", "yes")
+INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [

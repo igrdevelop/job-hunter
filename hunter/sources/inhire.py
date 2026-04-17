@@ -2,10 +2,20 @@
 inhire.io source — Polish IT job board.
 
 Strategy:
-  app.inhire.io is a Vue.js SPA with no public JSON API. Job data is loaded
-  from an internal backend (port 9000, not accessible from the public internet).
-  We use Playwright to render the page in a headless browser and read the Vuex
-  store directly after the listing has loaded.
+  app.inhire.io is a SPA (currently React-based, no public API).
+  We use Playwright to render the page headlessly and scrape job cards
+  directly from the DOM using stable CSS class selectors.
+
+  Job card DOM structure (as of 2025-04):
+    div.inh-offer
+      a.inh-offer__bottom[href="/praca/{slug}-job-arbeit-{id}"]
+        h3.inh-offer-data__name          → title
+        h4.inh-offer-data__company-name  → company
+        .inh-offer-data__salary .inh-text--bold  → salary
+        .inh-offer-data__location .inh-text      → location
+
+  Vuex extraction is attempted first for forward-compatibility, but falls back
+  to DOM scraping (primary strategy since the Vue instance was removed).
 
   Requires:
     pip install playwright
@@ -40,9 +50,10 @@ LISTING_URLS = [
 ]
 
 # How long to wait for job cards to appear (ms)
-PAGE_LOAD_TIMEOUT = 30_000
-# Selector that indicates the listing has rendered
-CARD_SELECTOR = "a[href*='oferty-pracy'][href*=',oferta,'], a[href*='job-offers'][href*=',oferta,']"
+# networkidle takes longer than domcontentloaded — use a generous timeout
+PAGE_LOAD_TIMEOUT = 60_000
+# Selector that indicates the listing has rendered (updated 2025-04: new DOM structure)
+CARD_SELECTOR = "a.inh-offer__bottom"
 
 
 class InhireSource(BaseSource):
@@ -106,7 +117,7 @@ class InhireSource(BaseSource):
     async def _fetch_page(self, context, url: str) -> list[dict]:
         page = await context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
+            await page.goto(url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT)
 
             # Strategy 1: wait for Vue Vuex store to populate offer list
             raw = await self._extract_vuex(page)
@@ -132,8 +143,45 @@ class InhireSource(BaseSource):
 
     @staticmethod
     async def _extract_vuex(page) -> list[dict]:
-        """Try to read allOffersList directly from the Vue 3 / Vuex store."""
+        """Try to read the offers list directly from the Vue 3 / Vuex store.
+
+        Tries several known state/getter paths in priority order so the
+        scraper survives minor Vuex refactors on the inhire.io side.
+        """
         return await page.evaluate("""() => {
+            function tryPaths(store) {
+                // state-based paths (most common)
+                const statePaths = [
+                    () => store.state.offers.allOffersList,
+                    () => store.state.offers.list,
+                    () => store.state.offers.offers,
+                    () => store.state.offersList,
+                    () => store.state.offers.items,
+                ];
+                for (const fn of statePaths) {
+                    try {
+                        const val = fn();
+                        if (Array.isArray(val) && val.length > 0) return val;
+                    } catch(e) {}
+                }
+                // getter-based paths (Vuex modules with getters)
+                const getterPaths = [
+                    'offers/allOffersList',
+                    'offers/list',
+                    'offers/offers',
+                    'allOffersList',
+                ];
+                if (store.getters) {
+                    for (const key of getterPaths) {
+                        try {
+                            const val = store.getters[key];
+                            if (Array.isArray(val) && val.length > 0) return val;
+                        } catch(e) {}
+                    }
+                }
+                return [];
+            }
+
             try {
                 const appEl = document.getElementById('app');
                 if (!appEl) return [];
@@ -142,18 +190,17 @@ class InhireSource(BaseSource):
                 const vueApp = appEl.__vue_app__;
                 if (vueApp) {
                     const store = vueApp.config.globalProperties.$store;
-                    if (store && store.state && store.state.offers) {
-                        return store.state.offers.allOffersList || [];
+                    if (store) {
+                        const result = tryPaths(store);
+                        if (result.length > 0) return result;
                     }
                 }
 
                 // Vue 2: __vue__
                 const vue2 = appEl.__vue__;
-                if (vue2) {
-                    const store = vue2.$store;
-                    if (store && store.state && store.state.offers) {
-                        return store.state.offers.allOffersList || [];
-                    }
+                if (vue2 && vue2.$store) {
+                    const result = tryPaths(vue2.$store);
+                    if (result.length > 0) return result;
                 }
             } catch(e) {}
             return [];
@@ -161,22 +208,35 @@ class InhireSource(BaseSource):
 
     @staticmethod
     async def _extract_dom(page) -> list[dict]:
-        """Fallback: extract job card data from rendered DOM links."""
+        """Extract job card data from rendered DOM using stable CSS selectors."""
         return await page.evaluate("""() => {
-            const links = Array.from(document.querySelectorAll('a[href]'));
-            const offerLinks = links.filter(a =>
-                a.href.includes(',oferta,') &&
-                (a.href.includes('oferty-pracy') || a.href.includes('job-offers'))
-            );
+            const cards = Array.from(document.querySelectorAll('a.inh-offer__bottom'));
             const seen = new Set();
             const results = [];
-            for (const a of offerLinks) {
-                const href = a.href.split('?')[0];
-                if (seen.has(href)) continue;
+            for (const a of cards) {
+                const href = (a.getAttribute('href') || '').split('?')[0];
+                if (!href || !href.includes('/praca/') || seen.has(href)) continue;
                 seen.add(href);
-                const text = a.innerText.trim();
-                if (!text || text.length < 5) continue;
-                results.push({ url: href, _text: text, title: '', company: '' });
+
+                const titleEl   = a.querySelector('h3.inh-offer-data__name');
+                const companyEl = a.querySelector('h4.inh-offer-data__company-name');
+                const salaryEl  = a.querySelector('.inh-offer-data__salary .inh-text--bold');
+                const locationEl = a.querySelector('.inh-offer-data__location .inh-text');
+
+                const title   = titleEl   ? titleEl.innerText.trim()   : '';
+                const company = companyEl ? companyEl.innerText.trim() : '';
+                const salary  = salaryEl  ? salaryEl.innerText.trim()  : '';
+                const location = locationEl ? locationEl.innerText.trim() : '';
+
+                if (!title) continue;
+                results.push({
+                    url: href,
+                    title: title,
+                    company: company,
+                    salary: salary,
+                    location: location,
+                    _text: a.innerText.trim(),
+                });
             }
             return results;
         }""")
