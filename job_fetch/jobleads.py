@@ -4,10 +4,12 @@ URL format:
   https://www.jobleads.com/pl/job/{title}--{city}--{hash}
 
 Strategy:
-  1. cloudscraper GET — page is SSR, content available without JS.
+  1. cloudscraper GET — works when Cloudflare challenge is soft.
+     Detail pages often return 403, so we detect that and skip ahead.
   2. Try JSON-LD (application/ld+json, @type: JobPosting) — structured data.
   3. Try BeautifulSoup DOM — extract visible sections from detail page.
-  4. Last resort: html_fallback.fetch_html().
+  4. Playwright headless browser — bypasses hard 403 blocks on detail pages.
+  5. Last resort: html_fallback.fetch_html().
 """
 
 import json
@@ -35,26 +37,36 @@ HEADERS = {
 
 def fetch_jobleads(url: str) -> str:
     """Fetch jobleads.com offer and return plain text for LLM consumption."""
+    html = ""
     try:
         resp = _scraper.get(url, headers=HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        html = resp.text
+        if resp.status_code == 403:
+            logger.info(f"[jobleads] 403 on detail page, trying Playwright: {url}")
+        else:
+            resp.raise_for_status()
+            html = resp.text
     except Exception as e:
-        logger.warning(f"[jobleads] HTTP fetch failed ({e}), using html_fallback")
-        from job_fetch.html_fallback import fetch_html
-        return fetch_html(url)
+        logger.warning(f"[jobleads] HTTP fetch failed ({e}), trying Playwright")
 
-    # 1. Structured JSON-LD
-    text = _try_json_ld(html)
+    if html:
+        # 1. Structured JSON-LD
+        text = _try_json_ld(html)
+        if text and len(text) > 150:
+            return text
+
+        # 2. BeautifulSoup DOM extraction
+        text = _try_bs4(html)
+        if text and len(text) > 150:
+            return text
+
+        logger.info("[jobleads] cloudscraper returned thin content, trying Playwright")
+
+    # 3. Playwright headless — handles 403 and JS-rendered content
+    text = _try_playwright(url)
     if text and len(text) > 150:
         return text
 
-    # 2. BeautifulSoup DOM extraction
-    text = _try_bs4(html)
-    if text and len(text) > 150:
-        return text
-
-    logger.warning("[jobleads] Both strategies returned too little text, using html_fallback")
+    logger.warning("[jobleads] all strategies returned too little text, using html_fallback")
     from job_fetch.html_fallback import fetch_html
     return fetch_html(url)
 
@@ -172,6 +184,50 @@ def _try_bs4(html: str) -> str:
 
     result = "\n".join(parts)
     return result if len(result) > 100 else ""
+
+
+# ── Playwright fallback ────────────────────────────────────────────────────────
+
+def _try_playwright(url: str) -> str:
+    """Use headless Chromium to bypass 403 and render the detail page."""
+    try:
+        import asyncio
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.debug("[jobleads] playwright not installed, skipping headless fetch")
+        return ""
+
+    async def _run() -> str:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            page = await browser.new_page(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                )
+            )
+            try:
+                await page.goto(url, wait_until="networkidle", timeout=40_000)
+                html = await page.content()
+            finally:
+                await browser.close()
+        return html
+
+    try:
+        html = asyncio.run(_run())
+    except Exception as e:
+        logger.warning(f"[jobleads] Playwright fetch failed: {e}")
+        return ""
+
+    if not html:
+        return ""
+
+    # Re-run the same extraction pipeline on Playwright-rendered HTML
+    text = _try_json_ld(html)
+    if text and len(text) > 150:
+        return text
+    return _try_bs4(html)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
