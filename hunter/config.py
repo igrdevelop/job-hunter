@@ -30,6 +30,7 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
+TO_SEND_PATH = PROJECT_DIR / "to_send.xlsx"
 APPLICATIONS_DIR = PROJECT_DIR / "Applications"
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"

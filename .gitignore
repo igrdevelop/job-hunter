@@ -29,6 +29,8 @@ Applications/
 # Tracker (per-user data)
 tracker.xlsx
 tracker.backup.*.xlsx
+to_send.xlsx
+to_send.backup.*.xlsx
 
 # Temp files
 _*.py

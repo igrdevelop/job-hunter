@@ -139,11 +139,37 @@ All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, 
 | Sent | Date sent, or blank/dash |
 | Re-application | Flag |
 | To Learn | Skills gap noted |
+| ID | Short UUID (8-char hex) — internal key for `to_send.xlsx` sync |
 
 **Dedup logic:**
 - URL dedup: `normalize_url()` strips tracking params (`utm_*`, `sendid`, `trk`, etc.)
 - Company+title dedup: prevents same role from two sources
 - React-only jobs: written with `Sent = "—"` to block future reprocessing
+
+---
+
+## to_send.xlsx — Sending Workflow
+
+`to_send.xlsx` is a **derived, human-editable** file that shows only the rows you have not yet sent. It is rebuilt automatically and is safe to keep open while the bot runs.
+
+**How it works:**
+1. Every `add_applied()` / `add_failed()` / `add_manual_jobleads_pending()` in `tracker.xlsx` gets a short `ID`.
+2. After each successful apply, `tracker_service.record_successful_apply()` calls `to_send.sync_and_rebuild()` automatically.
+3. You open `to_send.xlsx`, find the rows you have sent, and fill in the `Sent` column (any value: a date, `+`, `ok` — doesn't matter).
+4. Run `/sync_sent` in Telegram (or wait for the next apply). The bot:
+   - reads the `Sent` values from `to_send.xlsx` by `ID`,
+   - writes them back to `tracker.xlsx`,
+   - rebuilds `to_send.xlsx` — sent rows disappear, only pending rows remain.
+5. If `to_send.xlsx` is open/locked when the bot tries to rebuild it, it logs a warning and continues without crashing. Close the file and run `/sync_sent` again.
+
+**Key files:**
+- `hunter/to_send.py` — `read_sent_marks()`, `rebuild()`, `sync_and_rebuild()`
+- `hunter/config.py` — `TO_SEND_PATH`
+- `hunter/tracker.py` — `iter_rows_for_to_send()`, `apply_sent_updates()`
+
+**Rows in to_send.xlsx:**
+- Included: successful applies (ATS%), FAIL rows, MANUAL rows — anything actionable.
+- Excluded: SKIP rows (geo/stack filtered, nothing to send), rows already marked Sent.
 
 ---
 
@@ -184,3 +210,4 @@ See `.claude/commands/add-source.md` for the full step-by-step guide.
 - Candidate profile is the single source of truth: `prompts/candidate_profile.md` — update it when experience changes
 - LibreOffice path on Windows: typically `C:/Program Files/LibreOffice/program/soffice.exe` — configured in `generate_docs.py`
 - On Windows, use PowerShell; `&&` is not valid — use `;` or separate commands
+- When changing `tracker.xlsx` schema (columns, constants), adding new runtime files (like `to_send.xlsx`), or changing user-facing bot behaviour — update the relevant section of `CLAUDE.md` in the same change

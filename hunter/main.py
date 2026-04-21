@@ -95,6 +95,19 @@ async def _run_hunt_impl(
       4. AUTO_APPLY=true  → generate docs (with delay between jobs)
          AUTO_APPLY=false → send Telegram cards with Apply/Skip buttons
     """
+    # Sync Sent marks only on a full manual hunt (not per-source scheduled runs)
+    if source_names is None:
+        try:
+            from hunter import to_send as _to_send
+            sync_result = await asyncio.to_thread(_to_send.sync_and_rebuild)
+            if sync_result["synced"]:
+                await send_text(
+                    context,
+                    f"📬 Synced <b>{sync_result['synced']}</b> Sent mark(s) from to_send.xlsx → tracker.xlsx",
+                )
+        except Exception as _e:
+            logger.warning("[Hunt] to_send sync failed: %s", _e)
+
     ts = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"[Hunt] Starting at {ts} sources={source_names or 'all'}")
     mode = "CLI" if (APPLY_USE_CLI or not LLM_API_KEY) else f"API ({LLM_MODEL})"

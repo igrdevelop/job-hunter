@@ -10,6 +10,7 @@ Responsibilities:
 
 import re
 import time
+import uuid
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -23,13 +24,15 @@ from hunter.models import Job
 
 TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
-    "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn",
+    "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
 ]
-# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, ...
+# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID
 URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedup)
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
+SENT_COL_INDEX = 8      # "Sent"
+ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used to sync to_send.xlsx → tracker
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -150,10 +153,37 @@ def _save_with_retry(wb: openpyxl.Workbook, retries: int = 5, delay: float = 3.0
             time.sleep(delay)
 
 
+def _new_row_id() -> str:
+    """Generate a short unique ID for a tracker row (8-char hex)."""
+    return uuid.uuid4().hex[:8]
+
+
+def _ensure_ids(ws: openpyxl.worksheet.worksheet.Worksheet) -> bool:
+    """Assign IDs to any existing rows that lack one. Returns True if any were added."""
+    changed = False
+    for row_num in range(2, ws.max_row + 1):
+        cell = ws.cell(row=row_num, column=ID_COL_INDEX)
+        if not cell.value:
+            cell.value = _new_row_id()
+            changed = True
+    return changed
+
+
 def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.Worksheet]:
     if TRACKER_PATH.exists():
         wb = openpyxl.load_workbook(TRACKER_PATH)
         ws = wb.active
+        # Ensure header row has ID column (migration for existing files)
+        if ws.max_column < ID_COL_INDEX:
+            header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+            header_fill = PatternFill("solid", fgColor="2B579A")
+            cell = ws.cell(row=1, column=ID_COL_INDEX, value="ID")
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[get_column_letter(ID_COL_INDEX)].width = 12
+        if _ensure_ids(ws):
+            _save_with_retry(wb)
         return wb, ws
 
     # Create fresh tracker with header row
@@ -163,7 +193,7 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
 
     header_fill = PatternFill("solid", fgColor="2B579A")
     header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35]
+    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12]
 
     for col, (header, width) in enumerate(zip(TRACKER_HEADERS, widths), 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -213,9 +243,6 @@ def get_known_company_titles() -> set[str]:
                 keys.add(dedup_key(company, title))
     wb.close()
     return keys
-
-
-SENT_COL_INDEX = 8  # "Sent" column (1-based)
 
 
 def get_sent_companies() -> set[str]:
@@ -509,6 +536,33 @@ def has_manual_pending(url: str) -> bool:
     )
 
 
+def latest_manual_pending() -> dict[str, str] | None:
+    """Return latest MANUAL row info (url, folder) or None.
+
+    Used by Telegram paste flow when the user pastes a posting without URL.
+    """
+    if not TRACKER_PATH.exists():
+        return None
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    latest: dict[str, str] | None = None
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < ATS_COL_INDEX:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats != MANUAL_PENDING_ATS:
+                continue
+            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
+            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
+            if not url:
+                continue
+            latest = {"url": url, "folder": folder}
+    finally:
+        wb.close()
+    return latest
+
+
 def add_manual_jobleads_pending(
     *,
     url: str,
@@ -537,6 +591,7 @@ def add_manual_jobleads_pending(
         "",
         "",
         "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
+        _new_row_id(),
     ]
     row_font = Font(name="Calibri", size=11)
     manual_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
@@ -593,6 +648,7 @@ def add_applied(content: dict, force: bool = False) -> bool:
         "",
         "+" if is_reapply else "",
         to_learn,
+        _new_row_id(),
     ]
 
     for col, val in enumerate(values, 1):
@@ -645,6 +701,7 @@ def add_skipped(job: Job) -> None:
         "",              # Sent
         "",              # Re-application
         "",              # To Learn
+        _new_row_id(),   # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -691,6 +748,7 @@ def add_react_skipped(content: dict, url: str) -> None:
         "—",                            # Sent  ← marks React-skip
         "",                             # Re-application
         "",                             # To Learn
+        _new_row_id(),                  # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -727,6 +785,7 @@ def add_failed(job: Job) -> None:
         "",              # Sent
         "",              # Re-application
         "",              # To Learn
+        _new_row_id(),   # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -741,3 +800,82 @@ def add_failed(job: Job) -> None:
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
 
     _save_with_retry(wb)
+
+
+# -- to_send.xlsx helpers -----------------------------------------------------
+
+def iter_rows_for_to_send() -> list[dict]:
+    """Return rows suitable for to_send.xlsx: all rows without a Sent value
+    (excluding SKIP rows, which are not actionable to send).
+
+    Each dict has keys: id, date, company, title, stack, ats, url, folder,
+    sent, reapp, to_learn, row_num.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results = []
+    try:
+        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+            if not row:
+                continue
+            row = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
+
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip()
+            sent = str(row[SENT_COL_INDEX - 1] or "").strip()
+            row_id = str(row[ID_COL_INDEX - 1] or "").strip()
+
+            if ats == "SKIP":
+                continue
+            if sent:
+                continue
+            if not row_id:
+                continue
+
+            results.append({
+                "id": row_id,
+                "row_num": row_num,
+                "date": str(row[0] or "").strip(),
+                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
+                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
+                "stack": str(row[3] or "").strip(),
+                "ats": ats,
+                "url": str(row[URL_COL_INDEX - 1] or "").strip(),
+                "folder": str(row[6] or "").strip(),
+                "sent": sent,
+                "reapp": str(row[8] or "").strip(),
+                "to_learn": str(row[9] or "").strip(),
+            })
+    finally:
+        wb.close()
+    return results
+
+
+def apply_sent_updates(updates: dict[str, str]) -> int:
+    """Write Sent values from to_send.xlsx back into tracker.xlsx.
+
+    updates: {row_id: sent_value} — only non-empty sent_value entries.
+    Returns number of rows updated.
+    """
+    if not updates or not TRACKER_PATH.exists():
+        return 0
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    updated = 0
+
+    for row_num in range(2, ws.max_row + 1):
+        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+        if row_id and row_id in updates:
+            sent_val = updates[row_id]
+            if sent_val:
+                ws.cell(row=row_num, column=SENT_COL_INDEX).value = sent_val
+                updated += 1
+
+    if updated:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+    return updated

@@ -7,8 +7,11 @@ If the bot restarts, old buttons become "expired" — that's acceptable.
 
 import asyncio
 import logging
+import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -31,7 +34,14 @@ from hunter.config import (
     SCHEDULE_SOURCE_OFFSET_MIN,
 )
 from hunter.models import Job
-from hunter.tracker import add_skipped, lookup_url, lookup_company, normalize_url
+from hunter.tracker import (
+    add_skipped,
+    latest_manual_pending,
+    lookup_url,
+    lookup_company,
+    manual_jobleads_job_posting_path,
+    normalize_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +92,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/hunt - run search now\n"
         "/schedule - show source schedule\n"
         "/status - show schedule + bot status\n"
-        "/force &lt;url&gt; - process URL even if already in tracker\n\n"
+        "/force &lt;url&gt; - process URL even if already in tracker\n"
+        "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -143,6 +154,28 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         _build_schedule_text(),
         parse_mode=ParseMode.HTML,
     )
+
+
+async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sync Sent marks from to_send.xlsx back to tracker.xlsx, then rebuild to_send.xlsx."""
+    await update.message.reply_text("⏳ Syncing to_send.xlsx → tracker.xlsx…")
+    try:
+        from hunter import to_send
+        result = to_send.sync_and_rebuild()
+        synced = result["synced"]
+        rebuilt = result["rebuilt"]
+        if synced:
+            msg = f"✅ Synced <b>{synced}</b> Sent mark(s) to tracker.xlsx."
+        else:
+            msg = "ℹ️ No new Sent marks found in to_send.xlsx."
+        if rebuilt:
+            msg += "\n📄 to_send.xlsx rebuilt (only unsent rows remain)."
+        else:
+            msg += "\n⚠️ to_send.xlsx could not be rebuilt — close the file and retry."
+    except Exception as exc:
+        logger.exception("[sync_sent] Failed: %s", exc)
+        msg = f"❌ Sync failed: {exc}"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 def _build_schedule_text() -> str:
@@ -240,11 +273,24 @@ async def _tg_notify(text: str) -> None:
         logger.error(f"[tg_notify] failed: {e}")
 
 
-async def _run_apply_agent(url: str, force: bool = False) -> None:
-    """Run apply_agent.py in the background, don't block the event loop."""
-    cmd = [sys.executable, str(APPLY_AGENT_PATH), url]
+async def _run_apply_agent(
+    url: str,
+    force: bool = False,
+    paste_file: Optional[str] = None,
+) -> None:
+    """Run apply_agent.py in the background, don't block the event loop.
+
+    If ``paste_file`` is set, URL may be empty — apply_agent will use the pasted
+    text instead of fetching.
+    """
+    label = url or "(pasted text)"
+    cmd = [sys.executable, str(APPLY_AGENT_PATH)]
+    if url:
+        cmd.append(url)
     if force:
         cmd.append("--force")
+    if paste_file:
+        cmd.extend(["--paste-file", paste_file])
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -258,36 +304,80 @@ async def _run_apply_agent(url: str, force: bool = False) -> None:
             )
         except asyncio.TimeoutError:
             proc.kill()
-            logger.error(f"[apply_agent] hard timeout ({_APPLY_AGENT_TIMEOUT}s) for {url}")
+            logger.error(f"[apply_agent] hard timeout ({_APPLY_AGENT_TIMEOUT}s) for {label}")
             await _tg_notify(
                 f"⏱ <b>apply_agent завис — принудительно остановлен</b>\n"
-                f"Таймаут {_APPLY_AGENT_TIMEOUT // 60} мин\n🔗 {url}"
+                f"Таймаут {_APPLY_AGENT_TIMEOUT // 60} мин\n🔗 {label}"
             )
             return
 
         if proc.returncode != 0:
-            logger.error(f"[apply_agent] failed (rc={proc.returncode}):\n{stderr.decode(errors='replace')}")
+            logger.error(
+                f"[apply_agent] failed (rc={proc.returncode}) for {label}:\n"
+                f"{stderr.decode(errors='replace')}"
+            )
         else:
-            logger.info(f"[apply_agent] done for {url}")
+            logger.info(f"[apply_agent] done for {label}")
 
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
-        await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {url}")
+        await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
+    finally:
+        if paste_file:
+            try:
+                Path(paste_file).unlink(missing_ok=True)
+            except Exception as cleanup_err:
+                logger.warning(f"[apply_agent] could not delete paste file {paste_file}: {cleanup_err}")
 
 
 # ── URL message handler ───────────────────────────────────────────────────────
 
-async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle plain URL messages.
+# Any message longer than this counts as "pasted job posting" if it isn't a single URL.
+# Typical job postings are 1-4 KB; short greetings / single URLs are well under 300.
+_PASTE_TEXT_MIN_LEN = 300
 
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _looks_like_paste(text: str) -> bool:
+    """True when user likely pasted a job posting (with or without URL)."""
+    stripped = text.strip()
+    if len(stripped) < _PASTE_TEXT_MIN_LEN:
+        return False
+    # Text with a URL + lots of extra content → paste with URL hint
+    urls = _URL_RE.findall(stripped)
+    if urls:
+        non_url_len = len(_URL_RE.sub("", stripped).strip())
+        return non_url_len >= _PASTE_TEXT_MIN_LEN
+    # No URL at all but long message → pure paste
+    return True
+
+
+def _extract_url(text: str) -> str:
+    """Return the first http(s) URL found in text, or ''."""
+    m = _URL_RE.search(text)
+    return m.group(0).rstrip(").,;") if m else ""
+
+
+async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle plain text messages.
+
+    - Long pasted job text (>= _PASTE_TEXT_MIN_LEN, with or without URL) → paste flow
     - Single job URL (JustJoin, NoFluffJobs, LinkedIn /jobs/view/...) → apply_agent
     - LinkedIn search / alert URL (/jobs/search?...) → extract job ids → batch apply
     """
     text = (update.message.text or "").strip()
 
+    # Paste-mode branch: user forwarded/pasted the posting text itself.
+    if _looks_like_paste(text):
+        await _handle_paste(update, text)
+        return
+
     if not text.startswith("http"):
         await update.message.reply_text(
-            "ℹ️ Отправь ссылку на вакансию (начинается с http) и я сгенерирую документы.\n\n"
+            "ℹ️ Отправь ссылку на вакансию (начинается с http) и я сгенерирую документы.\n"
+            "Либо вставь сюда полный текст вакансии (можно с ссылкой или без) — "
+            "я обработаю его напрямую.\n\n"
             "Также можно отправить ссылку из LinkedIn алерта — вытащу все вакансии из неё.",
             parse_mode=ParseMode.HTML,
         )
@@ -351,6 +441,111 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(_run_apply_agent(text))
 
 
+async def _handle_paste(update: Update, text: str) -> None:
+    """Save the pasted job text to a temp file and run apply_agent in paste mode.
+
+    The URL (if found inside the text) is passed to apply_agent so it ends up in
+    the tracker. If no URL — apply_agent runs without one and writes an empty URL cell.
+    """
+    from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
+
+    url = _extract_url(text)
+    url_inferred = False
+
+    # If user pasted text without URL, try to attach it to the latest MANUAL row.
+    if not url:
+        latest = await asyncio.to_thread(latest_manual_pending)
+        if latest and latest.get("url"):
+            url = latest["url"]
+            url_inferred = True
+
+    # If URL is already tracked, only block when it is NOT a MANUAL-pending row.
+    manual_pending = False
+    entries = []
+    if url:
+        entries = await asyncio.to_thread(lookup_url, url)
+        manual_pending = any(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
+        if entries and not manual_pending:
+            detail = "\n".join(
+                f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}\n"
+                f"    ATS: {e['ats']}"
+                + (f" | Sent: {e['sent']}" if e['sent'] else "")
+                for e in entries
+            )
+            await update.message.reply_text(
+                f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
+                f"{detail}\n\n"
+                f"Отправь /force {url}\nесли хочешь обработать заново.",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+
+    # If this is a MANUAL-pending JobLeads row, write into its job_posting.txt and rerun apply.
+    if manual_pending and url and "jobleads.com" in url.lower():
+        jp = await asyncio.to_thread(manual_jobleads_job_posting_path, url)
+        if jp and jp.is_file():
+            try:
+                existing = jp.read_text(encoding="utf-8", errors="replace")
+                if JOBLEADS_PASTE_MARKER in existing:
+                    prefix, _ = existing.split(JOBLEADS_PASTE_MARKER, 1)
+                    jp.write_text(prefix + JOBLEADS_PASTE_MARKER + "\n\n" + text.strip() + "\n", encoding="utf-8")
+                else:
+                    # Fallback: overwrite file if marker is missing for some reason.
+                    jp.write_text(text.strip() + "\n", encoding="utf-8")
+            except Exception as e:
+                await update.message.reply_text(
+                    f"❌ Не удалось записать текст в <code>{jp}</code>\n<pre>{str(e)[:500]}</pre>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
+            await update.message.reply_text(
+                "✅ <b>Текст вакансии сохранён</b> — запускаю генерацию…\n"
+                f"🔗 {url}{inferred_note}\n\nЭто займёт 1-2 минуты.",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            logger.info(f"[paste handler] Updated MANUAL job_posting.txt and rerun apply url={url}")
+            asyncio.create_task(_run_apply_agent(url))
+            return
+
+    try:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".txt",
+            prefix="tg_paste_",
+            delete=False,
+        )
+        with tmp as fh:
+            fh.write(text)
+        paste_path = tmp.name
+    except Exception as e:
+        logger.exception("[paste handler] failed to write temp file")
+        await update.message.reply_text(
+            f"❌ Не удалось сохранить присланный текст во временный файл: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    chars = len(text)
+    if url:
+        inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
+        url_line = f"🔗 {url}{inferred_note}"
+    else:
+        url_line = "🔗 (ссылка не найдена — обрабатываю без неё)"
+    await update.message.reply_text(
+        f"⏳ <b>Принял текст вакансии ({chars} символов), запускаю генерацию...</b>\n"
+        f"{url_line}\n\nЭто займёт 1-2 минуты.",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    logger.info(f"[paste handler] Launching apply_agent paste mode ({chars} chars) url={url or '—'}")
+    asyncio.create_task(_run_apply_agent(url, paste_file=paste_path))
+
+
 async def _run_linkedin_batch(job_ids: list[str], update) -> None:
     """Run apply_agent sequentially for each LinkedIn job id."""
     from job_fetch.linkedin_parse import job_view_url
@@ -404,11 +599,12 @@ def build_application() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Command handlers
-    app.add_handler(CommandHandler("start",    cmd_start))
-    app.add_handler(CommandHandler("hunt",     cmd_hunt))
-    app.add_handler(CommandHandler("force",    cmd_force))
-    app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
+    app.add_handler(CommandHandler("start",     cmd_start))
+    app.add_handler(CommandHandler("hunt",      cmd_hunt))
+    app.add_handler(CommandHandler("force",     cmd_force))
+    app.add_handler(CommandHandler("status",    cmd_status))
+    app.add_handler(CommandHandler("schedule",  cmd_schedule))
+    app.add_handler(CommandHandler("sync_sent", cmd_sync_sent))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -440,6 +636,19 @@ def build_application() -> Application:
                 f"{fire_hour:02d}:{fire_min:02d} {TIMEZONE}"
             )
 
+    # Dedicated to_send sync — fires once per base schedule window (5 min before first hunt)
+    for base_time in SCHEDULE_TIMES:
+        h, m = map(int, base_time.split(":"))
+        total = h * 60 + m - 5
+        total %= 24 * 60
+        fire_hour, fire_min = total // 60, total % 60
+        app.job_queue.run_daily(
+            callback=_scheduled_sync_sent,
+            time=dt_time(fire_hour, fire_min, tzinfo=tz),
+            name=f"sync_sent_{base_time}",
+        )
+        logger.info(f"[Schedule] sync_sent at {fire_hour:02d}:{fire_min:02d} {TIMEZONE}")
+
     return app
 
 
@@ -459,3 +668,19 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             pass
+
+
+async def _scheduled_sync_sent(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scheduled job: sync Sent marks from to_send.xlsx → tracker.xlsx (3×/day)."""
+    try:
+        import asyncio as _asyncio
+        from hunter import to_send as _to_send
+        result = await _asyncio.to_thread(_to_send.sync_and_rebuild)
+        if result["synced"]:
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=f"📬 Synced <b>{result['synced']}</b> Sent mark(s) from to_send.xlsx → tracker.xlsx",
+                parse_mode=ParseMode.HTML,
+            )
+    except Exception:
+        logger.exception("[scheduled_sync_sent] Failed")
