@@ -67,14 +67,54 @@ RED LINES (never cross):
 
 **Cover Letter EN** (250-350 words, 3-4 paragraphs):
 
-1. **Opening hook** — one strong sentence that ties YOUR most relevant experience
-   directly to THIS job's core problem or domain. NOT generic. NOT "I am writing to...".
-   Choose by domain:
-   - Banking/fintech → lead with Venture Labs / 300 German banks
-   - Enterprise SaaS / procurement → lead with Fairmarkit
-   - Startup / greenfield → lead with building from scratch (Venture Labs or Altoros e-commerce)
-   - Long-running product / legacy modernisation → lead with Angular 14→19 migration
-   - AI/automation tooling → lead with Fairmarkit AI integration
+1. **Opening hook** — ONE sentence, max 30 words. Default shape: **Concrete-fact-about-THEM**.
+
+   Reference something specific from THE JOB POSTING or company (a product name,
+   a tech choice they explicitly called out, a phrase from their requirements,
+   an industry detail, the version they listed) AND tie ONE concrete fact from
+   your experience to it in the SAME sentence.
+
+   Rule of thumb: if the sentence could be copy-pasted to another company by
+   swapping only the name — it FAILS. The hook must die when the posting changes.
+
+   Good examples:
+   - "Your posting lists Angular 19 + Signals + AG Grid — that's the exact stack
+     I've been shipping at Fairmarkit for the past year."
+   - "You mention 'procurement platform for enterprise clients' — I spent two
+     years building one of those at Fairmarkit on an Nx monorepo."
+   - "Since your team works on loan-processing dashboards for banks, the two
+     Angular apps I built at Venture Labs for 300+ German cooperative banks
+     are directly relevant."
+
+   Fallback shapes (use only when the posting gives no concrete hook to latch onto):
+   - Shape A — concrete fact about YOU: one specific verb-led achievement with
+     a number or named version. Example: "Last year I migrated Venture Labs'
+     Angular 14 banking platform to Angular 19 across 300+ cooperative banks."
+   - Shape C — role-anchored: name the role and give ONE specific, non-generic
+     reason for applying. Example: "I'm applying for the Senior Angular role
+     at Madiff because the 'Angular 17+ on enterprise procurement' line in your
+     posting matches the last two years of my work at Fairmarkit."
+
+   Domain → which proof to pull into the hook (use only as raw material, the
+   structure above still wins):
+   - Banking/fintech → Venture Labs / 300 German banks
+   - Enterprise SaaS / procurement → Fairmarkit
+   - Startup / greenfield → Venture Labs from scratch, or Altoros e-commerce
+   - Long-running product / legacy modernisation → Angular 14→19 migration
+   - AI/automation tooling → Fairmarkit AI integration
+
+   **BANNED opener patterns — hard reject, rewrite if generated**:
+   - "The best [X] I know …" / "Great [X] don't just …" (thought-leadership lecture)
+   - "[N] years of [doing X] is what I bring to …" (resume-slogan headline)
+   - "[N] years of [doing X] is exactly what [Company] requires/needs." (presumptuous)
+   - "… solving exactly the challenges you're facing." (presumption about them)
+   - "Your [role/posting] caught my attention because …" UNLESS the because-clause
+     names a specific thing from the posting (not a generic "your role").
+   - "I am writing to …", "I am excited to …", "I am passionate about …",
+     "As a [self-label] …".
+   - Any rhetorical/philosophical claim about engineering in general
+     ("Engineering teams succeed when …").
+   - Any sentence that survives a company-name swap.
 
 2. **Proof paragraph** — pick 2-3 facts from experience that best match THIS job's
    must-have requirements (not always the same two). Match like this:

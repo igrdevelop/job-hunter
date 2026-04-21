@@ -17,6 +17,8 @@ Usage:
   python apply_agent.py --cli "https://..."      # force CLI mode
   python apply_agent.py --full "https://..."     # generate all file types
   python apply_agent.py --force "https://..."    # skip tracker dedup
+  python apply_agent.py --paste-file posting.txt            # no URL, use pasted text
+  python apply_agent.py --paste-file posting.txt "https://..."  # URL + pasted text
 """
 
 import json
@@ -72,6 +74,10 @@ _APPLY_META_TITLE = ""
 # Exit code: JobLeads fetch blocked — MANUAL tracker row + stub job_posting.txt written
 APPLY_MANUAL_EXIT_CODE = 44
 
+# Placeholder URL used when user pastes job text into Telegram without any link.
+# Kept non-empty so tracker dedup / hyperlink code doesn't choke on blanks.
+PASTE_NO_URL_PLACEHOLDER = "paste://no-url"
+
 
 # ── Tracker dedup check (avoid wasting LLM tokens) ──────────────────────────
 
@@ -82,9 +88,11 @@ def _already_processed(url: str) -> bool:
     - a successful entry exists (ATS = real score), OR
     - a React-skip entry exists (ATS=SKIP, Sent='—') — permanently blocked.
     FAIL and plain SKIP rows do NOT block, so those jobs can be retried.
-    Skipped entirely when --force flag is used.
+    Skipped entirely when --force flag is used or URL is the paste placeholder.
     """
     if _SKIP_DEDUP:
+        return False
+    if not url or url == PASTE_NO_URL_PLACEHOLDER:
         return False
     try:
         from hunter.services.tracker_service import should_skip_url
@@ -121,15 +129,59 @@ _REVIEW_SYSTEM = (
 )
 
 
+_BANNED_OPENER_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"^\s*the best\s+\w[\w\s-]*?\bI know\b", re.IGNORECASE),
+    re.compile(r"^\s*great\s+\w[\w\s-]*?\bdon['’]t just\b", re.IGNORECASE),
+    re.compile(r"\bis what I bring to\b", re.IGNORECASE),
+    re.compile(r"\bis exactly what\s+.{1,80}?(?:requires|needs|is looking for|is after)\b", re.IGNORECASE),
+    re.compile(r"\bexactly the challenges you['’]?re\s+(?:facing|tackling|solving)\b", re.IGNORECASE),
+    re.compile(r"^\s*I am writing to\b", re.IGNORECASE),
+    re.compile(r"^\s*I am excited to\b", re.IGNORECASE),
+    re.compile(r"^\s*I am passionate about\b", re.IGNORECASE),
+    re.compile(r"^\s*As a (?:lifelong|passionate|dedicated|seasoned|highly[- ]skilled)\b", re.IGNORECASE),
+    re.compile(r"^\s*Engineering teams\s+succeed\b", re.IGNORECASE),
+)
+
+
+def _opener_banlist_hits(letter: str) -> list[str]:
+    """Return list of banned patterns matched in the letter's opener (first sentence)."""
+    if not letter:
+        return []
+    # Consider first ~250 chars — safely covers any reasonable opening sentence.
+    head = letter.strip()[:250]
+    # Take the first sentence for strict "^" checks; keep full head for mid-sentence patterns.
+    first_sentence = re.split(r"[.!?]\s", head, maxsplit=1)[0]
+    hits: list[str] = []
+    for pat in _BANNED_OPENER_PATTERNS:
+        target = first_sentence if pat.pattern.startswith(r"^") else head
+        if pat.search(target):
+            hits.append(pat.pattern)
+    return hits
+
+
 def _review_cover_letter(letter: str) -> tuple[str, int]:
     """Send cover letter to LLM for AI-language review.
 
     Returns (rewritten_or_original, score_1_to_10).
     Score > 6 = acceptable. Score ≤ 6 = rewrites.
+    If the opener matches a banned pattern, the score is capped at 4 to force a rewrite.
     Skips if no API key available.
     """
     if not LLM_API_KEY:
         return letter, 10
+
+    banlist_hits = _opener_banlist_hits(letter)
+    banlist_note = ""
+    if banlist_hits:
+        banlist_note = (
+            "\n\nCRITICAL: the opening sentence of this letter matches one or more BANNED "
+            "patterns listed in the system prompt (thought-leadership lectures, "
+            "'is what I bring to', 'is exactly what X needs', 'caught my attention' without "
+            "a specific posting detail, etc). Score MUST be <= 4 and you MUST rewrite the "
+            "opener following the Concrete-fact-about-THEM shape (reference one specific "
+            "thing from the job posting or company and tie one of the candidate's facts to "
+            "it in the same sentence)."
+        )
 
     user_msg = (
         "Review this cover letter for AI-generated language patterns.\n"
@@ -138,9 +190,12 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         "  5-6: borderline — some generic phrases, some specific\n"
         "  7-10: natural, human, specific to the job\n\n"
         "Penalise: sentences that could apply to ANY job, repetitive rhythm, "
-        "opener starting with 'I', generic buzzwords.\n\n"
+        "opener starting with 'I', generic buzzwords, opener that would survive "
+        "a company-name swap.\n\n"
         "If score ≤ 6, provide a rewritten version that removes all generic phrases "
-        "and makes every sentence concrete and specific to this job/company.\n\n"
+        "and makes every sentence concrete and specific to this job/company. "
+        "Keep paragraphs 2-4 intact unless they obviously contradict or repeat the new opener."
+        f"{banlist_note}\n\n"
         'Respond with JSON only: {"score": <int 1-10>, "rewrite": <rewritten string or null if score > 6>}\n\n'
         f"Cover letter:\n{letter}"
     )
@@ -157,6 +212,9 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         )
         score = int(result.get("score", 10))
         rewrite = result.get("rewrite")
+        if banlist_hits:
+            score = min(score, 4)
+            print(f"[apply_agent] Opener banlist hits: {banlist_hits} — forcing score={score}")
         if score <= 6 and isinstance(rewrite, str) and len(rewrite) > 50:
             return rewrite.strip(), score
         return letter, score
@@ -344,8 +402,9 @@ def validate_content(data: dict) -> list[str]:
 # API MODE — fetch job → LLM → content.json → generate_docs
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main_api(url: str) -> None:
-    print(f"\n[apply_agent] API mode | URL: {url}\n")
+def main_api(url: str, paste_text: str = "") -> None:
+    url_display = url if url and url != PASTE_NO_URL_PLACEHOLDER else "(pasted text, no URL)"
+    print(f"\n[apply_agent] API mode | URL: {url_display}\n")
 
     if _already_processed(url):
         try:
@@ -365,18 +424,22 @@ def main_api(url: str) -> None:
         print(f"[apply_agent] SKIP — already in tracker: {url}")
         return
 
-    # Step 1 — Fetch job text
-    print("[apply_agent] Step 1: Fetching job posting...")
-    try:
-        from job_fetch import fetch_job_text
-        job_text = fetch_job_text(url)
-        print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
-    except Exception as e:
-        if "jobleads.com" in url.lower():
-            _handle_jobleads_fetch_blocked(url, str(e))
-        notify(f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>")
-        print(f"[apply_agent] FETCH ERROR: {e}")
-        sys.exit(1)
+    # Step 1 — Get job text: either use pasted text (Telegram paste flow) or fetch
+    if paste_text:
+        job_text = paste_text
+        print(f"[apply_agent] Step 1: Using pasted text ({len(job_text)} chars, no fetch)")
+    else:
+        print("[apply_agent] Step 1: Fetching job posting...")
+        try:
+            from job_fetch import fetch_job_text
+            job_text = fetch_job_text(url)
+            print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
+        except Exception as e:
+            if "jobleads.com" in url.lower():
+                _handle_jobleads_fetch_blocked(url, str(e))
+            notify(f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>")
+            print(f"[apply_agent] FETCH ERROR: {e}")
+            sys.exit(1)
 
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "system_prompt.md"
@@ -396,9 +459,14 @@ def main_api(url: str) -> None:
     print(f"[apply_agent] Step 2: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
     try:
         from llm_client import call_llm, LLMError
+        url_hint = (
+            url
+            if url and url != PASTE_NO_URL_PLACEHOLDER
+            else "(none — text pasted directly by user)"
+        )
         content = call_llm(
             system_prompt=system_prompt,
-            user_message=f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url}",
+            user_message=f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}",
             provider=LLM_PROVIDER,
             model=LLM_MODEL,
             api_key=LLM_API_KEY,
@@ -456,7 +524,7 @@ def main_api(url: str) -> None:
     output_folder.mkdir(parents=True, exist_ok=True)
 
     content["output_folder"] = str(output_folder).replace("\\", "/")
-    content["apply_url"] = url
+    content["apply_url"] = "" if url == PASTE_NO_URL_PLACEHOLDER else url
     if "ats_score" not in content:
         content["ats_score"] = ""
 
@@ -467,8 +535,13 @@ def main_api(url: str) -> None:
 
     job_posting_path = output_folder / "job_posting.txt"
     try:
+        url_line = (
+            f"URL: {url}\n\n"
+            if url and url != PASTE_NO_URL_PLACEHOLDER
+            else "URL: (none — pasted by user)\n\n"
+        )
         job_posting_path.write_text(
-            f"URL: {url}\n\n{job_text}",
+            url_line + job_text,
             encoding="utf-8",
         )
         print(f"[apply_agent] Saved job posting -> {job_posting_path.name}")
@@ -813,13 +886,28 @@ class ApplyError(RuntimeError):
     """Raised when an apply attempt fails and fallback should be tried."""
 
 
-def main(url: str, force_cli: bool = False, force: bool = False, full: bool = False) -> None:
+def main(
+    url: str,
+    force_cli: bool = False,
+    force: bool = False,
+    full: bool = False,
+    paste_text: str = "",
+) -> None:
     if force:
         global _SKIP_DEDUP
         _SKIP_DEDUP = True
     if full:
         global _FULL_MODE
         _FULL_MODE = True
+
+    # Pasted text skips fetch, so there is nothing for CLI mode (claude -p /apply) to help with.
+    # CLI mode also can't write structured content.json reliably for the pasted branch — force API.
+    if paste_text:
+        if not LLM_API_KEY:
+            print("[apply_agent] ERROR: --paste-file requires LLM_API_KEY (CLI mode not supported).")
+            sys.exit(1)
+        main_api(url or PASTE_NO_URL_PLACEHOLDER, paste_text=paste_text)
+        return
 
     if force_cli or APPLY_USE_CLI:
         main_cli(url)
@@ -846,13 +934,13 @@ def main(url: str, force_cli: bool = False, force: bool = False, full: bool = Fa
         sys.exit(1)
 
 
-def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, str]:
-    """Parse argv (including script name) → url, force_cli, force, full, company, title."""
+def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, str, str]:
+    """Parse argv (including script name) → url, force_cli, force, full, company, title, paste_file."""
     args = argv[1:]
     force_cli = "--cli" in args
     force = "--force" in args
     full = "--full" in args
-    company, title = "", ""
+    company, title, paste_file = "", "", ""
     pos: list[str] = []
     i = 0
     while i < len(args):
@@ -865,27 +953,47 @@ def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, s
             title = args[i + 1]
             i += 2
             continue
+        if a == "--paste-file" and i + 1 < len(args):
+            paste_file = args[i + 1]
+            i += 2
+            continue
         if a.startswith("--"):
             i += 1
             continue
         pos.append(a)
         i += 1
     url = pos[0] if pos else ""
-    return url, force_cli, force, full, company, title
+    return url, force_cli, force, full, company, title, paste_file
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(
             "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
-            "[--company NAME] [--title TITLE]",
+            "[--company NAME] [--title TITLE] [--paste-file PATH]",
         )
         sys.exit(1)
 
-    url, force_cli, force, full, co, ti = parse_apply_cli_argv(sys.argv)
-    if not url:
-        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] ...")
+    url, force_cli, force, full, co, ti, paste_file = parse_apply_cli_argv(sys.argv)
+
+    paste_text = ""
+    if paste_file:
+        try:
+            paste_text = Path(paste_file).read_text(encoding="utf-8").strip()
+        except Exception as e:
+            print(f"[apply_agent] ERROR: failed to read paste file {paste_file}: {e}")
+            sys.exit(1)
+        if not paste_text:
+            print(f"[apply_agent] ERROR: paste file {paste_file} is empty.")
+            sys.exit(1)
+
+    if not url and not paste_text:
+        print(
+            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
+            "[--paste-file PATH] ...",
+        )
         sys.exit(1)
+
     _APPLY_META_COMPANY = co
     _APPLY_META_TITLE = ti
-    main(url, force_cli=force_cli, force=force, full=full)
+    main(url, force_cli=force_cli, force=force, full=full, paste_text=paste_text)

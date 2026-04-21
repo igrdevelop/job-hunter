@@ -1,0 +1,197 @@
+My name is Igor
+I gonna/will  be brief
+I gonna be brief in describing myself and lengthy in describing my experience. 
+I am a person who likes good books, witty jokes, and eating cakes.
+
+Science fiction
+The Android's Dream is a 2006 science fiction novel by American writer John Scalzi.[1]
+Do Androids Dream of Electric Sheep?
+The Three-Body Problem writer Liu Cixin
+
+In addition, I am working as an frontend developer. I have 7 years of practice in it.
+
+Currently, I live in Wroclaw. Relocated there 3.5 years ago
+I like the city because of its warm weather,  cute low-height buildings and huge green parks.
+
+What else. 
+I have a wife, son and cat. 
+Sun has name Mark 
+Cat has named Marika
+Because of that, you can judge about my creativity.
+
+"Despite my limited experience with this framework, I'm truly grateful for the opportunity to interview for this role."
+
+I am a front-end developer with 9 years of practice.
+I'm using Angular2+ in my current job.
+I’ve been working with Angular since it appeared.
+And to keep up with the times, I finished several online courses with Angular.
+In addition, I have skills in TypeScript, HTML, SCSS and etc.
+
+I participated in various projects where I was responsible for the front-end and layout part. 
+Of course, during these projects, I collaborated with back-end developers, designers, and sometimes with customers to improve usability and successfully complete the projects.
+Let me dive into a more detailed description of the projects and my role in them.
+
+Last one
+Projects in the banking sector related to calculating the carbon footprint of companies and the corresponding calculations. One application was created from scratch and integrated into the working environment, two more applications were under support and development. Responsibilities: developing new features, update project to the newer Angular version, code review. Stack: Angular 14-17, TypeScript, SCSS, RxJS, NgRx. Backend: JAVA 10+ members. The team composition changed from one front-end and two Team: back-end developers to three front-end developers and 5 back-end developers
+My first project was just like Uber for workers.
+For example, a manager in Walmart makes a picture of a problem, such as a burned-out bulb, or smth broken.
+After this picture with some comments goes to the server and transforms to work order.
+Secondly, these WO are combined and reflected in the corresponding table where tasks for stuff are assigned.
+And finally, workers with their web or mobile application get the WO and fix it.
+
+The team of the project was comprised of 10 people.  2 FE 5BE 2QA and PM,
+I was responsible for the layout and front-end logic, interaction with the server.
+
+My second project was somewhat similar.
+
+It was connected with insurance companies that work with traffic incidents. 
+Along with the functionality of the previous application
+the app combined the assignment table with a map, which helps the manager refer the client to the service needed.
+In the application the locations of the car accident, mobile service stations, and regular services are displayed on the map.
+Manager could connect them depending on a particular situation and controle route, distance and time.
+
+To do this, apart from usual API requests to the server this application receives information from clients' and mechanics' mobile devices through SignalR.
+Before I forget. 
+I developed this project entirely by myself (all on my own).
+
+My next project was really big. 
+I joined an existing team that had been working on it for quite a time.
+This project dealt with the distribution of grants. .
+Should I go into details? Or I can go to my current projects?
+
+For example, Bill Gates announces a grant.  And applicants could send their suggestions and projects to get the grant. 
+Detailed processing of the documents follows this stage.
+
+After that, I was working on 2 projects.
+
+The first of them started as a usual e-commerce project, but later on, it transformed into an e-commerce platform with a huge admin panel.
+
+The second one is connected to medicine. 
+We are developing an application for a British hospital that helps them collect, analyze and make a resolution on the information about volunteers.
+I got this app after a long chain of developers had worked on it, so I had to optimize it, refactor it, and solve issues with performance and functionality. 
+
+Currently, actually, presently, I am working on the projects.
+The  project is in the finance sphere related to financial instruments
+Responsibilities: developing new features, update project to the newer Angular
+version, code review.
+Stack: Angular 10-12,
+
+---------------------------------------------------------------------------
+
+Personal qualities – active, hardworking, creative, ambitious,
+determined, ready to work in a team, and a quick learner.
+My hobbies - books, cycling.
+
+1. Introduce yourself/ tell a little about yourself
+
+my name is Igor
+I gonna/will  be brief
+
+I gonna be brief in describing myself and lengthy in describing my experience. 
+
+I am a person who likes good books, witty jokes, and eating cakes.
+
+
+Science fiction
+The Android's Dream is a 2006 science fiction novel by American writer John Scalzi.[1]
+Do Androids Dream of Electric Sheep?
+The Three-Body Problem writer Liu Cixin
+
+In addition, I am working as an frontend developer. I have 7 years of practice in it.
+
+Currently, I live in Wroclaw. RElocated there 2 years ago
+I like the city because of its warm weather,  cute low-height buildings and huge green parks.
+
+What else. 
+I have wife, sun and cat. 
+Sun has name Mark 
+Cat has name marika
+Because of that you can jurge about my creativity.
+
+I have to get a child to kindergarten
+
+2. What attracted you to this company/project
+
+ First - I want to participate in the development of a modern product. 
+It will be a new challenge for me to share and get experience with other developers.
+Second - from the future job I’m waiting transparent working process and friendly team.
+And, of course, I want to earn money help me to journey, 
+
+3. What qualities or experience do you think you would bring to this job
+
+During my previous project, I had to deal not only with programming but also with establishing successful interaction between team members, clients and product owners.
+I could share my experience with finding solutions and new ways of solving complicated issues.
+
+4. What do you think will be most difficult about this project. How would you handle this challenge.
+
+I will create plans in my head and discuss it with the team.
+5. What achievement in your career has given you the most satisfaction 
+
+I can't determine the most successful achievement.
+Every closed stage or finished feature can be the reason to be satisfied.
+I am always satisfied when my work passes tests and everything works smoothly. 
+And the client says - well done.
+
+6. How would other people in your present company describe you as a colleague.
+
+Smart, witty, friendly.
+
+7. What are your strong points/ weak points
+
+I'm not afraid to ask questions if I don't understand. 
+I mean, during discussions and planning, I'm not afraid to be the slowest ship in the fleet. 
+Everything should be crystal clear for the whole team. 
+If I didn't catch something, half of the team might have missed it too . 
+
+8. How do you deal with criticism and direction
+
+I try to analyze it. 
+I met a lot of people, who were smarter than me, more skilled than me, and more experienced. 
+Everything could be transformed into advice or experience.
+Sometimes it is advisable to avoid a particular person, and at other times you need experience to manage a conflict.
+
+9. where do you see yourself in 5 years time ))))
+I imagine myself, 
+sitting in front of three big monitors and conducting the development process with other programmers.
+
+question about conflict
+
+achievement 
+
+to submit the application for residence 
+
+I applied for residence 
+
+
+
+I am a person who likes good books, witty jokes, and eating cakes.
+In addition, I am working as an Angular developer. I have 7 years of practice in it.
+
+Currently, I live in Wroclaw. 
+I like the city because of its cute low-height buildings and huge green parks.
+
+I'm not afraid to ask questions if I don't understand. 
+I mean, during discussions and planning, I'm not afraid to be the slowest ship in the fleet. 
+
+I‘ll  be brief
+My name is Igor
+
+I have been working as an frontend Angular  developer during 7 years.
+
+Currently, I live in Wroclaw. Relocated here 1.5 years ago
+
+I am happy to join the friendly team of a European company.
+
+// I like this green city because of the warm weather and cute buildings.
+
+What else. 
+I have a wife, son, and cat. 
+Son has name Mark 
+Cat has name Marika
+Because of that, you can judge about  my creativity.
+
+
+
+
+
+
