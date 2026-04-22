@@ -649,6 +649,15 @@ def build_application() -> Application:
         )
         logger.info(f"[Schedule] sync_sent at {fire_hour:02d}:{fire_min:02d} {TIMEZONE}")
 
+    # Daily pending-report at 09:00 and 21:00
+    for report_hour in (9, 21):
+        app.job_queue.run_daily(
+            callback=_scheduled_pending_report,
+            time=dt_time(report_hour, 0, tzinfo=tz),
+            name=f"pending_report_{report_hour:02d}00",
+        )
+        logger.info(f"[Schedule] pending_report at {report_hour:02d}:00 {TIMEZONE}")
+
     return app
 
 
@@ -684,3 +693,32 @@ async def _scheduled_sync_sent(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
     except Exception:
         logger.exception("[scheduled_sync_sent] Failed")
+
+
+async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scheduled job: report how many unsent applications are in to_send.xlsx."""
+    try:
+        from hunter.tracker import iter_rows_for_to_send
+        rows = await asyncio.to_thread(iter_rows_for_to_send)
+        total = len(rows)
+        if total == 0:
+            msg = "📭 <b>Неотосланных заявок нет</b> — to_send.xlsx пуст."
+        else:
+            fail_n = sum(1 for r in rows if r["ats"] == "FAIL")
+            manual_n = sum(1 for r in rows if r["ats"] == "MANUAL")
+            ready_n = total - fail_n - manual_n
+            parts = [f"📋 <b>Неотосланных заявок: {total}</b>"]
+            if ready_n:
+                parts.append(f"  ✅ Готовы к отправке: {ready_n}")
+            if manual_n:
+                parts.append(f"  📝 MANUAL (нужен текст): {manual_n}")
+            if fail_n:
+                parts.append(f"  ❌ FAIL: {fail_n}")
+            msg = "\n".join(parts)
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=msg,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        logger.exception("[scheduled_pending_report] Failed")
