@@ -7,6 +7,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: int = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
+# After apply_agent success, also send .pdf/.docx via sendDocument (Bot API 50MB/file cap)
+TELEGRAM_SEND_DOCS: bool = os.getenv("TELEGRAM_SEND_DOCS", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # ── Auto-apply ────────────────────────────────────────────────────────────────
 AUTO_APPLY: bool = os.getenv("AUTO_APPLY", "false").lower() in ("true", "1", "yes")
