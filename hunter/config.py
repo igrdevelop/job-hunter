@@ -152,6 +152,9 @@ REMOTIVE_ENABLED: bool = os.getenv("REMOTIVE_ENABLED", "true").lower() in ("true
 # ── Remote OK source config ───────────────────────────────────────────────────
 REMOTEOK_ENABLED: bool = os.getenv("REMOTEOK_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── Himalayas source config ───────────────────────────────────────────────────
+HIMALAYAS_ENABLED: bool = os.getenv("HIMALAYAS_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",

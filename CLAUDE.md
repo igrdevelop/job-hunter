@@ -45,6 +45,7 @@ hunter/
     arbeitnow.py        # Arbeitnow.com JSON API (EU / remote)
     remotive.py         # Remotive.com JSON API (remote)
     remoteok.py         # Remote OK JSON API (remoteok.com/api)
+    himalayas.py        # Himalayas.app JSON API (remote jobs search)
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
 
 job_fetch/

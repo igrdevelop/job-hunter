@@ -6,11 +6,11 @@
 
 | Категория | Примерно сколько | Комментарий |
 |-----------|------------------|-------------|
-| **Tier A — API / RSS, без скрейпа** | **3** | Осталось из изначального списка «глобальных»: Himalayas, 4dayweek.io, We Work Remotely (RSS). Remote OK, Remotive, Arbeitnow уже сделаны. |
+| **Tier A — API / RSS, без скрейпа** | **2** | Осталось: 4dayweek.io, We Work Remotely (RSS). Remote OK, Remotive, Arbeitnow, Himalayas уже сделаны. |
 | **Tier B** | **0–1** | Remoteleaf — только если появится нормальная публичная дока / ключ. |
 | **Tier C — скрейп / тяжёлая поддержка** | **5+** | Wellfound, Jobgether, EuroTechJobs, Relocate.me, Landing.jobs — без открытого feed; подключать только осознанно. |
 
-Итого **реалистичный минимум «добить план»**: **ещё 3 источника** (tier A). Всё остальное — по желанию и трудозатратам, не «обязательный» объём.
+Итого **реалистичный минимум «добить план»**: **ещё 2 источника** (tier A). Всё остальное — по желанию и трудозатратам, не «обязательный» объём.
 
 ---
 
@@ -30,14 +30,14 @@
 | Arbeitnow | `arbeitnow` | JSON API |
 | Remotive | `remotive` | JSON API |
 | Remote OK | `remoteok` | JSON API |
+| Himalayas | `himalayas` | JSON API |
 
 ---
 
 ## Очередь tier A (рекомендуемый порядок)
 
-1. **Himalayas** — `himalayas.app`: JSON API + RSS, есть OpenAPI. Много пересечений с другими remote-досками; зато фильтры (страна, remote) богатые.
-2. **4dayweek.io** — JSON API v2 (`/api/v2/jobs`), хорошая дока, ниша 4-day week → меньше дубликатов с PL-досок.
-3. **We Work Remotely** — `weworkremotely.com/remote-jobs.rss`: один большой RSS, реализация близка к [solidjobs.py](../hunter/sources/solidjobs.py); детали — `fetch_html` по `<link>`.
+1. **4dayweek.io** — JSON API v2 (`/api/v2/jobs`), хорошая дока, ниша 4-day week → меньше дубликатов с PL-досок.
+2. **We Work Remotely** — `weworkremotely.com/remote-jobs.rss`: один большой RSS, реализация близка к [solidjobs.py](../hunter/sources/solidjobs.py); детали — `fetch_html` по `<link>`.
 
 Для каждого нового источника после мержа: обновить эту таблицу, `CLAUDE.md`, `.env.example`, промпты (не использовать имя доски как `company_name`), при необходимости добавить `NEXT_SOURCE_*.md` с чеклистом.
 
@@ -59,7 +59,7 @@
 - [NEXT_SOURCE_REMOTIVE_PLAN.md](NEXT_SOURCE_REMOTIVE_PLAN.md) — выполнено  
 - [NEXT_SOURCE_REMOTEOK_PLAN.md](NEXT_SOURCE_REMOTEOK_PLAN.md) — выполнено  
 
-Следующий логичный отдельный план при желании: **Himalayas** или **4dayweek.io** (скопировать структуру с Remote OK / Remotive).
+Следующий логичный отдельный план при желании: **4dayweek.io** или **We Work Remotely** (скопировать структуру с Remote OK / Solid.Jobs).
 
 ---
 
@@ -67,6 +67,7 @@
 
 ```text
 /hunt remoteok
+/hunt himalayas
 /hunt remotive arbeitnow
 /schedule
 ```
