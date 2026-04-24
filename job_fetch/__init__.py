@@ -78,5 +78,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.remotive import fetch_remotive
         return fetch_remotive(url)
 
+    if "remoteok.com" in domain:
+        logger.info(f"[job_fetch] Remote OK detected: {url}")
+        from job_fetch.remoteok import fetch_remoteok
+        return fetch_remoteok(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

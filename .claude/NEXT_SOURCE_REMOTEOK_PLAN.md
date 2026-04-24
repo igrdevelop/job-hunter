@@ -1,6 +1,6 @@
 # План: следующий источник — Remote OK (remoteok.com)
 
-**Статус:** не реализовано.
+**Статус:** реализовано (`hunter/sources/remoteok.py`, `job_fetch/remoteok.py`, `REMOTEOK_ENABLED`).
 
 Рецепт: [add-source.md](commands/add-source.md). Ближайшие аналоги по коду: [remotive.py](../hunter/sources/remotive.py), [arbeitnow.py](../hunter/sources/arbeitnow.py) (один JSON GET + HTML описание).
 

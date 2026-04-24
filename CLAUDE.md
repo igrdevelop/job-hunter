@@ -44,6 +44,7 @@ hunter/
     solidjobs.py        # Solid.Jobs RSS feed scraper
     arbeitnow.py        # Arbeitnow.com JSON API (EU / remote)
     remotive.py         # Remotive.com JSON API (remote)
+    remoteok.py         # Remote OK JSON API (remoteok.com/api)
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
 
 job_fetch/
@@ -94,7 +95,7 @@ requirements.txt
 | `GENERATE_PL_RESUME` | `false` | Generate Polish CV variant (full-mode only by default) |
 | `INHIRE_ENABLED` | `false` | Requires Playwright — disabled until installed |
 
-All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`.
+All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`.
 
 ---
 

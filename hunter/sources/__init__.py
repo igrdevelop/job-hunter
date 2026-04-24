@@ -8,6 +8,7 @@ from hunter.config import (
     JOBLEADS_ENABLED,
     ARBEITNOW_ENABLED,
     REMOTIVE_ENABLED,
+    REMOTEOK_ENABLED,
 )
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
@@ -53,3 +54,7 @@ if ARBEITNOW_ENABLED:
 if REMOTIVE_ENABLED:
     from hunter.sources.remotive import RemotiveSource
     ALL_SOURCES.append(RemotiveSource())
+
+if REMOTEOK_ENABLED:
+    from hunter.sources.remoteok import RemoteOkSource
+    ALL_SOURCES.append(RemoteOkSource())

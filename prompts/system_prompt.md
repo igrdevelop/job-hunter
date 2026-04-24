@@ -11,7 +11,7 @@ IMPORTANT: Never use em dashes or en dashes (characters like \u2014 or \u2013) a
 ### Step 1 - Analyze the Job Posting
 
 Extract from the provided job text:
-- **company_name**: The EMPLOYER company name — ASCII only, no spaces, CamelCase (e.g. "Devapo", "TransitionTech"). NEVER use the job board name (theprotocol, justjoin, pracuj, nofluffjobs, solidjobs, bulldogjob, arbeitnow, remotive) as company_name. If the company is not identifiable, use a descriptive fallback like "AngularStartup" or "FinanceCompany".
+- **company_name**: The EMPLOYER company name — ASCII only, no spaces, CamelCase (e.g. "Devapo", "TransitionTech"). NEVER use the job board name (theprotocol, justjoin, pracuj, nofluffjobs, solidjobs, bulldogjob, arbeitnow, remotive, remoteok) as company_name. If the company is not identifiable, use a descriptive fallback like "AngularStartup" or "FinanceCompany".
 - **job_title**: exact title from the posting
 - **stack**: pick ONE primary technology → "Angular", "React", or "JavaScript"
 - **lang**: posting language → "EN" or "PL"
