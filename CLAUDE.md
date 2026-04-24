@@ -56,6 +56,8 @@ prompts/
   system_prompt.md      # LLM instructions: resume tailoring, ATS gap analysis, cover letter rules
   candidate_profile.md  # Candidate data: contact, stack, work experience, education (single source of truth)
 
+.claude/
+  JOB_SOURCES_ROADMAP.md # Job boards: integrated vs queued (tier A–C)
 .claude/commands/
   apply.md              # Claude Code slash-command /apply — used in CLI fallback mode
   batch.md              # /batch — process multiple URLs
