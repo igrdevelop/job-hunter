@@ -1,5 +1,7 @@
 # План: следующий источник — Remotive (remotive.com)
 
+**Статус:** реализовано (`hunter/sources/remotive.py`, `job_fetch/remotive.py`, `REMOTIVE_ENABLED`).
+
 Опираемся на рецепт [add-source.md](commands/add-source.md) и на образец JSON-источника [hunter/sources/nofluffjobs.py](../hunter/sources/nofluffjobs.py) / [hunter/sources/arbeitnow.py](../hunter/sources/arbeitnow.py).
 
 ## Зачем Remotive

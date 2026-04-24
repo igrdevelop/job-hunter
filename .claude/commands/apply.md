@@ -25,7 +25,7 @@ If input is plain text: use it directly.
 ## Step 2 - Analyze the job posting
 
 Extract:
-- **Company name** (ASCII only, no spaces, CamelCase, e.g. "Devapo") — NEVER use the job board name (theprotocol, justjoin, pracuj, nofluffjobs, solidjobs, arbeitnow) as company name. Use the actual employer. If not identifiable, use a descriptive fallback like "AngularStartup".
+- **Company name** (ASCII only, no spaces, CamelCase, e.g. "Devapo") — NEVER use the job board name (theprotocol, justjoin, pracuj, nofluffjobs, solidjobs, arbeitnow, remotive) as company name. Use the actual employer. If not identifiable, use a descriptive fallback like "AngularStartup".
 - **Job title** (exact)
 - **Primary stack**: pick ONE → `Angular`, `React`, or `JavaScript`
 - **Job language**: `EN` or `PL`

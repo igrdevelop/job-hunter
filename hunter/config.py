@@ -146,6 +146,9 @@ JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "true").lower() in ("true
 # ── Arbeitnow source config ───────────────────────────────────────────────────
 ARBEITNOW_ENABLED: bool = os.getenv("ARBEITNOW_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── Remotive source config ────────────────────────────────────────────────────
+REMOTIVE_ENABLED: bool = os.getenv("REMOTIVE_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",
