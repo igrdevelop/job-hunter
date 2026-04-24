@@ -1,0 +1,9 @@
+Szanowni Państwo,
+
+Piszę w związku z ofertą pracy na stanowisko Senior Frontend Developer w Example Corp. Posiadam ponad 10 lat doświadczenia w rozwoju aplikacji Angular oraz specjalizuję się w technologiach wymienionych w ofercie - Angular 17/18, TypeScript, NgRx i AG Grid - co pozwala mi skutecznie przyczynić się do rozwoju Państwa aplikacji korporacyjnej.
+
+Jak wskazuję w załączonym CV, ostatnio przeprowadziłem migracje Angular z wersji 14 do 19 w Venture Labs, zapewniając minimalne przestoje dla aplikacji używanych przez ponad 300 niemieckich banków. W Fairmarkit pracowałem intensywnie z Angular Signals i AG Grid przy złożonych tabelach danych w architekturze Nx monorepo - co bezpośrednio odpowiada Państwa wymaganiom dodatkowym. Moje doświadczenie obejmuje sektory regulowane, w tym bankowość i finanse, gdzie utrzymywałem wysoką jakość kodu poprzez testy jednostkowe Jest, testy E2E Cypress i pipeline'y CI/CD Jenkins.
+
+Moje doświadczenie obejmuje budowanie aplikacji korporacyjnych od podstaw, przeprowadzanie regularnych przeglądów kodu w międzyfunkcyjnych zespołach Agile liczących 10+ członków oraz dostarczanie funkcjonalności obsługujących setki klientów korporacyjnych na całym świecie. To dobrze współgra z Państwa potrzebą osoby komfortowo czującej się przy rozwoju Angular w skali enterprise i codziennej komunikacji w języku angielskim.
+
+Dziękuję za rozważenie mojej aplikacji. Chętnie omówię, jak moja ekspertyza w Angular i doświadczenie z regulowanymi aplikacjami korporacyjnymi może przyczynić się do rozwoju Państwa zespołu produktowego.

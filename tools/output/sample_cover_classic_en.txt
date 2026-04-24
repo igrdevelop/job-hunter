@@ -1,0 +1,9 @@
+Dear Hiring Manager,
+
+I am writing to express my interest in the Senior Frontend Developer position at Example Corp, as advertised. With 10+ years of Angular development experience and expertise in the technologies you've outlined - including Angular 17/18, TypeScript, NgRx, and AG Grid - I am well-positioned to contribute to your enterprise application.
+
+As detailed in my attached resume, I recently completed Angular migrations from 14 to 19 at Venture Labs, ensuring minimal downtime for applications used by 300+ German banks. At Fairmarkit, I worked extensively with Angular Signals and AG Grid for complex data tables within an Nx monorepo architecture - directly matching your nice-to-have requirements. My experience spans regulated domains including banking and finance, where I've maintained high code quality through Jest unit tests, Cypress E2E testing, and Jenkins CI/CD pipelines.
+
+My background includes building enterprise applications from scratch, conducting regular code reviews in cross-functional Agile teams of 10+ members, and delivering features that serve hundreds of enterprise clients globally. This aligns well with your need for someone comfortable with enterprise-scale Angular development and daily English communication.
+
+Thank you for considering my application. I look forward to discussing how my Angular expertise and experience with regulated enterprise applications can contribute to your product team.
