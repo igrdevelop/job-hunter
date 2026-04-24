@@ -536,6 +536,32 @@ def has_manual_pending(url: str) -> bool:
     )
 
 
+def get_all_manual_pending() -> list[dict]:
+    """Return all MANUAL-pending rows as dicts with keys: url, folder, company, title, row."""
+    if not TRACKER_PATH.exists():
+        return []
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results: list[dict] = []
+    try:
+        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if not row or len(row) < ATS_COL_INDEX:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats != MANUAL_PENDING_ATS:
+                continue
+            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
+            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
+            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
+            title = str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else ""
+            if not url:
+                continue
+            results.append({"url": url, "folder": folder, "company": company, "title": title, "row": i})
+    finally:
+        wb.close()
+    return results
+
+
 def latest_manual_pending() -> dict[str, str] | None:
     """Return latest MANUAL row info (url, folder) or None.
 

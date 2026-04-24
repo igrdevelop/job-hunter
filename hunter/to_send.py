@@ -119,10 +119,22 @@ def _write_data_row(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def is_excel_open() -> bool:
+    """Return True if Excel currently has to_send.xlsx open (lock file exists)."""
+    lock = TO_SEND_PATH.parent / f"~${TO_SEND_PATH.name}"
+    return lock.exists()
+
+
 def read_sent_marks() -> dict[str, str]:
     """Read to_send.xlsx and return {row_id: sent_value} for rows with a non-empty Sent."""
     if not TO_SEND_PATH.exists():
         return {}
+
+    if is_excel_open():
+        logger.warning(
+            "[to_send] to_send.xlsx appears open in Excel — unsaved changes will NOT be read. "
+            "Save and close the file, then run /sync_sent again."
+        )
 
     try:
         wb = openpyxl.load_workbook(TO_SEND_PATH, read_only=True, data_only=True)

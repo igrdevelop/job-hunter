@@ -1,0 +1,17 @@
+Senior Frontend Developer — Example Corp (Warsaw / hybrid)
+
+We are looking for an experienced frontend engineer to join our product team. You will work on a large Angular application used by enterprise clients.
+
+Requirements:
+- 5+ years with Angular (we are on Angular 17; migration to 18 planned)
+- Strong TypeScript, RxJS, and state management (NgRx or similar)
+- Experience with AG Grid or similar data grids
+- Jest or Jasmine for unit tests; E2E with Cypress is a plus
+- Comfortable with REST APIs, code review, and CI (Jenkins or GitHub Actions)
+- English B2+ for daily communication
+
+Nice to have: Nx monorepo, Signals, experience in fintech or regulated domains.
+
+We offer: competitive salary, flexible hours, private medical care.
+
+Apply with CV and a short note on why this role fits you.

@@ -93,6 +93,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/schedule - show source schedule\n"
         "/status - show schedule + bot status\n"
         "/force &lt;url&gt; - process URL even if already in tracker\n"
+        "/process_manual - process MANUAL rows with filled job_posting.txt\n"
         "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
@@ -129,6 +130,79 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(_run_apply_agent(url, force=True))
 
 
+async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Process all MANUAL-pending tracker rows whose job_posting.txt is already filled."""
+    from hunter.tracker import get_all_manual_pending
+    from job_fetch.jobleads import try_load_manual_job_posting
+
+    rows = await asyncio.to_thread(get_all_manual_pending)
+    if not rows:
+        await update.message.reply_text("✅ Нет MANUAL вакансий для обработки.")
+        return
+
+    ready = []
+    for row in rows:
+        content = await asyncio.to_thread(try_load_manual_job_posting, row["url"])
+        if content:
+            ready.append(row)
+
+    if not ready:
+        lines = [
+            f"  Row {r['row']}: <b>{r['company']}</b> - {r['title']}"
+            + (f"\n    📁 <code>{r['folder']}</code>" if r.get("folder") else "")
+            for r in rows
+        ]
+        await update.message.reply_text(
+            f"📝 <b>Найдено {len(rows)} MANUAL вакансий, но ни одна не готова.</b>\n\n"
+            + "\n".join(lines)
+            + "\n\nДобавь текст вакансии под маркером в <code>job_posting.txt</code> и повтори.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    not_ready_count = len(rows) - len(ready)
+    note = f" (ещё {not_ready_count} ожидают текста)" if not_ready_count else ""
+    await update.message.reply_text(
+        f"🚀 <b>Запускаю обработку {len(ready)} готовых вакансий{note}…</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    logger.info(f"[process_manual] Processing {len(ready)} ready MANUAL rows")
+
+    ok = failed = 0
+    total = len(ready)
+    for i, row in enumerate(ready, 1):
+        url = row["url"]
+        try:
+            await update.message.reply_text(
+                f"⏳ [{i}/{total}] <b>{row['company']}</b> — {row['title']}\n🔗 {url}",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            pass
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(APPLY_AGENT_PATH),
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_APPLY_AGENT_TIMEOUT)
+
+        if proc.returncode == 0:
+            ok += 1
+            logger.info(f"[process_manual] OK: {url}")
+        else:
+            failed += 1
+            logger.error(f"[process_manual] FAIL: {url}\n{stderr.decode(errors='replace')[-300:]}")
+
+    await update.message.reply_text(
+        f"🏁 <b>process_manual завершён</b>\n✅ {ok} / ❌ {failed} / Всего: {total}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from hunter.main import _hunt_lock
     from hunter.config import AUTO_APPLY
@@ -161,6 +235,14 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("⏳ Syncing to_send.xlsx → tracker.xlsx…")
     try:
         from hunter import to_send
+        if to_send.is_excel_open():
+            await update.message.reply_text(
+                "⚠️ <b>to_send.xlsx открыт в Excel!</b>\n\n"
+                "Несохранённые изменения не будут прочитаны.\n"
+                "<b>Сохрани файл (Ctrl+S) и запусти /sync_sent снова.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         result = to_send.sync_and_rebuild()
         synced = result["synced"]
         rebuilt = result["rebuilt"]
@@ -413,9 +495,35 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Single job URL — check tracker first
     entries = await asyncio.to_thread(lookup_url, text)
     if entries:
+        only_manual = all(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
+        if only_manual:
+            from job_fetch.jobleads import try_load_manual_job_posting
+            manual_content = await asyncio.to_thread(try_load_manual_job_posting, text)
+            if manual_content:
+                await update.message.reply_text(
+                    f"✅ <b>Текст вакансии найден в файле — запускаю генерацию…</b>\n"
+                    f"🔗 {text}\n\nЭто займёт 1-2 минуты.",
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                logger.info(f"[URL handler] MANUAL row with ready file, launching apply_agent: {text}")
+                asyncio.create_task(_run_apply_agent(text))
+                return
+            else:
+                e = entries[-1]
+                folder_info = f'\n📁 <code>{e["folder"]}</code>' if e.get("folder") else ""
+                await update.message.reply_text(
+                    f"📝 <b>Вакансия ожидает текста (MANUAL)</b>\n\n"
+                    f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
+                    f"Вставь полный текст вакансии под маркером в <code>job_posting.txt</code> и пришли эту ссылку ещё раз.\n"
+                    f"Либо отправь сюда текст вакансии (можно вместе со ссылкой) — обработаю сразу.",
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                return
+
         lines = []
         for e in entries:
-            status = "Sent" if e["sent"] else e["ats"] or "?"
             sent_info = f' | Sent: {e["sent"]}' if e["sent"] else ""
             folder_info = f'\n    Folder: <code>{e["folder"]}</code>' if e["folder"] else ""
             lines.append(
@@ -591,18 +699,33 @@ async def _run_linkedin_batch(job_ids: list[str], update) -> None:
 
 # ── Application factory ───────────────────────────────────────────────────────
 
+async def _set_bot_commands(app: Application) -> None:
+    """Register command list with Telegram so the '/' menu is populated."""
+    from telegram import BotCommand
+    await app.bot.set_my_commands([
+        BotCommand("start",          "Show help"),
+        BotCommand("hunt",           "Run job search now"),
+        BotCommand("status",         "Bot status and schedule"),
+        BotCommand("schedule",       "Show source schedule"),
+        BotCommand("force",          "Process URL even if already in tracker"),
+        BotCommand("process_manual", "Process MANUAL rows with filled job_posting.txt"),
+        BotCommand("sync_sent",      "Sync Sent column from to_send.xlsx"),
+    ])
+
+
 def build_application() -> Application:
     """Build and configure the Telegram Application instance."""
     import pytz
     from datetime import time as dt_time
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     # Command handlers
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("hunt",      cmd_hunt))
-    app.add_handler(CommandHandler("force",     cmd_force))
-    app.add_handler(CommandHandler("status",    cmd_status))
+    app.add_handler(CommandHandler("force",          cmd_force))
+    app.add_handler(CommandHandler("process_manual", cmd_process_manual))
+    app.add_handler(CommandHandler("status",         cmd_status))
     app.add_handler(CommandHandler("schedule",  cmd_schedule))
     app.add_handler(CommandHandler("sync_sent", cmd_sync_sent))
 

@@ -1,6 +1,6 @@
-"""Banned opener patterns — ensure pretentious / boilerplate openings are rejected."""
+"""Banned opener/body patterns — classic openers OK; resume-site junk flagged."""
 
-from apply_agent import _opener_banlist_hits
+from apply_agent import _body_banlist_hits, _opener_banlist_hits
 
 
 # ── should TRIGGER the banlist ───────────────────────────────────────────────
@@ -39,12 +39,18 @@ def test_banlist_exactly_the_challenges() -> None:
     assert _opener_banlist_hits(letter)
 
 
-def test_banlist_i_am_writing_to() -> None:
-    assert _opener_banlist_hits("I am writing to express my interest in the role.")
+def test_classic_opener_i_am_writing_allowed() -> None:
+    assert _opener_banlist_hits("I am writing to express my interest in the role.") == []
 
 
-def test_banlist_i_am_excited_to() -> None:
-    assert _opener_banlist_hits("I am excited to apply for the Senior Angular role.")
+def test_classic_opener_i_am_excited_allowed() -> None:
+    assert _opener_banlist_hits("I am excited to apply for the Senior Angular role.") == []
+
+
+def test_opener_ive_had_opportunity_banned() -> None:
+    assert _opener_banlist_hits(
+        "I've had the opportunity to closely follow your company online.",
+    )
 
 
 def test_banlist_as_a_self_label() -> None:
@@ -90,3 +96,34 @@ def test_good_opener_concrete_migration_fact() -> None:
         "Angular 19, shipping it to 300+ German cooperative banks."
     )
     assert _opener_banlist_hits(letter) == []
+
+
+def test_good_opener_skillbox_style_with_posting_anchor() -> None:
+    letter = (
+        "I am writing to express my interest in the Senior Frontend Developer role at Acme, "
+        "as advertised on LinkedIn. Your posting calls for Angular 17+ and NgRx — the stack "
+        "I have used for the past three years at Fairmarkit."
+    )
+    assert _opener_banlist_hits(letter) == []
+
+
+def test_body_skillbox_excited_to_discuss_ok() -> None:
+    text = "I am eager to discuss how my skills can support your upcoming roadmap."
+    assert _body_banlist_hits(text) == []
+
+
+def test_body_aligns_with_my_background_ok() -> None:
+    assert _body_banlist_hits("This aligns with my background in enterprise Angular.") == []
+
+
+def test_body_technical_acumen_flagged() -> None:
+    assert _body_banlist_hits(
+        "The role required deep technical acumen across the full stack.",
+    )
+
+
+def test_body_seamlessly_excellence_flagged() -> None:
+    hits = _body_banlist_hits(
+        "My experience aligns seamlessly with the standards of excellence your team upholds.",
+    )
+    assert hits

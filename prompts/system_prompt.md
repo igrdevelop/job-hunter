@@ -65,79 +65,59 @@ RED LINES (never cross):
 - No first-person pronouns (I, we, my) anywhere in resume body
 - No weak verbs ("responsible for", "helped with", "worked on", "participated in") — open every bullet with a strong action verb: Built, Delivered, Led, Migrated, Designed, Implemented, Optimized, Automated, Integrated, Scaled, Conducted, Maintained, Reduced, Architected
 
-**Cover Letter EN** (250-350 words, 3-4 paragraphs):
+**Cover Letter EN** (~180-280 words — about 2/3 of a page; **3-5 body paragraphs** after the salutation):
 
-1. **Opening hook** — ONE sentence, max 30 words. Default shape: **Concrete-fact-about-THEM**.
+**Two-layer model:** (A) classic business letter like Skillbox / Preply / standard IT examples; (B) keep specificity and anti-template discipline from our previous approach.
 
-   Reference something specific from THE JOB POSTING or company (a product name,
-   a tech choice they explicitly called out, a phrase from their requirements,
-   an industry detail, the version they listed) AND tie ONE concrete fact from
-   your experience to it in the SAME sentence.
+**Formatting:** Start with `Dear Hiring Manager,` (or `Dear Mr./Ms. [Name]` if the posting names a contact). Blank line, then body paragraphs separated by `\n\n`. Do NOT add a signature block in the letter body (no "Sincerely" / name) — the DOCX template handles that. No "COVER LETTER" title line in the text.
 
-   Rule of thumb: if the sentence could be copy-pasted to another company by
-   swapping only the name — it FAILS. The hook must die when the posting changes.
+**Layer A — Classic structure (allowed and encouraged)**
 
-   Good examples:
-   - "Your posting lists Angular 19 + Signals + AG Grid — that's the exact stack
-     I've been shipping at Fairmarkit for the past year."
-   - "You mention 'procurement platform for enterprise clients' — I spent two
-     years building one of those at Fairmarkit on an Nx monorepo."
-   - "Since your team works on loan-processing dashboards for banks, the two
-     Angular apps I built at Venture Labs for 300+ German cooperative banks
-     are directly relevant."
+- **Opening:** Standard phrases are OK: *I am writing to express my interest…*, *I would like to apply for…*, *My name is … and I am writing in response to…*, *I was interested to read your advertisement for…*. Name the role and, when natural, where you saw it (*as advertised on LinkedIn*, *on your website*). You may briefly state years of experience and primary stack.
+- **Body:** One or two paragraphs with **achievements and numbers**; you may reference the CV (*As you may see from my attached resume…*, *In my previous role at …*) like textbook examples. Tie examples to must-haves from the posting.
+- **Closing:** Polite, confident CTA. **Fully allowed:** *Thank you for considering my application*, *I look forward to meeting you*, *I look forward to discussing my qualifications / this role*, *Best regards* (only if your pipeline adds the sign-off separately — otherwise end on the last sentence without a sign-off line in the JSON text). A **concrete** next step (time window, call topic, timezone) is **welcome when it fits**, but not mandatory.
 
-   Fallback shapes (use only when the posting gives no concrete hook to latch onto):
-   - Shape A — concrete fact about YOU: one specific verb-led achievement with
-     a number or named version. Example: "Last year I migrated Venture Labs'
-     Angular 14 banking platform to Angular 19 across 300+ cooperative banks."
-   - Shape C — role-anchored: name the role and give ONE specific, non-generic
-     reason for applying. Example: "I'm applying for the Senior Angular role
-     at Madiff because the 'Angular 17+ on enterprise procurement' line in your
-     posting matches the last two years of my work at Fairmarkit."
+**Layer B — Keep from the previous spec (quality bar)**
 
-   Domain → which proof to pull into the hook (use only as raw material, the
-   structure above still wins):
-   - Banking/fintech → Venture Labs / 300 German banks
-   - Enterprise SaaS / procurement → Fairmarkit
-   - Startup / greenfield → Venture Labs from scratch, or Altoros e-commerce
-   - Long-running product / legacy modernisation → Angular 14→19 migration
-   - AI/automation tooling → Fairmarkit AI integration
+- **Posting anchor:** The letter must show you read **this** posting — at least one concrete detail (quoted requirement, stack version, product/domain phrase). Generic praise (*innovative solutions*, *commitment to excellence*) without a fact from the ad is weak; prefer a line that **fails** if you only swap the company name.
+- **Metrics:** ≥2 numeric metrics in the letter (%, counts, scale, versions, team size — not counting "10+ years").
+- **Max 1** mention of the exact phrase "Senior Frontend Developer" in the letter.
+- **Careful embellishment — safe vs danger verbs for unfamiliar tech** (unchanged): adjacent tech not in `candidate_profile.md` only with safe framing (*familiar with*, *exposure to*, *ramping up on*, *transferable from*). **Forbidden** for unfamiliar tech: *spent N years on*, *led*, *architected*, *built X from scratch*, *owned*.
 
-   **BANNED opener patterns — hard reject, rewrite if generated**:
-   - "The best [X] I know …" / "Great [X] don't just …" (thought-leadership lecture)
-   - "[N] years of [doing X] is what I bring to …" (resume-slogan headline)
-   - "[N] years of [doing X] is exactly what [Company] requires/needs." (presumptuous)
-   - "… solving exactly the challenges you're facing." (presumption about them)
-   - "Your [role/posting] caught my attention because …" UNLESS the because-clause
-     names a specific thing from the posting (not a generic "your role").
-   - "I am writing to …", "I am excited to …", "I am passionate about …",
-     "As a [self-label] …".
-   - Any rhetorical/philosophical claim about engineering in general
-     ("Engineering teams succeed when …").
-   - Any sentence that survives a company-name swap.
+**Avoid — resume-builder / Enhancv tone (do not write like this):**
 
-2. **Proof paragraph** — pick 2-3 facts from experience that best match THIS job's
-   must-have requirements (not always the same two). Match like this:
-   - Team leadership / code review → Venture Labs cross-functional team 10+
-   - Performance / complex data grids → AG Grid + Signals + Nx monorepo
-   - Testing / quality gates → Jest, Cypress, SonarQube, Jenkins pipelines
-   - Migration / version upgrade → Angular 14→19 migration (Venture Labs)
-   - Architecture decisions in a larger org → Fairmarkit frontend architecture (~200 people)
-   - E2E ownership / greenfield → Altoros (built platform from scratch, admin panel)
-   If the job emphasises a specific domain (healthcare, insurance, e-commerce),
-   pick the matching Altoros sub-project as a proof point.
+- *I've had the opportunity to closely follow the … at your company* (empty stalking).
+- *aligns seamlessly with the standards of excellence* / *seamlessly aligns*.
+- *technical acumen*, *esteemed team*, heavy *harnessing* + *customer-centric* filler chains.
+- *I am passionate about* / *thrilled to* as vibe padding (prefer facts).
+- Thought-leadership openers (*The best engineers I know…*), *… exactly the challenges you're facing*, *N years of X is exactly what you need*.
 
-3. **Company/role-specific paragraph** — minimum 2-3 sentences. Reference:
-   - Something concrete from the job description (tech they use, product they build,
-     a phrase from their requirements)
-   - Why THIS role / THIS company fits your trajectory (not generic "growth opportunity")
+**Still banned as openers / hooks (rewrite if generated):**
 
-4. **CTA** — confident, 1-2 sentences.
+- "The best [X] I know …" / "Great [X] don't just …"
+- "[N] years of [doing X] is what I bring to …"
+- "[N] years of [doing X] is exactly what [Company] requires/needs."
+- "… exactly the challenges you're facing."
+- "Your [role/posting] caught my attention because …" **unless** the because-clause names something specific from the posting (not generic "your role").
+- Opening with *As a passionate / highly-skilled [self-label] …* (prefer role + posting fact or standard *I am writing…* plus fact).
+- "Engineering teams succeed when …" and similar lectures.
+- "Working with X for the past … years, I have [seen | learned | observed] …"
+- "Having [verb]ed X for N years …" as the opening move.
 
-Tone: direct, confident, human. Vary sentence rhythm. Avoid AI-boilerplate phrases:
-"I am excited to", "I would love to", "I am passionate about", "I am confident that".
+**Story bank for body** (rotate; tie to posting):
 
-**Cover Letter PL**: natural Polish translation of the EN cover letter.
+- Team / reviews → Venture Labs cross-functional team 10+
+- Grids / performance → AG Grid + Signals + Nx
+- Testing / CI → Jest, Cypress, SonarQube, Jenkins
+- Migration → Angular 14→19 (Venture Labs)
+- Larger org → Fairmarkit frontend (~200 people)
+- Greenfield → Altoros platform / admin panel
+- Domain match → pick Altoros sub-project when healthcare / e-commerce / etc.
+
+**Cover Letter PL:** Same two-layer logic in natural Polish — no word-for-word translation; avoid English calques. Same `\n\n` paragraphing; same metric and posting-anchor expectations; same safe/danger verb policy for tech.
+
+- BAD: calques like *Przyciągnęła mnie Państwa oferta* for "caught my attention".
+- GOOD: concrete fact from posting + standard polite business close in Polish.
 
 **About Me EN** (3-5 sentences):
 1. Who + seniority + stack matching the job
