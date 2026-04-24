@@ -6,11 +6,11 @@
 
 | Категория | Примерно сколько | Комментарий |
 |-----------|------------------|-------------|
-| **Tier A — API / RSS, без скрейпа** | **1** | Осталось: We Work Remotely (RSS). Remote OK, Remotive, Arbeitnow, Himalayas, 4dayweek.io уже сделаны. |
+| **Tier A — API / RSS, без скрейпа** | **0** | Запланированные источники закрыты: в т.ч. We Work Remotely (RSS). Дальше — по желанию (tier B/C). |
 | **Tier B** | **0–1** | Remoteleaf — только если появится нормальная публичная дока / ключ. |
 | **Tier C — скрейп / тяжёлая поддержка** | **5+** | Wellfound, Jobgether, EuroTechJobs, Relocate.me, Landing.jobs — без открытого feed; подключать только осознанно. |
 
-Итого **реалистичный минимум «добить план»**: **ещё 1 источник** (tier A). Всё остальное — по желанию и трудозатратам, не «обязательный» объём.
+Итого **минимальный tier A** выполнен. Дополнительные доски — по желанию (tier B/C), не обязательный объём.
 
 ---
 
@@ -32,12 +32,13 @@
 | Remote OK | `remoteok` | JSON API |
 | Himalayas | `himalayas` | JSON API |
 | 4dayweek.io | `fourdayweek` | JSON API |
+| We Work Remotely | `weworkremotely` | RSS |
 
 ---
 
-## Очередь tier A (рекомендуемый порядок)
+## Очередь tier A
 
-1. **We Work Remotely** — `weworkremotely.com/remote-jobs.rss`: один большой RSS, реализация близка к [solidjobs.py](../hunter/sources/solidjobs.py); детали — `fetch_html` по `<link>`.
+*Пусто — рекомендуемый минимум tier A исчерпан.*
 
 Для каждого нового источника после мержа: обновить эту таблицу, `CLAUDE.md`, `.env.example`, промпты (не использовать имя доски как `company_name`), при необходимости добавить `NEXT_SOURCE_*.md` с чеклистом.
 
@@ -59,7 +60,7 @@
 - [NEXT_SOURCE_REMOTIVE_PLAN.md](NEXT_SOURCE_REMOTIVE_PLAN.md) — выполнено  
 - [NEXT_SOURCE_REMOTEOK_PLAN.md](NEXT_SOURCE_REMOTEOK_PLAN.md) — выполнено  
 
-Следующий логичный отдельный план при желании: **We Work Remotely** (скопировать структуру с Solid.Jobs).
+Дальше при желании: tier B (Remoteleaf и т.п.) или tier C из таблицы «Вне scope».
 
 ---
 
@@ -69,6 +70,7 @@
 /hunt remoteok
 /hunt himalayas
 /hunt fourdayweek
+/hunt weworkremotely
 /hunt remotive arbeitnow
 /schedule
 ```

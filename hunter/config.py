@@ -162,6 +162,13 @@ FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in 
     "yes",
 )
 
+# ── We Work Remotely source config ────────────────────────────────────────────
+WEWORKREMOTELY_ENABLED: bool = os.getenv("WEWORKREMOTELY_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",

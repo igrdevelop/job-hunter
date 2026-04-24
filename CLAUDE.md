@@ -47,6 +47,7 @@ hunter/
     remoteok.py         # Remote OK JSON API (remoteok.com/api)
     himalayas.py        # Himalayas.app JSON API (remote jobs search)
     fourdayweek.py      # 4dayweek.io JSON API v2
+    weworkremotely.py   # We Work Remotely RSS feed
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
 
 job_fetch/
