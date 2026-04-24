@@ -31,7 +31,7 @@ hunter/
   models.py             # Job dataclass (title, company, location, salary, url, source)
   filters.py            # Central job filter: location, seniority, stack, exclude patterns
   main.py               # Hunt loop: fetch all sources → filter → dedup → notify Telegram
-  telegram_bot.py       # Telegram bot: /hunt, /force, /status, /schedule commands + inline buttons
+  telegram_bot.py       # Telegram bot: /hunt [sources…], /force, /status, /schedule + inline buttons
   tracker.py            # tracker.xlsx read/write: known URLs, add rows, dedup helpers
   sources/
     base.py             # BaseSource ABC — all scrapers implement search() → list[Job]
@@ -42,6 +42,7 @@ hunter/
     pracuj.py           # Pracuj.pl scraper (cloudscraper + __NEXT_DATA__ parsing)
     theprotocol.py      # theprotocol.it scraper (cloudscraper + __NEXT_DATA__ / dehydratedState)
     solidjobs.py        # Solid.Jobs RSS feed scraper
+    arbeitnow.py        # Arbeitnow.com JSON API (EU / remote)
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
 
 job_fetch/
@@ -92,7 +93,7 @@ requirements.txt
 | `GENERATE_PL_RESUME` | `false` | Generate Polish CV variant (full-mode only by default) |
 | `INHIRE_ENABLED` | `false` | Requires Playwright — disabled until installed |
 
-All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`.
+All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`.
 
 ---
 

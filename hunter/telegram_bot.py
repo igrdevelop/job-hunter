@@ -89,7 +89,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🤖 <b>Job Hunter Bot</b>\n\n"
         "Commands:\n"
-        "/hunt - run search now\n"
+        "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
         "/schedule - show source schedule\n"
         "/status - show schedule + bot status\n"
         "/force &lt;url&gt; - process URL even if already in tracker\n"
@@ -100,11 +100,55 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _parse_hunt_source_args(args: list[str], valid_names: set[str]) -> tuple[list[str] | None, list[str]]:
+    """Split /hunt arguments into source slugs. Returns (names or None for «all», unknown slugs)."""
+    requested: list[str] = []
+    for a in args:
+        for part in a.split(","):
+            part = part.strip().lower()
+            if part:
+                requested.append(part)
+    if not requested:
+        return None, []
+    seen: set[str] = set()
+    unique: list[str] = []
+    for r in requested:
+        if r not in seen:
+            seen.add(r)
+            unique.append(r)
+    unknown = [r for r in unique if r not in valid_names]
+    if unknown:
+        return [], unknown
+    return unique, []
+
+
 async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manual trigger — runs the full hunt cycle immediately."""
-    await update.message.reply_text("🔍 Running hunt now...")
+    """Manual trigger — full hunt or a subset of sources (same names as in /schedule)."""
     from hunter.main import run_hunt
-    await run_hunt(context)
+    from hunter.sources import ALL_SOURCES
+
+    valid_names = {s.name for s in ALL_SOURCES}
+    source_names, unknown = _parse_hunt_source_args(context.args or [], valid_names)
+
+    if unknown:
+        avail = ", ".join(sorted(valid_names))
+        await update.message.reply_text(
+            f"❌ Unknown source(s): <b>{', '.join(unknown)}</b>\n\n"
+            f"Available: <code>{avail}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if source_names:
+        label = ", ".join(source_names)
+        await update.message.reply_text(
+            f"🔍 Running hunt: <b>{label}</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        await run_hunt(context, source_names=source_names)
+    else:
+        await update.message.reply_text("🔍 Running hunt (all sources)...")
+        await run_hunt(context)
 
 
 async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -704,7 +748,7 @@ async def _set_bot_commands(app: Application) -> None:
     from telegram import BotCommand
     await app.bot.set_my_commands([
         BotCommand("start",          "Show help"),
-        BotCommand("hunt",           "Run job search now"),
+        BotCommand("hunt",           "Run search (optional: source names)"),
         BotCommand("status",         "Bot status and schedule"),
         BotCommand("schedule",       "Show source schedule"),
         BotCommand("force",          "Process URL even if already in tracker"),

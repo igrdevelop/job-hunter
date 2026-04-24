@@ -1,7 +1,55 @@
+import html
 import re
 
 from hunter.models import Job
 from hunter.config import FILTER
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
+
+# If any pattern matches job text → treat as German required (skip job),
+# unless a german_not_required pattern matches first.
+_GERMAN_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        # English
+        r"\bfluent\s+in\s+german\b",
+        r"\bnative(?:[-\s]+level)?\s+german\b",
+        r"\bgerman\s+native\b",
+        r"\bprofessional\s+proficiency\s+in\s+german\b",
+        r"\bworking\s+knowledge\s+of\s+(?:the\s+)?german\s+language\b",
+        r"\bgerman\s+language\s+(?:skills?|proficiency)\b",
+        r"\bgerman\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
+        r"\bknowledge\s+of\s+german\s+is\s+(?:essential|required|mandatory)\b",
+        r"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?german\b",
+        r"\bgerman\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
+        r"\bgerman\s+and\s+english\s+are\s+both\s+(?:required|mandatory)\b",
+        r"\bbusiness\s+german\b",
+        # German phrases
+        r"\bdeutschkenntnisse?\b",
+        r"\bsehr\s+gute\s+deutschkenntnisse\b",
+        r"\bverhandlungssicher(?:es)?\s+deutsch\b",
+        r"\bdeutsch\s+(?:fließend|fließende)\b",
+        r"\bzwingend\s+.*\bdeutsch\b",
+        r"\bvoraussetzung\b.*\bdeutschkenntnis",
+        # Polish boards
+        r"\bjęzyk\s+niemiecki\b.*\b(?:wymagany|wymagane|konieczn|b2|c1|c2)\b",
+        r"\b(?:wymagany|wymagana|wymagane)\s+język\s+niemieckiego?\b",
+        r"\b(?:wymagana?|bardzo\s+dobra?)\s+znajomość\s+niemieckiego\b",
+        r"\bniemiecki\s*[\(:]?\s*(?:b2|c1|c2)\b",
+    )
+)
+
+_GERMAN_NOT_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bno\s+german\s+required\b",
+        r"\bgerman\s+not\s+required\b",
+        r"\bnot\s+require(?:d)?\s+german\b",
+        r"\bknowledge\s+of\s+german\s+is\s+not\s+required\b",
+        r"\benglish\s+is\s+(?:the\s+)?(?:working|company|office)\s+language\b",
+        r"\bworking\s+language\s*[:\s]+\s*english\b",
+    )
+)
 
 
 def _matches_title_keywords(title: str) -> bool:
@@ -80,6 +128,10 @@ def _is_react_without_angular(job: Job) -> bool:
     # theprotocol.it: raw["technologies"] = ["JavaScript", "Angular", ...]
     for t in raw.get("technologies") or []:
         tech_texts.append(_lower_text_fragment(t))
+
+    # Arbeitnow: raw["tags"] = ["javascript", "react", ...]
+    for tag in raw.get("tags") or []:
+        tech_texts.append(_lower_text_fragment(tag))
     for tile in raw.get("tiles", {}).get("values", []) or []:
         if isinstance(tile, dict):
             tech_texts.append(_lower_text_fragment(tile.get("value")))
@@ -100,6 +152,60 @@ def _is_react_without_angular(job: Job) -> bool:
     has_react = bool(re.search(r"\breact\b", combined))
     has_angular = "angular" in combined
     return has_react and not has_angular
+
+
+def _strip_html_fragment(s: str) -> str:
+    t = _HTML_TAG_RE.sub(" ", s)
+    t = html.unescape(t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _job_plain_text_blob(job: Job, max_chars: int = 24_000) -> str:
+    """Title, location, and long text fields from raw (for language / requirement checks)."""
+    parts: list[str] = [job.title or "", job.location or ""]
+    raw = job.raw or {}
+    favored_keys = (
+        "description",
+        "jobDescription",
+        "content",
+        "body",
+        "about",
+        "requirements",
+        "offer",
+    )
+    seen: set[int] = set()
+
+    def add_chunk(text: str) -> None:
+        tid = id(text)
+        if tid in seen:
+            return
+        seen.add(tid)
+        parts.append(text)
+
+    for key in favored_keys:
+        v = raw.get(key)
+        if isinstance(v, str) and v.strip():
+            add_chunk(_strip_html_fragment(v))
+
+    for key, v in raw.items():
+        if key in favored_keys or not isinstance(v, str) or len(v) < 350:
+            continue
+        add_chunk(_strip_html_fragment(v))
+
+    blob = " ".join(parts)
+    return blob if len(blob) <= max_chars else blob[:max_chars]
+
+
+def _is_german_language_required(job: Job) -> bool:
+    """True → skip job (German appears to be a hard requirement)."""
+    if not FILTER.get("exclude_german_language_required", False):
+        return False
+    blob = _job_plain_text_blob(job)
+    if not blob.strip():
+        return False
+    if any(p.search(blob) for p in _GERMAN_NOT_REQUIRED_RES):
+        return False
+    return any(p.search(blob) for p in _GERMAN_REQUIRED_RES)
 
 
 def _matches_location(job: Job) -> bool:
@@ -126,6 +232,8 @@ def apply_filters(jobs: list[Job]) -> list[Job]:
         if _is_react_without_angular(job):
             continue
         if not _matches_location(job):
+            continue
+        if _is_german_language_required(job):
             continue
         result.append(job)
     return result

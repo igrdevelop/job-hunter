@@ -68,5 +68,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.jobleads import fetch_jobleads
         return fetch_jobleads(url)
 
+    if "arbeitnow.com" in domain:
+        logger.info(f"[job_fetch] Arbeitnow detected: {url}")
+        from job_fetch.arbeitnow import fetch_arbeitnow
+        return fetch_arbeitnow(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

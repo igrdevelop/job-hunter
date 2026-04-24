@@ -111,6 +111,10 @@ FILTER = {
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
     "exclude_react_without_angular": True,
+
+    # Drop roles that require German (checked in title + location + raw description-like fields).
+    # Set false if you speak German or use boards where this produces false positives.
+    "exclude_german_language_required": True,
 }
 
 # ── LinkedIn source config ────────────────────────────────────────────────────
@@ -138,6 +142,9 @@ INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "true").lower() in ("true", "
 # Detail pages are often Cloudflare-blocked; apply_agent then writes MANUAL tracker
 # rows + stub job_posting.txt — paste description and re-run apply on the same URL.
 JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# ── Arbeitnow source config ───────────────────────────────────────────────────
+ARBEITNOW_ENABLED: bool = os.getenv("ARBEITNOW_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [

@@ -111,3 +111,68 @@ def test_apply_filters_rejects_qa_automation_roles() -> None:
     ]
     filtered = apply_filters(jobs)
     assert filtered == []
+
+
+# ── German language requirement ───────────────────────────────────────────────
+
+
+def test_apply_filters_rejects_fluent_german_in_description() -> None:
+    jobs = [
+        _job(
+            title="Senior Frontend Developer (Angular)",
+            location="Remote",
+            raw={"description": "<p>We need someone fluent in German for client calls.</p>"},
+        )
+    ]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_rejects_german_c1_in_title() -> None:
+    jobs = [_job(title="Frontend Developer (Angular, German C1)", location="Remote")]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_keeps_english_working_language_exemption() -> None:
+    jobs = [
+        _job(
+            title="Senior Frontend Developer (Angular)",
+            location="Berlin (Remote)",
+            raw={
+                "description": (
+                    "English is the company language. "
+                    "Knowledge of German is not required. "
+                ),
+            },
+        )
+    ]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 1
+
+
+def test_apply_filters_rejects_polish_niemiecki_wymagany() -> None:
+    jobs = [
+        _job(
+            title="Frontend Developer Angular",
+            location="Remote",
+            raw={"description": "Wymagany język niemiecki min. B2."},
+        )
+    ]
+    filtered = apply_filters(jobs)
+    assert filtered == []
+
+
+def test_apply_filters_allows_german_when_filter_disabled(monkeypatch) -> None:
+    import hunter.config as cfg
+
+    monkeypatch.setitem(cfg.FILTER, "exclude_german_language_required", False)
+    jobs = [
+        _job(
+            title="Senior Frontend Developer (Angular)",
+            location="Remote",
+            raw={"description": "Fluent in German required."},
+        )
+    ]
+    filtered = apply_filters(jobs)
+    assert len(filtered) == 1
