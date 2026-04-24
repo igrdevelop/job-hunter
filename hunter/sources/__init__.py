@@ -10,6 +10,7 @@ from hunter.config import (
     REMOTIVE_ENABLED,
     REMOTEOK_ENABLED,
     HIMALAYAS_ENABLED,
+    FOURDAYWEEK_ENABLED,
 )
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
@@ -63,3 +64,7 @@ if REMOTEOK_ENABLED:
 if HIMALAYAS_ENABLED:
     from hunter.sources.himalayas import HimalayasSource
     ALL_SOURCES.append(HimalayasSource())
+
+if FOURDAYWEEK_ENABLED:
+    from hunter.sources.fourdayweek import FourdayweekSource
+    ALL_SOURCES.append(FourdayweekSource())

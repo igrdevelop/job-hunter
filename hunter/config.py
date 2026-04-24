@@ -155,6 +155,13 @@ REMOTEOK_ENABLED: bool = os.getenv("REMOTEOK_ENABLED", "true").lower() in ("true
 # ── Himalayas source config ───────────────────────────────────────────────────
 HIMALAYAS_ENABLED: bool = os.getenv("HIMALAYAS_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── 4dayweek.io source config ───────────────────────────────────────────────
+FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",

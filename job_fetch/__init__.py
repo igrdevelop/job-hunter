@@ -83,5 +83,10 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.remoteok import fetch_remoteok
         return fetch_remoteok(url)
 
+    if "4dayweek.io" in domain:
+        logger.info(f"[job_fetch] 4dayweek.io detected: {url}")
+        from job_fetch.fourdayweek import fetch_fourdayweek
+        return fetch_fourdayweek(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)
