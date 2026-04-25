@@ -164,12 +164,138 @@ job_fetch/ats.py                    — fetcher для деталей вакан
 **Критерий готовности Phase 1:** `/hunt ats_aggregator` в Telegram присылает Netguru-вакансии.
 
 ### Phase 2 — добавить остальные провайдеры
-- `hunter/ats/greenhouse.py`
-- `hunter/ats/lever.py`
-- `hunter/ats/recruitee.py`
-- `hunter/ats/ashby.py`
-- Соответствующие fetcher'ы в `job_fetch/`
-- Тесты на парсинг для каждого (мок-ответы)
+
+**Цель:** покрыть Greenhouse, Lever, Recruitee, Ashby. Каждый добавляет новые компании без нового кода — только строки в `ats_companies.json`.
+
+#### Шаги
+
+**1. Greenhouse** (`hunter/ats/greenhouse.py`)
+
+```
+API: GET https://boards-api.greenhouse.io/v1/boards/{slug}/jobs
+Auth: нет
+Pagination: нет, все вакансии за один запрос
+Поля ответа (top-level):
+  { "jobs": [ { "id", "title", "location": {"name"}, "absolute_url",
+                "updated_at", "departments": [{"name"}] } ] }
+URL: absolute_url из ответа
+state: нет поля — все возвращённые вакансии считаются published
+Домен для job_fetch: boards.greenhouse.io
+job_fetch файл: job_fetch/ats_greenhouse.py (html_fallback достаточно)
+```
+
+Реализация:
+1. `hunter/ats/greenhouse.py` — `GreenhouseProvider(ATSProvider)`, метод `fetch(slug, company_name)`
+2. `parse_greenhouse_job(raw, company_name) → Optional[Job]`
+   - `location = raw["location"]["name"]` (или "Remote" если содержит "remote")
+   - `url = raw["absolute_url"]`
+   - `source = f"ats:greenhouse:{slug}"`
+3. `job_fetch/ats_greenhouse.py` — html_fallback
+4. Регистрация в `job_fetch/__init__.py` для домена `boards.greenhouse.io`
+5. Регистрация в `hunter/sources/ats_aggregator.py` PROVIDERS: `"greenhouse": GreenhouseProvider()`
+6. Тест `tests/test_ats_greenhouse_parse.py` — мок, 4–5 кейсов
+7. Добавить в `ats_companies.json` тестовую компанию (например `gitlab` / `greenhouse`)
+
+---
+
+**2. Lever** (`hunter/ats/lever.py`)
+
+```
+API: GET https://api.lever.co/v0/postings/{slug}?mode=json
+Auth: нет
+Pagination: нет
+Поля ответа (массив):
+  [ { "id", "text" (=title), "categories": {"location", "team"},
+      "hostedUrl", "createdAt", "descriptionPlain" } ]
+URL: hostedUrl
+Домен для job_fetch: jobs.lever.co
+job_fetch файл: job_fetch/ats_lever.py (html_fallback достаточно)
+```
+
+Реализация:
+1. `hunter/ats/lever.py` — `LeverProvider(ATSProvider)`
+2. `parse_lever_job(raw, slug, company_name) → Optional[Job]`
+   - `title = raw["text"]`
+   - `location = raw["categories"].get("location") or "Remote"`
+   - `url = raw["hostedUrl"]`
+   - `source = f"ats:lever:{slug}"`
+3. `job_fetch/ats_lever.py` + регистрация домена `jobs.lever.co`
+4. Регистрация в PROVIDERS: `"lever": LeverProvider()`
+5. Тест `tests/test_ats_lever_parse.py`
+6. Добавить тестовую компанию в `ats_companies.json` (например `miro` / `lever`)
+
+---
+
+**3. Recruitee** (`hunter/ats/recruitee.py`)
+
+```
+API: GET https://{slug}.recruitee.com/api/offers/
+Auth: нет
+Pagination: нет
+Поля ответа:
+  { "offers": [ { "id", "title", "location", "country_code",
+                  "careers_url", "remote_recruitment", "department" } ] }
+URL: careers_url
+Домен для job_fetch: *.recruitee.com  (проверять через endswith(".recruitee.com"))
+job_fetch файл: job_fetch/ats_recruitee.py (html_fallback)
+```
+
+Реализация:
+1. `hunter/ats/recruitee.py` — `RecruiteeProvider(ATSProvider)`
+2. `parse_recruitee_job(raw, slug, company_name) → Optional[Job]`
+   - `location = raw.get("location") or raw.get("country_code") or "Remote"`
+   - если `raw["remote_recruitment"] == True` → добавить `(Remote)` к локации
+   - `url = raw["careers_url"]`
+   - `source = f"ats:recruitee:{slug}"`
+3. `job_fetch/ats_recruitee.py` + регистрация домена (домен динамический: `{slug}.recruitee.com`)
+   - В `job_fetch/__init__.py` добавить: `if domain.endswith(".recruitee.com")`
+4. Регистрация в PROVIDERS: `"recruitee": RecruiteeProvider()`
+5. Тест `tests/test_ats_recruitee_parse.py`
+6. Добавить `apptension` в `ats_companies.json`
+
+---
+
+**4. Ashby** (`hunter/ats/ashby.py`)
+
+```
+API: GET https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true
+Auth: нет
+Pagination: нет
+Поля ответа:
+  { "jobs": [ { "id", "title", "locationName", "employmentType",
+                "jobUrl", "descriptionHtml", "isRemote",
+                "compensation": {...} (optional) } ] }
+URL: jobUrl
+Домен для job_fetch: jobs.ashbyhq.com
+job_fetch файл: job_fetch/ats_ashby.py (html_fallback)
+```
+
+Реализация:
+1. `hunter/ats/ashby.py` — `AshbyProvider(ATSProvider)`
+2. `parse_ashby_job(raw, slug, company_name) → Optional[Job]`
+   - `location = raw["locationName"]` (часто уже "Remote" или "Worldwide")
+   - `salary = _extract_ashby_salary(raw.get("compensation"))` (если есть)
+   - `url = raw["jobUrl"]`
+   - `source = f"ats:ashby:{slug}"`
+3. `job_fetch/ats_ashby.py` + регистрация домена `jobs.ashbyhq.com`
+4. Регистрация в PROVIDERS: `"ashby": AshbyProvider()`
+5. Тест `tests/test_ats_ashby_parse.py`
+6. Добавить тестовую компанию (например `linear` / `ashby`)
+
+---
+
+#### Общие шаги после всех провайдеров
+
+- Добавить в `ats_companies.json` реальные польские/EU компании из §3 Phase 3 плана (проверить slug руками: DevTools → Network на их career-странице)
+- Обновить `CLAUDE.md` — дополнить `hunter/ats/` список файлов
+- Обновить план: Phase 2 → ✅ DONE
+
+#### Acceptance criteria Phase 2
+- [ ] 4 новых адаптера, все зарегистрированы в `PROVIDERS`
+- [ ] Тесты для каждого (min 4 кейса: valid, skip-archived/invalid, location, missing-url)
+- [ ] `python -m pytest tests/` — все green
+- [ ] `python -m compileall .` — без ошибок
+- [ ] Smoke-run на реальном API хотя бы одного нового провайдера (Greenhouse или Ashby — они самые открытые)
 
 ### Phase 3 — наполнить список компаний
 Кандидаты для `ats_companies.yml` (требуют верификации — у какой компании какой ATS):
