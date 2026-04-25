@@ -93,5 +93,15 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.weworkremotely import fetch_weworkremotely
         return fetch_weworkremotely(url)
 
+    if "remoteleaf.com" in domain:
+        logger.info(f"[job_fetch] RemoteLeaf detected: {url}")
+        from job_fetch.remoteleaf import fetch_remoteleaf
+        return fetch_remoteleaf(url)
+
+    if "apply.workable.com" in domain:
+        logger.info(f"[job_fetch] Workable ATS detected: {url}")
+        from job_fetch.ats_workable import fetch_ats_workable
+        return fetch_ats_workable(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

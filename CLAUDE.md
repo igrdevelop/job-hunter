@@ -48,7 +48,15 @@ hunter/
     himalayas.py        # Himalayas.app JSON API (remote jobs search)
     fourdayweek.py      # 4dayweek.io JSON API v2
     weworkremotely.py   # We Work Remotely RSS feed
+    remoteleaf.py       # RemoteLeaf.com HTML listing (paginated category pages)
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
+    ats_aggregator.py   # ATS Aggregator: many companies via their ATS provider's JSON API
+                        # (Workable now; Greenhouse/Lever/Recruitee/Ashby planned).
+                        # Companies listed in hunter/ats_companies.json — no code needed per-company.
+  ats/                  # ATS provider adapters (one file per ATS system)
+    base.py             # ATSProvider ABC: fetch(slug, company_name) → list[Job]
+    workable.py         # Workable widget API (apply.workable.com/api/v1/widget/accounts/{slug})
+  ats_companies.json    # List of companies for ats_aggregator: {slug, provider, name?, tags?}
 
 job_fetch/
   __init__.py           # Dispatcher: routes job URL to the right fetcher
@@ -100,7 +108,7 @@ requirements.txt
 | `GENERATE_PL_RESUME` | `false` | Generate Polish CV variant (full-mode only by default) |
 | `INHIRE_ENABLED` | `false` | Requires Playwright — disabled until installed |
 
-All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`.
+All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`, `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`.
 
 ---
 

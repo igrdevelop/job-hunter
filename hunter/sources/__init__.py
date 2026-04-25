@@ -12,6 +12,8 @@ from hunter.config import (
     HIMALAYAS_ENABLED,
     FOURDAYWEEK_ENABLED,
     WEWORKREMOTELY_ENABLED,
+    REMOTELEAF_ENABLED,
+    ATS_AGGREGATOR_ENABLED,
 )
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
@@ -73,3 +75,11 @@ if FOURDAYWEEK_ENABLED:
 if WEWORKREMOTELY_ENABLED:
     from hunter.sources.weworkremotely import WeworkremotelySource
     ALL_SOURCES.append(WeworkremotelySource())
+
+if REMOTELEAF_ENABLED:
+    from hunter.sources.remoteleaf import RemoteleafSource
+    ALL_SOURCES.append(RemoteleafSource())
+
+if ATS_AGGREGATOR_ENABLED:
+    from hunter.sources.ats_aggregator import AtsAggregatorSource
+    ALL_SOURCES.append(AtsAggregatorSource())

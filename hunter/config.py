@@ -41,6 +41,7 @@ APPLICATIONS_DIR = PROJECT_DIR / "Applications"
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
+ATS_COMPANIES_PATH = PROJECT_DIR / "hunter" / "ats_companies.json"
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
@@ -164,6 +165,23 @@ FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in 
 
 # ── We Work Remotely source config ────────────────────────────────────────────
 WEWORKREMOTELY_ENABLED: bool = os.getenv("WEWORKREMOTELY_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
+# ── RemoteLeaf source config ─────────────────────────────────────────────────
+# HTML listing parser — set false if site layout changes and scraper breaks.
+REMOTELEAF_ENABLED: bool = os.getenv("REMOTELEAF_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
+# ── ATS Aggregator source config ─────────────────────────────────────────────
+# Reads career pages of companies listed in hunter/ats_companies.json through
+# their ATS provider's public JSON API (Workable / Greenhouse / Lever / …).
+ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower() in (
     "true",
     "1",
     "yes",

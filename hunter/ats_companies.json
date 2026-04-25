@@ -1,0 +1,11 @@
+{
+  "_comment": "ATS aggregator company list. provider: workable|greenhouse|lever|recruitee|ashby. slug: company id inside that ATS. name (optional): display name override (defaults to slug.title()). tags (optional): metadata for future filters.",
+  "companies": [
+    {
+      "slug": "netguru",
+      "provider": "workable",
+      "name": "Netguru",
+      "tags": ["poland", "outsourcing"]
+    }
+  ]
+}
