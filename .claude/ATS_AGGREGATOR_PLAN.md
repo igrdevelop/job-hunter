@@ -1,6 +1,6 @@
 # ATS Aggregator — план реализации
 
-**Status:** Phase 1 ✅ DONE (Workable + Netguru live, 3 vacancies passing prefilter on first run, 2026-04-26). Phases 2–4 — pending.
+**Status:** Phase 1 ✅ DONE (Workable + Netguru). Phase 2 ✅ DONE (Greenhouse, Lever, Recruitee, Ashby + job_fetch + tests, 2026-04-26). **Phase 3 — отложена** (наполнение `ats_companies.json` не в ближайших планах). Phase 4 — pending.
 **Owner:** Ihar
 **Цель:** добавить универсальный источник вакансий, который читает career-страницы компаний через публичные JSON API популярных ATS-систем (Workable, Greenhouse, Lever, Recruitee, Ashby).
 
@@ -163,7 +163,7 @@ job_fetch/ats.py                    — fetcher для деталей вакан
 
 **Критерий готовности Phase 1:** `/hunt ats_aggregator` в Telegram присылает Netguru-вакансии.
 
-### Phase 2 — добавить остальные провайдеры
+### Phase 2 — добавить остальные провайдеры ✅ DONE (2026-04-26)
 
 **Цель:** покрыть Greenhouse, Lever, Recruitee, Ashby. Каждый добавляет новые компании без нового кода — только строки в `ats_companies.json`.
 
@@ -291,14 +291,17 @@ job_fetch файл: job_fetch/ats_ashby.py (html_fallback)
 - Обновить план: Phase 2 → ✅ DONE
 
 #### Acceptance criteria Phase 2
-- [ ] 4 новых адаптера, все зарегистрированы в `PROVIDERS`
-- [ ] Тесты для каждого (min 4 кейса: valid, skip-archived/invalid, location, missing-url)
-- [ ] `python -m pytest tests/` — все green
-- [ ] `python -m compileall .` — без ошибок
-- [ ] Smoke-run на реальном API хотя бы одного нового провайдера (Greenhouse или Ashby — они самые открытые)
+- [x] 4 новых адаптера, все зарегистрированы в `PROVIDERS`
+- [x] Тесты для каждого (min 4 кейса: valid, skip-archived/invalid, location, missing-url)
+- [x] `python -m pytest tests/` — все green
+- [x] `python -m compileall .` — без ошибок
+- [x] Smoke-run на реальном API: GitLab (Greenhouse) и Linear (Ashby) — live fetch OK
 
-### Phase 3 — наполнить список компаний
-Кандидаты для `ats_companies.yml` (требуют верификации — у какой компании какой ATS):
+### Phase 3 — наполнить список компаний *(отложено)*
+
+> **2026-05-10:** эта фаза сознательно откладывается — расширение списка компаний и ручная верификация slug не делаем до отдельного решения.
+
+Кандидаты для `ats_companies.json` (требуют верификации — у какой компании какой ATS):
 
 **Польские студии:**
 - netguru → workable ✅ (verified)

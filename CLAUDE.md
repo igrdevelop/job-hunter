@@ -31,7 +31,7 @@ hunter/
   models.py             # Job dataclass (title, company, location, salary, url, source)
   filters.py            # Central job filter: location, seniority, stack, exclude patterns
   main.py               # Hunt loop: fetch all sources → filter → dedup → notify Telegram
-  telegram_bot.py       # Telegram bot: /hunt [sources…], /force, /status, /schedule + inline buttons
+  telegram_bot.py       # Telegram bot: /hunt [sources…], /force, /status, /schedule, /unsent, /sync_sent + inline buttons
   tracker.py            # tracker.xlsx read/write: known URLs, add rows, dedup helpers
   sources/
     base.py             # BaseSource ABC — all scrapers implement search() → list[Job]
@@ -51,11 +51,15 @@ hunter/
     remoteleaf.py       # RemoteLeaf.com HTML listing (paginated category pages)
     inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
     ats_aggregator.py   # ATS Aggregator: many companies via their ATS provider's JSON API
-                        # (Workable now; Greenhouse/Lever/Recruitee/Ashby planned).
+                        # (Workable, Greenhouse, Lever, Recruitee, Ashby; see PROVIDERS in source file).
                         # Companies listed in hunter/ats_companies.json — no code needed per-company.
   ats/                  # ATS provider adapters (one file per ATS system)
     base.py             # ATSProvider ABC: fetch(slug, company_name) → list[Job]
     workable.py         # Workable widget API (apply.workable.com/api/v1/widget/accounts/{slug})
+    greenhouse.py       # Greenhouse (boards-api…/v1/boards/{slug}/jobs)
+    lever.py            # Lever (api.lever.co/v0/postings/{slug})
+    recruitee.py        # Recruitee ({slug}.recruitee.com/api/offers/)
+    ashby.py            # Ashby (api.ashbyhq.com/posting-api/job-board/{slug})
   ats_companies.json    # List of companies for ats_aggregator: {slug, provider, name?, tags?}
 
 job_fetch/
@@ -177,6 +181,7 @@ All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, 
    - writes them back to `tracker.xlsx`,
    - rebuilds `to_send.xlsx` — sent rows disappear, only pending rows remain.
 5. If `to_send.xlsx` is open/locked when the bot tries to rebuild it, it logs a warning and continues without crashing. Close the file and run `/sync_sent` again.
+6. `/unsent` in Telegram shows how many unsent rows are in the queue (same logic as `to_send.xlsx`) and how many of them have `ANGULAR` in the Stack column (case-insensitive substring).
 
 **Key files:**
 - `hunter/to_send.py` — `read_sent_marks()`, `rebuild()`, `sync_and_rebuild()`

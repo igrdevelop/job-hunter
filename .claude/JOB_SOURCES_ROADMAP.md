@@ -7,7 +7,7 @@
 | Категория | Примерно сколько | Комментарий |
 |-----------|------------------|-------------|
 | **Tier A — API / RSS, без скрейпа** | **0** | Запланированные источники закрыты: в т.ч. We Work Remotely (RSS). Дальше — по желанию (tier B/C). |
-| **Tier B** | **0–1** | Remoteleaf — только если появится нормальная публичная дока / ключ. |
+| **Tier B** | **0** | Remoteleaf: интеграция через HTML-листинг (см. `remoteleaf.py`); публичного JSON нет. |
 | **Tier C — скрейп / тяжёлая поддержка** | **5+** | Wellfound, Jobgether, EuroTechJobs, Relocate.me, Landing.jobs — без открытого feed; подключать только осознанно. |
 
 Итого **минимальный tier A** выполнен. Дополнительные доски — по желанию (tier B/C), не обязательный объём.
@@ -33,6 +33,7 @@
 | Himalayas | `himalayas` | JSON API |
 | 4dayweek.io | `fourdayweek` | JSON API |
 | We Work Remotely | `weworkremotely` | RSS |
+| RemoteLeaf | `remoteleaf` | HTML (категория + `?skills=` + `&page=`) |
 
 ---
 
@@ -71,6 +72,7 @@
 /hunt himalayas
 /hunt fourdayweek
 /hunt weworkremotely
+/hunt remoteleaf
 /hunt remotive arbeitnow
 /schedule
 ```
