@@ -94,7 +94,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/status - show schedule + bot status\n"
         "/force &lt;url&gt; - process URL even if already in tracker\n"
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
-        "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n\n"
+        "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n"
+        "/unsent - сколько неотосланных в to_send и сколько с ANGULAR в Stack\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -272,6 +273,29 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         _build_schedule_text(),
         parse_mode=ParseMode.HTML,
     )
+
+
+async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сколько строк в очереди на отправку (как to_send.xlsx) и сколько с ANGULAR в Stack."""
+    try:
+        from hunter.tracker import iter_rows_for_to_send
+        rows = await asyncio.to_thread(iter_rows_for_to_send)
+        total = len(rows)
+        angular_n = sum(
+            1 for r in rows
+            if "ANGULAR" in str(r.get("stack") or "").upper()
+        )
+        if total == 0:
+            msg = "📭 <b>Неотосланных заявок нет</b> — to_send пуст."
+        else:
+            msg = (
+                f"📋 <b>Неотосланных заявок:</b> {total}\n"
+                f"🔷 <b>С ANGULAR в Stack:</b> {angular_n}"
+            )
+    except Exception as exc:
+        logger.exception("[unsent] Failed: %s", exc)
+        msg = f"❌ Не удалось прочитать трекер: <code>{exc}</code>"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -754,6 +778,7 @@ async def _set_bot_commands(app: Application) -> None:
         BotCommand("force",          "Process URL even if already in tracker"),
         BotCommand("process_manual", "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",      "Sync Sent column from to_send.xlsx"),
+        BotCommand("unsent",         "Unsent queue count + Angular in Stack"),
     ])
 
 
@@ -771,6 +796,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
     app.add_handler(CommandHandler("schedule",  cmd_schedule))
+    app.add_handler(CommandHandler("unsent",    cmd_unsent))
     app.add_handler(CommandHandler("sync_sent", cmd_sync_sent))
 
     # Button callbacks

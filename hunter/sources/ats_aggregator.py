@@ -4,7 +4,7 @@ through their ATS provider's public JSON API.
 
 Companies are listed in hunter/ats_companies.json. Each entry has:
   - slug: company id inside the ATS (e.g. "netguru" on Workable)
-  - provider: workable | greenhouse | lever | recruitee | ashby
+  - provider: workable | greenhouse | lever | recruitee | ashby (see hunter/ats/*.py)
   - name (optional): display name; defaults to slug.title()
 
 Adding a new ATS provider: implement hunter/ats/<name>.py and register
@@ -18,7 +18,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from hunter.ats.ashby import AshbyProvider
 from hunter.ats.base import ATSProvider
+from hunter.ats.greenhouse import GreenhouseProvider
+from hunter.ats.lever import LeverProvider
+from hunter.ats.recruitee import RecruiteeProvider
 from hunter.ats.workable import WorkableProvider
 from hunter.config import ATS_COMPANIES_PATH
 from hunter.models import Job
@@ -28,7 +32,10 @@ logger = logging.getLogger(__name__)
 
 PROVIDERS: dict[str, ATSProvider] = {
     "workable": WorkableProvider(),
-    # Phase 2: greenhouse, lever, recruitee, ashby
+    "greenhouse": GreenhouseProvider(),
+    "lever": LeverProvider(),
+    "recruitee": RecruiteeProvider(),
+    "ashby": AshbyProvider(),
 }
 
 

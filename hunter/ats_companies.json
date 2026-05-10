@@ -6,6 +6,30 @@
       "provider": "workable",
       "name": "Netguru",
       "tags": ["poland", "outsourcing"]
+    },
+    {
+      "slug": "gitlab",
+      "provider": "greenhouse",
+      "name": "GitLab",
+      "tags": ["eu", "remote"]
+    },
+    {
+      "slug": "palantir",
+      "provider": "lever",
+      "name": "Palantir",
+      "tags": ["us"]
+    },
+    {
+      "slug": "gorgias",
+      "provider": "recruitee",
+      "name": "Gorgias",
+      "tags": ["recruitee"]
+    },
+    {
+      "slug": "linear",
+      "provider": "ashby",
+      "name": "Linear",
+      "tags": ["eu", "remote"]
     }
   ]
 }

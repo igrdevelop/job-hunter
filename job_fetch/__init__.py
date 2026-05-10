@@ -103,5 +103,25 @@ def fetch_job_text(url: str) -> str:
         from job_fetch.ats_workable import fetch_ats_workable
         return fetch_ats_workable(url)
 
+    if "greenhouse.io" in domain:
+        logger.info(f"[job_fetch] Greenhouse ATS detected: {url}")
+        from job_fetch.ats_greenhouse import fetch_ats_greenhouse
+        return fetch_ats_greenhouse(url)
+
+    if "jobs.lever.co" in domain:
+        logger.info(f"[job_fetch] Lever ATS detected: {url}")
+        from job_fetch.ats_lever import fetch_ats_lever
+        return fetch_ats_lever(url)
+
+    if domain.endswith(".recruitee.com"):
+        logger.info(f"[job_fetch] Recruitee ATS detected: {url}")
+        from job_fetch.ats_recruitee import fetch_ats_recruitee
+        return fetch_ats_recruitee(url)
+
+    if "jobs.ashbyhq.com" in domain:
+        logger.info(f"[job_fetch] Ashby ATS detected: {url}")
+        from job_fetch.ats_ashby import fetch_ats_ashby
+        return fetch_ats_ashby(url)
+
     logger.info(f"[job_fetch] Generic HTML fetch: {url}")
     return fetch_html(url)

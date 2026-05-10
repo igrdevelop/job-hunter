@@ -122,6 +122,25 @@ def _is_react_without_angular(job: Job) -> bool:
         else:
             tech_texts.append(_lower_text_fragment(skill))
 
+    # 4dayweek.io API: stack + tools hold frameworks (React lives here; skills are often soft skills)
+    for key in ("stack", "tools"):
+        for item in raw.get(key) or []:
+            if isinstance(item, dict):
+                tech_texts.append(_lower_text_fragment(item.get("name")))
+            else:
+                tech_texts.append(_lower_text_fragment(item))
+
+    # Himalayas: categories / parentCategories are string lists
+    for c in raw.get("categories") or []:
+        tech_texts.append(_lower_text_fragment(c))
+    for c in raw.get("parentCategories") or []:
+        tech_texts.append(_lower_text_fragment(c))
+
+    # Remoteleaf card summary (plain text blurb)
+    summ = raw.get("summary")
+    if isinstance(summ, str) and summ.strip():
+        tech_texts.append(summ.lower())
+
     # NoFluffJobs: raw["technology"] = str; SolidJobs: list[{"name": "IT"}, ...]
     _append_technology_field(tech_texts, raw.get("technology"))
 
