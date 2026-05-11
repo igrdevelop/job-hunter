@@ -37,6 +37,17 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
 TO_SEND_PATH = PROJECT_DIR / "to_send.xlsx"
+# Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
+TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+TRACKER_BACKUP_DIR: Path = Path(
+    os.getenv("TRACKER_BACKUP_DIR", str(PROJECT_DIR / "backups"))
+).expanduser()
+TRACKER_BACKUP_KEEP_FILES: int = max(0, int(os.getenv("TRACKER_BACKUP_KEEP_FILES", "90")))
+TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
 APPLICATIONS_DIR = PROJECT_DIR / "Applications"
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
@@ -186,6 +197,11 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
     "1",
     "yes",
 )
+
+# ── Gmail source config ───────────────────────────────────────────────────────
+# Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
+# Requires one-time setup: python tools/gmail_auth.py
+GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [

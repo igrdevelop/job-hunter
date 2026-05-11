@@ -14,6 +14,7 @@ from hunter.config import (
     WEWORKREMOTELY_ENABLED,
     REMOTELEAF_ENABLED,
     ATS_AGGREGATOR_ENABLED,
+    GMAIL_ENABLED,
 )
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
@@ -83,3 +84,7 @@ if REMOTELEAF_ENABLED:
 if ATS_AGGREGATOR_ENABLED:
     from hunter.sources.ats_aggregator import AtsAggregatorSource
     ALL_SOURCES.append(AtsAggregatorSource())
+
+if GMAIL_ENABLED:
+    from hunter.sources.gmail import GmailSource
+    ALL_SOURCES.append(GmailSource())

@@ -237,22 +237,57 @@ def _matches_location(job: Job) -> bool:
 
 
 def apply_filters(jobs: list[Job]) -> list[Job]:
-    """Filter a list of Jobs according to config.FILTER rules."""
+    """Filter jobs — returns passing jobs only. See apply_filters_with_stats for breakdown."""
+    return apply_filters_with_stats(jobs)[0]
+
+
+def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]]:
+    """Filter jobs and return (passing_jobs, reason_counts).
+
+    Gmail-sourced jobs (source starts with 'gmail_') bypass title/location
+    filters — the user's alert subscriptions already pre-filter for relevance.
+    Only level exclusions apply to them.
+
+    reason_counts keys: title_kw, require_angular, level, exclude_pattern,
+                        react_no_angular, location, german
+    """
     result = []
+    reasons: dict[str, int] = {
+        "title_kw": 0,
+        "require_angular": 0,
+        "level": 0,
+        "exclude_pattern": 0,
+        "react_no_angular": 0,
+        "location": 0,
+        "german": 0,
+    }
+
     for job in jobs:
-        if not _matches_title_keywords(job.title):
-            continue
-        if not _requires_angular_check(job.title):
-            continue
+        is_gmail = job.source.startswith("gmail_")
+
+        if not is_gmail:
+            if not _matches_title_keywords(job.title):
+                reasons["title_kw"] += 1
+                continue
+            if not _requires_angular_check(job.title):
+                reasons["require_angular"] += 1
+                continue
         if _is_excluded_level(job.title):
+            reasons["level"] += 1
             continue
-        if _matches_exclude_pattern(job.title):
-            continue
-        if _is_react_without_angular(job):
-            continue
-        if not _matches_location(job):
-            continue
+        if not is_gmail:
+            if _matches_exclude_pattern(job.title):
+                reasons["exclude_pattern"] += 1
+                continue
+            if _is_react_without_angular(job):
+                reasons["react_no_angular"] += 1
+                continue
+            if not _matches_location(job):
+                reasons["location"] += 1
+                continue
         if _is_german_language_required(job):
+            reasons["german"] += 1
             continue
         result.append(job)
-    return result
+
+    return result, reasons

@@ -26,6 +26,10 @@ generate_docs.py        # DOCX/PDF/TXT generation from content.json using python
 hunter.py               # Entry point: starts the Telegram bot + scheduler
 llm_client.py           # Thin wrapper: supports Anthropic API and OpenAI API
 
+tools/
+  backup_tracker.py     # Manual one-shot backup (also schedulable via Windows Task Scheduler)
+  linkedin_login.py     # Optional: save Playwright session for LinkedIn
+
 hunter/
   config.py             # ALL config: env vars, filters, schedule, paths, enabled sources
   models.py             # Job dataclass (title, company, location, salary, url, source)
@@ -33,6 +37,7 @@ hunter/
   main.py               # Hunt loop: fetch all sources → filter → dedup → notify Telegram
   telegram_bot.py       # Telegram bot: /hunt [sources…], /force, /status, /schedule, /unsent, /sync_sent + inline buttons
   tracker.py            # tracker.xlsx read/write: known URLs, add rows, dedup helpers
+  tracker_backup.py     # Timestamped copies of tracker.xlsx + to_send.xlsx (used by bot JobQueue + tools/backup_tracker.py)
   sources/
     base.py             # BaseSource ABC — all scrapers implement search() → list[Job]
     linkedin.py         # LinkedIn scraper (Playwright, requires session cookie)
@@ -79,6 +84,7 @@ prompts/
   add-source.md         # /add-source — guide for adding a new job board scraper
 
 tracker.xlsx            # Main data store: every job seen, applied, or skipped
+backups/                # Local daily snapshots (gitignored) — tracker_*.xlsx, to_send_*.xlsx
 Applications/           # Generated documents: Applications/{YYYY-MM-DD}/{CompanyName}/
   2026-04-14/
     CompanyName/
@@ -111,6 +117,10 @@ requirements.txt
 | `APPLY_DELAY_SEC` | `30` | Pause between jobs in auto-apply batch |
 | `GENERATE_PL_RESUME` | `false` | Generate Polish CV variant (full-mode only by default) |
 | `INHIRE_ENABLED` | `false` | Requires Playwright — disabled until installed |
+| `TRACKER_BACKUP_ENABLED` | `true` | When `hunter.py` runs, daily JobQueue copies `tracker.xlsx` + `to_send.xlsx` into `TRACKER_BACKUP_DIR` |
+| `TRACKER_BACKUP_DIR` | `backups` (under project root) | Absolute path allowed |
+| `TRACKER_BACKUP_KEEP_FILES` | `90` | Max retained snapshots **per file type** (`tracker_*.xlsx`, `to_send_*.xlsx`) |
+| `TRACKER_BACKUP_TIME` | `06:05` | `HH:MM` in `Europe/Warsaw` for the scheduled backup job |
 
 All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`, `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`.
 
@@ -138,10 +148,12 @@ All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, 
 8. Update `tracker.xlsx`
 9. Send Telegram notification with file list
 
+**Telegram — вставка текста вакансии:** длинное обычное сообщение (не команда) распознаётся как полный текст объявления → бот сразу отвечает подтверждением с числом символов, затем вторым сообщением подтверждает запуск `apply_agent` в режиме вставки; итог (файлы / ошибка) приходит от `apply_agent` как обычно.
+
 ### Doc generation modes
 - **Short mode** (default): PDF only, English CV only (3 files: CV EN, Cover Letter EN, Cover Letter PL)
 - **Full mode** (`--full` flag only): DOCX + PDF, EN + PL CV, About_Me `.txt` files (10 files)
-- **Force mode** (`--force`): skip tracker dedup check (used by `/force` Telegram command)
+- **Force mode** (`--force`): skip tracker dedup check, bypass React-only auto-skip, stronger LLM tailoring hint. Telegram: `/force <url>` **or** `/force` followed by the same long pasted posting as plain-text apply. JobLeads still loads pasted `job_posting.txt` when present.
 
 ---
 

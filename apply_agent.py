@@ -126,6 +126,15 @@ def notify(message: str) -> None:
 _TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024
 _TELEGRAM_SEND_DOC_TIMEOUT = 120
 
+# Shown after React-only auto-skip — /force already sets --force (bypasses this filter).
+_REACT_SKIP_FORCE_HINT = (
+    "\n\n📌 <b>Нужны документы всё равно?</b> В Telegram:\n"
+    "• <code>/force</code> и тот же URL (строка 🔗 выше), или\n"
+    "• <code>/force</code> и сразу под ним полный текст вакансии (как при обычной вставке).\n"
+    "Так включается <code>--force</code> (без React-only); для JobLeads подтянется "
+    "<code>job_posting.txt</code>, если ты его уже заполнял."
+)
+
 
 def send_telegram_documents(paths: list[Path]) -> None:
     """Send generated files to Telegram as documents (separate from notify text)."""
@@ -760,6 +769,7 @@ def main_api(url: str, paste_text: str = "") -> None:
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"
             f"Stack: {content.get('stack', '?')}"
+            f"{_REACT_SKIP_FORCE_HINT}"
         )
         print(f"[apply_agent] SKIP — React-only stack: {content.get('stack')}")
         try:
@@ -814,6 +824,7 @@ def main_api(url: str, paste_text: str = "") -> None:
     )
     mode_label = "FULL" if use_full else "SHORT"
     print(f"[apply_agent] Step 4: Generating docs ({mode_label})...")
+    gen_ok = True
     try:
         result = subprocess.run(
             gen_cmd,
@@ -824,17 +835,13 @@ def main_api(url: str, paste_text: str = "") -> None:
             errors="replace",
             timeout=120,
         )
+        gen_ok = result.returncode == 0
         if result.stdout:
             print(result.stdout)
         if result.stderr:
             print("[generate_docs] STDERR:", result.stderr, file=sys.stderr)
-        if result.returncode != 0:
-            notify(
-                f"⚠️ <b>generate_docs.py failed</b>\n"
-                f"content.json written OK, but doc generation had issues.\n"
-                f"Folder: <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>"
-            )
     except subprocess.TimeoutExpired:
+        gen_ok = False
         print("[apply_agent] generate_docs.py timed out (120s)")
 
     # Step 8 — Notify success
@@ -842,6 +849,13 @@ def main_api(url: str, paste_text: str = "") -> None:
     if created_files:
         file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
         ats = content.get("ats_score", "?")
+        issues_note = ""
+        if not gen_ok:
+            issues_note = (
+                "\n\n⚠️ <code>generate_docs.py</code> reported a problem "
+                "(often <code>tracker.xlsx</code> locked, timeout, or PDF step). "
+                "Files listed above are on disk; fix and re-run that script if needed."
+            )
         notify(
             f"✅ <b>Docs ready!</b>\n\n"
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
@@ -849,6 +863,7 @@ def main_api(url: str, paste_text: str = "") -> None:
             f"ATS: {ats}% | Stack: {content.get('stack', '?')}\n"
             f"Via: API ({LLM_MODEL})\n"
             f"Review and send when ready."
+            f"{issues_note}"
         )
         send_telegram_documents(created_files)
         print(f"\n[apply_agent] Done! Folder: Applications/{output_folder.parent.name}/{output_folder.name}/ ({len(created_files)} files)")
@@ -1056,6 +1071,7 @@ def main_cli(url: str) -> None:
                         f"⏭ <b>Skipped — React-only stack</b>\n"
                         f"🔗 {url}\n"
                         f"Stack: {_cli_content.get('stack', '?')}"
+                        f"{_REACT_SKIP_FORCE_HINT}"
                     )
                     print(f"[apply_agent] SKIP — React-only stack: {_cli_content.get('stack')}")
                     try:

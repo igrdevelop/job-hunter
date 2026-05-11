@@ -2,6 +2,8 @@
 .env
 .secrets/
 linkedin_storage_state.json
+gmail_credentials.json
+gmail_token.json
 
 # Python
 __pycache__/
@@ -25,6 +27,9 @@ Desktop.ini
 
 # Generated application documents (large, per-user)
 Applications/
+
+# Local daily copies of tracker / to_send (see hunter/tracker_backup.py)
+backups/
 
 # Tracker (per-user data)
 tracker.xlsx

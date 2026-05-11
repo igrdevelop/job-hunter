@@ -19,8 +19,9 @@ from hunter.config import (
     AUTO_APPLY, APPLY_AGENT_PATH, APPLY_USE_CLI,
     LLM_API_KEY, LLM_PROVIDER, LLM_MODEL,
     APPLY_DELAY_SEC, MAX_JOBS_PER_RUN, APPLY_AGENT_TIMEOUT_SEC,
+    TRACKER_PATH,
 )
-from hunter.filters import apply_filters
+from hunter.filters import apply_filters_with_stats
 from hunter.models import Job
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
@@ -137,15 +138,29 @@ async def _run_hunt_impl(
     total_raw = sum(v for v in fetch_stats.values() if isinstance(v, int))
 
     # ── Step 2: Filter ───────────────────────────────────────────────────────
-    filtered = apply_filters(all_jobs)
+    filtered, filter_reasons = apply_filters_with_stats(all_jobs)
     filtered_out = len(all_jobs) - len(filtered)
     logger.info(f"[Hunt] After filter: {len(filtered)} jobs")
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple
     # open roles and we don't want to block all of them just because one was sent.
-    known_urls = await asyncio.to_thread(get_known_urls)
-    known_ct = await asyncio.to_thread(get_known_company_titles)
+    try:
+        known_urls = await asyncio.to_thread(get_known_urls)
+        known_ct = await asyncio.to_thread(get_known_company_titles)
+    except Exception as e:
+        logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
+        hint = str(e)[:400]
+        await send_text(
+            context,
+            "❌ <b>Не удалось прочитать tracker.xlsx</b> (дедуп перед охотой).\n\n"
+            f"<pre>{hint}</pre>\n\n"
+            "Типичная причина сообщения про <code>[Content_Types].xml</code> — файл "
+            "не настоящий Excel (обрезан, 0 байт, переименованный HTML/CSV, битый архив). "
+            f"Проверь: <code>{TRACKER_PATH}</code>\n"
+            "Открой в Excel или восстанови из бэкапа.",
+        )
+        return
 
     seen_urls_this_run: set[str] = set()
     seen_ct_this_run: set[str] = set()
@@ -177,7 +192,15 @@ async def _run_hunt_impl(
         f"{fetch_lines}\n"
         f"  Total: <b>{total_raw}</b> raw\n\n"
         f"<b>--- Filter ---</b>\n"
-        f"  {total_raw} raw -> <b>{len(filtered)}</b> passed ({filtered_out} filtered out)\n\n"
+        f"  {total_raw} raw -> <b>{len(filtered)}</b> passed ({filtered_out} filtered out)\n"
+        + (
+            "".join(
+                f"  ✂️ {cnt} by {reason}\n"
+                for reason, cnt in filter_reasons.items()
+                if cnt > 0
+            )
+        )
+        + "\n"
         f"<b>--- Dedup ---</b>\n"
         f"  {len(filtered)} passed -> <b>{len(new_jobs)}</b> new\n"
         f"  Skipped: {dup_url} by URL, {dup_ct} by company+title"

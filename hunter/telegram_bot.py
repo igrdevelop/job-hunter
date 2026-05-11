@@ -32,6 +32,8 @@ from hunter.config import (
     TIMEZONE,
     SCHEDULE_TIMES,
     SCHEDULE_SOURCE_OFFSET_MIN,
+    TRACKER_BACKUP_ENABLED,
+    TRACKER_BACKUP_TIME,
 )
 from hunter.models import Job
 from hunter.tracker import (
@@ -92,7 +94,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
         "/schedule - show source schedule\n"
         "/status - show schedule + bot status\n"
-        "/force &lt;url&gt; - process URL even if already in tracker\n"
+        "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
+        "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
+        "<code>job_posting.txt</code>)\n"
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
         "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n"
         "/unsent - сколько неотосланных в to_send и сколько с ANGULAR в Stack\n\n"
@@ -153,26 +157,52 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Force-process a URL even if it's already in tracker."""
-    args = context.args
-    if not args:
+    """Force-process: URL from tracker / React-only, or full pasted posting after /force."""
+    raw = (update.message.text or "").strip()
+    m = re.match(r"/force(?:@\w+)?\s*(.*)\Z", raw, flags=re.DOTALL | re.IGNORECASE)
+    body = (m.group(1) or "").strip() if m else ""
+
+    if not body:
         await update.message.reply_text(
-            "Usage: /force <url>",
+            "<b>/force</b> — принудительная генерация (<code>--force</code>):\n\n"
+            "• <code>/force https://…</code> — по ссылке\n"
+            "• <code>/force</code> и с новой строки (или через пробел) полный текст вакансии — "
+            "как обычная вставка, но с обходом дедупа и React-only\n\n"
+            "Текст должен быть достаточно длинным (как при вставке JD), иначе пришли http-ссылку.",
             parse_mode=ParseMode.HTML,
         )
         return
-    url = args[0].strip()
-    if not url.startswith("http"):
-        await update.message.reply_text("URL must start with http")
+
+    if _looks_like_paste(body):
+        await update.message.reply_text(
+            f"🔧 <b>Force + текст вакансии</b> — {len(body.strip())} симв. "
+            "Обход: дедуп трекера, React-only. Запускаю…",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        logger.info(f"[Force] paste mode ({len(body)} chars)")
+        await _handle_paste(update, body, force=True)
+        return
+
+    if body.startswith("http"):
+        url = _extract_url(body) or body.split()[0].strip()
+        await update.message.reply_text(
+            f"⏳ <b>Force: запускаю генерацию</b> (<code>--force</code>)\n"
+            f"🔗 {url}\n\n"
+            "Обход: дедуп трекера, React-only skip; для JobLeads — вставленный "
+            "<code>job_posting.txt</code> подставится при fetch.",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        logger.info(f"[Force] Launching apply_agent --force for: {url}")
+        asyncio.create_task(_run_apply_agent(url, force=True))
         return
 
     await update.message.reply_text(
-        f"⏳ <b>Force: запускаю генерацию...</b>\n🔗 {url}",
+        "После <code>/force</code> нужна <b>http(s)-ссылка</b> или длинный текст вакансии "
+        "(как при обычной вставке). Одно слово без ссылки не подходит.",
         parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
     )
-    logger.info(f"[Force] Launching apply_agent --force for: {url}")
-    asyncio.create_task(_run_apply_agent(url, force=True))
 
 
 async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -483,8 +513,10 @@ async def _run_apply_agent(
 # ── URL message handler ───────────────────────────────────────────────────────
 
 # Any message longer than this counts as "pasted job posting" if it isn't a single URL.
-# Typical job postings are 1-4 KB; short greetings / single URLs are well under 300.
-_PASTE_TEXT_MIN_LEN = 300
+# Typical job postings are 1-4 KB; short greetings / single URLs stay well below this.
+# 200 catches compact JD summaries users paste from recruiters (~250 chars) without
+# reacting to casual chat.
+_PASTE_TEXT_MIN_LEN = 200
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -520,6 +552,12 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Paste-mode branch: user forwarded/pasted the posting text itself.
     if _looks_like_paste(text):
+        n = len(text.strip())
+        await update.message.reply_text(
+            f"📥 <b>Текст вакансии получен</b> — {n} симв. Сохраняю и проверяю трекер…",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
         await _handle_paste(update, text)
         return
 
@@ -617,11 +655,13 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(_run_apply_agent(text))
 
 
-async def _handle_paste(update: Update, text: str) -> None:
+async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     """Save the pasted job text to a temp file and run apply_agent in paste mode.
 
     The URL (if found inside the text) is passed to apply_agent so it ends up in
     the tracker. If no URL — apply_agent runs without one and writes an empty URL cell.
+
+    ``force=True`` passes ``--force`` (bypass tracker duplicate block and React-only skip).
     """
     from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
 
@@ -641,7 +681,7 @@ async def _handle_paste(update: Update, text: str) -> None:
     if url:
         entries = await asyncio.to_thread(lookup_url, url)
         manual_pending = any(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
-        if entries and not manual_pending:
+        if entries and not manual_pending and not force:
             detail = "\n".join(
                 f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}\n"
                 f"    ATS: {e['ats']}"
@@ -651,7 +691,7 @@ async def _handle_paste(update: Update, text: str) -> None:
             await update.message.reply_text(
                 f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
                 f"{detail}\n\n"
-                f"Отправь /force {url}\nесли хочешь обработать заново.",
+                f"Отправь <code>/force {url}</code> или <code>/force</code> с полным текстом.",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
@@ -677,14 +717,17 @@ async def _handle_paste(update: Update, text: str) -> None:
                 return
 
             inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
+            force_note = " <code>--force</code>" if force else ""
             await update.message.reply_text(
-                "✅ <b>Текст вакансии сохранён</b> — запускаю генерацию…\n"
-                f"🔗 {url}{inferred_note}\n\nЭто займёт 1-2 минуты.",
+                "✅ <b>Подтверждаю:</b> текст записан в <code>job_posting.txt</code>, "
+                f"запускаю генерацию документов{force_note}.\n"
+                f"🔗 {url}{inferred_note}\n\n"
+                "Ориентировочно 1–2 мин; готовые файлы пришлю отдельным сообщением.",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
-            logger.info(f"[paste handler] Updated MANUAL job_posting.txt and rerun apply url={url}")
-            asyncio.create_task(_run_apply_agent(url))
+            logger.info(f"[paste handler] Updated MANUAL job_posting.txt and rerun apply url={url} force={force}")
+            asyncio.create_task(_run_apply_agent(url, force=force))
             return
 
     try:
@@ -712,14 +755,19 @@ async def _handle_paste(update: Update, text: str) -> None:
         url_line = f"🔗 {url}{inferred_note}"
     else:
         url_line = "🔗 (ссылка не найдена — обрабатываю без неё)"
+    mode = "режим вставки + <code>--force</code>" if force else "режим вставки"
     await update.message.reply_text(
-        f"⏳ <b>Принял текст вакансии ({chars} символов), запускаю генерацию...</b>\n"
-        f"{url_line}\n\nЭто займёт 1-2 минуты.",
+        "✅ <b>Подтверждаю:</b> текст сохранён, запускаю <code>apply_agent</code> "
+        f"({mode}, {chars} симв.).\n"
+        f"{url_line}\n\n"
+        "Ориентировочно 1–2 мин; результат пришлю сюда же.",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
-    logger.info(f"[paste handler] Launching apply_agent paste mode ({chars} chars) url={url or '—'}")
-    asyncio.create_task(_run_apply_agent(url, paste_file=paste_path))
+    logger.info(
+        f"[paste handler] Launching apply_agent paste mode ({chars} chars) url={url or '—'} force={force}"
+    )
+    asyncio.create_task(_run_apply_agent(url, force=force, paste_file=paste_path))
 
 
 async def _run_linkedin_batch(job_ids: list[str], update) -> None:
@@ -851,7 +899,51 @@ def build_application() -> Application:
         )
         logger.info(f"[Schedule] pending_report at {report_hour:02d}:00 {TIMEZONE}")
 
+    if TRACKER_BACKUP_ENABLED:
+        try:
+            bh, bm = map(int, TRACKER_BACKUP_TIME.strip().split(":"))
+            bh %= 24
+            bm %= 60
+        except (ValueError, AttributeError):
+            bh, bm = 6, 5
+            logger.warning(
+                "[Schedule] Invalid TRACKER_BACKUP_TIME=%r — using 06:05",
+                TRACKER_BACKUP_TIME,
+            )
+        app.job_queue.run_daily(
+            callback=_scheduled_tracker_backup,
+            time=dt_time(bh, bm, tzinfo=tz),
+            name="tracker_backup_daily",
+        )
+        logger.info(f"[Schedule] tracker_backup at {bh:02d}:{bm:02d} {TIMEZONE}")
+
     return app
+
+
+async def _scheduled_tracker_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Daily snapshot of tracker.xlsx + to_send.xlsx (silent on success)."""
+    try:
+        import asyncio as _asyncio
+        from hunter.tracker_backup import run_tracker_backup
+
+        result = await _asyncio.to_thread(run_tracker_backup)
+        if not result.get("ok") or result.get("errors"):
+            err = "; ".join(result.get("errors") or [])[:400]
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=f"⚠️ <b>Tracker backup failed</b>\n<pre>{err}</pre>",
+                parse_mode=ParseMode.HTML,
+            )
+    except Exception as exc:
+        logger.exception("[tracker_backup] scheduled job failed: %s", exc)
+        try:
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=f"⚠️ <b>Tracker backup failed</b>\n<pre>{str(exc)[:400]}</pre>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
 
 
 async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -862,10 +954,16 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         label = ", ".join(source_names) if source_names else "all"
         logger.exception(f"[scheduled_hunt] Unhandled error for {label}")
+        extra = ""
+        if "Content_Types" in str(e) or "archive" in str(e).lower():
+            extra = (
+                "\n\n<i>Скорее всего повреждён или не-xlsx файл tracker.xlsx / to_send.xlsx — "
+                "не ошибка борда в скобках.</i>"
+            )
         try:
             await context.bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
-                text=f"⚠️ <b>Hunt error</b> ({label}):\n<pre>{str(e)[:500]}</pre>",
+                text=f"⚠️ <b>Hunt error</b> ({label}):\n<pre>{str(e)[:500]}</pre>{extra}",
                 parse_mode=ParseMode.HTML,
             )
         except Exception:
