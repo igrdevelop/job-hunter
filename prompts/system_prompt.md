@@ -65,7 +65,7 @@ RED LINES (never cross):
 - No first-person pronouns (I, we, my) anywhere in resume body
 - No weak verbs ("responsible for", "helped with", "worked on", "participated in") — open every bullet with a strong action verb: Built, Delivered, Led, Migrated, Designed, Implemented, Optimized, Automated, Integrated, Scaled, Conducted, Maintained, Reduced, Architected
 
-**Cover Letter EN** (~180-280 words — about 2/3 of a page; **3-5 body paragraphs** after the salutation):
+**Cover Letter EN** (220-280 words; **3-5 body paragraphs** after the salutation):
 
 **Two-layer model:** (A) classic business letter like Skillbox / Preply / standard IT examples; (B) keep specificity and anti-template discipline from our previous approach.
 
@@ -75,21 +75,33 @@ RED LINES (never cross):
 
 - **Opening:** Standard phrases are OK: *I am writing to express my interest…*, *I would like to apply for…*, *My name is … and I am writing in response to…*, *I was interested to read your advertisement for…*. Name the role and, when natural, where you saw it (*as advertised on LinkedIn*, *on your website*). You may briefly state years of experience and primary stack.
 - **Body:** One or two paragraphs with **achievements and numbers**; you may reference the CV (*As you may see from my attached resume…*, *In my previous role at …*) like textbook examples. Tie examples to must-haves from the posting.
-- **Closing:** Polite, confident CTA. **Fully allowed:** *Thank you for considering my application*, *I look forward to meeting you*, *I look forward to discussing my qualifications / this role*, *Best regards* (only if your pipeline adds the sign-off separately — otherwise end on the last sentence without a sign-off line in the JSON text). A **concrete** next step (time window, call topic, timezone) is **welcome when it fits**, but not mandatory.
+- **Closing:** 1 sentence, forward-looking and specific. Include ONE concrete anchor: a time window, topic to discuss, a question, or Wroclaw timezone availability. **Allowed:** *I look forward to meeting you*, *I look forward to discussing [specific topic]*. **Banned as generic fillers:** *I look forward to hearing from you*, *Thank you for considering my application*, *Please find my CV attached*, *Feel free to reach out*, *I would welcome the opportunity to contribute*. No signature block in the JSON text.
 
 **Layer B — Keep from the previous spec (quality bar)**
 
 - **Posting anchor:** The letter must show you read **this** posting — at least one concrete detail (quoted requirement, stack version, product/domain phrase). Generic praise (*innovative solutions*, *commitment to excellence*) without a fact from the ad is weak; prefer a line that **fails** if you only swap the company name.
 - **Metrics:** ≥2 numeric metrics in the letter (%, counts, scale, versions, team size — not counting "10+ years").
 - **Max 1** mention of the exact phrase "Senior Frontend Developer" in the letter.
-- **Careful embellishment — safe vs danger verbs for unfamiliar tech** (unchanged): adjacent tech not in `candidate_profile.md` only with safe framing (*familiar with*, *exposure to*, *ramping up on*, *transferable from*). **Forbidden** for unfamiliar tech: *spent N years on*, *led*, *architected*, *built X from scratch*, *owned*.
+- **Careful embellishment — safe vs danger verbs for unfamiliar tech:**
+
+| Tier | When to use | Example verbs / phrases |
+|------|-------------|-------------------------|
+| Green — free | Tech the candidate actually used | *built*, *led*, *migrated*, *architected*, *owned* |
+| Yellow — safe verbs only | Tech NOT in candidate_profile.md | *familiar with*, *exposure to*, *ramping up on*, *transferable from X*, *adjacent to*, *comfortable picking up* |
+| Red — forbidden | Any unfamiliar tech | *spent N years on X*, *led X*, *architected X*, *built X from scratch*, *owned X*; inventing metrics or timeframes for unused tech |
+
+  Good: *"My Nx monorepo work at Fairmarkit is transferable to AEM's component model, which I'm ramping up on."*
+  Bad: *"I spent two years wrestling with AEM's component architecture at Fairmarkit."*
 
 **Avoid — resume-builder / Enhancv tone (do not write like this):**
 
 - *I've had the opportunity to closely follow the … at your company* (empty stalking).
-- *aligns seamlessly with the standards of excellence* / *seamlessly aligns*.
+- *aligns seamlessly with the standards of excellence* / *seamlessly aligns* / *aligns with my background* / *aligns perfectly with*.
 - *technical acumen*, *esteemed team*, heavy *harnessing* + *customer-centric* filler chains.
-- *I am passionate about* / *thrilled to* as vibe padding (prefer facts).
+- *I am passionate about* / *thrilled to* / *excited to* as vibe padding (prefer facts).
+- *comfortable owning* / *comfortable with* — weak filler; use specific verbs instead.
+- *proven track record* / *leverage* / *synergy*.
+- *perfect fit* / *ideal match* / *exactly what I'm looking for*.
 - Thought-leadership openers (*The best engineers I know…*), *… exactly the challenges you're facing*, *N years of X is exactly what you need*.
 
 **Still banned as openers / hooks (rewrite if generated):**
@@ -104,15 +116,27 @@ RED LINES (never cross):
 - "Working with X for the past … years, I have [seen | learned | observed] …"
 - "Having [verb]ed X for N years …" as the opening move.
 
-**Story bank for body** (rotate; tie to posting):
+**Proof paragraph structure** (for the 1-2 body paragraphs carrying evidence):
 
-- Team / reviews → Venture Labs cross-functional team 10+
-- Grids / performance → AG Grid + Signals + Nx
-- Testing / CI → Jest, Cypress, SonarQube, Jenkins
-- Migration → Angular 14→19 (Venture Labs)
-- Larger org → Fairmarkit frontend (~200 people)
-- Greenfield → Altoros platform / admin panel
-- Domain match → pick Altoros sub-project when healthcare / e-commerce / etc.
+Pick the 2 blocks that best match the job's top-2 must-have requirements. Each block: 1-2 sentences following **Challenge → Action → Outcome**. Each block must contain ≥1 numeric metric (%, count, version, timeframe, team size). Max 3 technologies per block (avoid keyword-stuffing). Rotate — do not always use the same pair.
+
+**Story bank** (rotate; tie to posting must-haves):
+
+- Team leadership / code review → Venture Labs cross-functional team 10+, Fairmarkit cross-functional team ~10
+- Performance / complex data grids → AG Grid + Signals + Nx monorepo (Fairmarkit)
+- Testing / quality gates → Jest, Cypress, SonarQube, Jenkins pipelines (Venture Labs)
+- Migration / version upgrade → Angular 14→19 (Venture Labs; 300+ German banks, minimal downtime)
+- Architecture in a larger org → Fairmarkit frontend architecture (~200-person engineering org)
+- Greenfield / E2E ownership → Altoros (multi-tenant e-commerce platform + admin panel from scratch)
+- Banking / fintech → Venture Labs / 300+ German cooperative banks (Atruvia AG)
+- Enterprise SaaS / procurement → Fairmarkit AI-powered procurement platform
+- Startup / early-stage → Venture Labs apps built from scratch; Altoros admin panel greenfield
+- Healthcare / insurance → Altoros: British Hospital app (inherited, optimized perf → delivered to sale); real-time incident management system (sole FE dev, SignalR, AG Grid)
+- E-commerce / retail → Altoros multi-tenant shop platform (merchants with separate databases)
+- AI / automation tooling → Fairmarkit AI integration feature + automation dashboard
+- Dev platforms / internal tooling → Fairmarkit internal AI tooling and procurement workflow automation
+- Logistics / supply chain → reframe Fairmarkit procurement as supply-side logistics (use safe verbs: "adjacent to supply chain", "transferable from procurement automation")
+- Media / CMS → reframe Altoros e-commerce product/content management as CMS-adjacent (safe verbs: "familiar with content management patterns")
 
 **Cover Letter PL:** Same two-layer logic in natural Polish — no word-for-word translation; avoid English calques. Same `\n\n` paragraphing; same metric and posting-anchor expectations; same safe/danger verb policy for tech.
 

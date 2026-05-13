@@ -190,13 +190,22 @@ Before adding a NEW domain row, grep `prompts/candidate_profile.md` to verify th
 
 ---
 
+## Execution log
+
+| Date | Agent | What was done |
+|------|-------|---------------|
+| 2026-05-13 | sonnet-4-6 | Edit 1 (system_prompt.md): word count 180→220, CTA rules strengthened (banned 5 generic closings, required concrete anchor), safe/danger verbs table added, Avoid list expanded (+aligns with my background, +aligns perfectly with, +comfortable with, +excited to, +proven track record, +leverage, +synergy, +perfect fit, +ideal match), Proof paragraph CAO structure added, Story bank extended to 15 domains (Edit 4). |
+| 2026-05-13 | sonnet-4-6 | Edit 3 (apply_agent.py): _CL_WORD_MIN 180→220, _BANNED_BODY_PHRASES +5 patterns (aligns with my background, aligns perfectly with, excited to, comfortable with, +aligns perfectly with), _BANNED_CTA_PHRASES +2 (I look forward to hearing from you, Thank you for considering my application), user_msg in review loop updated with new banned CTA list and banned body phrase list. `python -m py_compile apply_agent.py` passes. |
+
+---
+
 ## Success criteria (definition of done)
 
-- [ ] `prompts/system_prompt.md` updated per Edits 1 + 2 (+ optional 4).
-- [ ] `apply_agent.py` self-review loop extended per Edit 3; the 6 gates are explicit in the review prompt.
+- [x] `prompts/system_prompt.md` updated per Edits 1 + 2 (+ optional 4).
+- [x] `apply_agent.py` self-review loop extended per Edit 3; the 6 gates are explicit in the review prompt.
 - [ ] 3 smoke-test CLs generated, manually inspected, all gates pass.
 - [ ] No regression in resume quality (spot-check `resume_en` in the same 3 test jobs).
-- [ ] `python -m compileall .` passes.
+- [x] `python -m compileall .` passes.
 - [ ] Commit on `develop`, not pushed to `master`.
 
 ---

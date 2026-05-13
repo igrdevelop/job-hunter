@@ -214,9 +214,11 @@ _BANNED_OPENER_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"^\s*Having\s+\w.{0,30}for\s+\d+\s+years?\b", re.IGNORECASE),
 )
 
-# Narrow resume-site / Ditko-style junk; classic phrases like "excited to discuss" are allowed.
+# Resume-site / vibe-padding junk. Note: "excited to" and "thrilled to" are banned as empty filler.
 _BANNED_BODY_PHRASES: tuple[re.Pattern, ...] = (
     re.compile(r"\baligns?\s+seamlessly\b", re.IGNORECASE),
+    re.compile(r"\baligns?\s+(?:perfectly\s+)?with\s+my\s+background\b", re.IGNORECASE),
+    re.compile(r"\baligns?\s+perfectly\s+with\b", re.IGNORECASE),
     re.compile(r"\bstandards\s+of\s+excellence\b", re.IGNORECASE),
     re.compile(r"\btechnical\s+acumen\b", re.IGNORECASE),
     re.compile(r"\besteemed\s+team\b", re.IGNORECASE),
@@ -228,8 +230,10 @@ _BANNED_BODY_PHRASES: tuple[re.Pattern, ...] = (
     re.compile(r"\bexactly\s+what\s+I['\u2018\u2019]?m\s+looking\s+for\b", re.IGNORECASE),
     re.compile(r"\bpassionate\s+about\b", re.IGNORECASE),
     re.compile(r"\bthrilled\s+to\b", re.IGNORECASE),
+    re.compile(r"\bexcited\s+to\b", re.IGNORECASE),
     re.compile(r"\bproven\s+track\s+record\b", re.IGNORECASE),
     re.compile(r"\bcomfortable\s+owning\b", re.IGNORECASE),
+    re.compile(r"\bcomfortable\s+with\b", re.IGNORECASE),
     re.compile(r"\bseamlessly\b", re.IGNORECASE),
     re.compile(r"\bsynergy\b", re.IGNORECASE),
     re.compile(r"\bleverage\b", re.IGNORECASE),
@@ -239,16 +243,20 @@ _BANNED_CTA_PHRASES: tuple[re.Pattern, ...] = (
     re.compile(r"I would welcome the opportunity to contribute", re.IGNORECASE),
     re.compile(r"Please find my CV attached", re.IGNORECASE),
     re.compile(r"Feel free to reach out", re.IGNORECASE),
+    re.compile(r"I look forward to hearing from you", re.IGNORECASE),
+    re.compile(r"Thank you for considering my application", re.IGNORECASE),
 )
 
-_CL_WORD_MIN, _CL_WORD_MAX = 180, 280
+_CL_WORD_MIN, _CL_WORD_MAX = 220, 280
 _CL_BODY_PARA_MIN, _CL_BODY_PARA_MAX = 3, 5
 
 _METRIC_RE = re.compile(
-    r"\b\d+\s*%"
-    r"|\b\d{3,}\b"
-    r"|\b\d+\s*(?:x\b|\+\b)"
-    r"|\b\d+\s*(?:people|developers?|engineers?|banks?|apps?|clients?|members?|months?|weeks?)\b",
+    r"\b\d+\s*%"                                          # percentages
+    r"|\b\d{3,}\b"                                        # 3+ digit numbers (300, 1000)
+    r"|\b\d+\s*(?:x\b|\+\b)"                             # multipliers / "10x", "50+"
+    r"|\b\d+\+?\s*(?:people|developers?|engineers?|banks?|apps?|applications?|"
+    r"clients?|members?|months?|weeks?|hours?|microservices?|services?|projects?|"
+    r"repos?|repositories?|teams?|companies|countries)\b",
     re.IGNORECASE,
 )
 
@@ -396,10 +404,15 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         "If score ≤ 6, rewrite fixing ALL failing gates. Target a classic business letter: "
         "`Dear Hiring Manager,` then blank line, then 3-5 body paragraphs separated by blank lines. "
         "Intro may use standard phrases (I am writing to express…) but must still include a concrete "
-        "detail from the job posting. Include ≥2 numeric metrics in the letter. Closing may use "
-        "Thank you / I look forward to meeting or discussing — optionally add a concrete call or "
-        "time window when it fits. No signature block in the letter text. Avoid resume-site filler "
-        "(technical acumen, aligns seamlessly with excellence, I've had the opportunity to follow…).\n"
+        "detail from the job posting. Include ≥2 numeric metrics in the letter. "
+        "Closing: 1 forward-looking sentence with a concrete anchor (time window, topic, timezone). "
+        "BANNED CTAs: 'I look forward to hearing from you', 'Thank you for considering my application', "
+        "'Please find my CV attached', 'Feel free to reach out', 'I would welcome the opportunity to contribute'. "
+        "ALLOWED CTAs: 'I look forward to meeting you', 'I look forward to discussing [specific topic]'. "
+        "No signature block in the letter text. "
+        "Avoid resume-site filler: 'technical acumen', 'aligns seamlessly', 'aligns with my background', "
+        "'aligns perfectly with', 'comfortable owning', 'comfortable with', 'proven track record', "
+        "'leverage', 'synergy', 'excited to', 'passionate about', 'thrilled to'.\n"
         f"{critical_note}\n\n"
         'Respond JSON only: {"score": <int 1-10>, "fails": [<failing gate descriptions>], '
         '"rewrite": <rewritten letter string or null if score > 6>}\n\n'
