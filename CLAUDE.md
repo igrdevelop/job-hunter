@@ -1,103 +1,157 @@
 # CLAUDE.md — Project Context for AI Agents
 
-This file provides context for Claude and other AI agents working in this repository.
-Read it before making any changes.
+This file is the single source of truth for any agent working on this codebase.
+Read it fully before making changes. Update it when you learn something new.
 
 ---
 
 ## What This Project Is
 
 **Job Hunter Bot** — an autonomous system that:
-1. Scrapes Polish/European IT job boards for Senior Frontend (Angular) vacancies
-2. Filters them by location, seniority, stack
-3. Sends new jobs to Telegram for review
-4. On user approval (or automatically), generates a tailored CV + cover letter package via LLM
-5. Tracks everything in `tracker.xlsx`
+1. Scrapes 17 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
+2. Filters by location, seniority, stack, language requirements
+3. Deduplicates against tracker.xlsx (URL + company+title)
+4. Sends new jobs to Telegram for review (Apply/Skip buttons)
+5. On approval (or automatically), generates a tailored CV + cover letter via LLM
+6. Tracks everything in `tracker.xlsx`, manages sending workflow via `to_send.xlsx`
 
-**Owner profile:** Senior Frontend Developer, Angular, 7+ years. Located in Wrocław. Seeking full-remote or hybrid-Wrocław roles. Polish and English speaker.
+**Owner:** Ihar Petrasheuski, Senior Frontend Developer, Angular, 10+ years. Wroclaw, Poland. Seeking Angular/React/JS roles, remote or hybrid-Wroclaw.
+
+**Tech stack:** Python 3.11+, python-telegram-bot (async), Anthropic/OpenAI API, openpyxl, python-docx, LibreOffice headless, requests, cloudscraper, Playwright (optional).
+
+---
+
+## Architecture Overview
+
+```
+hunter.py                   Entry point. Validates config, builds Telegram app, starts polling.
+                            |
+                            v
+hunter/telegram_bot.py      Telegram Application (1266 lines — largest file).
+                            Handlers: /start /hunt /force /status /schedule /unsent
+                              /sync_sent /process_manual /check_expired /apply_expired
+                            URL messages, paste flow, Apply/Skip callbacks.
+                            Staggered JobQueue schedule per source.
+                            LinkedIn batch processing.
+                            |
+                            v  run_hunt(context, source_names?)
+hunter/main.py              Core hunt loop:
+                            1. FETCH  -> sources/*.search() -> list[Job]
+                            2. FILTER -> filters.apply_filters_with_stats()
+                            3. DEDUP  -> tracker (URL + company+title)
+                            4. ACT   -> AUTO_APPLY: apply_agent.py (subprocess)
+                                         MANUAL:    Telegram cards with buttons
+                            Also: _retry_failed(), to_send sync before each hunt.
+                            |
+         +------------------+--------------------+
+         v                  v                    v
+hunter/sources/        hunter/tracker.py     apply_agent.py (1297 lines)
+  17 sources             tracker.xlsx r/w       |
+  (see list below)       dedup logic         job_fetch/       -> fetch job text
+                         SKIP/FAIL/MANUAL      22 fetchers
+                         add_applied()         html_fallback.py
+                         to_send sync           |
+                                                v
+hunter/services/                             llm_client.py   -> call LLM API
+  apply_service.py      subprocess wrapper      |
+  tracker_service.py    high-level tracker      v
+                                             generate_docs.py -> DOCX/PDF + tracker
+```
+
+### Data Flow
+
+```
+Job Boards --scrape--> list[Job] --filter--> list[Job] --dedup--> list[Job] (new)
+  --> apply_agent.py:
+        job_fetch.fetch_job_text(url)      # full job posting text
+        expired_check.is_job_expired()     # skip if offer expired
+        llm_client.call_llm()              # -> JSON (resume, cover letter, about me)
+        cover letter self-review loop      # up to 3 LLM rounds
+        generate_docs.py(content.json)     # -> DOCX + PDF + tracker.xlsx row
+  --> Telegram notification + PDF/DOCX files
+```
+
+### Schedule
+
+Base times: 08:00, 13:00, 19:00 (Europe/Warsaw).
+Each source offset by `SCHEDULE_SOURCE_OFFSET_MIN` (default 40 min).
+With 17 sources, a full cycle spans ~11 hours from the base time.
+
+---
+
+## Job Sources (17 active)
+
+| Source | Module | Strategy | Notes |
+|--------|--------|----------|-------|
+| JustJoin.it | justjoin.py | SSR HTML slugs + JSON detail API | Polish market leader |
+| NoFluffJobs | nofluffjobs.py | POST JSON search API | No auth |
+| LinkedIn | linkedin.py | Guest HTML search API | 2 pages x 25 per keyword |
+| Bulldogjob | bulldogjob.py | `__NEXT_DATA__` JSON | |
+| Pracuj.pl | pracuj.py | cloudscraper + `__NEXT_DATA__` | Cloudflare-protected |
+| theprotocol.it | theprotocol.py | cloudscraper + dehydratedState | Cloudflare-protected |
+| SolidJobs | solidjobs.py | RSS feed | |
+| Arbeitnow | arbeitnow.py | JSON API | EU/remote |
+| Remotive | remotive.py | JSON API | Remote only |
+| RemoteOK | remoteok.py | JSON API | Remote only |
+| Himalayas | himalayas.py | JSON API | Remote only |
+| 4dayweek.io | fourdayweek.py | JSON API v2 | |
+| WeWorkRemotely | weworkremotely.py | RSS feed | |
+| RemoteLeaf | remoteleaf.py | HTML listing parser | Paginated |
+| Inhire.io | inhire.py | Playwright + Vuex store | Requires Playwright |
+| JobLeads | jobleads.py | HTML scraper | Cloudflare issues; MANUAL flow |
+| ATS Aggregator | ats_aggregator.py | Per-company ATS APIs | Workable/Greenhouse/Lever/Recruitee/Ashby |
+| Gmail | gmail.py | Gmail API email alerts | Parses LinkedIn/NoFluff/JustJoin/Pracuj alerts |
 
 ---
 
 ## Repository Layout
 
 ```
-apply_agent.py          # Core apply pipeline: fetch job → LLM → generate docs → tracker
-generate_docs.py        # DOCX/PDF/TXT generation from content.json using python-docx + LibreOffice
-hunter.py               # Entry point: starts the Telegram bot + scheduler
-llm_client.py           # Thin wrapper: supports Anthropic API and OpenAI API
-
-tools/
-  backup_tracker.py     # Manual one-shot backup (also schedulable via Windows Task Scheduler)
-  linkedin_login.py     # Optional: save Playwright session for LinkedIn
+apply_agent.py              Core apply pipeline: fetch job -> LLM -> content.json -> generate docs
+generate_docs.py            DOCX/PDF generation from content.json (python-docx + LibreOffice)
+hunter.py                   Entry point: starts Telegram bot + scheduler
+llm_client.py               LLM wrapper: Anthropic + OpenAI with retry + JSON parsing
 
 hunter/
-  config.py             # ALL config: env vars, filters, schedule, paths, enabled sources
-  models.py             # Job dataclass (title, company, location, salary, url, source)
-  filters.py            # Central job filter: location, seniority, stack, exclude patterns
-  main.py               # Hunt loop: fetch all sources → filter → dedup → notify Telegram
-  telegram_bot.py       # Telegram bot: /hunt [sources…], /force, /status, /schedule, /unsent, /sync_sent + inline buttons
-  tracker.py            # tracker.xlsx read/write: known URLs, add rows, dedup helpers
-  tracker_backup.py     # Timestamped copies of tracker.xlsx + to_send.xlsx (used by bot JobQueue + tools/backup_tracker.py)
-  sources/
-    base.py             # BaseSource ABC — all scrapers implement search() → list[Job]
-    linkedin.py         # LinkedIn scraper (Playwright, requires session cookie)
-    justjoin.py         # JustJoin.it API scraper
-    nofluffjobs.py      # NoFluffJobs API scraper
-    bulldogjob.py       # Bulldogjob.pl scraper
-    pracuj.py           # Pracuj.pl scraper (cloudscraper + __NEXT_DATA__ parsing)
-    theprotocol.py      # theprotocol.it scraper (cloudscraper + __NEXT_DATA__ / dehydratedState)
-    solidjobs.py        # Solid.Jobs RSS feed scraper
-    arbeitnow.py        # Arbeitnow.com JSON API (EU / remote)
-    remotive.py         # Remotive.com JSON API (remote)
-    remoteok.py         # Remote OK JSON API (remoteok.com/api)
-    himalayas.py        # Himalayas.app JSON API (remote jobs search)
-    fourdayweek.py      # 4dayweek.io JSON API v2
-    weworkremotely.py   # We Work Remotely RSS feed
-    remoteleaf.py       # RemoteLeaf.com HTML listing (paginated category pages)
-    inhire.py           # Inhire.io scraper (Playwright + Vuex store, disabled by default)
-    ats_aggregator.py   # ATS Aggregator: many companies via their ATS provider's JSON API
-                        # (Workable, Greenhouse, Lever, Recruitee, Ashby; see PROVIDERS in source file).
-                        # Companies listed in hunter/ats_companies.json — no code needed per-company.
-  ats/                  # ATS provider adapters (one file per ATS system)
-    base.py             # ATSProvider ABC: fetch(slug, company_name) → list[Job]
-    workable.py         # Workable widget API (apply.workable.com/api/v1/widget/accounts/{slug})
-    greenhouse.py       # Greenhouse (boards-api…/v1/boards/{slug}/jobs)
-    lever.py            # Lever (api.lever.co/v0/postings/{slug})
-    recruitee.py        # Recruitee ({slug}.recruitee.com/api/offers/)
-    ashby.py            # Ashby (api.ashbyhq.com/posting-api/job-board/{slug})
-  ats_companies.json    # List of companies for ats_aggregator: {slug, provider, name?, tags?}
+  config.py                 ALL config: env vars, filters, schedule, paths, source toggles
+  models.py                 Job dataclass
+  filters.py                Central filter: keywords, level, location, patterns, React-only, German
+  main.py                   Hunt loop: fetch -> filter -> dedup -> act
+  telegram_bot.py           Telegram bot: all handlers, schedule, callbacks (1266 lines)
+  tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (947 lines)
+  tracker_backup.py         Timestamped snapshots of tracker + to_send
+  to_send.py                to_send.xlsx sync/rebuild workflow
+  expired_check.py          Expired job detection (regex patterns)
+  expired_to_send_check.py  Parallel expired check for to_send entries
+  gmail_client.py           Gmail API wrapper
+  gmail_parsers.py          Parse job alert emails from various boards
+  services/
+    apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
+    tracker_service.py      High-level: should_skip_url(), record_successful_apply()
+  sources/                  17 scrapers (see table above)
+    base.py                 BaseSource ABC: search() -> list[Job]
+    __init__.py             ALL_SOURCES registry (conditional imports by ENABLED flags)
+  ats/                      ATS provider adapters
+    base.py                 ATSProvider ABC: fetch(slug, company_name) -> list[Job]
+    workable.py / greenhouse.py / lever.py / recruitee.py / ashby.py
+  ats_companies.json        Company list for ATS aggregator
 
-job_fetch/
-  __init__.py           # Dispatcher: routes job URL to the right fetcher
-  linkedin.py / pracuj.py / theprotocol.py / ... # Per-site detail fetchers
-  html_fallback.py      # Generic HTML fetcher (requests/cloudscraper + BeautifulSoup)
+job_fetch/                  Per-site detail text fetchers (22 files)
+  __init__.py               Dispatcher: domain -> fetcher
+  html_fallback.py          Generic HTML -> text (BeautifulSoup)
+  ats_workable.py / ats_greenhouse.py / ...  ATS detail fetchers
 
 prompts/
-  system_prompt.md      # LLM instructions: resume tailoring, ATS gap analysis, cover letter rules
-  candidate_profile.md  # Candidate data: contact, stack, work experience, education (single source of truth)
+  system_prompt.md          LLM instructions for resume/CL generation
+  candidate_profile.md      Candidate data (single source of truth for personal info)
 
-.claude/
-  JOB_SOURCES_ROADMAP.md # Job boards: integrated vs queued (tier A–C)
-.claude/commands/
-  apply.md              # Claude Code slash-command /apply — used in CLI fallback mode
-  batch.md              # /batch — process multiple URLs
-  add-source.md         # /add-source — guide for adding a new job board scraper
+tests/                      35 test files, ~2800 lines (pytest)
+tools/                      Utilities: backup, dedup, gmail auth, LinkedIn login, repair
 
-tracker.xlsx            # Main data store: every job seen, applied, or skipped
-backups/                # Local daily snapshots (gitignored) — tracker_*.xlsx, to_send_*.xlsx
-Applications/           # Generated documents: Applications/{YYYY-MM-DD}/{CompanyName}/
-  2026-04-14/
-    CompanyName/
-      content.json      # LLM output (structured data)
-      job_posting.txt   # Raw job description text (saved for free, no LLM)
-      CV_en.pdf
-      Cover_Letter_en.pdf
-      ...
-
-prompts/system_prompt.md
-requirements.txt
-.env                    # Secret config — NEVER commit
-.env.example            # Template
+tracker.xlsx                Main data store (never commit)
+to_send.xlsx                Derived sending queue (never commit)
+backups/                    Daily snapshots (gitignored)
+Applications/               Generated documents (gitignored)
 ```
 
 ---
@@ -108,139 +162,240 @@ requirements.txt
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | — | Required |
 | `TELEGRAM_CHAT_ID` | — | Required |
-| `AUTO_APPLY` | `false` | Auto-generate docs without manual Telegram button press |
+| `AUTO_APPLY` | `false` | Auto-generate docs without manual button press |
 | `LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `LLM_MODEL` | `claude-3-5-haiku-20241022` | Model for API mode |
-| `LLM_API_KEY` | — | API key for LLM |
-| `APPLY_USE_CLI` | `false` | Use Claude Code CLI (Pro subscription) instead of API |
-| `MAX_JOBS_PER_RUN` | `10` | Safety cap: max docs generated per hunt cycle |
-| `APPLY_DELAY_SEC` | `30` | Pause between jobs in auto-apply batch |
-| `GENERATE_PL_RESUME` | `false` | Generate Polish CV variant (full-mode only by default) |
-| `INHIRE_ENABLED` | `false` | Requires Playwright — disabled until installed |
-| `TRACKER_BACKUP_ENABLED` | `true` | When `hunter.py` runs, daily JobQueue copies `tracker.xlsx` + `to_send.xlsx` into `TRACKER_BACKUP_DIR` |
-| `TRACKER_BACKUP_DIR` | `backups` (under project root) | Absolute path allowed |
-| `TRACKER_BACKUP_KEEP_FILES` | `90` | Max retained snapshots **per file type** (`tracker_*.xlsx`, `to_send_*.xlsx`) |
-| `TRACKER_BACKUP_TIME` | `06:05` | `HH:MM` in `Europe/Warsaw` for the scheduled backup job |
+| `LLM_API_KEY` | — | API key for LLM provider |
+| `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
+| `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
+| `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
+| `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
+| `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
+| `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
 
-All source toggles: `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`, `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`, `REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`, `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`.
+Source toggles (all default `true` except `GMAIL_ENABLED=false`):
+`LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
+`SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`,
+`REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`,
+`WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`.
 
 ---
 
 ## Pipeline Flow
 
 ### Hunt cycle (`hunter/main.py`)
-1. Each source calls `source.search()` → `list[Job]`
-2. `filters.apply_filters()` — location, seniority, stack, exclude patterns
-3. Dedup: URL-based (`normalize_url`) + company+title key
-4. New jobs → Telegram card with inline buttons: **Apply** / **Skip**
-5. If `AUTO_APPLY=true` — immediately trigger apply pipeline
+1. Sync `to_send.xlsx` Sent marks back to tracker
+2. Each source calls `source.search()` -> `list[Job]`
+3. `filters.apply_filters_with_stats()` — keywords, level, location, patterns, React-only, German language
+4. Dedup: URL (`normalize_url`) + company+title key (`dedup_key`)
+5. New jobs -> Telegram cards with Apply/Skip buttons
+6. If `AUTO_APPLY=true` -> auto-apply pipeline + retry FAILed jobs
 
 ### Apply pipeline (`apply_agent.py`)
-1. `job_fetch.fetch_job_text(url)` — fetch full job description (free, no LLM)
-2. Save `job_posting.txt` to the output folder
-3. LLM call: `candidate_profile.md` + `system_prompt.md` + job text → structured `content.json`
-   - **Auth priority:** CLI first (Claude Pro) → API fallback (LLM_API_KEY)
-   - **React-only skip:** if stack is React without Angular → log to tracker, skip docs
-4. Cover letter self-review loop (up to 3 rounds, using LLM)
-5. Compute output folder: `Applications/{today}/{CompanyName}/`
-6. Write `content.json`
-7. Run `generate_docs.py` → DOCX/PDF via python-docx + LibreOffice (`soffice.exe`)
-8. Update `tracker.xlsx`
-9. Send Telegram notification with file list
-
-**Telegram — вставка текста вакансии:** длинное обычное сообщение (не команда) распознаётся как полный текст объявления → бот сразу отвечает подтверждением с числом символов, затем вторым сообщением подтверждает запуск `apply_agent` в режиме вставки; итог (файлы / ошибка) приходит от `apply_agent` как обычно.
+1. `job_fetch.fetch_job_text(url)` — fetch full job description
+2. Save `job_posting.txt` to output folder
+3. `expired_check.is_job_expired(text)` — skip if expired
+4. LLM call: `candidate_profile.md` + `system_prompt.md` + job text -> `content.json`
+5. Cover letter self-review loop (up to 3 LLM rounds)
+6. Output folder: `Applications/{today}/{CompanyName}/`
+7. `generate_docs.py` -> DOCX + PDF (LibreOffice headless)
+8. `tracker_service.record_successful_apply()` -> tracker.xlsx + to_send rebuild
+9. Telegram notification + file upload
 
 ### Doc generation modes
-- **Short mode** (default): PDF only, English CV only (3 files: CV EN, Cover Letter EN, Cover Letter PL)
-- **Full mode** (`--full` flag only): DOCX + PDF, EN + PL CV, About_Me `.txt` files (10 files)
-- **Force mode** (`--force`): skip tracker dedup check, bypass React-only auto-skip, stronger LLM tailoring hint. Telegram: `/force <url>` **or** `/force` followed by the same long pasted posting as plain-text apply. JobLeads still loads pasted `job_posting.txt` when present.
+- **Short** (default): PDF only, EN CV only (3 files)
+- **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
+- **Force** (`--force`): skip dedup, bypass React-only skip
 
 ---
 
 ## tracker.xlsx Schema
 
-| Column | Description |
-|---|---|
-| Date | Application date |
-| Company | Company name |
-| Job Title | Position title |
-| Stack | Tech stack from LLM analysis |
-| ATS % | Keyword match score (or SKIP / FAIL / —) |
-| URL | Canonical job URL (dedup key) |
-| Folder | Relative path to `Applications/` subfolder |
-| Sent | Date sent, or blank/dash |
-| Re-application | Flag |
-| To Learn | Skills gap noted |
-| ID | Short UUID (8-char hex) — internal key for `to_send.xlsx` sync |
+| Col | Name | Description |
+|-----|------|-------------|
+| 1 | Date | Application date |
+| 2 | Company | Company name |
+| 3 | Job Title | Position title |
+| 4 | Stack | Tech stack (from LLM) |
+| 5 | ATS % | Match score, or: SKIP / FAIL / MANUAL / EXPIRED / — |
+| 6 | URL | Canonical job URL (dedup key) |
+| 7 | Folder | Path to Applications/ subfolder |
+| 8 | Sent | Date sent, or blank/dash |
+| 9 | Re-application | `+` flag |
+| 10 | To Learn | Skills gap |
+| 11 | ID | Short UUID (8-char hex) for to_send sync |
 
-**Dedup logic:**
-- URL dedup: `normalize_url()` strips tracking params (`utm_*`, `sendid`, `trk`, etc.)
-- Company+title dedup: prevents same role from two sources
-- React-only jobs: written with `Sent = "—"` to block future reprocessing
+**Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
 ---
 
 ## to_send.xlsx — Sending Workflow
 
-`to_send.xlsx` is a **derived, human-editable** file that shows only the rows you have not yet sent. It is rebuilt automatically and is safe to keep open while the bot runs.
+Derived from tracker.xlsx. Shows unsent rows only. Auto-rebuilt after each apply.
 
-**How it works:**
-1. Every `add_applied()` / `add_failed()` / `add_manual_jobleads_pending()` in `tracker.xlsx` gets a short `ID`.
-2. After each successful apply, `tracker_service.record_successful_apply()` calls `to_send.sync_and_rebuild()` automatically.
-3. You open `to_send.xlsx`, find the rows you have sent, and fill in the `Sent` column (any value: a date, `+`, `ok` — doesn't matter).
-4. Run `/sync_sent` in Telegram (or wait for the next apply). The bot:
-   - reads the `Sent` values from `to_send.xlsx` by `ID`,
-   - writes them back to `tracker.xlsx`,
-   - rebuilds `to_send.xlsx` — sent rows disappear, only pending rows remain.
-5. If `to_send.xlsx` is open/locked when the bot tries to rebuild it, it logs a warning and continues without crashing. Close the file and run `/sync_sent` again.
-6. `/unsent` in Telegram shows how many unsent rows are in the queue (same logic as `to_send.xlsx`) and how many of them have `ANGULAR` in the Stack column (case-insensitive substring).
-
-**Key files:**
-- `hunter/to_send.py` — `read_sent_marks()`, `rebuild()`, `sync_and_rebuild()`
-- `hunter/config.py` — `TO_SEND_PATH`
-- `hunter/tracker.py` — `iter_rows_for_to_send()`, `apply_sent_updates()`
-
-**Rows in to_send.xlsx:**
-- Included: successful applies (ATS%), FAIL rows, MANUAL rows — anything actionable.
-- Excluded: SKIP rows (geo/stack filtered, nothing to send), rows already marked Sent.
+1. Successful apply -> `to_send.sync_and_rebuild()` adds row
+2. User fills `Sent` column in to_send.xlsx
+3. `/sync_sent` copies Sent marks to tracker.xlsx, rebuilds to_send
+4. `/unsent` shows count + Angular percentage
 
 ---
 
 ## Adding a New Job Source
 
-See `.claude/commands/add-source.md` for the full step-by-step guide.
+See `.claude/commands/add-source.md` for full guide.
 
-**Short version:**
-1. Create `hunter/sources/yoursite.py` — subclass `BaseSource`, implement `search() → list[Job]`
-2. Create `job_fetch/yoursite.py` — implement `fetch_yoursite(url) → str` (returns job description text)
-3. Add `YOURSITE_ENABLED` toggle to `hunter/config.py`
-4. Register in `hunter/sources/__init__.py` (conditional import) and `job_fetch/__init__.py` (domain routing)
-
-**Scraping strategies (in priority order):**
-1. Public JSON API (easiest)
-2. `__NEXT_DATA__` / React Query `dehydratedState` in HTML (Next.js sites)
-3. RSS feed (Solid.Jobs)
-4. `cloudscraper` + BeautifulSoup DOM (Cloudflare-protected sites: Pracuj, theprotocol)
-5. Playwright headless browser (SPAs: LinkedIn, Inhire)
+1. `hunter/sources/yoursite.py` — subclass `BaseSource`, implement `search() -> list[Job]`
+2. `job_fetch/yoursite.py` — implement `fetch_yoursite(url) -> str`
+3. `YOURSITE_ENABLED` toggle in `hunter/config.py`
+4. Register in `hunter/sources/__init__.py` + `job_fetch/__init__.py`
 
 ---
 
 ## Git Workflow
 
 - **Active branch:** `develop` — all changes go here
-- `main` is production-stable
-- Always commit on `develop`, never force-push `main`
+- `master` is production-stable (60+ commits behind develop)
+- Always commit on `develop`, never force-push `master`
 
 ---
 
 ## Important Rules for Agents
 
-- **Never commit `.env`** — it contains real secrets
-- **Never commit `tracker.xlsx`** — it contains personal application data
-- **Never commit files in `Applications/`** — generated documents
+- **Never commit** `.env`, `tracker.xlsx`, `to_send.xlsx`, `Applications/`, `backups/`, `gmail_token.json`
 - Always test syntax after edits: `python -m compileall .`
-- When editing `tracker.py` or `generate_docs.py`, check column index constants in `tracker.py` — they are hardcoded (`URL_COL_INDEX = 6`, etc.)
-- Candidate profile is the single source of truth: `prompts/candidate_profile.md` — update it when experience changes
-- LibreOffice path on Windows: typically `C:/Program Files/LibreOffice/program/soffice.exe` — configured in `generate_docs.py`
-- On Windows, use PowerShell; `&&` is not valid — use `;` or separate commands
-- When changing `tracker.xlsx` schema (columns, constants), adding new runtime files (like `to_send.xlsx`), or changing user-facing bot behaviour — update the relevant section of `CLAUDE.md` in the same change
+- Run `pytest tests/` after changes to tracker, filters, or sources
+- Column index constants in `tracker.py` are hardcoded — update carefully
+- Candidate profile single source of truth: `prompts/candidate_profile.md`
+- LibreOffice path: `C:/Program Files/LibreOffice/program/soffice.exe` (in `generate_docs.py`)
+- When changing tracker schema, bot behavior, or adding files — update CLAUDE.md in the same commit
+
+---
+
+## Known Issues and Technical Debt
+
+### Structural
+
+1. **telegram_bot.py is a 1266-line monolith.** Contains 15+ handlers, build_application, schedule setup, LinkedIn batch, paste flow, expired check flow, force logic. Hard to navigate and test.
+
+2. **job_fetch/ is a separate parallel package (22 files, 2475 lines).** Every site has a file in both `hunter/sources/` (search/listing) and `job_fetch/` (detail text fetch). URLs, headers, and domain knowledge are duplicated across packages.
+
+3. **apply_agent.py is 1297 lines.** Contains two full pipelines (API + CLI mode), Telegram notification, folder management, LLM calling, cover letter review loop, paste flow, force mode, JobLeads MANUAL flow. Could be split.
+
+4. **Stale documentation files in root:**
+   - `PLAN.md` — describes Phase 1 (/apply skill) as "in progress" (done long ago)
+   - `HUNTER_PLAN.md` — describes hunter bot as "NOT BUILT" (fully operational)
+   - `EXPIRED_PLAN.md` — expired check plan (already implemented)
+   - `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` — all TASKs completed
+   - `WEBSITE_PLAN.md` — unrelated to this project
+
+5. **Debug artifacts in repo:** `_probe2.py`, `_probe3.py`, `_probe_bulldogjob.py`, `tracker_broken.xlsx` — should be gitignored or deleted.
+
+6. **`__pycache__/` directories tracked in git.** Multiple `.pyc` files committed.
+
+### Code Quality
+
+7. **telegram_bot.py has its own `_run_apply_agent()`** (lines 483+) separate from `services/apply_service.py`. Two subprocess launch paths for the same operation.
+
+8. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
+
+9. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
+
+10. **tracker.py is 947 lines.** Multiple functions re-open and re-parse the entire Excel file per call. No caching within a hunt cycle.
+
+---
+
+## Refactoring Plan
+
+### Phase 1 — Cleanup (LOW risk, immediate value)
+
+- [ ] **1.1** Delete stale docs: `PLAN.md`, `HUNTER_PLAN.md`, `EXPIRED_PLAN.md`, `PROJECT_REVIEW_AND_REFACTOR_PLAN.md`, `WEBSITE_PLAN.md`
+- [ ] **1.2** Delete debug artifacts: `_probe*.py`, `tracker_broken.xlsx`
+- [ ] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs
+- [ ] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
+
+### Phase 2 — Split telegram_bot.py (MEDIUM risk)
+
+- [ ] **2.1** Extract command handlers into `hunter/commands/` module (hunt, force, status, expired, etc.)
+- [ ] **2.2** Extract `build_application()` + schedule setup into `hunter/app.py`
+- [ ] **2.3** Keep `telegram_bot.py` as thin dispatcher + send_text/send_job_cards API
+
+### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk)
+
+- [ ] **3.1** Add `fetch_text(url) -> str` method to `BaseSource` ABC
+- [ ] **3.2** Move `job_fetch/*.py` logic into corresponding `hunter/sources/*.py`
+- [ ] **3.3** Update `apply_agent.py` to call `source.fetch_text(url)` instead of `job_fetch.fetch_job_text()`
+- [ ] **3.4** Delete `job_fetch/` package
+
+### Phase 4 — Split apply_agent.py (MEDIUM risk)
+
+- [ ] **4.1** Extract API pipeline into `hunter/apply_api.py`
+- [ ] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
+- [ ] **4.3** Make apply callable as import (not just subprocess)
+- [ ] **4.4** Keep `apply_agent.py` as thin CLI entry point
+
+### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk)
+
+- [ ] **5.1** Create `hunter/db.py` with SQLite schema
+- [ ] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
+- [ ] **5.3** Add `/export` command for Excel export
+- [ ] **5.4** Keep openpyxl only for doc generation formatting
+
+### Phase 6 — Project structure (after phases 1-5)
+
+- [ ] **6.1** Add `pyproject.toml` with metadata and mypy config
+- [ ] **6.2** Make project installable (`pip install -e .`)
+- [ ] **6.3** Entry point: `python -m hunter` instead of `python hunter.py`
+
+---
+
+## Scraper Health Notes
+
+> Agents: update this section when you verify or fix a scraper.
+
+| Source | Last verified | Status | Notes |
+|--------|--------------|--------|-------|
+| JustJoin.it | 2026-04 | OK | SSR HTML + `/api/candidate-api/offers/{slug}` |
+| NoFluffJobs | 2026-04 | OK | POST `/api/search/posting` |
+| LinkedIn | 2026-04 | OK | Guest HTML search API |
+| Bulldogjob | 2026-04 | OK | `__NEXT_DATA__` JSON |
+| Pracuj.pl | 2026-04 | OK | cloudscraper + `__NEXT_DATA__` |
+| theprotocol.it | 2026-04 | OK | cloudscraper + dehydratedState |
+| SolidJobs | 2026-04 | OK | RSS feed |
+| Arbeitnow | 2026-04 | OK | JSON API |
+| Remotive | 2026-04 | OK | JSON API |
+| RemoteOK | 2026-04 | OK | JSON API |
+| Himalayas | 2026-04 | OK | JSON API |
+| 4dayweek.io | 2026-04 | OK | JSON API v2 |
+| WeWorkRemotely | 2026-04 | OK | RSS feed |
+| RemoteLeaf | 2026-04 | OK | HTML listing |
+| Inhire.io | 2026-04 | OK | Playwright + Vuex |
+| JobLeads | 2026-04 | PARTIAL | Detail pages Cloudflare-blocked; MANUAL flow |
+| ATS Aggregator | 2026-04 | OK | Workable/Greenhouse/Lever/Recruitee/Ashby |
+| Gmail | 2026-05 | OK | Gmail API alerts |
+
+---
+
+## Previously Completed Refactoring
+
+These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
+
+- **TASK-01 (P0):** Subprocess timeout/kill — `asyncio.wait_for` + `proc.kill()` in `apply_service.py`
+- **TASK-02 (P0):** Tracker writes centralized — `generate_docs.py` delegates to `tracker_service.record_successful_apply()`
+- **TASK-03 (P1):** Hardcoded paths removed — all paths from `hunter.config`
+- **TASK-04 (P1):** Config unified — `apply_agent.py` imports from `hunter.config`
+- **TASK-05 (P2):** Tests added — 35 test files covering filters, tracker, sources, LLM parsing
+- **Extra:** ATS 10-point scale interpretation, robust JSON parsing, status normalization, service layer
+
+---
+
+## Agent Work Log
+
+> Agents: append a dated entry here after completing significant work.
+> Format: `YYYY-MM-DD | agent | what was done`
+
+| Date | Agent | Work |
+|------|-------|------|
+| 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
+| 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
+| 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
+| 2026-05-13 | opus | Full develop-branch analysis, CLAUDE.md rewritten with current architecture + refactoring plan |

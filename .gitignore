@@ -36,6 +36,7 @@ tracker.xlsx
 tracker.backup.*.xlsx
 to_send.xlsx
 to_send.backup.*.xlsx
+to_send_checking.xlsx
 
 # Temp files
 _*.py
