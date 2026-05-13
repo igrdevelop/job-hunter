@@ -636,47 +636,30 @@ async def _run_apply_agent(
     force: bool = False,
     paste_file: Optional[str] = None,
 ) -> None:
-    """Run apply_agent.py in the background, don't block the event loop.
+    """Run apply_agent.py via apply_service, don't block the event loop.
 
     If ``paste_file`` is set, URL may be empty — apply_agent will use the pasted
     text instead of fetching.
     """
+    from hunter.services.apply_service import run_apply_agent_for_url
+
     label = url or "(pasted text)"
-    cmd = [sys.executable, str(APPLY_AGENT_PATH)]
-    if url:
-        cmd.append(url)
-    if force:
-        cmd.append("--force")
-    if paste_file:
-        cmd.extend(["--paste-file", paste_file])
-
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        outcome = await run_apply_agent_for_url(
+            url=url,
+            timeout_sec=_APPLY_AGENT_TIMEOUT,
+            apply_agent_path=APPLY_AGENT_PATH,
+            python_executable=sys.executable,
+            force=force,
+            paste_file=paste_file,
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_APPLY_AGENT_TIMEOUT
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            logger.error(f"[apply_agent] hard timeout ({_APPLY_AGENT_TIMEOUT}s) for {label}")
+        if outcome == "fail":
+            logger.error(f"[apply_agent] failed for {label}")
             await _tg_notify(
-                f"⏱ <b>apply_agent завис — принудительно остановлен</b>\n"
-                f"Таймаут {_APPLY_AGENT_TIMEOUT // 60} мин\n🔗 {label}"
-            )
-            return
-
-        if proc.returncode != 0:
-            logger.error(
-                f"[apply_agent] failed (rc={proc.returncode}) for {label}:\n"
-                f"{stderr.decode(errors='replace')}"
+                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}"
             )
         else:
-            logger.info(f"[apply_agent] done for {label}")
-
+            logger.info(f"[apply_agent] done ({outcome}) for {label}")
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
@@ -685,7 +668,9 @@ async def _run_apply_agent(
             try:
                 Path(paste_file).unlink(missing_ok=True)
             except Exception as cleanup_err:
-                logger.warning(f"[apply_agent] could not delete paste file {paste_file}: {cleanup_err}")
+                logger.warning(
+                    f"[apply_agent] could not delete paste file {paste_file}: {cleanup_err}"
+                )
 
 
 # ── URL message handler ───────────────────────────────────────────────────────
