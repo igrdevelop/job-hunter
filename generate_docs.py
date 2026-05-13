@@ -38,6 +38,7 @@ Expects a JSON file with the following schema:
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -47,6 +48,31 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from hunter.services.tracker_service import record_successful_apply
+
+# Polish boards (e.g. Pracuj.pl) often reject uploads when the filename exceeds ~50 characters.
+MAX_ATTACHMENT_BASENAME_LEN = 50
+
+
+def _safe_stack_segment(stack: str, max_len: int = 22) -> str:
+    s = (stack or "FE").strip()
+    s = re.sub(r"[^\w\-+]", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    s = s.replace("+", "_")
+    return (s[:max_len] or "FE").strip("_") or "FE"
+
+
+def resume_docx_basename(stack: str, lang: str) -> str:
+    """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
+    lang_u = (lang or "EN").strip().upper()[:2] or "EN"
+    ext = ".docx"
+    safe = _safe_stack_segment(stack, max_len=22)
+    primary = f"CV_{safe}_2026_{lang_u}{ext}"
+    if len(primary) <= MAX_ATTACHMENT_BASENAME_LEN:
+        return primary
+    fallback = f"CV_2026_{lang_u}{ext}"
+    if len(fallback) <= MAX_ATTACHMENT_BASENAME_LEN:
+        return fallback
+    return f"CV_{lang_u}{ext}"
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
@@ -287,7 +313,7 @@ def main():
         doc = Document()
         set_margins(doc)
         build_resume(doc, content["resume_en"], stack)
-        fname = f"Ihar Petrasheuski CV Senior Frontend Developer ({stack}) 2026.docx"
+        fname = resume_docx_basename(stack, "EN")
         save_docx(doc, Path(output_folder) / fname)
 
     # --- Resume PL (full mode only) ---
@@ -295,7 +321,7 @@ def main():
         doc = Document()
         set_margins(doc)
         build_resume(doc, content["resume_pl"], stack)
-        fname = f"Ihar Petrasheuski CV Senior Frontend Developer ({stack}) 2026 PL.docx"
+        fname = resume_docx_basename(stack, "PL")
         save_docx(doc, Path(output_folder) / fname)
 
     # --- Cover Letter EN ---
@@ -314,15 +340,9 @@ def main():
 
     # --- About Me (full mode only) ---
     if full_mode:
-        if content.get("about_me_en"):
-            p = Path(output_folder) / "About_Me_EN.txt"
-            p.write_text(content["about_me_en"], encoding="utf-8")
-            print(f"  [OK] TXT:  {p}")
-
-        if content.get("about_me_pl"):
-            p = Path(output_folder) / "About_Me_PL.txt"
-            p.write_text(content["about_me_pl"], encoding="utf-8")
-            print(f"  [OK] TXT:  {p}")
+        from hunter.about_me_agent import generate_about_me
+        generate_about_me(Path(output_folder), lang="en")
+        generate_about_me(Path(output_folder), lang="pl")
 
     # --- Convert all DOCX to PDF in one shot ---
     convert_all_to_pdf(output_folder)

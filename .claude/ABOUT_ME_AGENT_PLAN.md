@@ -336,6 +336,7 @@ BotCommand("about_me", "Generate About Me for a job URL (lang + url)"),
 |------|-------|--------|
 | 2026-05-13 | sonnet-4-6 | Plan created |
 | 2026-05-13 | sonnet-4-6 | Step 0 DONE: examples updated (see below) |
+| 2026-05-13 | sonnet-4-6 | Steps 1-4 DONE: about_me_agent.py, generate_docs.py, tracker.py, telegram_bot.py |
 
 ### Step 0 results
 
@@ -351,4 +352,4 @@ BotCommand("about_me", "Generate About Me for a job URL (lang + url)"),
 
 **`prompts/examples/about_me_legacy.md`:** no changes needed (negative example, still valid)
 
-**Next:** Step 1 — create `hunter/about_me_agent.py`
+**Next:** Step 5 — verification (compileall passed; manual Telegram test pending)

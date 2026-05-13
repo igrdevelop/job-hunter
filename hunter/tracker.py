@@ -945,3 +945,29 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
     else:
         wb.close()
     return updated
+
+
+def get_folder_by_url(url: str) -> str | None:
+    """Return the Folder value for a given job URL, or None if not found.
+
+    Normalizes the URL before comparing (strip trailing slash, lowercase scheme).
+    Returns the raw string from the Folder column (e.g. 'Applications/2026-05-11/PeopleMore_3').
+    """
+    if not TRACKER_PATH.exists():
+        return None
+
+    target = normalize_url(url)
+    if not target:
+        return None
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            cell_url = str(row[URL_COL_INDEX - 1] or "").strip()
+            if normalize_url(cell_url) == target:
+                folder_val = row[URL_COL_INDEX]  # column 7 = index 6 = URL_COL_INDEX
+                return str(folder_val).strip() if folder_val else None
+    finally:
+        wb.close()
+    return None

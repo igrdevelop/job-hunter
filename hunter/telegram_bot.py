@@ -399,7 +399,7 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not expired:
         return
 
-    # Try to apply immediately — will fail if Excel has the file open
+    # Try to apply immediately — will fail if Excel / LibreOffice Calc has the file open
     apply_result = await asyncio.to_thread(apply_check)
     if apply_result["ok"]:
         synced = apply_result.get("synced", 0)
@@ -413,7 +413,7 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
     elif apply_result["error"] == "PermissionError":
         await update.message.reply_text(
-            "📌 Файл занят (Excel открыт).\n"
+            "📌 Файл занят (открыт в Excel или LibreOffice Calc).\n"
             "Буду пробовать каждую минуту — как закроешь, применю автоматически.",
             parse_mode=ParseMode.HTML,
         )
@@ -444,7 +444,7 @@ def _schedule_apply_retry(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _retry_apply_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Repeating job: try to apply checked copy until Excel releases the file."""
+    """Repeating job: try to apply checked copy until the editor releases the file."""
     from hunter.expired_to_send_check import apply_check, CHECKING_PATH
 
     if not CHECKING_PATH.exists():
@@ -494,7 +494,7 @@ async def cmd_apply_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.info("[apply_expired] Applied checking copy to to_send.xlsx")
     elif result["error"] == "PermissionError":
         await update.message.reply_text(
-            "⚠️ <b>Файл занят — закрой to_send.xlsx в Excel.</b>\n"
+            "⚠️ <b>Файл занят — закрой to_send.xlsx в Excel или LibreOffice Calc.</b>\n"
             "Буду пробовать каждую минуту автоматически.",
             parse_mode=ParseMode.HTML,
         )
@@ -511,9 +511,9 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("⏳ Syncing to_send.xlsx → tracker.xlsx…")
     try:
         from hunter import to_send
-        if to_send.is_excel_open():
+        if to_send.is_to_send_locked_by_editor():
             await update.message.reply_text(
-                "⚠️ <b>to_send.xlsx открыт в Excel!</b>\n\n"
+                "⚠️ <b>to_send.xlsx открыт в Excel или LibreOffice Calc!</b>\n\n"
                 "Несохранённые изменения не будут прочитаны.\n"
                 "<b>Сохрани файл (Ctrl+S) и запусти /sync_sent снова.</b>",
                 parse_mode=ParseMode.HTML,
@@ -702,6 +702,58 @@ def _extract_url(text: str) -> str:
     """Return the first http(s) URL found in text, or ''."""
     m = _URL_RE.search(text)
     return m.group(0).rstrip(").,;") if m else ""
+
+
+async def cmd_about_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate (or regenerate) About Me for a job URL in the tracker.
+
+    Usage: /about_me <lang> <url>
+    lang: en | pl
+    """
+    args = context.args or []
+    if len(args) != 2:
+        await update.message.reply_text(
+            "Usage: /about_me <lang> <url>\nExample: /about_me pl https://justjoin.it/job-offer/..."
+        )
+        return
+
+    lang, url = args[0].lower(), args[1]
+    if lang not in ("en", "pl"):
+        await update.message.reply_text("lang must be 'en' or 'pl'")
+        return
+
+    from hunter.tracker import get_folder_by_url, normalize_url
+    from hunter.config import PROJECT_DIR
+
+    normalized = normalize_url(url)
+    folder_str = get_folder_by_url(normalized)
+    if not folder_str:
+        await update.message.reply_text(
+            "URL not found in tracker. Run /force to process it first."
+        )
+        return
+
+    folder_path = PROJECT_DIR / folder_str
+    if not (folder_path / "job_posting.txt").exists():
+        await update.message.reply_text(
+            "No job_posting.txt in folder - cannot generate."
+        )
+        return
+
+    await update.message.reply_text(f"⏳ Generating About Me ({lang.upper()})...")
+
+    import asyncio
+    from hunter.about_me_agent import generate_about_me
+
+    result = await asyncio.to_thread(generate_about_me, folder_path, lang)
+    if not result:
+        await update.message.reply_text("❌ Generation failed - check logs.")
+        return
+
+    await update.message.reply_text(result)
+    await update.message.reply_text(
+        f"✅ Saved to {folder_str}/About_Me_{lang.upper()}.txt"
+    )
 
 
 async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -989,6 +1041,7 @@ async def _set_bot_commands(app: Application) -> None:
         BotCommand("unsent",         "Unsent queue count + Angular in Stack"),
         BotCommand("check_expired",  "Check to_send for expired job offers"),
         BotCommand("apply_expired",  "Apply expiry results to to_send.xlsx"),
+        BotCommand("about_me",       "Generate About Me for a job URL (lang + url)"),
     ])
 
 
@@ -1010,6 +1063,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("sync_sent",     cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired", cmd_check_expired))
     app.add_handler(CommandHandler("apply_expired", cmd_apply_expired))
+    app.add_handler(CommandHandler("about_me",      cmd_about_me))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -1148,7 +1202,7 @@ async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=f"🌙 <b>Ночная проверка:</b> найдено <b>{len(expired)}</b> истёкших.\n"
-                 f"📌 to_send.xlsx открыт — закрой Excel и нажми /apply_expired.",
+                 f"📌 to_send.xlsx открыт — закрой Excel или LibreOffice Calc и нажми /apply_expired.",
             parse_mode=ParseMode.HTML,
         )
         _schedule_apply_retry(context)
