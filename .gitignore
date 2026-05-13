@@ -44,6 +44,7 @@ ssh.txt
 
 # Temp files
 _*.py
+!__init__.py
 *.tmp
 
 # Personal documents (templates)
