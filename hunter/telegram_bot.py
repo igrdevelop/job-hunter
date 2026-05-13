@@ -65,6 +65,8 @@ def _make_keyboard(job_id: str) -> InlineKeyboardMarkup:
 # ── Public API (called from main.py) ─────────────────────────────────────────
 
 async def send_text(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    if len(text) > 4096:
+        text = text[:4090] + "\n…"
     await context.bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text=text,
