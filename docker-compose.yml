@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  job-hunter:
+    image: ghcr.io/igrdevelop/job-hunter:latest
+    container_name: job-hunter
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./tracker.xlsx:/app/tracker.xlsx
+      - ./to_send.xlsx:/app/to_send.xlsx
+      - ./Applications:/app/Applications
+      - ./backups:/app/backups
+      - ./.secrets:/app/.secrets
+      - ./gmail_credentials.json:/app/gmail_credentials.json
+      - ./gmail_token.json:/app/gmail_token.json
+      - ./drive_credentials.json:/app/drive_credentials.json
+      - ./drive_token.json:/app/drive_token.json
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
