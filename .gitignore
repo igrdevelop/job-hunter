@@ -37,7 +37,7 @@ tracker.backup.*.xlsx
 to_send.xlsx
 to_send.backup.*.xlsx
 to_send_checking.xlsx
-
+ssh.txt
 # Spreadsheet editor lock files (Excel / LibreOffice Calc)
 ~$*
 .~lock.*
@@ -50,6 +50,7 @@ _*.py
 *.docx
 *.pdf
 !templates/*.docx
+
 
 # Claude Code local settings (personal, not for repo)
 .claude/settings.local.json
