@@ -235,7 +235,7 @@ Derived from tracker.xlsx. Shows unsent rows only. Auto-rebuilt after each apply
 
 1. Successful apply -> `to_send.sync_and_rebuild()` adds row
 2. User fills `Sent` column in to_send.xlsx
-3. `/sync_sent` copies Sent marks to tracker.xlsx, rebuilds to_send
+3. `/sync_sent` copies Sent marks to tracker.xlsx, rebuilds to_send (rebuild is skipped while Excel / LibreOffice Calc lock files are present so the open file is not overwritten on disk)
 4. `/unsent` shows count + Angular percentage
 
 ---
@@ -400,3 +400,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
 | 2026-05-13 | opus | Full develop-branch analysis, CLAUDE.md rewritten with current architecture + refactoring plan |
 | 2026-05-13 | opus | Phase 1 complete: 1.1 stale docs removed (7526acb), 1.2 debug artifacts deleted, 1.3 pre-done, 1.4 apply_service unified (265d87e) |
+| 2026-05-13 | composer | to_send: detect LibreOffice Calc lock (`.~lock.*#`); skip rebuild when editor holds file; Telegram/gitignore/docs aligned |

@@ -6,13 +6,14 @@ Workflow:
   2. sync_and_rebuild() reads "Sent" marks from to_send.xlsx, copies them
      back to tracker.xlsx, then rebuilds to_send.xlsx from tracker rows
      that still have an empty Sent column (SKIP rows are excluded).
-  3. User opens to_send.xlsx in Excel, fills in "Sent" column (any value,
-     e.g. a date, "+" or "ok"), saves and closes.
+  3. User opens to_send.xlsx in Excel or LibreOffice Calc, fills in "Sent"
+     (any value, e.g. a date, "+" or "ok"), saves and closes.
   4. Next sync (on new apply or /sync_sent Telegram command) picks up the
      changes and removes those rows from to_send.xlsx.
 
-to_send.xlsx is safe to have open; if it is locked the rebuild step
-logs a warning and returns without raising (main apply flow is unaffected).
+While the file is open (Excel ~$ lock or LibreOffice .~lock…#), rebuild is
+skipped so the editor is not overwritten on disk — sync then proceeds on the
+next run after close. PermissionError on save is retried the same way.
 """
 
 import logging
@@ -55,8 +56,8 @@ def _save_to_send_safe(wb: openpyxl.Workbook, retries: int = 3, delay: float = 2
         except PermissionError:
             if attempt == retries:
                 logger.warning(
-                    "[to_send] to_send.xlsx is open in Excel — rebuild skipped. "
-                    "Close the file and run /sync_sent again."
+                    "[to_send] to_send.xlsx is open (Excel or LibreOffice Calc) — "
+                    "rebuild skipped. Close the file and run /sync_sent again."
                 )
                 return False
             logger.debug("[to_send] File locked, retry %d/%d in %.0fs…", attempt, retries, delay)
@@ -119,10 +120,21 @@ def _write_data_row(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def is_to_send_locked_by_editor() -> bool:
+    """True if a spreadsheet editor likely has to_send.xlsx open (sidecar lock files).
+
+    Excel: ``~$filename.xlsx``. LibreOffice Calc: ``.~lock.filename.xlsx#``.
+    """
+    parent = TO_SEND_PATH.parent
+    name = TO_SEND_PATH.name
+    excel_lock = parent / f"~${name}"
+    libre_lock = parent / f".~lock.{name}#"
+    return excel_lock.exists() or libre_lock.exists()
+
+
 def is_excel_open() -> bool:
-    """Return True if Excel currently has to_send.xlsx open (lock file exists)."""
-    lock = TO_SEND_PATH.parent / f"~${TO_SEND_PATH.name}"
-    return lock.exists()
+    """Backward-compatible alias for :func:`is_to_send_locked_by_editor`."""
+    return is_to_send_locked_by_editor()
 
 
 def read_sent_marks() -> dict[str, str]:
@@ -130,10 +142,11 @@ def read_sent_marks() -> dict[str, str]:
     if not TO_SEND_PATH.exists():
         return {}
 
-    if is_excel_open():
+    if is_to_send_locked_by_editor():
         logger.warning(
-            "[to_send] to_send.xlsx appears open in Excel — unsaved changes will NOT be read. "
-            "Save and close the file, then run /sync_sent again."
+            "[to_send] to_send.xlsx appears open in Excel or LibreOffice Calc — "
+            "unsaved in-memory changes will NOT be read. Save to disk and close the file, "
+            "then run /sync_sent again."
         )
 
     try:
@@ -161,8 +174,15 @@ def read_sent_marks() -> dict[str, str]:
 def rebuild() -> bool:
     """Rebuild to_send.xlsx from current tracker rows that have no Sent value.
 
-    Returns True on success, False if the file was locked.
+    Returns True on success, False if the file was locked or an editor holds it open.
     """
+    if is_to_send_locked_by_editor():
+        logger.warning(
+            "[to_send] Skipping rebuild — to_send.xlsx is open in Excel or LibreOffice Calc "
+            "(lock file present). Close the file to refresh the sheet."
+        )
+        return False
+
     rows = iter_rows_for_to_send()
 
     wb = openpyxl.Workbook()

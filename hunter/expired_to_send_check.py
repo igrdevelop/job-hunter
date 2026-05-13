@@ -5,7 +5,7 @@ Used by the Telegram /check_expired command.
 
 Strategy:
   - Works on a COPY (to_send_checking.xlsx) so the original is never touched
-    while the user may have it open in Excel.
+    while the user may have it open in Excel or LibreOffice Calc.
   - Fetches URLs in parallel: global semaphore + per-domain semaphore + per-domain delay.
   - After the check, /apply_expired replaces the original with the copy.
 """
@@ -99,7 +99,7 @@ async def run_check(
     if not TO_SEND_PATH.exists():
         raise FileNotFoundError(f"to_send.xlsx not found: {TO_SEND_PATH}")
 
-    # Work on a fresh copy — never touch the original while Excel may have it open
+    # Work on a fresh copy — never touch the original while an editor may have it open
     await asyncio.to_thread(shutil.copy2, TO_SEND_PATH, CHECKING_PATH)
     logger.info("[check_expired] Working copy created: %s", CHECKING_PATH)
 
@@ -225,7 +225,7 @@ async def run_check(
 def apply_check() -> dict:
     """
     Replace to_send.xlsx with to_send_checking.xlsx (the checked copy).
-    Call only after the user has closed to_send.xlsx in Excel.
+    Call only after the user has closed to_send.xlsx in Excel / LibreOffice Calc.
 
     Returns:
         {"ok": bool, "error": str | None}

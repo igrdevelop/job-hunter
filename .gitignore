@@ -38,6 +38,10 @@ to_send.xlsx
 to_send.backup.*.xlsx
 to_send_checking.xlsx
 
+# Spreadsheet editor lock files (Excel / LibreOffice Calc)
+~$*
+.~lock.*
+
 # Temp files
 _*.py
 *.tmp

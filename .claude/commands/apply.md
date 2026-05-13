@@ -264,14 +264,13 @@ Package ready: Applications/{date}/{CompanyName}/
 
 Mode: SHORT (default) — PDF only, EN CV only
 Files created:
-  - Ihar Petrasheuski CV Senior Frontend Developer ({Stack}) 2026.pdf
+  - CV file: short basename `CV_{Stack}_2026_EN.pdf` (≤50 chars incl. extension; Polish ATS limit)
   - Cover_Letter_EN.pdf
   - Cover_Letter_PL.pdf
 
 Mode: FULL (only when --full explicitly passed) — DOCX + PDF, EN + PL CV, About_Me txt
 Files created:
-  - Ihar Petrasheuski CV Senior Frontend Developer ({Stack}) 2026.docx/.pdf
-  - Ihar Petrasheuski CV Senior Frontend Developer ({Stack}) 2026 PL.docx/.pdf
+  - `CV_{Stack}_2026_EN.docx` / `.pdf` and `CV_{Stack}_2026_PL.docx` / `.pdf` (same ≤50-char rule)
   - Cover_Letter_EN.docx/.pdf
   - Cover_Letter_PL.docx/.pdf
   - About_Me_EN.txt / About_Me_PL.txt

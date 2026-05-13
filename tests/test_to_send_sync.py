@@ -212,6 +212,26 @@ def test_locked_to_send_logs_warning_not_raises(patch_paths, caplog):
                for r in caplog.records)
 
 
+def test_rebuild_skips_when_libreoffice_lock_present(patch_paths):
+    """LibreOffice Calc lock file prevents overwriting to_send.xlsx on disk."""
+    tracker.add_applied(_applied_content(11))
+    assert to_send.rebuild() is True
+
+    tracker.add_applied(_applied_content(12))
+    send_path = patch_paths[1]
+    lo_lock = send_path.parent / f".~lock.{send_path.name}#"
+    lo_lock.write_text("lock", encoding="utf-8")
+    try:
+        assert to_send.rebuild() is False
+        wb = openpyxl.load_workbook(send_path)
+        ws = wb.active
+        companies = [ws.cell(row=r, column=2).value for r in range(2, ws.max_row + 1)]
+        assert "Corp11" in companies
+        assert "Corp12" not in companies
+    finally:
+        lo_lock.unlink(missing_ok=True)
+
+
 def test_existing_tracker_gets_ids_on_migration(patch_paths):
     """Tracker rows without ID column get IDs assigned on next _load_or_create call."""
     # Build a minimal tracker with no ID column (old format)

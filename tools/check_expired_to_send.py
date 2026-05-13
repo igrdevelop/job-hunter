@@ -3,7 +3,7 @@ tools/check_expired_to_send.py — Check all URLs in to_send.xlsx for expiry.
 
 Runs the same parallel logic as the Telegram /check_expired command.
 Checks URLs, then immediately tries to apply results to to_send.xlsx.
-If the file is open in Excel, prints a message and exits.
+If the file is open in Excel or LibreOffice Calc, prints a message and exits.
 
 Usage:
     python tools/check_expired_to_send.py
@@ -69,7 +69,7 @@ async def main() -> None:
         if res.get("sync_error"):
             print(f"[check] ⚠️  sync_sent failed: {res['sync_error']}")
     elif res["error"] == "PermissionError":
-        print(f"\n[check] ⚠️  to_send.xlsx is open in Excel — close it and run again.")
+        print(f"\n[check] ⚠️  to_send.xlsx is open — close Excel / LibreOffice Calc and run again.")
         print(f"[check] Results are saved in: {CHECKING_PATH}")
     else:
         print(f"\n[check] ❌ Failed to apply: {res['error']}")
