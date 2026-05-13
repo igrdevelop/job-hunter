@@ -1,4 +1,5 @@
 name: Deploy Job Hunter
+# docker-compose.yml is fetched via curl on deploy — no scp needed
 
 on:
   push:
