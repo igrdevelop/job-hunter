@@ -16,12 +16,15 @@
 
 **Senior Frontend Developer (Angular) | Fairmarkit (via contractor)** - Jun 2025 - March 2026
 AI-powered Enterprise Procurement Platform | USA (Global)
-- Contributed to frontend development of an AI-powered procurement platform serving enterprise clients globally, built with Angular 19 in an Nx monorepo.
-- Delivered two domain-specific features covering complex procurement workflow logic, including one feature with direct AI integration; built an automation dashboard improving procurement workflow visibility.
+- Contributed to frontend development of an AI-powered procurement platform serving enterprise clients globally, built with Angular 21 in an Nx monorepo.
+- Built an AI decision-support feature: Angular frontend consumed LLM-generated recommendations helping procurement teams select optimal supplier options from large datasets of historical and real-time data.
+- Built a workflow-consolidation feature: aggregated fragmented procurement workflows into a unified AG Grid table; server-side LLM analyzed consolidated data to surface best-fit vendor options per client.
+- Built an automation dashboard improving procurement workflow visibility across the platform.
 - Worked extensively with Angular Signals, NgRx state management, and AG Grid for complex heavy data tables in a production environment.
 - Participated in frontend architecture decisions within a cross-functional team of ~10, part of a ~200-person engineering organization.
 - Maintained code quality through regular code reviews in Agile (Scrum).
-Stack: Angular 19, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS.
+- Developed using Cursor + Claude as agentic coding tools throughout the engagement.
+Stack: Angular 21, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS. AI dev tools: Cursor, Claude.
 
 **Senior Frontend Developer (Angular) | Venture Labs** - July 2023 - April 2025
 Banking Sector | Carbon Footprint Calculations | Poland | Client: Atruvia AG - core banking IT provider for 300+ German cooperative banks

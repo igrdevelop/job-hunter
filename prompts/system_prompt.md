@@ -195,7 +195,7 @@ Return ONLY a valid JSON object with this exact structure:
         "period": "Jun 2025 - March 2026",
         "subtitle": "AI-powered Enterprise Procurement Platform | USA (Global)",
         "bullets": ["reframed bullet 1", "reframed bullet 2", "..."],
-        "stack_line": "Stack: Angular 19, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS."
+        "stack_line": "Stack: Angular 21, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS."
       }
     ],
     "education": "Belarusian State Technological University - Bachelor, PE and Systems of Information Processing",
