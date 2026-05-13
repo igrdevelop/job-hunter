@@ -4,6 +4,8 @@
 linkedin_storage_state.json
 gmail_credentials.json
 gmail_token.json
+*.txt.secret
+github tokens.txt
 
 # Python
 __pycache__/
