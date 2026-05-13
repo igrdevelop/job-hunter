@@ -112,8 +112,8 @@ def test_body_skillbox_excited_to_discuss_ok() -> None:
     assert _body_banlist_hits(text) == []
 
 
-def test_body_aligns_with_my_background_ok() -> None:
-    assert _body_banlist_hits("This aligns with my background in enterprise Angular.") == []
+def test_body_aligns_with_my_background_flagged() -> None:
+    assert _body_banlist_hits("This aligns with my background in enterprise Angular.") != []
 
 
 def test_body_technical_acumen_flagged() -> None:
