@@ -48,3 +48,10 @@ _*.py
 
 # Claude Code local settings (personal, not for repo)
 .claude/settings.local.json
+.claude/worktrees/
+
+# Runtime logs
+logs/
+
+# Local repair / broken tracker copies (personal data)
+tracker_broken.xlsx

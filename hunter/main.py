@@ -184,6 +184,33 @@ async def _run_hunt_impl(
     skipped_total = dup_url + dup_ct
     logger.info(f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct})")
 
+    # ── Gmail breakdown ──────────────────────────────────────────────────────
+    gmail_section = ""
+    gmail_jobs = [j for j in all_jobs if j.source.startswith("gmail_")]
+    if gmail_jobs:
+        # Group by sub-source (gmail_linkedin, gmail_justjoin, etc.)
+        from collections import defaultdict
+        by_source: dict[str, list[Job]] = defaultdict(list)
+        for j in gmail_jobs:
+            by_source[j.source].append(j)
+
+        gmail_lines = ["\n<b>--- Gmail ---</b>"]
+        for src, jobs in sorted(by_source.items()):
+            aggregator = src.replace("gmail_", "")
+            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} вакансий:")
+            # Group by email subject
+            by_subject: dict[str, list[Job]] = defaultdict(list)
+            for j in jobs:
+                by_subject[j.title].append(j)
+            for subject, sjobs in by_subject.items():
+                subj_short = subject[:60] + ("…" if len(subject) > 60 else "")
+                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)} шт.)")
+                for j in sjobs[:5]:  # max 5 URLs per email
+                    gmail_lines.append(f"      🔗 {j.url}")
+                if len(sjobs) > 5:
+                    gmail_lines.append(f"      … ещё {len(sjobs) - 5}")
+        gmail_section = "\n".join(gmail_lines)
+
     # ── Send detailed report ─────────────────────────────────────────────────
     report = (
         f"🔍 <b>Hunt {ts}</b>\n"
@@ -204,6 +231,7 @@ async def _run_hunt_impl(
         f"<b>--- Dedup ---</b>\n"
         f"  {len(filtered)} passed -> <b>{len(new_jobs)}</b> new\n"
         f"  Skipped: {dup_url} by URL, {dup_ct} by company+title"
+        + gmail_section
     )
     await send_text(context, report)
 

@@ -791,6 +791,46 @@ def add_react_skipped(content: dict, url: str) -> None:
     _save_with_retry(wb)
 
 
+def add_expired(url: str, company: str = "", title: str = "") -> None:
+    """Write an EXPIRED row — offer was no longer active when fetched.
+
+    Orange fill distinguishes these from SKIP (grey) and React-skip (yellow).
+    URL is recorded so the job is never re-fetched.
+    """
+    if is_known(url, company, title):
+        return
+    wb, ws = _load_or_create()
+    today = date.today().strftime("%Y-%m-%d")
+    next_row = ws.max_row + 1
+
+    values = [
+        today,           # Date
+        company,         # Company
+        title,           # Job Title
+        "",              # Stack
+        "EXPIRED",       # ATS %
+        url,             # URL
+        "",              # Folder
+        "",              # Sent
+        "",              # Re-application
+        "",              # To Learn
+        _new_row_id(),   # ID
+    ]
+
+    row_font = Font(name="Calibri", size=11)
+    row_fill = PatternFill("solid", fgColor="FCE4D6")  # light orange
+
+    for col, val in enumerate(values, 1):
+        cell = ws.cell(row=next_row, column=col, value=val)
+        cell.font = row_font
+        cell.fill = row_fill
+        if col == URL_COL_INDEX:
+            cell.hyperlink = url
+            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+
+    _save_with_retry(wb)
+
+
 def add_failed(job: Job) -> None:
     """Append a FAIL row so the job is not retried on next hunt.
     User can delete the row from Excel to retry manually."""

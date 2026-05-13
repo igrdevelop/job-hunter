@@ -285,14 +285,32 @@ class PracujSource(BaseSource):
 
     @staticmethod
     def _build_url(raw: dict) -> str:
+        title_slug = re.sub(r"[^\w-]", "-", (raw.get("jobTitle") or raw.get("title") or "").strip().lower())
+        title_slug = re.sub(r"-{2,}", "-", title_slug).strip("-")
+
+        def _fix(url: str) -> str:
+            """Ensure URL has a slug before ,oferta,ID — pracuj.pl requires it."""
+            if not url:
+                return ""
+            # Already full: https://...slug,oferta,ID
+            if re.search(r"/praca/[^/]+,oferta,\d+", url):
+                return url
+            # Slug-less: /praca/oferta,ID — prepend title slug if available
+            m = re.search(r"oferta[,/](\d+)", url)
+            if m and title_slug:
+                return f"{OFFER_BASE}/praca/{title_slug},oferta,{m.group(1)}"
+            if m:
+                return ""  # no slug available — discard rather than store broken URL
+            return url
+
         for key in ("offerAbsoluteUri", "offerUrl", "uri", "url"):
             val = raw.get(key, "")
             if val:
                 if val.startswith("http"):
-                    return val
+                    return _fix(val)
                 if val.startswith("/"):
-                    return f"{OFFER_BASE}{val}"
-                return f"{OFFER_BASE}/praca/{val}"
+                    return _fix(f"{OFFER_BASE}{val}")
+                return _fix(f"{OFFER_BASE}/praca/{val}")
 
         # dehydratedState format: URL is inside nested "offers" list
         nested = raw.get("offers") or []
@@ -301,11 +319,14 @@ class PracujSource(BaseSource):
                 if isinstance(o, dict):
                     uri = o.get("offerAbsoluteUri") or o.get("offerUrl") or ""
                     if uri:
-                        return uri if uri.startswith("http") else f"{OFFER_BASE}{uri}"
+                        full = uri if uri.startswith("http") else f"{OFFER_BASE}{uri}"
+                        fixed = _fix(full)
+                        if fixed:
+                            return fixed
 
         # JSON-LD format
         if raw.get("@type") == "JobPosting" and raw.get("url"):
-            return raw["url"]
+            return _fix(raw["url"])
 
         return ""
 

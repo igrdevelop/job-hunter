@@ -54,9 +54,17 @@ def _strip_html(html: str) -> str:
 def fetch_solidjobs(url: str) -> str:
     """Fetch solid.jobs offer and return plain text for LLM consumption."""
     url = normalize_solidjobs_offer_url(url)
+
+    if "/offer-not-found/" in url:
+        logger.info("[solidjobs] offer-not-found URL — returning expired marker")
+        return "Offer expired"
     try:
         resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
+        # Detect redirect to /offer-not-found/ (expired offer)
+        if "/offer-not-found/" in resp.url:
+            logger.info("[solidjobs] redirected to offer-not-found — expired: %s", url)
+            return "Offer expired"
         html = resp.text
     except Exception as e:
         logger.warning(f"[solidjobs] HTTP fetch failed ({e}), trying html_fallback")

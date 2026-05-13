@@ -9,15 +9,37 @@ Usage:
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
-from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROJECT_DIR
 from hunter.telegram_bot import build_application
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# ── Console handler (INFO+) ───────────────────────────────────────────────────
+_fmt = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+_console = logging.StreamHandler(sys.stdout)
+_console.setLevel(logging.INFO)
+_console.setFormatter(_fmt)
+
+# ── File handler (WARNING+ with full tracebacks) ──────────────────────────────
+_log_dir = PROJECT_DIR / "logs"
+_log_dir.mkdir(exist_ok=True)
+_file_handler = RotatingFileHandler(
+    _log_dir / "hunter_errors.log",
+    maxBytes=5 * 1024 * 1024,   # 5 MB per file
+    backupCount=10,              # keep 10 rotated files → up to 50 MB history
+    encoding="utf-8",
+)
+_file_handler.setLevel(logging.WARNING)
+_file_handler.setFormatter(_fmt)
+
+logging.root.setLevel(logging.DEBUG)
+logging.root.addHandler(_console)
+logging.root.addHandler(_file_handler)
+
 logger = logging.getLogger("hunter")
 
 

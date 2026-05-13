@@ -651,6 +651,18 @@ def main_api(url: str, paste_text: str = "") -> None:
             print(f"[apply_agent] FETCH ERROR: {e}")
             sys.exit(1)
 
+    # Step 1.5 — Check for expired offer (skip before calling LLM)
+    from hunter.expired_check import is_job_expired
+    if is_job_expired(job_text):
+        notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
+        print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
+        try:
+            from hunter.tracker import add_expired
+            add_expired(url)
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+        return
+
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "system_prompt.md"
     profile_path = PROMPTS_DIR / "candidate_profile.md"
@@ -978,6 +990,19 @@ def main_cli(url: str) -> None:
             print(f"[apply_agent] Pre-fetched {len(job_text)} chars via JSON API")
     except Exception as e:
         print(f"[apply_agent] Pre-fetch failed ({e}), passing raw URL to Claude")
+
+    # Check for expired offer before spinning up Claude CLI
+    if job_text:
+        from hunter.expired_check import is_job_expired
+        if is_job_expired(job_text):
+            notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
+            print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
+            try:
+                from hunter.tracker import add_expired
+                add_expired(url)
+            except Exception as e:
+                print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+            return
 
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
     print(f"[apply_agent] Running claude CLI...\n")

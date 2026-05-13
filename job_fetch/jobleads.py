@@ -58,6 +58,10 @@ def try_load_manual_job_posting(url: str) -> str | None:
     return f"URL: {url}\n\n{body}"
 
 
+class JobLeadsCloudflareError(RuntimeError):
+    """Raised when jobleads.com is blocked by Cloudflare and no manual posting exists."""
+
+
 def fetch_jobleads(url: str) -> str:
     """Fetch jobleads.com offer and return plain text for LLM consumption."""
     manual = try_load_manual_job_posting(url)
@@ -100,7 +104,7 @@ def fetch_jobleads(url: str) -> str:
     last = fetch_html(url)
     if last and len(last) > 150 and "just a moment" not in last.lower():
         return last
-    raise RuntimeError(
+    raise JobLeadsCloudflareError(
         f"jobleads.com: could not load job description ({len(last or '')} chars). "
         "Cloudflare often blocks automated fetches — use MANUAL flow (tracker + job_posting.txt)."
     )

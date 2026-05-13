@@ -47,6 +47,9 @@ def fetch_justjoin(url: str) -> str:
     parts.append(f"Job Title: {data.get('title', 'N/A')}")
     parts.append(f"Company: {data.get('companyName', 'N/A')}")
 
+    if not data.get("isActive", True):
+        parts.append("Offer expired")
+
     city = data.get("city", "")
     workplace = data.get("workplaceType", "")
     parts.append(f"Location: {city} ({workplace})" if city else f"Location: {workplace}")

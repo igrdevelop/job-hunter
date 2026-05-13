@@ -203,6 +203,17 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 # Requires one-time setup: python tools/gmail_auth.py
 GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
 
+# ── Expired check schedule ───────────────────────────────────────────────────
+EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
+
+# ── Expired check concurrency ────────────────────────────────────────────────
+# Global max parallel requests during /check_expired
+EXPIRED_CHECK_CONCURRENCY: int = int(os.getenv("EXPIRED_CHECK_CONCURRENCY", "10"))
+# Max simultaneous requests to the same domain
+EXPIRED_CHECK_DOMAIN_LIMIT: int = int(os.getenv("EXPIRED_CHECK_DOMAIN_LIMIT", "2"))
+# Delay (sec) between requests to the same domain
+EXPIRED_CHECK_DOMAIN_DELAY: float = float(os.getenv("EXPIRED_CHECK_DOMAIN_DELAY", "1.0"))
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",

@@ -73,3 +73,22 @@ def parse_linkedin_job_ids(url: str) -> list[str]:
 def job_view_url(job_id: str) -> str:
     """Canonical URL for a single LinkedIn job posting."""
     return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+
+def normalize_linkedin_url(url: str) -> str:
+    """Strip tracking params from a LinkedIn job view URL.
+
+    https://www.linkedin.com/jobs/view/123/?trk=...&refId=... → https://www.linkedin.com/jobs/view/123/
+
+    Non-view URLs are returned unchanged.
+    """
+    parsed = urlparse(url)
+    if "linkedin.com" not in (parsed.hostname or "") or "/jobs/view/" not in parsed.path:
+        return url
+    # Extract numeric job id from path and return canonical clean URL
+    import re
+    m = re.search(r"/jobs/view/(\d+)", parsed.path)
+    if m:
+        return f"https://www.linkedin.com/jobs/view/{m.group(1)}/"
+    # Fallback: just strip query string
+    return parsed._replace(query="", fragment="").geturl()

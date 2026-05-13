@@ -93,10 +93,9 @@ def parse_bulldogjob(subject: str, body_text: str, body_html: str) -> list[Job]:
 @register("pracuj.pl")
 def parse_pracuj(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
+    # Only use full URLs that contain the title slug — slug-less URLs (/praca/oferta,ID)
+    # are invalid on pracuj.pl and will show "not found"
     direct = re.findall(r'https://www\.pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html)
-    if direct:
-        clean = [re.sub(r'\?.*$', '', url) for url in direct]
-        return _jobs_from_urls(clean, "pracuj", subject)
-    ids = re.findall(r'oferta[,/](\d{7,10})', html)
-    urls = [f"https://www.pracuj.pl/praca/oferta,{oid}" for oid in ids]
-    return _jobs_from_urls(urls, "pracuj", subject)
+    clean = [re.sub(r'\?.*$', '', url) for url in direct
+             if re.search(r'/praca/[^/]+,oferta,\d+', url)]
+    return _jobs_from_urls(clean, "pracuj", subject)

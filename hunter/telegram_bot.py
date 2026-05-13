@@ -34,11 +34,12 @@ from hunter.config import (
     SCHEDULE_SOURCE_OFFSET_MIN,
     TRACKER_BACKUP_ENABLED,
     TRACKER_BACKUP_TIME,
+    EXPIRED_CHECK_TIME,
 )
 from hunter.models import Job
 from hunter.tracker import (
     add_skipped,
-    latest_manual_pending,
+
     lookup_url,
     lookup_company,
     manual_jobleads_job_posting_path,
@@ -99,7 +100,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "<code>job_posting.txt</code>)\n"
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
         "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n"
-        "/unsent - сколько неотосланных в to_send и сколько с ANGULAR в Stack\n\n"
+        "/unsent - сколько неотосланных в to_send и сколько с ANGULAR в Stack\n"
+        "/check_expired - проверить to_send на истёкшие вакансии (работает с копией)\n"
+        "/apply_expired - применить результаты проверки к to_send.xlsx\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -326,6 +329,181 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         logger.exception("[unsent] Failed: %s", exc)
         msg = f"❌ Не удалось прочитать трекер: <code>{exc}</code>"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check all URLs in to_send.xlsx for expired job offers (works on a copy)."""
+    from hunter.expired_to_send_check import run_check, apply_check, TO_SEND_PATH
+
+    if not TO_SEND_PATH.exists():
+        await update.message.reply_text("⚠️ to_send.xlsx не найден.")
+        return
+
+    # Count rows to check upfront
+    import openpyxl as _opxl
+    _wb = _opxl.load_workbook(TO_SEND_PATH)
+    _ws = _wb.active
+    _total_rows = max(0, _ws.max_row - 1)
+
+    status_msg = await update.message.reply_text(
+        f"🔍 Проверяю to_send.xlsx ({_total_rows} вакансий)...\n"
+        f"Это займёт ~{_total_rows} секунд.\n"
+        f"<i>Оригинал не трогаю — работаю с копией.</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+    async def progress_cb(text: str) -> None:
+        try:
+            await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
+    try:
+        result = await run_check(progress_cb=progress_cb)
+    except Exception as e:
+        logger.exception("[check_expired] Failed: %s", e)
+        await status_msg.edit_text(
+            f"❌ Ошибка: <code>{str(e)[:200]}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    total   = result["total"]
+    alive   = result["alive"]
+    expired = result["expired"]
+    errors  = result["errors"]
+    skipped = result.get("skipped", [])
+
+    lines = [f"✅ <b>Проверка завершена</b> — {total} вакансий\n"]
+
+    if expired:
+        lines.append(f"⏭ <b>Истекло ({len(expired)}):</b>")
+        for item in expired:
+            lines.append(f"  • {item['company']} — {item['title']}")
+        lines.append("")
+
+    if errors:
+        lines.append(f"⚠️ <b>Ошибки загрузки ({len(errors)}):</b>")
+        for item in errors[:5]:
+            lines.append(f"  • {item['company']}: {item['error'][:60]}")
+        if len(errors) > 5:
+            lines.append(f"  … ещё {len(errors) - 5}")
+        lines.append("")
+
+    lines.append(f"✅ Живых: <b>{alive}</b>")
+    if skipped:
+        lines.append(f"⏩ Пропущено (jobleads): <b>{len(skipped)}</b>")
+
+    await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    if not expired:
+        return
+
+    # Try to apply immediately — will fail if Excel has the file open
+    apply_result = await asyncio.to_thread(apply_check)
+    if apply_result["ok"]:
+        synced = apply_result.get("synced", 0)
+        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
+        sync_err = apply_result.get("sync_error")
+        sync_err_note = f"\n⚠️ sync_sent не удался: <code>{sync_err}</code>" if sync_err else ""
+        await update.message.reply_text(
+            f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent."
+            f"{sync_note}{sync_err_note}",
+            parse_mode=ParseMode.HTML,
+        )
+    elif apply_result["error"] == "PermissionError":
+        await update.message.reply_text(
+            "📌 Файл занят (Excel открыт).\n"
+            "Буду пробовать каждую минуту — как закроешь, применю автоматически.",
+            parse_mode=ParseMode.HTML,
+        )
+        _schedule_apply_retry(context)
+    else:
+        await update.message.reply_text(
+            f"❌ Не удалось применить: <code>{apply_result['error']}</code>\n"
+            f"Попробуй /apply_expired вручную.",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+_APPLY_RETRY_JOB = "apply_expired_retry"
+
+
+def _schedule_apply_retry(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Schedule a repeating job that tries apply_check every 60s until it succeeds."""
+    # Cancel any existing retry to avoid duplicates
+    for job in context.job_queue.get_jobs_by_name(_APPLY_RETRY_JOB):
+        job.schedule_removal()
+    context.job_queue.run_repeating(
+        _retry_apply_expired,
+        interval=60,
+        first=60,
+        name=_APPLY_RETRY_JOB,
+    )
+    logger.info("[apply_expired] retry job scheduled (every 60s)")
+
+
+async def _retry_apply_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Repeating job: try to apply checked copy until Excel releases the file."""
+    from hunter.expired_to_send_check import apply_check, CHECKING_PATH
+
+    if not CHECKING_PATH.exists():
+        # Nothing left to apply — stop
+        context.job.schedule_removal()
+        return
+
+    result = await asyncio.to_thread(apply_check)
+    if result["ok"]:
+        context.job.schedule_removal()
+        logger.info("[apply_expired] retry succeeded — file applied")
+        synced = result.get("synced", 0)
+        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent.{sync_note}",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        logger.debug("[apply_expired] retry: file still locked, will try again in 60s")
+
+
+async def cmd_apply_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Replace to_send.xlsx with the checked copy (to_send_checking.xlsx)."""
+    from hunter.expired_to_send_check import apply_check, CHECKING_PATH
+
+    if not CHECKING_PATH.exists():
+        await update.message.reply_text(
+            "ℹ️ Нет готовых результатов проверки.\n"
+            "Сначала запусти /check_expired.",
+        )
+        return
+
+    result = await asyncio.to_thread(apply_check)
+
+    if result["ok"]:
+        # Cancel background retry if running
+        for job in context.job_queue.get_jobs_by_name(_APPLY_RETRY_JOB):
+            job.schedule_removal()
+        synced = result.get("synced", 0)
+        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
+        await update.message.reply_text(
+            f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent."
+            f"{sync_note}",
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info("[apply_expired] Applied checking copy to to_send.xlsx")
+    elif result["error"] == "PermissionError":
+        await update.message.reply_text(
+            "⚠️ <b>Файл занят — закрой to_send.xlsx в Excel.</b>\n"
+            "Буду пробовать каждую минуту автоматически.",
+            parse_mode=ParseMode.HTML,
+        )
+        _schedule_apply_retry(context)
+    else:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{result['error']}</code>",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -574,6 +752,10 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from job_fetch.linkedin_parse import is_linkedin_search, parse_linkedin_job_ids, job_view_url
     from hunter.config import MAX_JOBS_PER_RUN
 
+    # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
+    from job_fetch.linkedin_parse import normalize_linkedin_url
+    text = normalize_linkedin_url(text)
+
     if is_linkedin_search(text):
         job_ids = parse_linkedin_job_ids(text)
         if not job_ids:
@@ -667,13 +849,6 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
 
     url = _extract_url(text)
     url_inferred = False
-
-    # If user pasted text without URL, try to attach it to the latest MANUAL row.
-    if not url:
-        latest = await asyncio.to_thread(latest_manual_pending)
-        if latest and latest.get("url"):
-            url = latest["url"]
-            url_inferred = True
 
     # If URL is already tracked, only block when it is NOT a MANUAL-pending row.
     manual_pending = False
@@ -827,6 +1002,8 @@ async def _set_bot_commands(app: Application) -> None:
         BotCommand("process_manual", "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",      "Sync Sent column from to_send.xlsx"),
         BotCommand("unsent",         "Unsent queue count + Angular in Stack"),
+        BotCommand("check_expired",  "Check to_send for expired job offers"),
+        BotCommand("apply_expired",  "Apply expiry results to to_send.xlsx"),
     ])
 
 
@@ -844,8 +1021,10 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
     app.add_handler(CommandHandler("schedule",  cmd_schedule))
-    app.add_handler(CommandHandler("unsent",    cmd_unsent))
-    app.add_handler(CommandHandler("sync_sent", cmd_sync_sent))
+    app.add_handler(CommandHandler("unsent",        cmd_unsent))
+    app.add_handler(CommandHandler("sync_sent",     cmd_sync_sent))
+    app.add_handler(CommandHandler("check_expired", cmd_check_expired))
+    app.add_handler(CommandHandler("apply_expired", cmd_apply_expired))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -899,6 +1078,19 @@ def build_application() -> Application:
         )
         logger.info(f"[Schedule] pending_report at {report_hour:02d}:00 {TIMEZONE}")
 
+    # Daily expired check at EXPIRED_CHECK_TIME (default 00:00)
+    try:
+        ech, ecm = map(int, EXPIRED_CHECK_TIME.strip().split(":"))
+    except (ValueError, AttributeError):
+        ech, ecm = 0, 0
+        logger.warning("[Schedule] Invalid EXPIRED_CHECK_TIME=%r — using 00:00", EXPIRED_CHECK_TIME)
+    app.job_queue.run_daily(
+        callback=_scheduled_check_expired,
+        time=dt_time(ech, ecm, tzinfo=tz),
+        name="check_expired_daily",
+    )
+    logger.info(f"[Schedule] check_expired at {ech:02d}:{ecm:02d} {TIMEZONE}")
+
     if TRACKER_BACKUP_ENABLED:
         try:
             bh, bm = map(int, TRACKER_BACKUP_TIME.strip().split(":"))
@@ -918,6 +1110,65 @@ def build_application() -> Application:
         logger.info(f"[Schedule] tracker_backup at {bh:02d}:{bm:02d} {TIMEZONE}")
 
     return app
+
+
+async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Daily scheduled expired check — runs at midnight, applies results, syncs tracker."""
+    from hunter.expired_to_send_check import run_check, apply_check, TO_SEND_PATH
+
+    if not TO_SEND_PATH.exists():
+        return
+
+    logger.info("[scheduled_check_expired] Starting daily expired check")
+
+    try:
+        result = await run_check()
+    except Exception as e:
+        logger.exception("[scheduled_check_expired] run_check failed: %s", e)
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=f"⚠️ <b>Scheduled check_expired failed</b>\n<pre>{str(e)[:300]}</pre>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    expired = result["expired"]
+    skipped = result.get("skipped", [])
+    errors  = result["errors"]
+
+    if not expired:
+        logger.info("[scheduled_check_expired] Nothing expired.")
+        return
+
+    # Try to apply
+    apply_result = await asyncio.to_thread(apply_check)
+    if apply_result["ok"]:
+        synced = apply_result.get("synced", 0)
+        sync_note = f"\n📊 tracker.xlsx: {synced} строк(и) помечено EXPIRED." if synced else ""
+        lines = [f"🌙 <b>Ночная проверка истёкших</b>\n"]
+        lines.append(f"⏭ Истекло: <b>{len(expired)}</b>")
+        for item in expired:
+            lines.append(f"  • {item['company']} — {item['title']}")
+        if skipped:
+            lines.append(f"⏩ Пропущено (jobleads): {len(skipped)}")
+        if errors:
+            lines.append(f"⚠️ Ошибок: {len(errors)}")
+        lines.append(f"\n✅ to_send.xlsx обновлён.{sync_note}")
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text="\n".join(lines),
+            parse_mode=ParseMode.HTML,
+        )
+    elif apply_result["error"] == "PermissionError":
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=f"🌙 <b>Ночная проверка:</b> найдено <b>{len(expired)}</b> истёкших.\n"
+                 f"📌 to_send.xlsx открыт — закрой Excel и нажми /apply_expired.",
+            parse_mode=ParseMode.HTML,
+        )
+        _schedule_apply_retry(context)
+    else:
+        logger.error("[scheduled_check_expired] apply_check failed: %s", apply_result["error"])
 
 
 async def _scheduled_tracker_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
