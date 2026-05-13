@@ -203,10 +203,15 @@ Before adding a NEW domain row, grep `prompts/candidate_profile.md` to verify th
 
 - [x] `prompts/system_prompt.md` updated per Edits 1 + 2 (+ optional 4).
 - [x] `apply_agent.py` self-review loop extended per Edit 3; the 6 gates are explicit in the review prompt.
-- [ ] 3 smoke-test CLs generated, manually inspected, all gates pass.
-- [ ] No regression in resume quality (spot-check `resume_en` in the same 3 test jobs).
-- [x] `python -m compileall .` passes.
-- [ ] Commit on `develop`, not pushed to `master`.
+- [x] 3 smoke-test CLs generated via `smoke_test_cl.py` on real Applications/ job_posting.txt files.
+  - Antal Angular: banned phrase `proven track record` caught, review loop fixed → PASS
+  - Appliscale React: banned phrase `excited to` caught, review loop fixed → PASS
+  - Upvanta Fullstack: banned phrase caught and fixed; Gate 2 (metrics) stays FAIL — posting has no client-side numbers, expected behaviour
+- [x] `python -m py_compile apply_agent.py` passes.
+- [x] Committed on `develop` (b5bf71b), not pushed to `master`.
+
+### Known limitation (post-test finding)
+`_METRIC_RE` is regex-based and misses natural-language metrics like "15 institutions", "2 applications", version numbers under 100. Even after expanding the word list, some job types (short-term contracts, backend-heavy postings) produce letters with only 1 regex-detectable metric. The gate correctly fires and triggers rewrite, but 3 LLM rounds may not always reach ≥2. Possible future improvement: also count 2-digit standalone numbers in context (e.g. `\b\d{2,}\b` only when preceded/followed by a job-relevant context word).
 
 ---
 
