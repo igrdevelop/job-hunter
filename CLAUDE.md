@@ -308,10 +308,10 @@ See `.claude/commands/add-source.md` for full guide.
 
 ### Phase 1 — Cleanup (LOW risk, immediate value)
 
-- [ ] **1.1** Delete stale docs: `PLAN.md`, `HUNTER_PLAN.md`, `EXPIRED_PLAN.md`, `PROJECT_REVIEW_AND_REFACTOR_PLAN.md`, `WEBSITE_PLAN.md`
-- [ ] **1.2** Delete debug artifacts: `_probe*.py`, `tracker_broken.xlsx`
-- [ ] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs
-- [ ] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
+- [x] **1.1** Delete stale docs: `PLAN.md`, `HUNTER_PLAN.md`, `EXPIRED_PLAN.md`, `PROJECT_REVIEW_AND_REFACTOR_PLAN.md`, `WEBSITE_PLAN.md`
+- [x] **1.2** Delete debug artifacts: `_probe*.py`, `tracker_broken.xlsx`
+- [x] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs (was already done)
+- [x] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
 
 ### Phase 2 — Split telegram_bot.py (MEDIUM risk)
 
@@ -399,3 +399,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
 | 2026-05-13 | opus | Full develop-branch analysis, CLAUDE.md rewritten with current architecture + refactoring plan |
+| 2026-05-13 | opus | Phase 1 complete: 1.1 stale docs removed (7526acb), 1.2 debug artifacts deleted, 1.3 pre-done, 1.4 apply_service unified (265d87e) |
