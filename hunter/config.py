@@ -36,7 +36,6 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
-TO_SEND_PATH = PROJECT_DIR / "to_send.xlsx"
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
 TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
     "true",

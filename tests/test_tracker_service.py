@@ -23,10 +23,9 @@ def test_should_skip_url_false_for_unknown_url(tmp_path, monkeypatch) -> None:
 
 
 def test_record_successful_apply_writes_and_enables_skip(tmp_path, monkeypatch) -> None:
-    from hunter import tracker, to_send
+    from hunter import tracker
 
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    monkeypatch.setattr(to_send, "TO_SEND_PATH", tmp_path / "to_send.xlsx")
     content = _content("https://example.com/jobs/2", tmp_path / "Applications" / "2026-04-16" / "Acme")
 
     assert record_successful_apply(content, force=False) is True

@@ -32,7 +32,7 @@ COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 SENT_COL_INDEX = 8      # "Sent"
-ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used to sync to_send.xlsx → tracker
+ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -868,11 +868,8 @@ def add_failed(job: Job) -> None:
     _save_with_retry(wb)
 
 
-# -- to_send.xlsx helpers -----------------------------------------------------
-
-def iter_rows_for_to_send() -> list[dict]:
-    """Return rows suitable for to_send.xlsx: all rows without a Sent value
-    (excluding SKIP rows, which are not actionable to send).
+def iter_unsent_rows() -> list[dict]:
+    """Return unsent tracker rows (no Sent value, excluding SKIP).
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
@@ -920,7 +917,7 @@ def iter_rows_for_to_send() -> list[dict]:
 
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
-    """Write Sent values from to_send.xlsx back into tracker.xlsx.
+    """Write Sent values (e.g. EXPIRED) back into tracker.xlsx.
 
     updates: {row_id: sent_value} — only non-empty sent_value entries.
     Returns number of rows updated.
