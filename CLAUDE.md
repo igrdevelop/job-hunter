@@ -13,7 +13,7 @@ Read it fully before making changes. Update it when you learn something new.
 3. Deduplicates against tracker.xlsx (URL + company+title)
 4. Sends new jobs to Telegram for review (Apply/Skip buttons)
 5. On approval (or automatically), generates a tailored CV + cover letter via LLM
-6. Tracks everything in `tracker.xlsx`, manages sending workflow via `to_send.xlsx`
+6. Tracks everything in `tracker.xlsx`, mirrors live to Google Sheets
 
 **Owner:** Ihar Petrasheuski, Senior Frontend Developer, Angular, 10+ years. Wroclaw, Poland. Seeking Angular/React/JS roles, remote or hybrid-Wroclaw.
 
@@ -27,9 +27,10 @@ Read it fully before making changes. Update it when you learn something new.
 hunter.py                   Entry point. Validates config, builds Telegram app, starts polling.
                             |
                             v
-hunter/telegram_bot.py      Telegram Application (1266 lines — largest file).
+hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
-                              /sync_sent /process_manual /check_expired /apply_expired
+                              /sync_sent /process_manual /check_expired
+                              /gsheets_status /gsheets_resync
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
                             LinkedIn batch processing.
@@ -50,12 +51,18 @@ hunter/sources/        hunter/tracker.py     apply_agent.py (1297 lines)
   (see list below)       dedup logic         job_fetch/       -> fetch job text
                          SKIP/FAIL/MANUAL      22 fetchers
                          add_applied()         html_fallback.py
-                         to_send sync           |
+                                                |
                                                 v
 hunter/services/                             llm_client.py   -> call LLM API
   apply_service.py      subprocess wrapper      |
   tracker_service.py    high-level tracker      v
                                              generate_docs.py -> DOCX/PDF + tracker
+                                                |
+                                                v
+hunter/gsheets_sync.py  mirror_new_row()  -> Google Sheets (best-effort)
+hunter/gsheets_client.py                     Sheets API v4 wrapper
+hunter/tracker_cache.py                      In-memory cache (asyncio.Lock)
+                                             dedup, stats, conflict matrix
 ```
 
 ### Data Flow
@@ -118,11 +125,13 @@ hunter/
   filters.py                Central filter: keywords, level, location, patterns, React-only, German
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
   telegram_bot.py           Telegram bot: all handlers, schedule, callbacks (1266 lines)
-  tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (947 lines)
-  tracker_backup.py         Timestamped snapshots of tracker + to_send
-  to_send.py                to_send.xlsx sync/rebuild workflow
+  tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (~980 lines)
+  tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
+  tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
   expired_check.py          Expired job detection (regex patterns)
-  expired_to_send_check.py  Parallel expired check for to_send entries
+  expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
+  gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
+  gsheets_client.py         Low-level Sheets API v4 wrapper
   gmail_client.py           Gmail API wrapper
   gmail_parsers.py          Parse job alert emails from various boards
   services/
@@ -145,11 +154,13 @@ prompts/
   system_prompt.md          LLM instructions for resume/CL generation
   candidate_profile.md      Candidate data (single source of truth for personal info)
 
-tests/                      35 test files, ~2800 lines (pytest)
-tools/                      Utilities: backup, dedup, gmail auth, LinkedIn login, repair
+tests/                      37+ test files, ~3200 lines (pytest)
+tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 
 tracker.xlsx                Main data store (never commit)
-to_send.xlsx                Derived sending queue (never commit)
+gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
+gsheets_credentials.json    OAuth2 client secrets (never commit)
+gsheets_token.json          OAuth2 token (never commit; auto-refreshed)
 backups/                    Daily snapshots (gitignored)
 Applications/               Generated documents (gitignored)
 ```
@@ -172,6 +183,9 @@ Applications/               Generated documents (gitignored)
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
 | `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
+| `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
+| `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
+| `GSHEETS_REFRESH_INTERVAL_MIN` | `30` | Sheets → Excel pull interval |
 
 Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
@@ -184,8 +198,7 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 ## Pipeline Flow
 
 ### Hunt cycle (`hunter/main.py`)
-1. Sync `to_send.xlsx` Sent marks back to tracker
-2. Each source calls `source.search()` -> `list[Job]`
+1. Each source calls `source.search()` -> `list[Job]`
 3. `filters.apply_filters_with_stats()` — keywords, level, location, patterns, React-only, German language
 4. Dedup: URL (`normalize_url`) + company+title key (`dedup_key`)
 5. New jobs -> Telegram cards with Apply/Skip buttons
@@ -199,8 +212,9 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 5. Cover letter self-review loop (up to 3 LLM rounds)
 6. Output folder: `Applications/{today}/{CompanyName}/`
 7. `generate_docs.py` -> DOCX + PDF (LibreOffice headless)
-8. `tracker_service.record_successful_apply()` -> tracker.xlsx + to_send rebuild
-9. Telegram notification + file upload
+8. `tracker_service.record_successful_apply()` -> tracker.xlsx row
+9. `gsheets_sync.mirror_new_row()` -> Google Sheets (best-effort)
+10. Telegram notification + file upload
 
 ### Doc generation modes
 - **Short** (default): PDF only, EN CV only (3 files)
@@ -223,20 +237,34 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 | 8 | Sent | Date sent, or blank/dash |
 | 9 | Re-application | `+` flag |
 | 10 | To Learn | Skills gap |
-| 11 | ID | Short UUID (8-char hex) for to_send sync |
+| 11 | ID | Short UUID (8-char hex) — Google Sheets sync key |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
 ---
 
-## to_send.xlsx — Sending Workflow
+## Google Sheets — Sending Workflow
 
-Derived from tracker.xlsx. Shows unsent rows only. Auto-rebuilt after each apply.
+Replaces `to_send.xlsx`. tracker.xlsx rows are mirrored live to a Google Sheets spreadsheet.
 
-1. Successful apply -> `to_send.sync_and_rebuild()` adds row
-2. User fills `Sent` column in to_send.xlsx
-3. `/sync_sent` copies Sent marks to tracker.xlsx, rebuilds to_send (rebuild is skipped while Excel / LibreOffice Calc lock files are present so the open file is not overwritten on disk)
-4. `/unsent` shows count + Angular percentage
+### Setup (one-time)
+1. `python tools/gsheets_auth.py` — OAuth2 consent → writes `gsheets_token.json`
+2. Set `GSHEETS_ENABLED=true` in `.env`
+3. On first bot start: spreadsheet created automatically; bot sends you the URL + ID
+
+### Runtime flow
+1. Successful apply / skip → `gsheets_sync.mirror_new_row(row)` appends to Sheets
+2. EXPIRED stamp → `gsheets_sync.mirror_expired_batch()` updates Sent column
+3. User edits Sent date / To Learn / Re-application in Sheets
+4. `/sync_sent` → `pull_full_snapshot()` → conflict matrix → tracker.xlsx updated
+5. Automatic pull every `GSHEETS_REFRESH_INTERVAL_MIN` (default 30 min)
+6. `/unsent` shows count from in-memory cache (O(1), no Excel read)
+7. `/gsheets_status` — integration health; `/gsheets_resync` — push dirty rows
+
+### Conflict matrix (Sent column)
+- Bot wrote EXPIRED, Sheets is empty → keep EXPIRED (Sheets will be fixed by resync)
+- Sheets has date / was edited → trust Sheets
+- To Learn, Re-application → always trust Sheets (user edits there)
 
 ---
 
@@ -251,6 +279,28 @@ See `.claude/commands/add-source.md` for full guide.
 
 ---
 
+## Google Sheets Setup (one-time per deployment)
+
+```bash
+# 1. Get OAuth2 credentials from Google Cloud Console
+#    API & Services → Credentials → Create OAuth2 client (Desktop app)
+#    Download JSON → save as gsheets_credentials.json in project root
+
+# 2. Run OAuth flow (opens browser for consent)
+python tools/gsheets_auth.py
+# → writes gsheets_token.json
+
+# 3. Enable in .env
+GSHEETS_ENABLED=true
+
+# 4. Start bot — spreadsheet is created automatically on first run
+#    Bot sends you a Telegram message with the URL and .env snippet
+#    Copy GSHEETS_TRACKER_ID=... to .env (optional — state file takes over after first run)
+
+# Docker: mount gsheets_state.json so sheet_id survives container restarts
+# (see docker-compose.yml)
+```
+
 ## Git Workflow
 
 - **Active branch:** `develop` — all changes go here
@@ -261,7 +311,7 @@ See `.claude/commands/add-source.md` for full guide.
 
 ## Important Rules for Agents
 
-- **Never commit** `.env`, `tracker.xlsx`, `to_send.xlsx`, `Applications/`, `backups/`, `gmail_token.json`
+- **Never commit** `.env`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`
 - Always test syntax after edits: `python -m compileall .`
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
@@ -275,32 +325,19 @@ See `.claude/commands/add-source.md` for full guide.
 
 ### Structural
 
-1. **telegram_bot.py is a 1266-line monolith.** Contains 15+ handlers, build_application, schedule setup, LinkedIn batch, paste flow, expired check flow, force logic. Hard to navigate and test.
+1. **telegram_bot.py is a ~1380-line monolith.** Contains 17+ handlers, build_application, schedule setup, LinkedIn batch, paste flow, expired check flow, force logic. Hard to navigate and test.
 
 2. **job_fetch/ is a separate parallel package (22 files, 2475 lines).** Every site has a file in both `hunter/sources/` (search/listing) and `job_fetch/` (detail text fetch). URLs, headers, and domain knowledge are duplicated across packages.
 
 3. **apply_agent.py is 1297 lines.** Contains two full pipelines (API + CLI mode), Telegram notification, folder management, LLM calling, cover letter review loop, paste flow, force mode, JobLeads MANUAL flow. Could be split.
 
-4. **Stale documentation files in root:**
-   - `PLAN.md` — describes Phase 1 (/apply skill) as "in progress" (done long ago)
-   - `HUNTER_PLAN.md` — describes hunter bot as "NOT BUILT" (fully operational)
-   - `EXPIRED_PLAN.md` — expired check plan (already implemented)
-   - `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` — all TASKs completed
-   - `WEBSITE_PLAN.md` — unrelated to this project
-
-5. **Debug artifacts in repo:** `_probe2.py`, `_probe3.py`, `_probe_bulldogjob.py`, `tracker_broken.xlsx` — should be gitignored or deleted.
-
-6. **`__pycache__/` directories tracked in git.** Multiple `.pyc` files committed.
-
 ### Code Quality
 
-7. **telegram_bot.py has its own `_run_apply_agent()`** (lines 483+) separate from `services/apply_service.py`. Two subprocess launch paths for the same operation.
+4. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
 
-8. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
+5. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
-9. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
-
-10. **tracker.py is 947 lines.** Multiple functions re-open and re-parse the entire Excel file per call. No caching within a hunt cycle.
+6. **tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call. The in-memory `tracker_cache` solves dedup/stats O(1) but individual write functions still re-open the workbook.
 
 ---
 
@@ -339,6 +376,7 @@ See `.claude/commands/add-source.md` for full guide.
 - [ ] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
 - [ ] **5.3** Add `/export` command for Excel export
 - [ ] **5.4** Keep openpyxl only for doc generation formatting
+- [ ] **5.5** gsheets_sync: replace tracker_cache with db queries
 
 ### Phase 6 — Project structure (after phases 1-5)
 
@@ -401,3 +439,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-13 | opus | Full develop-branch analysis, CLAUDE.md rewritten with current architecture + refactoring plan |
 | 2026-05-13 | opus | Phase 1 complete: 1.1 stale docs removed (7526acb), 1.2 debug artifacts deleted, 1.3 pre-done, 1.4 apply_service unified (265d87e) |
 | 2026-05-13 | composer | to_send: detect LibreOffice Calc lock (`.~lock.*#`); skip rebuild when editor holds file; Telegram/gitignore/docs aligned |
+| 2026-05-14 | sonnet | Google Sheets integration complete (GSHEETS_PLAN.md, phases 1-7): gsheets_client, tracker_cache, drop to_send.xlsx (15 files), gsheets_sync (mirror/pull/resync/bootstrap), /gsheets_status /gsheets_resync commands, 5-min resync + 30-min pull schedules, state file for Docker restart safety, 51 new tests (351 total) |

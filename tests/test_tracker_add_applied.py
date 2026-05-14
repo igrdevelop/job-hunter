@@ -142,3 +142,71 @@ def test_add_applied_converts_10_point_scale_to_percent(tmp_path, monkeypatch) -
 
     assert len(rows) == 1
     assert rows[0][4] == "80%"
+
+
+def test_apply_pull_updates_updates_fields(tmp_path, monkeypatch) -> None:
+    """apply_pull_updates writes Sent, Re-application, To Learn by ID."""
+    from hunter import tracker
+    from hunter.tracker import apply_pull_updates, add_applied
+
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
+
+    # Write an applied row so we have something to update
+    content = {
+        "company_name": "PullCo",
+        "job_title": "Frontend Dev",
+        "stack": "Angular",
+        "ats_score": "90",
+        "apply_url": "https://example.com/pull/1",
+        "output_folder": str(tmp_path / "PullCo"),
+        "to_learn": "",
+    }
+    assert add_applied(content)
+
+    # Find the row ID from tracker
+    import openpyxl
+    wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
+    ws = wb.active
+    row_id = str(ws.cell(row=2, column=11).value or "").strip()
+    wb.close()
+    assert row_id
+
+    # Now pull update with new Sent date and To Learn value
+    updated_row = {
+        "ID": row_id,
+        "Sent": "2026-05-14",
+        "Re-application": "+",
+        "To Learn": "RxJS",
+    }
+    count = apply_pull_updates([updated_row])
+    assert count == 1
+
+    # Verify the change was written
+    wb2 = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
+    ws2 = wb2.active
+    row = list(ws2.iter_rows(min_row=2, max_row=2, values_only=True))[0]
+    wb2.close()
+    assert row[7] == "2026-05-14"   # Sent (col 8, idx 7)
+    assert row[8] == "+"            # Re-application (col 9, idx 8)
+    assert row[9] == "RxJS"         # To Learn (col 10, idx 9)
+
+
+def test_apply_pull_updates_noop_for_unknown_id(tmp_path, monkeypatch) -> None:
+    from hunter import tracker
+    from hunter.tracker import apply_pull_updates, add_applied
+
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
+
+    content = {
+        "company_name": "Ghost",
+        "job_title": "Dev",
+        "stack": "React",
+        "ats_score": "70",
+        "apply_url": "https://example.com/ghost/1",
+        "output_folder": str(tmp_path / "Ghost"),
+        "to_learn": "",
+    }
+    assert add_applied(content)
+
+    count = apply_pull_updates([{"ID": "nonexistent", "Sent": "2026-05-14", "Re-application": "", "To Learn": ""}])
+    assert count == 0

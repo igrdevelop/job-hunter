@@ -32,7 +32,7 @@ COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 SENT_COL_INDEX = 8      # "Sent"
-ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used to sync to_send.xlsx → tracker
+ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -708,13 +708,14 @@ def add_applied(content: dict, force: bool = False) -> bool:
     return True
 
 
-def add_skipped(job: Job) -> None:
-    """Append a SKIP row to tracker so the job is never shown again."""
+def add_skipped(job: Job) -> dict | None:
+    """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
     if is_known(job.url, job.company, job.title):
-        return
+        return None
     wb, ws = _load_or_create()
     today = date.today().strftime("%Y-%m-%d")
     next_row = ws.max_row + 1
+    row_id = _new_row_id()
 
     values = [
         today,           # Date
@@ -727,7 +728,7 @@ def add_skipped(job: Job) -> None:
         "",              # Sent
         "",              # Re-application
         "",              # To Learn
-        _new_row_id(),   # ID
+        row_id,          # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -742,6 +743,7 @@ def add_skipped(job: Job) -> None:
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
 
     _save_with_retry(wb)
+    return dict(zip(TRACKER_HEADERS, values))
 
 
 def is_react_skipped(url: str) -> bool:
@@ -868,11 +870,8 @@ def add_failed(job: Job) -> None:
     _save_with_retry(wb)
 
 
-# -- to_send.xlsx helpers -----------------------------------------------------
-
-def iter_rows_for_to_send() -> list[dict]:
-    """Return rows suitable for to_send.xlsx: all rows without a Sent value
-    (excluding SKIP rows, which are not actionable to send).
+def iter_unsent_rows() -> list[dict]:
+    """Return unsent tracker rows (no Sent value, excluding SKIP).
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
@@ -920,7 +919,7 @@ def iter_rows_for_to_send() -> list[dict]:
 
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
-    """Write Sent values from to_send.xlsx back into tracker.xlsx.
+    """Write Sent values (e.g. EXPIRED) back into tracker.xlsx.
 
     updates: {row_id: sent_value} — only non-empty sent_value entries.
     Returns number of rows updated.
@@ -939,6 +938,43 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
             if sent_val:
                 ws.cell(row=row_num, column=SENT_COL_INDEX).value = sent_val
                 updated += 1
+
+    if updated:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+    return updated
+
+
+_REAPP_COL_INDEX = 9    # "Re-application"
+_TO_LEARN_COL_INDEX = 10  # "To Learn"
+
+
+def apply_pull_updates(rows: list[dict]) -> int:
+    """Write Sheets-sourced field changes back to tracker.xlsx (pull sync).
+
+    rows: list of full row dicts (with 'ID') where Sheets had a newer value.
+    Updates Sent, Re-application, To Learn columns. Returns count of rows updated.
+    """
+    if not rows or not TRACKER_PATH.exists():
+        return 0
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    updated = 0
+
+    for row_num in range(2, ws.max_row + 1):
+        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+        if not row_id:
+            continue
+        for row_dict in rows:
+            if row_dict.get("ID", "").strip() != row_id:
+                continue
+            ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
+            ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
+            ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
+            updated += 1
+            break
 
     if updated:
         _save_with_retry(wb)
