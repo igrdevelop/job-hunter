@@ -474,3 +474,96 @@ def test_pull_full_snapshot_writes_excel_on_changes():
     assert result["pulled"] == 1
     assert result["updated"] == 1
     assert result["errors"] == []
+
+
+# ── init_or_load_spreadsheet ──────────────────────────────────────────────────
+
+def test_init_or_load_noop_when_disabled():
+    with patch("hunter.gsheets_sync.GSHEETS_ENABLED", False):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.init_or_load_spreadsheet())
+    assert result["sheet_id"] == ""
+    assert not result["created"]
+
+
+def test_init_or_load_from_state_file(tmp_path):
+    import importlib
+    state_file = tmp_path / "gsheets_state.json"
+    state_file.write_text('{"sheet_id": "fromfile123"}')
+
+    with (
+        patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
+        patch("hunter.gsheets_sync.GSHEETS_STATE_FILE", state_file),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync.GSHEETS_TRACKER_ID", ""),
+    ):
+        from hunter import gsheets_sync
+        gsheets_sync._state = {}  # reset state
+        result = run(gsheets_sync.init_or_load_spreadsheet())
+
+    assert result["sheet_id"] == "fromfile123"
+    assert not result["created"]
+    assert "fromfile123" in result["sheet_url"]
+
+
+def test_init_or_load_from_env_when_no_state_file(tmp_path):
+    missing_state = tmp_path / "no_state.json"
+
+    with (
+        patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
+        patch("hunter.gsheets_sync.GSHEETS_STATE_FILE", missing_state),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync.GSHEETS_TRACKER_ID", "envsheet999"),
+    ):
+        from hunter import gsheets_sync
+        gsheets_sync._state = {}
+        result = run(gsheets_sync.init_or_load_spreadsheet())
+
+    assert result["sheet_id"] == "envsheet999"
+    assert not result["created"]
+    assert missing_state.exists()  # state was saved
+
+
+def test_init_or_load_creates_new_sheet_when_no_id(tmp_path):
+    missing_state = tmp_path / "no_state.json"
+    notify_calls = []
+
+    async def fake_notify(text: str):
+        notify_calls.append(text)
+
+    with (
+        patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
+        patch("hunter.gsheets_sync.GSHEETS_STATE_FILE", missing_state),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync.GSHEETS_TRACKER_ID", ""),
+        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value="newsheet456")),
+    ):
+        from hunter import gsheets_sync
+        gsheets_sync._state = {}
+        result = run(gsheets_sync.init_or_load_spreadsheet(notify_cb=fake_notify))
+
+    assert result["sheet_id"] == "newsheet456"
+    assert result["created"] is True
+    assert "newsheet456" in result["sheet_url"]
+    assert notify_calls  # Telegram message was sent
+    assert missing_state.exists()
+    import json as _json
+    saved = _json.loads(missing_state.read_text())
+    assert saved["sheet_id"] == "newsheet456"
+
+
+# ── _read_state / _write_state ────────────────────────────────────────────────
+
+def test_read_state_missing_file(tmp_path):
+    with patch("hunter.gsheets_sync.GSHEETS_STATE_FILE", tmp_path / "none.json"):
+        from hunter import gsheets_sync
+        assert gsheets_sync._read_state() == {}
+
+
+def test_write_and_read_state(tmp_path):
+    state_file = tmp_path / "state.json"
+    with patch("hunter.gsheets_sync.GSHEETS_STATE_FILE", state_file):
+        from hunter import gsheets_sync
+        gsheets_sync._write_state({"sheet_id": "test123"})
+        result = gsheets_sync._read_state()
+    assert result == {"sheet_id": "test123"}

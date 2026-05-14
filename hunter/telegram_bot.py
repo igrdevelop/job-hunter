@@ -1007,14 +1007,15 @@ async def _post_init(app: Application) -> None:
         BotCommand("gsheets_resync",  "Retry dirty rows → Google Sheets"),
     ])
 
-    # Validate Google Sheets on startup; log errors, send Telegram warning if broken.
+    # Bootstrap / validate Google Sheets on startup.
     try:
         from hunter import gsheets_sync
-        from hunter.config import GSHEETS_ENABLED
+
         if GSHEETS_ENABLED:
-            result = gsheets_sync.validate_startup()
-            if not result.get("ok"):
-                err = result.get("error", "unknown error")
+            # Pre-flight: credentials + token check (sync, cheap)
+            preflight = gsheets_sync.validate_startup()
+            if not preflight.get("ok"):
+                err = preflight.get("error", "unknown error")
                 logger.error("[gsheets] startup validation failed: %s", err)
                 try:
                     await app.bot.send_message(
@@ -1024,11 +1025,32 @@ async def _post_init(app: Application) -> None:
                     )
                 except Exception:
                     pass
+                return  # don't try to bootstrap if creds are broken
+
+            async def _tg_notify(text: str) -> None:
+                try:
+                    await app.bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                except Exception as _e:
+                    logger.warning("[gsheets] notify failed: %s", _e)
+
+            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify)
+            if result.get("error"):
+                logger.error("[gsheets] init failed: %s", result["error"])
             else:
-                url = result.get("sheet_url")
-                logger.info("[gsheets] startup OK%s", f" — {url}" if url else "")
+                url = result.get("sheet_url", "")
+                created = result.get("created", False)
+                logger.info(
+                    "[gsheets] %s — %s",
+                    "created new spreadsheet" if created else "loaded existing spreadsheet",
+                    url,
+                )
     except Exception as e:
-        logger.warning("[gsheets] startup check failed: %s", e)
+        logger.warning("[gsheets] startup init failed: %s", e)
 
 
 def build_application() -> Application:

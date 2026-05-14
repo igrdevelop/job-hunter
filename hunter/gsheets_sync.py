@@ -6,15 +6,17 @@ Responsibilities:
   - Mark rows dirty in cache when Sheets write fails.
   - Retry dirty rows via resync_dirty().
   - Validate credentials and sheet reachability on startup.
+  - Bootstrap: create or load spreadsheet (Phase 6).
 
 All public mirror_* functions are async and safe to call even when GSHEETS_ENABLED=False
 (they become no-ops). The caller never needs to check the flag.
 
-Pull logic (Sheets → Excel) is in Phase 5.
-Bootstrap logic (create/load spreadsheet) is in Phase 6.
+Pull logic (Sheets → Excel) is in pull_full_snapshot().
+Bootstrap logic (create/load spreadsheet) is in init_or_load_spreadsheet().
 """
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -23,10 +25,38 @@ from hunter.config import (
     GSHEETS_TRACKER_ID,
     GSHEETS_CREDENTIALS_FILE,
     GSHEETS_TOKEN_FILE,
+    GSHEETS_STATE_FILE,
 )
 from hunter.tracker_cache import cache
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Runtime state (survives process lifetime; persisted to gsheets_state.json)
+# ---------------------------------------------------------------------------
+
+_state: dict = {}   # {"sheet_id": "..."}
+
+
+def _read_state() -> dict:
+    """Load gsheets_state.json. Returns {} if missing or malformed."""
+    try:
+        if GSHEETS_STATE_FILE.exists():
+            return json.loads(GSHEETS_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.warning("gsheets_sync: could not read state file: %s", e)
+    return {}
+
+
+def _write_state(data: dict) -> None:
+    """Persist runtime state to gsheets_state.json (atomic-ish via write+rename)."""
+    try:
+        tmp = GSHEETS_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(GSHEETS_STATE_FILE)
+    except Exception as e:
+        log.warning("gsheets_sync: could not write state file: %s", e)
+
 
 # ---------------------------------------------------------------------------
 # Lazy service singleton
@@ -50,7 +80,8 @@ def _get_service() -> Any | None:
 
 
 def _sheet_id() -> str:
-    return GSHEETS_TRACKER_ID
+    """Return the active sheet ID: runtime state > env var."""
+    return _state.get("sheet_id") or GSHEETS_TRACKER_ID
 
 
 def _ready() -> bool:
@@ -229,6 +260,87 @@ async def pull_full_snapshot() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Bootstrap — create or load spreadsheet
+# ---------------------------------------------------------------------------
+
+async def init_or_load_spreadsheet(
+    notify_cb=None,
+) -> dict:
+    """
+    Determine the active spreadsheet, creating one if needed.
+
+    Resolution order:
+      1. gsheets_state.json has "sheet_id" → use it (Docker restart safety).
+      2. GSHEETS_TRACKER_ID env var is set → use it, save to state.
+      3. Both empty → create a new spreadsheet, save state, call notify_cb.
+
+    notify_cb: async callable(text: str) to send a Telegram message.
+    Returns: {"sheet_id": str, "created": bool, "sheet_url": str}
+    """
+    global _state
+
+    if not GSHEETS_ENABLED:
+        return {"sheet_id": "", "created": False, "sheet_url": ""}
+
+    svc = _get_service()
+    if svc is None:
+        return {"sheet_id": "", "created": False, "sheet_url": "", "error": "no service"}
+
+    # 1. Check state file
+    file_state = _read_state()
+    if file_state.get("sheet_id"):
+        _state = file_state
+        log.info("gsheets_sync: loaded sheet_id from state file: %s", _state["sheet_id"])
+        return {
+            "sheet_id": _state["sheet_id"],
+            "created": False,
+            "sheet_url": f"https://docs.google.com/spreadsheets/d/{_state['sheet_id']}",
+        }
+
+    # 2. Check env var
+    if GSHEETS_TRACKER_ID:
+        _state = {"sheet_id": GSHEETS_TRACKER_ID}
+        _write_state(_state)
+        log.info("gsheets_sync: using env GSHEETS_TRACKER_ID, saved to state")
+        return {
+            "sheet_id": GSHEETS_TRACKER_ID,
+            "created": False,
+            "sheet_url": f"https://docs.google.com/spreadsheets/d/{GSHEETS_TRACKER_ID}",
+        }
+
+    # 3. Create a new spreadsheet
+    log.info("gsheets_sync: no sheet_id found — creating new spreadsheet")
+    try:
+        from hunter.gsheets_client import create_spreadsheet
+        sheet_id = await asyncio.to_thread(create_spreadsheet, svc, "Job Tracker")
+    except Exception as e:
+        log.error("gsheets_sync: create_spreadsheet failed: %s", e)
+        return {"sheet_id": "", "created": False, "sheet_url": "", "error": str(e)}
+
+    _state = {"sheet_id": sheet_id}
+    _write_state(_state)
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+    log.info("gsheets_sync: created new spreadsheet: %s", sheet_url)
+
+    if notify_cb:
+        try:
+            await notify_cb(
+                "📊 <b>Google Sheets tracker создан!</b>\n\n"
+                f'🔗 <a href="{sheet_url}">Открыть таблицу</a>\n\n'
+                "Сохрани ID в .env:\n"
+                f"<code>GSHEETS_TRACKER_ID={sheet_id}</code>\n\n"
+                "💡 <b>Фильтр-вид для отправки:</b>\n"
+                "1. Данные → Создать фильтр-вид\n"
+                "2. Столбец «Sent» → Фильтровать: пусто\n"
+                "3. Сохрани вид — будет показывать только неотосланные."
+            )
+        except Exception as e:
+            log.warning("gsheets_sync: notify_cb failed: %s", e)
+
+    return {"sheet_id": sheet_id, "created": True, "sheet_url": sheet_url}
+
+
+# ---------------------------------------------------------------------------
 # Startup validation
 # ---------------------------------------------------------------------------
 
@@ -261,19 +373,20 @@ def validate_startup() -> dict:
     if svc is None:
         return {"ok": False, "error": "Failed to build Sheets service (check token)", "sheet_url": None}
 
-    if not GSHEETS_TRACKER_ID:
+    sid = _sheet_id()
+    if not sid:
         return {
             "ok": True,
             "error": None,
             "sheet_url": None,
-            "warning": "GSHEETS_TRACKER_ID not set — will be created on first run (Phase 6)",
+            "warning": "GSHEETS_TRACKER_ID not set — will be created on first run",
         }
 
     # Try a lightweight read to verify the sheet is accessible
     try:
         from hunter.gsheets_client import read_all
-        read_all(svc, GSHEETS_TRACKER_ID)
-        sheet_url = f"https://docs.google.com/spreadsheets/d/{GSHEETS_TRACKER_ID}"
+        read_all(svc, sid)
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}"
         return {"ok": True, "error": None, "sheet_url": sheet_url}
     except Exception as e:
         return {"ok": False, "error": f"Sheet not accessible: {e}", "sheet_url": None}
@@ -286,13 +399,11 @@ def validate_startup() -> dict:
 async def status_report() -> dict:
     """Return a dict summarising gsheets integration state for the status command."""
     dirty_rows = await cache.dirty_rows()
-    sheet_url = (
-        f"https://docs.google.com/spreadsheets/d/{GSHEETS_TRACKER_ID}"
-        if GSHEETS_TRACKER_ID else None
-    )
+    sid = _sheet_id()
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}" if sid else None
     return {
         "enabled": GSHEETS_ENABLED,
-        "sheet_id": GSHEETS_TRACKER_ID or None,
+        "sheet_id": sid or None,
         "sheet_url": sheet_url,
         "dirty_count": len(dirty_rows),
         "service_ok": _service is not None,
