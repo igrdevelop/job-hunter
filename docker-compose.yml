@@ -9,14 +9,14 @@ services:
       - .env
     volumes:
       - ./tracker.xlsx:/app/tracker.xlsx
-      - ./to_send.xlsx:/app/to_send.xlsx
       - ./Applications:/app/Applications
       - ./backups:/app/backups
       - ./.secrets:/app/.secrets
       - ./gmail_credentials.json:/app/gmail_credentials.json
       - ./gmail_token.json:/app/gmail_token.json
-      - ./drive_credentials.json:/app/drive_credentials.json
-      - ./drive_token.json:/app/drive_token.json
+      - ./gsheets_credentials.json:/app/gsheets_credentials.json
+      - ./gsheets_token.json:/app/gsheets_token.json
+      - ./gsheets_state.json:/app/gsheets_state.json
     logging:
       driver: "json-file"
       options:

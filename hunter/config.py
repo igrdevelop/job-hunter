@@ -36,7 +36,6 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
-TO_SEND_PATH = PROJECT_DIR / "to_send.xlsx"
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
 TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
     "true",
@@ -53,6 +52,16 @@ APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
 ATS_COMPANIES_PATH = PROJECT_DIR / "hunter" / "ats_companies.json"
+
+# ── Google Sheets integration ─────────────────────────────────────────────────
+GSHEETS_ENABLED: bool = os.getenv("GSHEETS_ENABLED", "false").lower() in ("true", "1", "yes")
+# Spreadsheet ID — set after first run (bot creates the sheet and sends you the ID)
+GSHEETS_TRACKER_ID: str = os.getenv("GSHEETS_TRACKER_ID", "")
+# How often (minutes) to pull Sheets → Excel to pick up user edits
+GSHEETS_REFRESH_INTERVAL_MIN: int = int(os.getenv("GSHEETS_REFRESH_INTERVAL_MIN", "30"))
+GSHEETS_CREDENTIALS_FILE: "Path" = PROJECT_DIR / "gsheets_credentials.json"
+GSHEETS_TOKEN_FILE: "Path" = PROJECT_DIR / "gsheets_token.json"
+GSHEETS_STATE_FILE: "Path" = PROJECT_DIR / "gsheets_state.json"
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.

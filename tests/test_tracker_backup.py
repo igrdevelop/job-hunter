@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 
-def test_run_tracker_backup_copies_and_skips_missing_to_send(
+def test_run_tracker_backup_copies_tracker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import hunter.config as cfg
@@ -18,7 +18,6 @@ def test_run_tracker_backup_copies_and_skips_missing_to_send(
 
     monkeypatch.setattr(cfg, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(cfg, "TRACKER_PATH", tracker)
-    monkeypatch.setattr(cfg, "TO_SEND_PATH", tmp_path / "nope.xlsx")
     backup_dir = tmp_path / "backups"
     monkeypatch.setattr(cfg, "TRACKER_BACKUP_DIR", backup_dir)
     monkeypatch.setattr(cfg, "TRACKER_BACKUP_KEEP_FILES", 5)
@@ -28,7 +27,6 @@ def test_run_tracker_backup_copies_and_skips_missing_to_send(
     assert r["errors"] == []
     assert len(r["copied"]) == 1
     assert r["copied"][0].startswith("backups/tracker_")
-    assert any("to_send: missing" in s for s in r["skipped"])
     assert list(backup_dir.glob("tracker_*.xlsx"))
 
 
@@ -40,7 +38,6 @@ def test_prune_keeps_newest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     tracker.write_bytes(b"x")
     monkeypatch.setattr(cfg, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(cfg, "TRACKER_PATH", tracker)
-    monkeypatch.setattr(cfg, "TO_SEND_PATH", tmp_path / "missing.xlsx")
     bdir = tmp_path / "b"
     monkeypatch.setattr(cfg, "TRACKER_BACKUP_DIR", bdir)
     monkeypatch.setattr(cfg, "TRACKER_BACKUP_KEEP_FILES", 2)

@@ -35,6 +35,8 @@ from hunter.config import (
     TRACKER_BACKUP_ENABLED,
     TRACKER_BACKUP_TIME,
     EXPIRED_CHECK_TIME,
+    GSHEETS_ENABLED,
+    GSHEETS_REFRESH_INTERVAL_MIN,
 )
 from hunter.models import Job
 from hunter.tracker import (
@@ -101,10 +103,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
         "<code>job_posting.txt</code>)\n"
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
-        "/sync_sent - sync Sent column from to_send.xlsx → tracker.xlsx\n"
-        "/unsent - сколько неотосланных в to_send и сколько с ANGULAR в Stack\n"
-        "/check_expired - проверить to_send на истёкшие вакансии (работает с копией)\n"
-        "/apply_expired - применить результаты проверки к to_send.xlsx\n\n"
+        "/sync_sent - sync Sent column from Google Sheets → tracker.xlsx\n"
+        "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
+        "/check_expired - проверить трекер на истёкшие вакансии\n"
+        "/gsheets_status - статус интеграции Google Sheets\n"
+        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -311,17 +314,15 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Сколько строк в очереди на отправку (как to_send.xlsx) и сколько с ANGULAR в Stack."""
+    """Сколько неотосланных заявок в трекере и сколько с ANGULAR в Stack."""
     try:
-        from hunter.tracker import iter_rows_for_to_send
-        rows = await asyncio.to_thread(iter_rows_for_to_send)
-        total = len(rows)
-        angular_n = sum(
-            1 for r in rows
-            if "ANGULAR" in str(r.get("stack") or "").upper()
-        )
+        from hunter.tracker_cache import cache
+        if not cache.loaded:
+            await asyncio.to_thread(lambda: None)  # yield to event loop
+        total = await cache.unsent_count()
+        angular_n = await cache.unsent_angular_count()
         if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет</b> — to_send пуст."
+            msg = "📭 <b>Неотосланных заявок нет.</b>"
         else:
             msg = (
                 f"📋 <b>Неотосланных заявок:</b> {total}\n"
@@ -334,23 +335,12 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check all URLs in to_send.xlsx for expired job offers (works on a copy)."""
-    from hunter.expired_to_send_check import run_check, apply_check, TO_SEND_PATH
-
-    if not TO_SEND_PATH.exists():
-        await update.message.reply_text("⚠️ to_send.xlsx не найден.")
-        return
-
-    # Count rows to check upfront
-    import openpyxl as _opxl
-    _wb = _opxl.load_workbook(TO_SEND_PATH)
-    _ws = _wb.active
-    _total_rows = max(0, _ws.max_row - 1)
+    """Check all unsent tracker rows for expired job offers."""
+    from hunter.expired_marker import run_check
 
     status_msg = await update.message.reply_text(
-        f"🔍 Проверяю to_send.xlsx ({_total_rows} вакансий)...\n"
-        f"Это займёт ~{_total_rows} секунд.\n"
-        f"<i>Оригинал не трогаю — работаю с копией.</i>",
+        "🔍 Проверяю трекер на истёкшие вакансии...\n"
+        "<i>EXPIRED будет записан прямо в tracker.xlsx.</i>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -382,6 +372,7 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         lines.append(f"⏭ <b>Истекло ({len(expired)}):</b>")
         for item in expired:
             lines.append(f"  • {item['company']} — {item['title']}")
+        lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
         lines.append("")
 
     if errors:
@@ -398,144 +389,97 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
-    if not expired:
-        return
-
-    # Try to apply immediately — will fail if Excel / LibreOffice Calc has the file open
-    apply_result = await asyncio.to_thread(apply_check)
-    if apply_result["ok"]:
-        synced = apply_result.get("synced", 0)
-        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
-        sync_err = apply_result.get("sync_error")
-        sync_err_note = f"\n⚠️ sync_sent не удался: <code>{sync_err}</code>" if sync_err else ""
-        await update.message.reply_text(
-            f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent."
-            f"{sync_note}{sync_err_note}",
-            parse_mode=ParseMode.HTML,
-        )
-    elif apply_result["error"] == "PermissionError":
-        await update.message.reply_text(
-            "📌 Файл занят (открыт в Excel или LibreOffice Calc).\n"
-            "Буду пробовать каждую минуту — как закроешь, применю автоматически.",
-            parse_mode=ParseMode.HTML,
-        )
-        _schedule_apply_retry(context)
-    else:
-        await update.message.reply_text(
-            f"❌ Не удалось применить: <code>{apply_result['error']}</code>\n"
-            f"Попробуй /apply_expired вручную.",
-            parse_mode=ParseMode.HTML,
-        )
-
-
-_APPLY_RETRY_JOB = "apply_expired_retry"
-
-
-def _schedule_apply_retry(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Schedule a repeating job that tries apply_check every 60s until it succeeds."""
-    # Cancel any existing retry to avoid duplicates
-    for job in context.job_queue.get_jobs_by_name(_APPLY_RETRY_JOB):
-        job.schedule_removal()
-    context.job_queue.run_repeating(
-        _retry_apply_expired,
-        interval=60,
-        first=60,
-        name=_APPLY_RETRY_JOB,
-    )
-    logger.info("[apply_expired] retry job scheduled (every 60s)")
-
-
-async def _retry_apply_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Repeating job: try to apply checked copy until the editor releases the file."""
-    from hunter.expired_to_send_check import apply_check, CHECKING_PATH
-
-    if not CHECKING_PATH.exists():
-        # Nothing left to apply — stop
-        context.job.schedule_removal()
-        return
-
-    result = await asyncio.to_thread(apply_check)
-    if result["ok"]:
-        context.job.schedule_removal()
-        logger.info("[apply_expired] retry succeeded — file applied")
-        synced = result.get("synced", 0)
-        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent.{sync_note}",
-            parse_mode=ParseMode.HTML,
-        )
-    else:
-        logger.debug("[apply_expired] retry: file still locked, will try again in 60s")
-
-
-async def cmd_apply_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Replace to_send.xlsx with the checked copy (to_send_checking.xlsx)."""
-    from hunter.expired_to_send_check import apply_check, CHECKING_PATH
-
-    if not CHECKING_PATH.exists():
-        await update.message.reply_text(
-            "ℹ️ Нет готовых результатов проверки.\n"
-            "Сначала запусти /check_expired.",
-        )
-        return
-
-    result = await asyncio.to_thread(apply_check)
-
-    if result["ok"]:
-        # Cancel background retry if running
-        for job in context.job_queue.get_jobs_by_name(_APPLY_RETRY_JOB):
-            job.schedule_removal()
-        synced = result.get("synced", 0)
-        sync_note = f"\n📊 tracker.xlsx обновлён — {synced} строк(и) помечено EXPIRED." if synced else ""
-        await update.message.reply_text(
-            f"✅ <b>to_send.xlsx обновлён</b> — истекшие вакансии помечены EXPIRED в колонке Sent."
-            f"{sync_note}",
-            parse_mode=ParseMode.HTML,
-        )
-        logger.info("[apply_expired] Applied checking copy to to_send.xlsx")
-    elif result["error"] == "PermissionError":
-        await update.message.reply_text(
-            "⚠️ <b>Файл занят — закрой to_send.xlsx в Excel или LibreOffice Calc.</b>\n"
-            "Буду пробовать каждую минуту автоматически.",
-            parse_mode=ParseMode.HTML,
-        )
-        _schedule_apply_retry(context)
-    else:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-
 
 async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sync Sent marks from to_send.xlsx back to tracker.xlsx, then rebuild to_send.xlsx."""
-    await update.message.reply_text("⏳ Syncing to_send.xlsx → tracker.xlsx…")
+    """Pull Sent/To Learn/Re-application changes from Google Sheets → tracker.xlsx."""
+    from hunter import gsheets_sync
+    from hunter.config import GSHEETS_ENABLED
+
+    if not GSHEETS_ENABLED:
+        await update.message.reply_text(
+            "ℹ️ Google Sheets отключён (GSHEETS_ENABLED=false). /sync_sent недоступен.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text("⏳ Синхронизирую Sheets → tracker.xlsx…")
     try:
-        from hunter import to_send
-        if to_send.is_to_send_locked_by_editor():
-            await update.message.reply_text(
-                "⚠️ <b>to_send.xlsx открыт в Excel или LibreOffice Calc!</b>\n\n"
-                "Несохранённые изменения не будут прочитаны.\n"
-                "<b>Сохрани файл (Ctrl+S) и запусти /sync_sent снова.</b>",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-        result = to_send.sync_and_rebuild()
-        synced = result["synced"]
-        rebuilt = result["rebuilt"]
-        if synced:
-            msg = f"✅ Synced <b>{synced}</b> Sent mark(s) to tracker.xlsx."
-        else:
-            msg = "ℹ️ No new Sent marks found in to_send.xlsx."
-        if rebuilt:
-            msg += "\n📄 to_send.xlsx rebuilt (only unsent rows remain)."
-        else:
-            msg += "\n⚠️ to_send.xlsx could not be rebuilt — close the file and retry."
-    except Exception as exc:
-        logger.exception("[sync_sent] Failed: %s", exc)
-        msg = f"❌ Sync failed: {exc}"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        result = await gsheets_sync.pull_full_snapshot()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка pull: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    pulled = result["pulled"]
+    updated = result["updated"]
+    errors = result["errors"]
+
+    lines = [f"✅ <b>sync_sent завершён</b>"]
+    lines.append(f"  Строк из Sheets: {pulled}")
+    lines.append(f"  Обновлено в tracker.xlsx: {updated}")
+    if errors:
+        lines.append(f"⚠️ Ошибки: {'; '.join(errors[:2])}")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show Google Sheets integration status."""
+    from hunter import gsheets_sync
+    try:
+        report = await gsheets_sync.status_report()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Не удалось получить статус: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    enabled = report["enabled"]
+    if not enabled:
+        await update.message.reply_text(
+            "ℹ️ <b>Google Sheets отключён</b> (GSHEETS_ENABLED=false).\n"
+            "Задай GSHEETS_ENABLED=true в .env чтобы включить.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    lines = ["📊 <b>Google Sheets статус</b>"]
+    lines.append(f"  Сервис: {'✅ OK' if report['service_ok'] else '❌ не инициализирован'}")
+    if report.get("sheet_url"):
+        lines.append(f"  Таблица: <a href=\"{report['sheet_url']}\">открыть</a>")
+    elif report.get("sheet_id"):
+        lines.append(f"  ID: <code>{report['sheet_id']}</code>")
+    else:
+        lines.append("  Таблица: не настроена")
+    dirty = report.get("dirty_count", 0)
+    lines.append(f"  Грязных строк: {dirty}")
+    if dirty:
+        lines.append("  ℹ️ Запусти /gsheets_resync для повторной отправки")
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Retry dirty rows → Google Sheets."""
+    from hunter import gsheets_sync
+    await update.message.reply_text("⏳ Повторная отправка грязных строк в Sheets…")
+    try:
+        synced = await gsheets_sync.resync_dirty()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await update.message.reply_text(
+        f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def _build_schedule_text() -> str:
@@ -585,9 +529,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _handle_skip(query, job: Job, job_id: str) -> None:
-    # Write to tracker synchronously in thread pool
-    await asyncio.to_thread(add_skipped, job)
+    row = await asyncio.to_thread(add_skipped, job)
     _pending_jobs.pop(job_id, None)
+    if row:
+        try:
+            from hunter.tracker_cache import cache
+            await cache.add(row)
+            from hunter import gsheets_sync
+            await gsheets_sync.mirror_new_row(row)
+        except Exception as _e:
+            logger.warning("[skip] cache/gsheets update failed: %s", _e)
 
     original = query.message.text
     await query.edit_message_text(
@@ -662,6 +613,17 @@ async def _run_apply_agent(
             )
         else:
             logger.info(f"[apply_agent] done ({outcome}) for {label}")
+            if url:
+                try:
+                    from hunter.tracker_cache import cache
+                    from hunter.config import TRACKER_PATH
+                    await cache.load_from_excel(TRACKER_PATH)
+                    row = await cache.get_row_by_url(url)
+                    if row:
+                        from hunter import gsheets_sync
+                        await gsheets_sync.mirror_new_row(row)
+                except Exception as _e:
+                    logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
@@ -1029,22 +991,68 @@ async def _run_linkedin_batch(job_ids: list[str], update) -> None:
 
 # ── Application factory ───────────────────────────────────────────────────────
 
-async def _set_bot_commands(app: Application) -> None:
-    """Register command list with Telegram so the '/' menu is populated."""
+async def _post_init(app: Application) -> None:
+    """Post-init hook: register bot commands + validate gsheets startup."""
     from telegram import BotCommand
     await app.bot.set_my_commands([
-        BotCommand("start",          "Show help"),
-        BotCommand("hunt",           "Run search (optional: source names)"),
-        BotCommand("status",         "Bot status and schedule"),
-        BotCommand("schedule",       "Show source schedule"),
-        BotCommand("force",          "Process URL even if already in tracker"),
-        BotCommand("process_manual", "Process MANUAL rows with filled job_posting.txt"),
-        BotCommand("sync_sent",      "Sync Sent column from to_send.xlsx"),
-        BotCommand("unsent",         "Unsent queue count + Angular in Stack"),
-        BotCommand("check_expired",  "Check to_send for expired job offers"),
-        BotCommand("apply_expired",  "Apply expiry results to to_send.xlsx"),
-        BotCommand("about_me",       "Generate About Me for a job URL (lang + url)"),
+        BotCommand("start",           "Show help"),
+        BotCommand("hunt",            "Run search (optional: source names)"),
+        BotCommand("status",          "Bot status and schedule"),
+        BotCommand("schedule",        "Show source schedule"),
+        BotCommand("force",           "Process URL even if already in tracker"),
+        BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
+        BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
+        BotCommand("unsent",          "Unsent applications count + Angular"),
+        BotCommand("check_expired",   "Check unsent rows for expired job offers"),
+        BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
+        BotCommand("gsheets_status",  "Google Sheets integration status"),
+        BotCommand("gsheets_resync",  "Retry dirty rows → Google Sheets"),
     ])
+
+    # Bootstrap / validate Google Sheets on startup.
+    try:
+        from hunter import gsheets_sync
+
+        if GSHEETS_ENABLED:
+            # Pre-flight: credentials + token check (sync, cheap)
+            preflight = gsheets_sync.validate_startup()
+            if not preflight.get("ok"):
+                err = preflight.get("error", "unknown error")
+                logger.error("[gsheets] startup validation failed: %s", err)
+                try:
+                    await app.bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=f"⚠️ <b>Google Sheets не готов</b>\n<code>{err}</code>",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+                return  # don't try to bootstrap if creds are broken
+
+            async def _tg_notify(text: str) -> None:
+                try:
+                    await app.bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                except Exception as _e:
+                    logger.warning("[gsheets] notify failed: %s", _e)
+
+            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify)
+            if result.get("error"):
+                logger.error("[gsheets] init failed: %s", result["error"])
+            else:
+                url = result.get("sheet_url", "")
+                created = result.get("created", False)
+                logger.info(
+                    "[gsheets] %s — %s",
+                    "created new spreadsheet" if created else "loaded existing spreadsheet",
+                    url,
+                )
+    except Exception as e:
+        logger.warning("[gsheets] startup init failed: %s", e)
 
 
 def build_application() -> Application:
@@ -1052,20 +1060,21 @@ def build_application() -> Application:
     import pytz
     from datetime import time as dt_time
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # Command handlers
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("hunt",      cmd_hunt))
+    app.add_handler(CommandHandler("start",          cmd_start))
+    app.add_handler(CommandHandler("hunt",           cmd_hunt))
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
-    app.add_handler(CommandHandler("schedule",  cmd_schedule))
-    app.add_handler(CommandHandler("unsent",        cmd_unsent))
-    app.add_handler(CommandHandler("sync_sent",     cmd_sync_sent))
-    app.add_handler(CommandHandler("check_expired", cmd_check_expired))
-    app.add_handler(CommandHandler("apply_expired", cmd_apply_expired))
-    app.add_handler(CommandHandler("about_me",      cmd_about_me))
+    app.add_handler(CommandHandler("schedule",       cmd_schedule))
+    app.add_handler(CommandHandler("unsent",         cmd_unsent))
+    app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
+    app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
+    app.add_handler(CommandHandler("about_me",       cmd_about_me))
+    app.add_handler(CommandHandler("gsheets_status", cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_resync", cmd_gsheets_resync))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -1096,19 +1105,6 @@ def build_application() -> Application:
                 f"[Schedule] {source.name} at "
                 f"{fire_hour:02d}:{fire_min:02d} {TIMEZONE}"
             )
-
-    # Dedicated to_send sync — fires once per base schedule window (5 min before first hunt)
-    for base_time in SCHEDULE_TIMES:
-        h, m = map(int, base_time.split(":"))
-        total = h * 60 + m - 5
-        total %= 24 * 60
-        fire_hour, fire_min = total // 60, total % 60
-        app.job_queue.run_daily(
-            callback=_scheduled_sync_sent,
-            time=dt_time(fire_hour, fire_min, tzinfo=tz),
-            name=f"sync_sent_{base_time}",
-        )
-        logger.info(f"[Schedule] sync_sent at {fire_hour:02d}:{fire_min:02d} {TIMEZONE}")
 
     # Daily pending-report at 09:00 and 21:00
     for report_hour in (9, 21):
@@ -1150,15 +1146,32 @@ def build_application() -> Application:
         )
         logger.info(f"[Schedule] tracker_backup at {bh:02d}:{bm:02d} {TIMEZONE}")
 
+    # Retry dirty Sheets rows every 5 minutes (no-op when GSHEETS_ENABLED=false)
+    app.job_queue.run_repeating(
+        callback=_scheduled_gsheets_resync,
+        interval=300,
+        first=60,
+        name="gsheets_resync",
+    )
+    logger.info("[Schedule] gsheets_resync every 5 min")
+
+    # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
+    if GSHEETS_ENABLED:
+        pull_interval_sec = max(60, GSHEETS_REFRESH_INTERVAL_MIN * 60)
+        app.job_queue.run_repeating(
+            callback=_scheduled_gsheets_pull,
+            interval=pull_interval_sec,
+            first=120,
+            name="gsheets_pull",
+        )
+        logger.info("[Schedule] gsheets_pull every %d min", GSHEETS_REFRESH_INTERVAL_MIN)
+
     return app
 
 
 async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Daily scheduled expired check — runs at midnight, applies results, syncs tracker."""
-    from hunter.expired_to_send_check import run_check, apply_check, TO_SEND_PATH
-
-    if not TO_SEND_PATH.exists():
-        return
+    """Daily scheduled expired check — runs at midnight, marks EXPIRED in tracker.xlsx."""
+    from hunter.expired_marker import run_check
 
     logger.info("[scheduled_check_expired] Starting daily expired check")
 
@@ -1181,39 +1194,24 @@ async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("[scheduled_check_expired] Nothing expired.")
         return
 
-    # Try to apply
-    apply_result = await asyncio.to_thread(apply_check)
-    if apply_result["ok"]:
-        synced = apply_result.get("synced", 0)
-        sync_note = f"\n📊 tracker.xlsx: {synced} строк(и) помечено EXPIRED." if synced else ""
-        lines = [f"🌙 <b>Ночная проверка истёкших</b>\n"]
-        lines.append(f"⏭ Истекло: <b>{len(expired)}</b>")
-        for item in expired:
-            lines.append(f"  • {item['company']} — {item['title']}")
-        if skipped:
-            lines.append(f"⏩ Пропущено (jobleads): {len(skipped)}")
-        if errors:
-            lines.append(f"⚠️ Ошибок: {len(errors)}")
-        lines.append(f"\n✅ to_send.xlsx обновлён.{sync_note}")
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text="\n".join(lines),
-            parse_mode=ParseMode.HTML,
-        )
-    elif apply_result["error"] == "PermissionError":
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"🌙 <b>Ночная проверка:</b> найдено <b>{len(expired)}</b> истёкших.\n"
-                 f"📌 to_send.xlsx открыт — закрой Excel или LibreOffice Calc и нажми /apply_expired.",
-            parse_mode=ParseMode.HTML,
-        )
-        _schedule_apply_retry(context)
-    else:
-        logger.error("[scheduled_check_expired] apply_check failed: %s", apply_result["error"])
+    lines = [f"🌙 <b>Ночная проверка истёкших</b>\n"]
+    lines.append(f"⏭ Истекло: <b>{len(expired)}</b>")
+    for item in expired:
+        lines.append(f"  • {item['company']} — {item['title']}")
+    if skipped:
+        lines.append(f"⏩ Пропущено (jobleads): {len(skipped)}")
+    if errors:
+        lines.append(f"⚠️ Ошибок: {len(errors)}")
+    lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
+    await context.bot.send_message(
+        chat_id=TELEGRAM_CHAT_ID,
+        text="\n".join(lines),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def _scheduled_tracker_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Daily snapshot of tracker.xlsx + to_send.xlsx (silent on success)."""
+    """Daily snapshot of tracker.xlsx (silent on success)."""
     try:
         import asyncio as _asyncio
         from hunter.tracker_backup import run_tracker_backup
@@ -1249,7 +1247,7 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
         extra = ""
         if "Content_Types" in str(e) or "archive" in str(e).lower():
             extra = (
-                "\n\n<i>Скорее всего повреждён или не-xlsx файл tracker.xlsx / to_send.xlsx — "
+                "\n\n<i>Скорее всего повреждён или не-xlsx файл tracker.xlsx — "
                 "не ошибка борда в скобках.</i>"
             )
         try:
@@ -1262,33 +1260,42 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
 
-async def _scheduled_sync_sent(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Scheduled job: sync Sent marks from to_send.xlsx → tracker.xlsx (3×/day)."""
+async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every-5-min job: push dirty rows to Google Sheets (no-op if disabled)."""
     try:
-        import asyncio as _asyncio
-        from hunter import to_send as _to_send
-        result = await _asyncio.to_thread(_to_send.sync_and_rebuild)
-        if result["synced"]:
-            await context.bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"📬 Synced <b>{result['synced']}</b> Sent mark(s) from to_send.xlsx → tracker.xlsx",
-                parse_mode=ParseMode.HTML,
-            )
-    except Exception:
-        logger.exception("[scheduled_sync_sent] Failed")
+        from hunter import gsheets_sync
+        synced = await gsheets_sync.resync_dirty()
+        if synced:
+            logger.info("[scheduled_gsheets_resync] pushed %d dirty row(s)", synced)
+    except Exception as e:
+        logger.warning("[scheduled_gsheets_resync] failed: %s", e)
+
+
+async def _scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: pull Sheets → tracker.xlsx (every GSHEETS_REFRESH_INTERVAL_MIN)."""
+    try:
+        from hunter import gsheets_sync
+        result = await gsheets_sync.pull_full_snapshot()
+        updated = result.get("updated", 0)
+        if updated:
+            logger.info("[scheduled_gsheets_pull] updated %d row(s) from Sheets", updated)
+        if result.get("errors"):
+            logger.warning("[scheduled_gsheets_pull] errors: %s", result["errors"])
+    except Exception as e:
+        logger.warning("[scheduled_gsheets_pull] failed: %s", e)
 
 
 async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Scheduled job: report how many unsent applications are in to_send.xlsx."""
+    """Scheduled job: report how many unsent applications are in tracker."""
     try:
-        from hunter.tracker import iter_rows_for_to_send
-        rows = await asyncio.to_thread(iter_rows_for_to_send)
-        total = len(rows)
+        from hunter.tracker_cache import cache
+        total = await cache.unsent_count()
         if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет</b> — to_send.xlsx пуст."
+            msg = "📭 <b>Неотосланных заявок нет.</b>"
         else:
-            fail_n = sum(1 for r in rows if r["ats"] == "FAIL")
-            manual_n = sum(1 for r in rows if r["ats"] == "MANUAL")
+            rows = await cache.all_unsent()
+            fail_n = sum(1 for r in rows if r.get("ATS %") == "FAIL")
+            manual_n = sum(1 for r in rows if r.get("ATS %") == "MANUAL")
             ready_n = total - fail_n - manual_n
             parts = [f"📋 <b>Неотосланных заявок: {total}</b>"]
             if ready_n:
