@@ -344,8 +344,17 @@ def main():
         generate_about_me(Path(output_folder), lang="en")
         generate_about_me(Path(output_folder), lang="pl")
 
+    # --- Update tracker.xlsx before PDF step so a LibreOffice crash doesn't lose the record ---
+    try:
+        update_tracker(content, force_mode=force_mode)
+    except Exception as exc:
+        print(f"  [WARN] Tracker update failed (close tracker.xlsx if open): {exc}")
+
     # --- Convert all DOCX to PDF in one shot ---
-    convert_all_to_pdf(output_folder)
+    try:
+        convert_all_to_pdf(output_folder)
+    except Exception as exc:
+        print(f"  [WARN] PDF conversion failed: {exc}")
 
     # --- Short mode: remove DOCX only when a sibling PDF exists (LibreOffice OK) ---
     if not full_mode:
@@ -360,12 +369,6 @@ def main():
                     f"  [cleanup] Kept DOCX (no PDF yet): {docx_file.name} "
                     "- check LibreOffice / run convert manually"
                 )
-
-    # --- Update tracker.xlsx (must not undo successful doc writes) ---
-    try:
-        update_tracker(content, force_mode=force_mode)
-    except Exception as exc:
-        print(f"  [WARN] Tracker update failed (close tracker.xlsx if open): {exc}")
 
     print("\nDone!\n")
 
