@@ -395,3 +395,82 @@ def test_status_report_enabled_with_sheet():
     assert "sheet123" in report["sheet_url"]
     assert report["dirty_count"] == 1
     assert report["service_ok"] is True
+
+
+# ── pull_full_snapshot ────────────────────────────────────────────────────────
+
+def test_pull_full_snapshot_noop_when_not_ready():
+    with patch("hunter.gsheets_sync._ready", return_value=False):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.pull_full_snapshot())
+    assert result == {"pulled": 0, "updated": 0, "errors": []}
+
+
+def test_pull_full_snapshot_read_all_error():
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(side_effect=Exception("api error"))),
+    ):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.pull_full_snapshot())
+    assert result["pulled"] == 0
+    assert result["errors"]
+
+
+def test_pull_full_snapshot_no_changes():
+    fake_cache = MagicMock()
+    fake_cache.set_sheet_row_index = AsyncMock()
+    fake_cache.apply_pull_delta = AsyncMock(return_value=[])
+
+    sheets_rows = [(2, {"ID": "abc12345", "Sent": "2026-05-01", "To Learn": "RxJS", "Re-application": ""})]
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=sheets_rows)),
+        patch("hunter.gsheets_sync.cache", fake_cache),
+    ):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.pull_full_snapshot())
+
+    assert result["pulled"] == 1
+    assert result["updated"] == 0
+    assert result["errors"] == []
+    fake_cache.set_sheet_row_index.assert_called_once_with("abc12345", 2)
+
+
+def test_pull_full_snapshot_writes_excel_on_changes():
+    fake_cache = MagicMock()
+    fake_cache.set_sheet_row_index = AsyncMock()
+    changed_row = _make_row("abc12345")
+    changed_row["Sent"] = "2026-05-10"
+    fake_cache.apply_pull_delta = AsyncMock(return_value=[changed_row])
+
+    sheets_rows = [(2, {"ID": "abc12345", "Sent": "2026-05-10", "To Learn": "", "Re-application": ""})]
+    excel_call_results = [sheets_rows, 1]  # first call = read_all, second = apply_pull_updates
+
+    call_count = 0
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return sheets_rows
+        return 1  # apply_pull_updates return value
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_sync.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("hunter.gsheets_sync.cache", fake_cache),
+    ):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.pull_full_snapshot())
+
+    assert result["pulled"] == 1
+    assert result["updated"] == 1
+    assert result["errors"] == []

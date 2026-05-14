@@ -35,6 +35,8 @@ from hunter.config import (
     TRACKER_BACKUP_ENABLED,
     TRACKER_BACKUP_TIME,
     EXPIRED_CHECK_TIME,
+    GSHEETS_ENABLED,
+    GSHEETS_REFRESH_INTERVAL_MIN,
 )
 from hunter.models import Job
 from hunter.tracker import (
@@ -387,12 +389,37 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sync Sent column from Google Sheets → tracker.xlsx (Phase 5 placeholder)."""
-    await update.message.reply_text(
-        "ℹ️ <b>/sync_sent</b> будет реализован в Phase 5 (Google Sheets pull).\n"
-        "Пока используй Google Sheets напрямую для просмотра отосланных.",
-        parse_mode=ParseMode.HTML,
-    )
+    """Pull Sent/To Learn/Re-application changes from Google Sheets → tracker.xlsx."""
+    from hunter import gsheets_sync
+    from hunter.config import GSHEETS_ENABLED
+
+    if not GSHEETS_ENABLED:
+        await update.message.reply_text(
+            "ℹ️ Google Sheets отключён (GSHEETS_ENABLED=false). /sync_sent недоступен.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text("⏳ Синхронизирую Sheets → tracker.xlsx…")
+    try:
+        result = await gsheets_sync.pull_full_snapshot()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка pull: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    pulled = result["pulled"]
+    updated = result["updated"]
+    errors = result["errors"]
+
+    lines = [f"✅ <b>sync_sent завершён</b>"]
+    lines.append(f"  Строк из Sheets: {pulled}")
+    lines.append(f"  Обновлено в tracker.xlsx: {updated}")
+    if errors:
+        lines.append(f"⚠️ Ошибки: {'; '.join(errors[:2])}")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1104,6 +1131,17 @@ def build_application() -> Application:
     )
     logger.info("[Schedule] gsheets_resync every 5 min")
 
+    # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
+    if GSHEETS_ENABLED:
+        pull_interval_sec = max(60, GSHEETS_REFRESH_INTERVAL_MIN * 60)
+        app.job_queue.run_repeating(
+            callback=_scheduled_gsheets_pull,
+            interval=pull_interval_sec,
+            first=120,
+            name="gsheets_pull",
+        )
+        logger.info("[Schedule] gsheets_pull every %d min", GSHEETS_REFRESH_INTERVAL_MIN)
+
     return app
 
 
@@ -1207,6 +1245,20 @@ async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.info("[scheduled_gsheets_resync] pushed %d dirty row(s)", synced)
     except Exception as e:
         logger.warning("[scheduled_gsheets_resync] failed: %s", e)
+
+
+async def _scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: pull Sheets → tracker.xlsx (every GSHEETS_REFRESH_INTERVAL_MIN)."""
+    try:
+        from hunter import gsheets_sync
+        result = await gsheets_sync.pull_full_snapshot()
+        updated = result.get("updated", 0)
+        if updated:
+            logger.info("[scheduled_gsheets_pull] updated %d row(s) from Sheets", updated)
+        if result.get("errors"):
+            logger.warning("[scheduled_gsheets_pull] errors: %s", result["errors"])
+    except Exception as e:
+        logger.warning("[scheduled_gsheets_pull] failed: %s", e)
 
 
 async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:

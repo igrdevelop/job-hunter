@@ -177,6 +177,58 @@ async def resync_dirty() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Pull — Sheets → tracker.xlsx
+# ---------------------------------------------------------------------------
+
+async def pull_full_snapshot() -> dict:
+    """
+    Pull all rows from Google Sheets and merge into cache + tracker.xlsx.
+
+    Conflict matrix (applied in tracker_cache.apply_pull_delta):
+      - Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
+      - To Learn, Re-application: always trust Sheets (user edits there).
+
+    Returns: {"pulled": int, "updated": int, "errors": list[str]}
+    """
+    if not _ready():
+        return {"pulled": 0, "updated": 0, "errors": []}
+
+    from hunter.gsheets_client import read_all
+    from hunter.tracker import apply_pull_updates
+    from hunter.config import TRACKER_PATH
+
+    errors: list[str] = []
+
+    try:
+        sheets_rows = await asyncio.to_thread(
+            read_all, _get_service(), _sheet_id()
+        )
+    except Exception as e:
+        log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
+        return {"pulled": 0, "updated": 0, "errors": [str(e)]}
+
+    # Update sheet_row_index for all rows we see in Sheets
+    for sheet_row_num, row in sheets_rows:
+        row_id = row.get("ID", "").strip()
+        if row_id:
+            await cache.set_sheet_row_index(row_id, sheet_row_num)
+
+    # Apply conflict matrix — get rows that need Excel update
+    to_write = await cache.apply_pull_delta(sheets_rows)
+
+    if to_write:
+        try:
+            written = await asyncio.to_thread(apply_pull_updates, to_write)
+            log.info("gsheets pull_full_snapshot: updated %d/%d rows in Excel", written, len(to_write))
+        except Exception as e:
+            log.error("gsheets pull_full_snapshot: apply_pull_updates failed: %s", e)
+            errors.append(str(e))
+
+    log.info("gsheets pull_full_snapshot: pulled %d rows, %d Excel updates", len(sheets_rows), len(to_write))
+    return {"pulled": len(sheets_rows), "updated": len(to_write), "errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Startup validation
 # ---------------------------------------------------------------------------
 

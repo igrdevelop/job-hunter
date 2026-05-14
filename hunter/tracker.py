@@ -946,6 +946,43 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
     return updated
 
 
+_REAPP_COL_INDEX = 9    # "Re-application"
+_TO_LEARN_COL_INDEX = 10  # "To Learn"
+
+
+def apply_pull_updates(rows: list[dict]) -> int:
+    """Write Sheets-sourced field changes back to tracker.xlsx (pull sync).
+
+    rows: list of full row dicts (with 'ID') where Sheets had a newer value.
+    Updates Sent, Re-application, To Learn columns. Returns count of rows updated.
+    """
+    if not rows or not TRACKER_PATH.exists():
+        return 0
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    updated = 0
+
+    for row_num in range(2, ws.max_row + 1):
+        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+        if not row_id:
+            continue
+        for row_dict in rows:
+            if row_dict.get("ID", "").strip() != row_id:
+                continue
+            ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
+            ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
+            ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
+            updated += 1
+            break
+
+    if updated:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+    return updated
+
+
 def get_folder_by_url(url: str) -> str | None:
     """Return the Folder value for a given job URL, or None if not found.
 
