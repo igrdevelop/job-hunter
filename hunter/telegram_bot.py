@@ -624,6 +624,23 @@ async def _run_apply_agent(
                         await gsheets_sync.mirror_new_row(row)
                 except Exception as _e:
                     logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
+            # Upload application folder to Google Drive (best-effort)
+            try:
+                from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+                if GDRIVE_ENABLED:
+                    from hunter.tracker import get_folder_by_url
+                    folder_str = await asyncio.to_thread(get_folder_by_url, url)
+                    if folder_str:
+                        from hunter import gdrive_sync
+                        drive_url = await gdrive_sync.upload_application_folder(
+                            PROJECT_DIR / folder_str
+                        )
+                        if drive_url:
+                            await _tg_notify(
+                                f'📁 <a href="{drive_url}">Открыть папку на Drive</a>'
+                            )
+            except Exception as _e:
+                logger.warning("[apply_agent] gdrive upload failed: %s", _e)
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")

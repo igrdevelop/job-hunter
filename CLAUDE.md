@@ -14,6 +14,7 @@ Read it fully before making changes. Update it when you learn something new.
 4. Sends new jobs to Telegram for review (Apply/Skip buttons)
 5. On approval (or automatically), generates a tailored CV + cover letter via LLM
 6. Tracks everything in `tracker.xlsx`, mirrors live to Google Sheets
+7. Uploads application docs to Google Drive; sends folder link via Telegram
 
 **Owner:** Ihar Petrasheuski, Senior Frontend Developer, Angular, 10+ years. Wroclaw, Poland. Seeking Angular/React/JS roles, remote or hybrid-Wroclaw.
 
@@ -61,6 +62,8 @@ hunter/services/                             llm_client.py   -> call LLM API
                                                 v
 hunter/gsheets_sync.py  mirror_new_row()  -> Google Sheets (best-effort)
 hunter/gsheets_client.py                     Sheets API v4 wrapper
+hunter/gdrive_sync.py   upload_application_folder() -> Google Drive (best-effort)
+hunter/gdrive_client.py                      Drive API v3 wrapper
 hunter/tracker_cache.py                      In-memory cache (asyncio.Lock)
                                              dedup, stats, conflict matrix
 ```
@@ -132,6 +135,8 @@ hunter/
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
   gsheets_client.py         Low-level Sheets API v4 wrapper
+  gdrive_sync.py            High-level Drive upload (upload_application_folder)
+  gdrive_client.py          Low-level Drive API v3 wrapper
   gmail_client.py           Gmail API wrapper
   gmail_parsers.py          Parse job alert emails from various boards
   services/
@@ -186,6 +191,9 @@ Applications/               Generated documents (gitignored)
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
 | `GSHEETS_REFRESH_INTERVAL_MIN` | `30` | Sheets → Excel pull interval |
+| `GDRIVE_ENABLED` | `false` | Upload application docs to Google Drive after apply |
+| `GDRIVE_ROOT_FOLDER_ID` | — | Optional: existing Drive folder ID (auto-creates "Job Hunter" if empty) |
+| `GDRIVE_ROOT_FOLDER_NAME` | `Job Hunter` | Name of auto-created root folder on Drive |
 
 Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
@@ -440,3 +448,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-13 | opus | Phase 1 complete: 1.1 stale docs removed (7526acb), 1.2 debug artifacts deleted, 1.3 pre-done, 1.4 apply_service unified (265d87e) |
 | 2026-05-13 | composer | to_send: detect LibreOffice Calc lock (`.~lock.*#`); skip rebuild when editor holds file; Telegram/gitignore/docs aligned |
 | 2026-05-14 | sonnet | Google Sheets integration complete (GSHEETS_PLAN.md, phases 1-7): gsheets_client, tracker_cache, drop to_send.xlsx (15 files), gsheets_sync (mirror/pull/resync/bootstrap), /gsheets_status /gsheets_resync commands, 5-min resync + 30-min pull schedules, state file for Docker restart safety, 51 new tests (351 total) |
+| 2026-05-15 | sonnet | Google Drive upload (GDRIVE_PLAN.md): gdrive_client (Drive API v3 wrapper), gdrive_sync (lazy singleton, upload_application_folder), GDRIVE_* config, telegram_bot hook after apply (best-effort, 22 new tests, 373 total) |
