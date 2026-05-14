@@ -295,12 +295,18 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
     mode = "AUTO" if AUTO_APPLY else "MANUAL"
 
+    active_lines = ""
+    if _active_apply_urls:
+        urls_list = "\n".join(f"  • {u}" for u in sorted(_active_apply_urls))
+        active_lines = f"\n⚙️ Generating ({len(_active_apply_urls)}):\n{urls_list}"
+
     schedule_str = _build_schedule_text()
     await update.message.reply_text(
         f"{schedule_str}\n\n"
         f"🔧 Mode: {mode}\n"
         f"{lock_status}\n"
-        f"📋 Pending decisions: {pending} jobs",
+        f"📋 Pending decisions: {pending} jobs"
+        f"{active_lines}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -568,6 +574,9 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
 
 _APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
 
+# Active manual apply_agent URLs — used by /status to show in-progress jobs.
+_active_apply_urls: set[str] = set()
+
 
 async def _tg_notify(text: str) -> None:
     """Send a message to the configured chat via bot token (no context needed)."""
@@ -597,8 +606,10 @@ async def _run_apply_agent(
     from hunter.services.apply_service import run_apply_agent_for_url
 
     label = url or "(pasted text)"
+    if url:
+        _active_apply_urls.add(url)
     try:
-        outcome = await run_apply_agent_for_url(
+        outcome, error_detail = await run_apply_agent_for_url(
             url=url,
             timeout_sec=_APPLY_AGENT_TIMEOUT,
             apply_agent_path=APPLY_AGENT_PATH,
@@ -608,8 +619,11 @@ async def _run_apply_agent(
         )
         if outcome == "fail":
             logger.error(f"[apply_agent] failed for {label}")
+            err_block = (
+                f"\n\n<pre>{error_detail[:800]}</pre>" if error_detail else ""
+            )
             await _tg_notify(
-                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}"
+                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}{err_block}"
             )
         else:
             logger.info(f"[apply_agent] done ({outcome}) for {label}")
@@ -645,6 +659,7 @@ async def _run_apply_agent(
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
     finally:
+        _active_apply_urls.discard(url)
         if paste_file:
             try:
                 Path(paste_file).unlink(missing_ok=True)
