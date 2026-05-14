@@ -63,6 +63,13 @@ GSHEETS_CREDENTIALS_FILE: "Path" = PROJECT_DIR / "gsheets_credentials.json"
 GSHEETS_TOKEN_FILE: "Path" = PROJECT_DIR / "gsheets_token.json"
 GSHEETS_STATE_FILE: "Path" = PROJECT_DIR / "gsheets_state.json"
 
+# ── Google Drive integration ──────────────────────────────────────────────────
+GDRIVE_ENABLED: bool = os.getenv("GDRIVE_ENABLED", "false").lower() in ("true", "1", "yes")
+# Optional: ID of an existing Drive folder to upload into (skips auto-create of root)
+GDRIVE_ROOT_FOLDER_ID: str = os.getenv("GDRIVE_ROOT_FOLDER_ID", "")
+# Name of the root folder created automatically when GDRIVE_ROOT_FOLDER_ID is not set
+GDRIVE_ROOT_FOLDER_NAME: str = os.getenv("GDRIVE_ROOT_FOLDER_NAME", "Job Hunter")
+
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
 # E.g. with times ["08:00","13:00","19:00"] and offset 40 min, 7 sources run at:

@@ -215,10 +215,10 @@ My Drive/
 
 ## Статус
 
-- [ ] `hunter/gdrive_client.py`
-- [ ] `hunter/gdrive_sync.py`
-- [ ] `hunter/config.py` — GDRIVE_* vars
-- [ ] `hunter/telegram_bot.py` — хук после apply
-- [ ] `tests/test_gdrive_client.py`
-- [ ] `tests/test_gdrive_sync.py`
-- [ ] CLAUDE.md обновлён
+- [x] `hunter/gdrive_client.py`
+- [x] `hunter/gdrive_sync.py`
+- [x] `hunter/config.py` — GDRIVE_* vars
+- [x] `hunter/telegram_bot.py` — хук после apply
+- [x] `tests/test_gdrive_client.py`
+- [x] `tests/test_gdrive_sync.py`
+- [x] CLAUDE.md обновлён
