@@ -159,6 +159,13 @@ async def run_check(
         except Exception as e:
             logger.warning("[expired_marker] cache update failed: %s", e)
 
+        # Mirror EXPIRED stamps to Google Sheets (best-effort)
+        try:
+            from hunter import gsheets_sync
+            await gsheets_sync.mirror_expired_batch(set(updates.keys()))
+        except Exception as e:
+            logger.warning("[expired_marker] gsheets mirror failed: %s", e)
+
     return {
         "total": total,
         "alive": alive,

@@ -101,7 +101,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
         "/sync_sent - sync Sent column from Google Sheets → tracker.xlsx\n"
         "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
-        "/check_expired - проверить трекер на истёкшие вакансии\n\n"
+        "/check_expired - проверить трекер на истёкшие вакансии\n"
+        "/gsheets_status - статус интеграции Google Sheets\n"
+        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -393,6 +395,64 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show Google Sheets integration status."""
+    from hunter import gsheets_sync
+    try:
+        report = await gsheets_sync.status_report()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Не удалось получить статус: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    enabled = report["enabled"]
+    if not enabled:
+        await update.message.reply_text(
+            "ℹ️ <b>Google Sheets отключён</b> (GSHEETS_ENABLED=false).\n"
+            "Задай GSHEETS_ENABLED=true в .env чтобы включить.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    lines = ["📊 <b>Google Sheets статус</b>"]
+    lines.append(f"  Сервис: {'✅ OK' if report['service_ok'] else '❌ не инициализирован'}")
+    if report.get("sheet_url"):
+        lines.append(f"  Таблица: <a href=\"{report['sheet_url']}\">открыть</a>")
+    elif report.get("sheet_id"):
+        lines.append(f"  ID: <code>{report['sheet_id']}</code>")
+    else:
+        lines.append("  Таблица: не настроена")
+    dirty = report.get("dirty_count", 0)
+    lines.append(f"  Грязных строк: {dirty}")
+    if dirty:
+        lines.append("  ℹ️ Запусти /gsheets_resync для повторной отправки")
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Retry dirty rows → Google Sheets."""
+    from hunter import gsheets_sync
+    await update.message.reply_text("⏳ Повторная отправка грязных строк в Sheets…")
+    try:
+        synced = await gsheets_sync.resync_dirty()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await update.message.reply_text(
+        f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 def _build_schedule_text() -> str:
     from hunter.sources import ALL_SOURCES
 
@@ -440,9 +500,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _handle_skip(query, job: Job, job_id: str) -> None:
-    # Write to tracker synchronously in thread pool
-    await asyncio.to_thread(add_skipped, job)
+    row = await asyncio.to_thread(add_skipped, job)
     _pending_jobs.pop(job_id, None)
+    if row:
+        try:
+            from hunter.tracker_cache import cache
+            await cache.add(row)
+            from hunter import gsheets_sync
+            await gsheets_sync.mirror_new_row(row)
+        except Exception as _e:
+            logger.warning("[skip] cache/gsheets update failed: %s", _e)
 
     original = query.message.text
     await query.edit_message_text(
@@ -517,6 +584,17 @@ async def _run_apply_agent(
             )
         else:
             logger.info(f"[apply_agent] done ({outcome}) for {label}")
+            if url:
+                try:
+                    from hunter.tracker_cache import cache
+                    from hunter.config import TRACKER_PATH
+                    await cache.load_from_excel(TRACKER_PATH)
+                    row = await cache.get_row_by_url(url)
+                    if row:
+                        from hunter import gsheets_sync
+                        await gsheets_sync.mirror_new_row(row)
+                except Exception as _e:
+                    logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
     except Exception as e:
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
@@ -884,21 +962,46 @@ async def _run_linkedin_batch(job_ids: list[str], update) -> None:
 
 # ── Application factory ───────────────────────────────────────────────────────
 
-async def _set_bot_commands(app: Application) -> None:
-    """Register command list with Telegram so the '/' menu is populated."""
+async def _post_init(app: Application) -> None:
+    """Post-init hook: register bot commands + validate gsheets startup."""
     from telegram import BotCommand
     await app.bot.set_my_commands([
-        BotCommand("start",          "Show help"),
-        BotCommand("hunt",           "Run search (optional: source names)"),
-        BotCommand("status",         "Bot status and schedule"),
-        BotCommand("schedule",       "Show source schedule"),
-        BotCommand("force",          "Process URL even if already in tracker"),
-        BotCommand("process_manual", "Process MANUAL rows with filled job_posting.txt"),
-        BotCommand("sync_sent",      "Sync Sent column from Google Sheets"),
-        BotCommand("unsent",         "Unsent applications count + Angular"),
-        BotCommand("check_expired",  "Check unsent rows for expired job offers"),
-        BotCommand("about_me",       "Generate About Me for a job URL (lang + url)"),
+        BotCommand("start",           "Show help"),
+        BotCommand("hunt",            "Run search (optional: source names)"),
+        BotCommand("status",          "Bot status and schedule"),
+        BotCommand("schedule",        "Show source schedule"),
+        BotCommand("force",           "Process URL even if already in tracker"),
+        BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
+        BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
+        BotCommand("unsent",          "Unsent applications count + Angular"),
+        BotCommand("check_expired",   "Check unsent rows for expired job offers"),
+        BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
+        BotCommand("gsheets_status",  "Google Sheets integration status"),
+        BotCommand("gsheets_resync",  "Retry dirty rows → Google Sheets"),
     ])
+
+    # Validate Google Sheets on startup; log errors, send Telegram warning if broken.
+    try:
+        from hunter import gsheets_sync
+        from hunter.config import GSHEETS_ENABLED
+        if GSHEETS_ENABLED:
+            result = gsheets_sync.validate_startup()
+            if not result.get("ok"):
+                err = result.get("error", "unknown error")
+                logger.error("[gsheets] startup validation failed: %s", err)
+                try:
+                    await app.bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=f"⚠️ <b>Google Sheets не готов</b>\n<code>{err}</code>",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+            else:
+                url = result.get("sheet_url")
+                logger.info("[gsheets] startup OK%s", f" — {url}" if url else "")
+    except Exception as e:
+        logger.warning("[gsheets] startup check failed: %s", e)
 
 
 def build_application() -> Application:
@@ -906,19 +1009,21 @@ def build_application() -> Application:
     import pytz
     from datetime import time as dt_time
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # Command handlers
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("hunt",      cmd_hunt))
+    app.add_handler(CommandHandler("start",          cmd_start))
+    app.add_handler(CommandHandler("hunt",           cmd_hunt))
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
-    app.add_handler(CommandHandler("schedule",  cmd_schedule))
-    app.add_handler(CommandHandler("unsent",        cmd_unsent))
-    app.add_handler(CommandHandler("sync_sent",     cmd_sync_sent))
-    app.add_handler(CommandHandler("check_expired", cmd_check_expired))
-    app.add_handler(CommandHandler("about_me",      cmd_about_me))
+    app.add_handler(CommandHandler("schedule",       cmd_schedule))
+    app.add_handler(CommandHandler("unsent",         cmd_unsent))
+    app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
+    app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
+    app.add_handler(CommandHandler("about_me",       cmd_about_me))
+    app.add_handler(CommandHandler("gsheets_status", cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_resync", cmd_gsheets_resync))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -989,6 +1094,15 @@ def build_application() -> Application:
             name="tracker_backup_daily",
         )
         logger.info(f"[Schedule] tracker_backup at {bh:02d}:{bm:02d} {TIMEZONE}")
+
+    # Retry dirty Sheets rows every 5 minutes (no-op when GSHEETS_ENABLED=false)
+    app.job_queue.run_repeating(
+        callback=_scheduled_gsheets_resync,
+        interval=300,
+        first=60,
+        name="gsheets_resync",
+    )
+    logger.info("[Schedule] gsheets_resync every 5 min")
 
     return app
 
@@ -1082,6 +1196,17 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             pass
+
+
+async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every-5-min job: push dirty rows to Google Sheets (no-op if disabled)."""
+    try:
+        from hunter import gsheets_sync
+        synced = await gsheets_sync.resync_dirty()
+        if synced:
+            logger.info("[scheduled_gsheets_resync] pushed %d dirty row(s)", synced)
+    except Exception as e:
+        logger.warning("[scheduled_gsheets_resync] failed: %s", e)
 
 
 async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:

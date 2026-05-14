@@ -708,13 +708,14 @@ def add_applied(content: dict, force: bool = False) -> bool:
     return True
 
 
-def add_skipped(job: Job) -> None:
-    """Append a SKIP row to tracker so the job is never shown again."""
+def add_skipped(job: Job) -> dict | None:
+    """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
     if is_known(job.url, job.company, job.title):
-        return
+        return None
     wb, ws = _load_or_create()
     today = date.today().strftime("%Y-%m-%d")
     next_row = ws.max_row + 1
+    row_id = _new_row_id()
 
     values = [
         today,           # Date
@@ -727,7 +728,7 @@ def add_skipped(job: Job) -> None:
         "",              # Sent
         "",              # Re-application
         "",              # To Learn
-        _new_row_id(),   # ID
+        row_id,          # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -742,6 +743,7 @@ def add_skipped(job: Job) -> None:
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
 
     _save_with_retry(wb)
+    return dict(zip(TRACKER_HEADERS, values))
 
 
 def is_react_skipped(url: str) -> bool:
