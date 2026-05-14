@@ -65,8 +65,8 @@ class TrackerCache:
         self.rows.clear()
         self.by_url.clear()
         self.by_ctkey.clear()
-        self.sheet_row_index.clear()
-        self.dirty_ids.clear()
+        # sheet_row_index and dirty_ids are Sheets-only state not stored in Excel —
+        # preserve them across hot reloads so mirror_cell_update keeps working.
 
         if not path.exists():
             log.warning("tracker_cache: %s not found, starting empty", path)
