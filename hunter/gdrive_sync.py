@@ -58,6 +58,25 @@ def _ready() -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
+async def _do_upload(folder_path: Path) -> str:
+    """Core upload logic — raises on error. Called by both public functions."""
+    from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+
+    svc = _get_service()
+    date_name = folder_path.parent.name
+
+    if GDRIVE_ROOT_FOLDER_ID:
+        root_id = GDRIVE_ROOT_FOLDER_ID
+    else:
+        root_id = await asyncio.to_thread(
+            get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
+        )
+
+    date_id = await asyncio.to_thread(get_or_create_folder, svc, date_name, root_id)
+    company_id = await asyncio.to_thread(upload_folder, svc, folder_path, date_id)
+    return folder_url(company_id)
+
+
 async def upload_application_folder(folder_path: Path) -> str | None:
     """
     Upload Applications/{date}/{company}/ to Google Drive.
@@ -77,42 +96,10 @@ async def upload_application_folder(folder_path: Path) -> str | None:
         log.warning("gdrive_sync: folder not found: %s", folder_path)
         return None
 
-    from hunter.gdrive_client import (
-        get_or_create_folder,
-        upload_folder,
-        folder_url,
-    )
-
-    svc = _get_service()
-
     try:
-        # folder_path is expected to be   .../Applications/{date}/{company}
-        # We replicate that two-level structure under the root folder on Drive.
-        company_name = folder_path.name
-        date_name = folder_path.parent.name
-
-        # 1. Root folder ("Job Hunter" or user-supplied ID)
-        if GDRIVE_ROOT_FOLDER_ID:
-            root_id = GDRIVE_ROOT_FOLDER_ID
-        else:
-            root_id = await asyncio.to_thread(
-                get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
-            )
-
-        # 2. Date sub-folder
-        date_id = await asyncio.to_thread(
-            get_or_create_folder, svc, date_name, root_id
-        )
-
-        # 3. Company sub-folder + upload files
-        company_id = await asyncio.to_thread(
-            upload_folder, svc, folder_path, date_id
-        )
-
-        url = folder_url(company_id)
+        url = await _do_upload(folder_path)
         log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
         return url
-
     except Exception as e:
         log.warning("gdrive_sync: upload failed for %s: %s", folder_path, e)
         return None
@@ -153,11 +140,12 @@ async def upload_missing_folders(project_dir: Path) -> dict:
             log.debug("gdrive_sync: folder not found locally, skipping: %s", folder_path)
             continue
 
-        url = await upload_application_folder(folder_path)
-        if url:
+        company = row.get("Company", folder_path.name)
+        try:
+            url = await _do_upload(folder_path)
+            log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
             uploaded += 1
-        else:
-            company = row.get("Company", folder_path.name)
-            errors.append(f"{company}: upload returned None")
+        except Exception as e:
+            errors.append(f"{company}: {e}")
 
     return {"uploaded": uploaded, "skipped_missing": skipped_missing, "errors": errors}
