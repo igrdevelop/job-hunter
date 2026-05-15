@@ -2,6 +2,7 @@ import base64
 import logging
 from datetime import datetime, timedelta, timezone
 
+from hunter.config import GMAIL_ENRICH_ENABLED
 from hunter.gmail_client import get_gmail_service
 from hunter.gmail_parsers import PARSERS
 from hunter.models import Job
@@ -53,6 +54,12 @@ class GmailSource(BaseSource):
             jobs.extend(self._parse_message(msg))
 
         logger.info(f"[gmail] Extracted {len(jobs)} job URLs total")
+
+        if jobs and GMAIL_ENRICH_ENABLED:
+            from hunter.gmail_enricher import enrich_jobs
+            jobs = enrich_jobs(jobs)
+            logger.info(f"[gmail] After enrichment: {len(jobs)} jobs")
+
         return jobs
 
     # Subjects that indicate confirmation/activity emails, not job alert emails.
