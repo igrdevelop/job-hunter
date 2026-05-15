@@ -18,6 +18,7 @@ from hunter.config import (
     EXPIRED_CHECK_CONCURRENCY,
     EXPIRED_CHECK_DOMAIN_LIMIT,
     EXPIRED_CHECK_DOMAIN_DELAY,
+    EXPIRED_CHECK_FETCH_TIMEOUT,
 )
 from hunter.expired_check import is_job_expired
 from hunter.tracker import apply_sent_updates, iter_unsent_rows as _iter_unsent
@@ -52,10 +53,14 @@ class _DomainLimiter:
         dom_sem, dom_lock = self._get(dom)
         async with global_sem:
             async with dom_sem:
-                result = await asyncio.to_thread(fetch_job_text, url)
-                async with dom_lock:
-                    await asyncio.sleep(self._delay)
-                return result
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(fetch_job_text, url),
+                    timeout=EXPIRED_CHECK_FETCH_TIMEOUT,
+                )
+        # Rate-limit delay runs outside semaphores so slots are freed immediately.
+        async with dom_lock:
+            await asyncio.sleep(self._delay)
+        return result
 
 
 # ── Core check ────────────────────────────────────────────────────────────────
@@ -98,6 +103,10 @@ async def run_check(
         try:
             text = await limiter.fetch(item["url"], global_sem)
             status = "expired" if is_job_expired(text) else "alive"
+        except asyncio.TimeoutError:
+            status = "error"
+            item = {**item, "error": f"timeout after {EXPIRED_CHECK_FETCH_TIMEOUT}s"}
+            logger.warning("[expired_marker] timeout: %s", item["url"])
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 status = "expired"
