@@ -107,7 +107,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
         "/check_expired - проверить трекер на истёкшие вакансии\n"
         "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n\n"
+        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
+        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -484,6 +485,35 @@ async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     await update.message.reply_text(
         f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Push tracker.xlsx rows that are absent from Google Sheets (by ID)."""
+    from hunter import gsheets_sync
+    await update.message.reply_text(
+        "⏳ Ищу строки в tracker.xlsx, которых нет в Sheets…",
+        parse_mode=ParseMode.HTML,
+    )
+    try:
+        result = await gsheets_sync.push_missing_rows()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    pushed = result["pushed"]
+    already = result["already_present"]
+    errors = result.get("errors", [])
+    err_note = f"\n⚠️ <code>{errors[0][:200]}</code>" if errors else ""
+    await update.message.reply_text(
+        f"✅ <b>gsheets_push_missing</b>\n"
+        f"  📤 Добавлено: {pushed}\n"
+        f"  ✔️ Уже были: {already}"
+        f"{err_note}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -1037,8 +1067,9 @@ async def _post_init(app: Application) -> None:
         BotCommand("unsent",          "Unsent applications count + Angular"),
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
-        BotCommand("gsheets_status",  "Google Sheets integration status"),
-        BotCommand("gsheets_resync",  "Retry dirty rows → Google Sheets"),
+        BotCommand("gsheets_status",        "Google Sheets integration status"),
+        BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
+        BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -1105,8 +1136,9 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
-    app.add_handler(CommandHandler("gsheets_status", cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_resync", cmd_gsheets_resync))
+    app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
+    app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))

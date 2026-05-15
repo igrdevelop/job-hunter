@@ -1011,3 +1011,40 @@ def get_folder_by_url(url: str) -> str | None:
     finally:
         wb.close()
     return None
+
+
+# gsheets COLUMNS order: Date, Company, Job Title, Stack, ATS %, URL,
+#                        Folder, Sent, Re-application, To Learn, ID
+_GSHEETS_COLS = [
+    "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
+    "Folder", "Sent", "Re-application", "To Learn", "ID",
+]
+
+def read_all_tracker_rows() -> list[dict]:
+    """Read every data row from tracker.xlsx as a dict keyed by gsheets COLUMNS names.
+
+    Rows with no ID are skipped (they can't be synced). Empty cells become "".
+    Used by gsheets_sync.push_missing_rows() to detect what's absent from Sheets.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results: list[dict] = []
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row:
+                continue
+            # Pad to at least ID_COL_INDEX columns
+            padded = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
+            row_id = str(padded[ID_COL_INDEX - 1] or "").strip()
+            if not row_id:
+                continue
+            results.append({
+                col: str(padded[i] or "").strip()
+                for i, col in enumerate(_GSHEETS_COLS)
+            })
+    finally:
+        wb.close()
+    return results

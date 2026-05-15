@@ -567,3 +567,69 @@ def test_write_and_read_state(tmp_path):
         gsheets_sync._write_state({"sheet_id": "test123"})
         result = gsheets_sync._read_state()
     assert result == {"sheet_id": "test123"}
+
+
+# ── push_missing_rows ─────────────────────────────────────────────────────────
+
+def _tracker_row(row_id: str, company: str = "Acme") -> dict:
+    return {
+        "Date": "2026-05-15", "Company": company, "Job Title": "Dev",
+        "Stack": "Angular", "ATS %": "90", "URL": f"https://x.com/{row_id}",
+        "Folder": "", "Sent": "", "Re-application": "", "To Learn": "", "ID": row_id,
+    }
+
+
+def test_push_missing_rows_noop_when_not_ready():
+    with patch("hunter.gsheets_sync.GSHEETS_ENABLED", False):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.push_missing_rows())
+    assert result["pushed"] == 0
+    assert "not ready" in result["errors"][0].lower()
+
+
+def test_push_missing_rows_pushes_absent_rows():
+    # Sheets has row "aaa", tracker has "aaa" + "bbb" → should push only "bbb"
+    sheets_data = [(2, _tracker_row("aaa", "Existing"))]
+    tracker_data = [_tracker_row("aaa", "Existing"), _tracker_row("bbb", "Missing")]
+
+    with (
+        patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_client.read_all", return_value=sheets_data),
+        patch("hunter.gsheets_client.append_rows", return_value=[3]) as mock_append,
+        patch("hunter.tracker.read_all_tracker_rows", return_value=tracker_data),
+        patch("hunter.tracker_cache.cache.set_sheet_row_index", new_callable=AsyncMock),
+        patch("hunter.tracker_cache.cache.mark_clean", new_callable=AsyncMock),
+    ):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.push_missing_rows())
+
+    assert result["pushed"] == 1
+    assert result["already_present"] == 1
+    assert result["errors"] == []
+    pushed_rows = mock_append.call_args.args[2]
+    assert len(pushed_rows) == 1
+    assert pushed_rows[0]["ID"] == "bbb"
+
+
+def test_push_missing_rows_nothing_to_push_when_all_present():
+    tracker_data = [_tracker_row("aaa"), _tracker_row("bbb")]
+    sheets_data = [(2, _tracker_row("aaa")), (3, _tracker_row("bbb"))]
+
+    with (
+        patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_client.read_all", return_value=sheets_data),
+        patch("hunter.gsheets_client.append_rows") as mock_append,
+        patch("hunter.tracker.read_all_tracker_rows", return_value=tracker_data),
+        patch("hunter.tracker_cache.cache.set_sheet_row_index", new_callable=AsyncMock),
+        patch("hunter.tracker_cache.cache.mark_clean", new_callable=AsyncMock),
+    ):
+        from hunter import gsheets_sync
+        result = run(gsheets_sync.push_missing_rows())
+
+    assert result["pushed"] == 0
+    assert result["already_present"] == 2
+    mock_append.assert_not_called()
