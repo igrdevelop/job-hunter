@@ -108,7 +108,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/check_expired - проверить трекер на истёкшие вакансии\n"
         "/gsheets_status - статус интеграции Google Sheets\n"
         "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
-        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n\n"
+        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n"
+        "/gdrive_upload_missing - загрузить все папки из tracker.xlsx на Google Drive\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -485,6 +486,46 @@ async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     await update.message.reply_text(
         f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Upload all tracker.xlsx application folders to Google Drive."""
+    from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+    if not GDRIVE_ENABLED:
+        await update.message.reply_text(
+            "⚠️ GDRIVE_ENABLED=false — Google Drive не активирован.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        "⏳ Загружаю папки из tracker.xlsx на Google Drive…",
+        parse_mode=ParseMode.HTML,
+    )
+    try:
+        from hunter import gdrive_sync
+        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR)
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    uploaded = result["uploaded"]
+    skipped = result["skipped_missing"]
+    errors = result.get("errors", [])
+    err_note = ""
+    if errors:
+        err_lines = "\n".join(f"  • {e[:120]}" for e in errors[:5])
+        err_note = f"\n⚠️ Ошибки ({len(errors)}):\n<code>{err_lines}</code>"
+    await update.message.reply_text(
+        f"✅ <b>gdrive_upload_missing</b>\n"
+        f"  📤 Загружено: {uploaded}\n"
+        f"  ⏭ Нет локально: {skipped}"
+        f"{err_note}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -1070,6 +1111,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("gsheets_status",        "Google Sheets integration status"),
         BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
+        BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -1139,6 +1181,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
     app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
     app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
+    app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
