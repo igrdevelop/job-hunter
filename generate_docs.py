@@ -262,8 +262,7 @@ def save_docx(doc, path_docx):
 def convert_all_to_pdf(output_folder):
     """Convert all DOCX files in the folder to PDF in a single LibreOffice call."""
     import subprocess
-    from hunter.config import SOFFICE_PATH
-    soffice = SOFFICE_PATH
+    soffice = r"C:\Program Files\LibreOffice\program\soffice.exe"
     docx_files = list(Path(output_folder).glob("*.docx"))
     if not docx_files:
         return
