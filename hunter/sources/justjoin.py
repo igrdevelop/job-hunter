@@ -88,10 +88,12 @@ class JustJoinSource(BaseSource):
         try:
             resp = requests.get(url, headers=HTML_HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
-            # Extract all /job-offer/{slug} hrefs — deduplicated, order preserved
+            # Extract all /job-offer/{slug} and /offers/{slug} hrefs (JustJoin uses both)
             slugs = list(dict.fromkeys(
-                re.findall(r'href=["\'](?:https://justjoin\.it)?/job-offer/([a-z0-9-]+)["\']',
-                           resp.text)
+                re.findall(
+                    r'href=["\'](?:https://justjoin\.it)?/(?:job-offer|offers)/([a-z0-9-]+)["\']',
+                    resp.text,
+                )
             ))
             return slugs
         except Exception as e:

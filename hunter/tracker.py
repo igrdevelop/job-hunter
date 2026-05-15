@@ -68,6 +68,10 @@ def normalize_url(url: str) -> str:
     # Strip /rss suffix (solid.jobs RSS feed vs regular URL are the same job)
     if path.endswith("/rss"):
         path = path[:-4] or "/"
+    # Normalize JustJoin URL format: /offers/{slug} → /job-offer/{slug}
+    # JustJoin changed their URL scheme; both point to the same offer.
+    if "justjoin.it" in host:
+        path = re.sub(r"^/offers/", "/job-offer/", path)
     return urlunparse((p.scheme, host, path, "", query, ""))
 
 
