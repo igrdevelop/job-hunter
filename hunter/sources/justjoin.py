@@ -1,21 +1,26 @@
 """
 JustJoin.it source.
 
-Public REST API was shut down Nov 2023.
-Current working approach (tested 2026-04):
+Working approach (updated 2026-05):
 
-  1. Fetch SSR HTML listing pages (Wrocław + Remote) — gives ~150-200 slugs each
-  2. Pre-filter slugs by keyword (angular/react/js/frontend/typescript in slug text)
-     → reduces to ~30-50 relevant slugs
-  3. Fetch individual offer details via  /api/candidate-api/offers/{slug}
-     → clean JSON with salary, location, experience level, skills
-  4. Return Job objects for global filter + dedup
+  JustJoin removed job slugs from SSR HTML — the listing pages are now fully
+  client-side rendered. The candidate API works directly:
 
-Rate: ~30-50 HTTP calls per run — well within limits.
+  GET /api/candidate-api/offers?workplaceType=remote&perPage=100
+  → JSON {data: [...], meta: {next: {cursor, itemsCount}}}
+
+  Strategy:
+  1. Paginate /api/candidate-api/offers for each workplaceType
+     (remote, hybrid, office) — up to MAX_PAGES pages of PER_PAGE items
+  2. Pre-filter by slug keyword (same as before)
+  3. Parse Job objects directly from the listing response (no detail call needed —
+     the listing API returns full salary/location/skills data)
+  4. City filtering is handled by the global filter (location field)
+
+Rate: 3–6 API calls per run (1–2 pages × 3 workplace types).
 """
 
 import logging
-import re
 import time
 from typing import Optional
 
@@ -28,15 +33,7 @@ from hunter.sources.base import BaseSource
 logger = logging.getLogger(__name__)
 
 BASE = "https://justjoin.it"
-DETAIL_API = f"{BASE}/api/candidate-api/offers"
-
-# Listing pages — SSR HTML, no auth needed
-LISTING_PAGES = [
-    # Wrocław (on-site + hybrid jobs posted for that city)
-    f"{BASE}/job-offers/wroclaw?experience-level=mid,senior&orderBy=DESC&sortBy=published",
-    # Remote (covers all of Poland remote, incl. Wrocław remote)
-    f"{BASE}/job-offers/remote?experience-level=mid,senior&orderBy=DESC&sortBy=published",
-]
+LISTING_API = f"{BASE}/api/candidate-api/offers"
 
 HEADERS = {
     "User-Agent": (
@@ -46,59 +43,59 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": BASE + "/",
 }
-HTML_HEADERS = {**HEADERS, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
 JSON_HEADERS = {**HEADERS, "Accept": "application/json, text/plain, */*"}
 
 TIMEOUT = 20
-DETAIL_DELAY = 0.15  # seconds between detail requests — be polite
+PER_PAGE = 100    # items per API page
+MAX_PAGES = 2     # max pages per workplaceType — 200 items each, ~600 total
+PAGE_DELAY = 0.3  # seconds between pages
+
+WORKPLACE_TYPES = ["remote", "hybrid", "office"]
 
 
 class JustJoinSource(BaseSource):
     name = "justjoin"
 
     def search(self) -> list[Job]:
-        # Step 1 — collect unique slugs from all listing pages
-        relevant_slugs: dict[str, str] = {}  # slug → page context ("wroclaw" / "remote")
-
-        for page_url in LISTING_PAGES:
-            context = "remote" if "remote" in page_url else "wroclaw"
-            slugs = self._fetch_slugs(page_url)
-            logger.info(f"[JustJoin] {context}: {len(slugs)} total slugs")
-
-            for slug in slugs:
-                if slug not in relevant_slugs and self._slug_is_relevant(slug):
-                    relevant_slugs[slug] = context
-
-        logger.info(f"[JustJoin] {len(relevant_slugs)} slugs match keyword pre-filter")
-
-        # Step 2 — fetch details and build Job objects
+        seen_slugs: set[str] = set()
         jobs: list[Job] = []
-        for slug, context in relevant_slugs.items():
-            job = self._fetch_detail(slug, context)
-            if job:
-                jobs.append(job)
-            time.sleep(DETAIL_DELAY)
 
-        logger.info(f"[JustJoin] {len(jobs)} jobs fetched successfully")
+        for wtype in WORKPLACE_TYPES:
+            cursor = None
+            for _ in range(MAX_PAGES):
+                params: dict = {"workplaceType": wtype, "perPage": PER_PAGE}
+                if cursor:
+                    params["cursor"] = cursor
+
+                try:
+                    resp = requests.get(
+                        LISTING_API, params=params, headers=JSON_HEADERS, timeout=TIMEOUT
+                    )
+                    resp.raise_for_status()
+                    body = resp.json()
+                except Exception as e:
+                    logger.error(f"[JustJoin] API fetch failed wtype={wtype}: {e}")
+                    break
+
+                for offer in body.get("data") or []:
+                    slug = offer.get("slug", "")
+                    if not slug or slug in seen_slugs:
+                        continue
+                    if not self._slug_is_relevant(slug):
+                        continue
+                    seen_slugs.add(slug)
+                    job = self._parse_offer(offer, slug, wtype)
+                    if job:
+                        jobs.append(job)
+
+                next_info = (body.get("meta") or {}).get("next") or {}
+                cursor = next_info.get("cursor")
+                if not cursor or next_info.get("itemsCount", 0) == 0:
+                    break
+                time.sleep(PAGE_DELAY)
+
+        logger.info(f"[JustJoin] {len(jobs)} jobs fetched")
         return jobs
-
-    # ── Listing page scraper ───────────────────────────────────────────────────
-
-    def _fetch_slugs(self, url: str) -> list[str]:
-        try:
-            resp = requests.get(url, headers=HTML_HEADERS, timeout=TIMEOUT)
-            resp.raise_for_status()
-            # Extract all /job-offer/{slug} and /offers/{slug} hrefs (JustJoin uses both)
-            slugs = list(dict.fromkeys(
-                re.findall(
-                    r'href=["\'](?:https://justjoin\.it)?/(?:job-offer|offers)/([a-z0-9-]+)["\']',
-                    resp.text,
-                )
-            ))
-            return slugs
-        except Exception as e:
-            logger.error(f"[JustJoin] fetch slugs from {url}: {e}")
-            return []
 
     def _slug_is_relevant(self, slug: str) -> bool:
         """
@@ -111,20 +108,6 @@ class JustJoinSource(BaseSource):
             return "angular" in s
         keywords = [kw.lower() for kw in FILTER["title_keywords"]]
         return any(kw in s for kw in keywords)
-
-    # ── Detail fetcher ────────────────────────────────────────────────────────
-
-    def _fetch_detail(self, slug: str, page_context: str) -> Optional[Job]:
-        try:
-            resp = requests.get(f"{DETAIL_API}/{slug}", headers=JSON_HEADERS, timeout=TIMEOUT)
-            if resp.status_code == 404:
-                return None  # offer expired
-            resp.raise_for_status()
-            offer = resp.json()
-            return self._parse_offer(offer, slug, page_context)
-        except Exception as e:
-            logger.warning(f"[JustJoin] detail fetch failed for {slug}: {e}")
-            return None
 
     # ── Parser ─────────────────────────────────────────────────────────────────
 
