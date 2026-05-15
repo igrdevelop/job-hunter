@@ -339,13 +339,17 @@ GSHEETS_ENABLED=true
 
 3. **apply_agent.py is 1297 lines.** Contains two full pipelines (API + CLI mode), Telegram notification, folder management, LLM calling, cover letter review loop, paste flow, force mode, JobLeads MANUAL flow. Could be split.
 
+### Infrastructure
+
+4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). LinkedIn job_fetch falls back to `html_fallback` without Playwright but gets lower-quality text.
+
 ### Code Quality
 
-4. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
+5. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
 
-5. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
+6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
-6. **tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call. The in-memory `tracker_cache` solves dedup/stats O(1) but individual write functions still re-open the workbook.
+7. **tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call. The in-memory `tracker_cache` solves dedup/stats O(1) but individual write functions still re-open the workbook.
 
 ---
 

@@ -28,7 +28,7 @@ GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in (
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
-MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "10"))
+MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "20"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "3"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
@@ -218,6 +218,12 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py
 GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
+# Fetch real title/company/location/salary for each URL extracted from alert emails.
+GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
+# Max parallel HTTP requests during enrichment
+GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
+# Per-job HTTP timeout (seconds) for enrichment fetches
+GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
 
 # ── Expired check schedule ───────────────────────────────────────────────────
 EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
