@@ -501,13 +501,20 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         )
         return
 
-    await update.message.reply_text(
+    status_msg = await update.message.reply_text(
         "⏳ Загружаю папки из tracker.xlsx на Google Drive…",
         parse_mode=ParseMode.HTML,
     )
+
+    async def _progress(text: str) -> None:
+        try:
+            await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
     try:
         from hunter import gdrive_sync
-        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR)
+        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
     except Exception as e:
         await update.message.reply_text(
             f"❌ Ошибка: <code>{e}</code>",
