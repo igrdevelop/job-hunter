@@ -232,6 +232,12 @@ EXPIRED_CHECK_DOMAIN_DELAY: float = float(os.getenv("EXPIRED_CHECK_DOMAIN_DELAY"
 # Hard asyncio-level timeout (sec) per URL fetch — guards against TCP hangs
 EXPIRED_CHECK_FETCH_TIMEOUT: float = float(os.getenv("EXPIRED_CHECK_FETCH_TIMEOUT", "35.0"))
 
+# ── LibreOffice ───────────────────────────────────────────────────────────────
+SOFFICE_PATH: str = os.getenv(
+    "SOFFICE_PATH",
+    r"C:\Program Files\LibreOffice\program\soffice.exe",
+)
+
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [
     "angular",
