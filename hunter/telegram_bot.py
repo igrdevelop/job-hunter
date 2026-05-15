@@ -37,6 +37,7 @@ from hunter.config import (
     EXPIRED_CHECK_TIME,
     GSHEETS_ENABLED,
     GSHEETS_REFRESH_INTERVAL_MIN,
+    TRACKER_PATH,
 )
 from hunter.models import Job
 from hunter.tracker import (
@@ -326,7 +327,7 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         from hunter.tracker_cache import cache
         if not cache.loaded:
-            await asyncio.to_thread(lambda: None)  # yield to event loop
+            await cache.load_from_excel(TRACKER_PATH)
         total = await cache.unsent_count()
         angular_n = await cache.unsent_angular_count()
         if total == 0:
@@ -1159,6 +1160,15 @@ async def _post_init(app: Application) -> None:
     except Exception as e:
         logger.warning("[gsheets] startup init failed: %s", e)
 
+    # Load tracker cache so /unsent, /sync_sent, and scheduled reports are
+    # correct immediately after startup (not only after the first /hunt).
+    try:
+        from hunter.tracker_cache import cache
+        await cache.load_from_excel(TRACKER_PATH)
+        logger.info("[startup] tracker_cache loaded")
+    except Exception as e:
+        logger.warning("[startup] tracker_cache load failed: %s", e)
+
 
 def build_application() -> Application:
     """Build and configure the Telegram Application instance."""
@@ -1381,6 +1391,9 @@ async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Periodic job: pull Sheets → tracker.xlsx (every GSHEETS_REFRESH_INTERVAL_MIN)."""
     try:
+        from hunter.tracker_cache import cache
+        if not cache.loaded:
+            await cache.load_from_excel(TRACKER_PATH)
         from hunter import gsheets_sync
         result = await gsheets_sync.pull_full_snapshot()
         updated = result.get("updated", 0)
@@ -1396,6 +1409,8 @@ async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Scheduled job: report how many unsent applications are in tracker."""
     try:
         from hunter.tracker_cache import cache
+        if not cache.loaded:
+            await cache.load_from_excel(TRACKER_PATH)
         total = await cache.unsent_count()
         if total == 0:
             msg = "📭 <b>Неотосланных заявок нет.</b>"
