@@ -107,7 +107,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
         "/check_expired - проверить трекер на истёкшие вакансии\n"
         "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n\n"
+        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
+        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -295,12 +296,18 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
     mode = "AUTO" if AUTO_APPLY else "MANUAL"
 
+    active_lines = ""
+    if _active_apply_urls:
+        urls_list = "\n".join(f"  • {u}" for u in sorted(_active_apply_urls))
+        active_lines = f"\n⚙️ Generating ({len(_active_apply_urls)}):\n{urls_list}"
+
     schedule_str = _build_schedule_text()
     await update.message.reply_text(
         f"{schedule_str}\n\n"
         f"🔧 Mode: {mode}\n"
         f"{lock_status}\n"
-        f"📋 Pending decisions: {pending} jobs",
+        f"📋 Pending decisions: {pending} jobs"
+        f"{active_lines}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -482,6 +489,35 @@ async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Push tracker.xlsx rows that are absent from Google Sheets (by ID)."""
+    from hunter import gsheets_sync
+    await update.message.reply_text(
+        "⏳ Ищу строки в tracker.xlsx, которых нет в Sheets…",
+        parse_mode=ParseMode.HTML,
+    )
+    try:
+        result = await gsheets_sync.push_missing_rows()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Ошибка: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    pushed = result["pushed"]
+    already = result["already_present"]
+    errors = result.get("errors", [])
+    err_note = f"\n⚠️ <code>{errors[0][:200]}</code>" if errors else ""
+    await update.message.reply_text(
+        f"✅ <b>gsheets_push_missing</b>\n"
+        f"  📤 Добавлено: {pushed}\n"
+        f"  ✔️ Уже были: {already}"
+        f"{err_note}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 def _build_schedule_text() -> str:
     from hunter.sources import ALL_SOURCES
 
@@ -568,6 +604,9 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
 
 _APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
 
+# Active manual apply_agent URLs — used by /status to show in-progress jobs.
+_active_apply_urls: set[str] = set()
+
 
 async def _tg_notify(text: str) -> None:
     """Send a message to the configured chat via bot token (no context needed)."""
@@ -597,8 +636,10 @@ async def _run_apply_agent(
     from hunter.services.apply_service import run_apply_agent_for_url
 
     label = url or "(pasted text)"
+    if url:
+        _active_apply_urls.add(url)
     try:
-        outcome = await run_apply_agent_for_url(
+        outcome, error_detail = await run_apply_agent_for_url(
             url=url,
             timeout_sec=_APPLY_AGENT_TIMEOUT,
             apply_agent_path=APPLY_AGENT_PATH,
@@ -608,8 +649,11 @@ async def _run_apply_agent(
         )
         if outcome == "fail":
             logger.error(f"[apply_agent] failed for {label}")
+            err_block = (
+                f"\n\n<pre>{error_detail[:800]}</pre>" if error_detail else ""
+            )
             await _tg_notify(
-                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}"
+                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}{err_block}"
             )
         else:
             logger.info(f"[apply_agent] done ({outcome}) for {label}")
@@ -645,6 +689,7 @@ async def _run_apply_agent(
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
     finally:
+        _active_apply_urls.discard(url)
         if paste_file:
             try:
                 Path(paste_file).unlink(missing_ok=True)
@@ -1022,8 +1067,9 @@ async def _post_init(app: Application) -> None:
         BotCommand("unsent",          "Unsent applications count + Angular"),
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
-        BotCommand("gsheets_status",  "Google Sheets integration status"),
-        BotCommand("gsheets_resync",  "Retry dirty rows → Google Sheets"),
+        BotCommand("gsheets_status",        "Google Sheets integration status"),
+        BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
+        BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -1090,8 +1136,9 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
-    app.add_handler(CommandHandler("gsheets_status", cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_resync", cmd_gsheets_resync))
+    app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
+    app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))

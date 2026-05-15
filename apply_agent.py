@@ -1245,12 +1245,18 @@ def main(
         sys.exit(1)
 
 
-def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, str, str]:
-    """Parse argv (including script name) → url, force_cli, force, full, company, title, paste_file."""
+def parse_apply_cli_argv(
+    argv: list[str],
+) -> tuple[str, bool, bool, bool, str, str, str, bool]:
+    """Parse argv (including script name).
+
+    Returns: url, force_cli, force, full, company, title, paste_file, notify_start
+    """
     args = argv[1:]
     force_cli = "--cli" in args
     force = "--force" in args
     full = "--full" in args
+    notify_start = "--notify-start" in args
     company, title, paste_file = "", "", ""
     pos: list[str] = []
     i = 0
@@ -1274,18 +1280,18 @@ def parse_apply_cli_argv(argv: list[str]) -> tuple[str, bool, bool, bool, str, s
         pos.append(a)
         i += 1
     url = pos[0] if pos else ""
-    return url, force_cli, force, full, company, title, paste_file
+    return url, force_cli, force, full, company, title, paste_file, notify_start
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(
             "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
-            "[--company NAME] [--title TITLE] [--paste-file PATH]",
+            "[--company NAME] [--title TITLE] [--paste-file PATH] [--notify-start]",
         )
         sys.exit(1)
 
-    url, force_cli, force, full, co, ti, paste_file = parse_apply_cli_argv(sys.argv)
+    url, force_cli, force, full, co, ti, paste_file, notify_start = parse_apply_cli_argv(sys.argv)
 
     paste_text = ""
     if paste_file:
@@ -1304,6 +1310,12 @@ if __name__ == "__main__":
             "[--paste-file PATH] ...",
         )
         sys.exit(1)
+
+    # Send early Telegram notification so the user knows the subprocess is alive.
+    # Only set when triggered manually from Telegram (not from auto-apply).
+    if notify_start:
+        label = url if url else "(pasted text)"
+        notify(f"🔄 <b>Обрабатываю...</b>\n🔗 {label}\n\nFetching job text & calling LLM…")
 
     _APPLY_META_COMPANY = co
     _APPLY_META_TITLE = ti

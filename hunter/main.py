@@ -257,6 +257,19 @@ async def _run_hunt_impl(
 
 # ── Auto-apply pipeline ──────────────────────────────────────────────────────
 
+async def _sync_to_sheets(url: str) -> None:
+    """Mirror a just-applied row to Google Sheets (best-effort)."""
+    try:
+        from hunter.tracker_cache import cache
+        from hunter import gsheets_sync
+        await cache.load_from_excel(TRACKER_PATH)
+        row = await cache.get_row_by_url(url)
+        if row:
+            await gsheets_sync.mirror_new_row(row)
+    except Exception as _e:
+        logger.warning("[auto_apply] gsheets mirror failed for %s: %s", url, _e)
+
+
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
     """Process all jobs sequentially with configurable delay between them."""
     total = len(jobs)
@@ -275,6 +288,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
         if outcome == "ok":
             ok += 1
             consecutive_fails = 0
+            await _sync_to_sheets(job.url)
             await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
         elif outcome == "manual":
             manual_n += 1
@@ -339,6 +353,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
         if outcome == "ok":
             ok += 1
             await asyncio.to_thread(remove_failed, job.url)
+            await _sync_to_sheets(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1

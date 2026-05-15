@@ -393,6 +393,75 @@ def validate_startup() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Push missing rows (tracker.xlsx → Sheets, skipping rows already there)
+# ---------------------------------------------------------------------------
+
+async def push_missing_rows() -> dict:
+    """Append tracker.xlsx rows that are absent from Google Sheets (by ID).
+
+    Returns: {"pushed": int, "already_present": int, "errors": list[str]}
+    Used by /gsheets_push_missing command.
+    """
+    if not _ready():
+        return {"pushed": 0, "already_present": 0, "errors": ["Sheets not ready"]}
+
+    from hunter.gsheets_client import read_all, append_rows
+    from hunter.tracker import read_all_tracker_rows
+
+    errors: list[str] = []
+
+    # 1. Fetch IDs already in Sheets
+    try:
+        sheets_rows = await asyncio.to_thread(read_all, _get_service(), _sheet_id())
+    except Exception as e:
+        log.error("push_missing_rows: read_all failed: %s", e)
+        return {"pushed": 0, "already_present": 0, "errors": [str(e)]}
+
+    sheets_ids: set[str] = {
+        r.get("ID", "").strip()
+        for _, r in sheets_rows
+        if r.get("ID", "").strip()
+    }
+    # Update sheet_row_index cache while we have the data
+    for sheet_row_num, row in sheets_rows:
+        row_id = row.get("ID", "").strip()
+        if row_id:
+            await cache.set_sheet_row_index(row_id, sheet_row_num)
+
+    # 2. Find tracker rows absent from Sheets
+    try:
+        tracker_rows = await asyncio.to_thread(read_all_tracker_rows)
+    except Exception as e:
+        log.error("push_missing_rows: read_all_tracker_rows failed: %s", e)
+        return {"pushed": 0, "already_present": 0, "errors": [str(e)]}
+
+    already = sum(1 for r in tracker_rows if r.get("ID", "").strip() in sheets_ids)
+    missing = [r for r in tracker_rows if r.get("ID", "").strip() not in sheets_ids]
+
+    if not missing:
+        log.info("push_missing_rows: nothing to push (%d rows already in Sheets)", already)
+        return {"pushed": 0, "already_present": already, "errors": []}
+
+    # 3. Append missing rows in one batch
+    try:
+        indices = await asyncio.to_thread(
+            append_rows, _get_service(), _sheet_id(), missing
+        )
+        for row_dict, sheet_row in zip(missing, indices):
+            row_id = row_dict.get("ID", "").strip()
+            if row_id and sheet_row > 0:
+                await cache.set_sheet_row_index(row_id, sheet_row)
+                await cache.mark_clean(row_id)
+        log.info("push_missing_rows: pushed %d rows", len(missing))
+    except Exception as e:
+        log.error("push_missing_rows: append_rows failed: %s", e)
+        errors.append(str(e))
+        return {"pushed": 0, "already_present": already, "errors": errors}
+
+    return {"pushed": len(missing), "already_present": already, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Status report (for /gsheets_status command)
 # ---------------------------------------------------------------------------
 

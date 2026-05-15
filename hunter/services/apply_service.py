@@ -15,6 +15,9 @@ _APPLY_MANUAL_EXIT_CODE = 44
 
 ApplyOutcome = Literal["ok", "fail", "manual"]
 
+# Second element: human-readable error snippet for Telegram (empty string on success).
+ApplyResult = tuple[ApplyOutcome, str]
+
 
 def build_generate_docs_cmd(
     generate_docs_script: Path,
@@ -91,12 +94,15 @@ async def run_apply_agent_for_url(
     python_executable: str,
     force: bool = False,
     paste_file: Optional[str] = None,
-) -> ApplyOutcome:
+) -> ApplyResult:
     """URL-based variant of run_apply_agent_subprocess for manual Telegram triggers.
 
     Unlike the Job-based variant, accepts a plain URL and optional flags for
     force-apply and paste-file flow (no Job object required).
-    Returns ``ok`` on exit 0, ``manual`` on exit 44 (JobLeads MANUAL flow), ``fail`` otherwise.
+
+    Returns (outcome, error_detail):
+      outcome    — "ok" | "fail" | "manual"
+      error_detail — non-empty string on failure (stderr snippet / timeout reason)
     """
     label = url or "(pasted text)"
     cmd = [python_executable, str(apply_agent_path)]
@@ -106,6 +112,8 @@ async def run_apply_agent_for_url(
         cmd.append("--force")
     if paste_file:
         cmd.extend(["--paste-file", paste_file])
+    # Signal apply_agent.py to send an early Telegram notification confirming start
+    cmd.append("--notify-start")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -115,7 +123,7 @@ async def run_apply_agent_for_url(
         )
     except (OSError, subprocess.SubprocessError) as e:
         logger.error(f"[apply_agent] failed to start subprocess for {label}: {e}")
-        return "fail"
+        return "fail", f"Failed to start process: {e}"
 
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -126,19 +134,19 @@ async def run_apply_agent_for_url(
         proc.kill()
         await proc.communicate()
         logger.error(f"[apply_agent] TIMEOUT ({timeout_sec}s) for {label}")
-        return "fail"
+        return "fail", f"Timed out after {timeout_sec}s"
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
-        return "manual"
+        return "manual", ""
 
+    stderr_text = stderr.decode(errors="replace") if stderr else ""
     if proc.returncode != 0:
-        logger.error(
-            f"[apply_agent] FAIL for {label}: {stderr.decode(errors='replace')[-500:]}"
-        )
-        return "fail"
+        snippet = stderr_text[-600:].strip() if stderr_text else "(no stderr)"
+        logger.error(f"[apply_agent] FAIL for {label}: {snippet}")
+        return "fail", snippet
 
     if stdout:
         logger.debug(f"[apply_agent] stdout for {label}: {stdout.decode(errors='replace')[-300:]}")
     logger.info(f"[apply_agent] OK {label}")
-    return "ok"
+    return "ok", ""

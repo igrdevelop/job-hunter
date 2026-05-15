@@ -30,7 +30,8 @@ def _strip_html(html: str) -> str:
 
 
 def _extract_slug(url: str) -> str:
-    match = re.search(r"/job-offer/([a-z0-9-]+)", url)
+    # JustJoin uses both /job-offer/{slug} (old) and /offers/{slug} (new) formats.
+    match = re.search(r"/(?:job-offer|offers)/([a-z0-9-]+)", url)
     if not match:
         raise ValueError(f"Cannot extract JustJoin slug from URL: {url}")
     return match.group(1)
