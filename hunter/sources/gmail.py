@@ -63,11 +63,21 @@ class GmailSource(BaseSource):
         return jobs
 
     # Subjects that indicate confirmation/activity emails, not job alert emails.
+    # Covers English (LinkedIn) and Polish (Pracuj, NoFluffJobs) platforms.
     _SKIP_SUBJECTS = (
+        # English
         "you applied",
         "your application",
         "application received",
         "application was sent",
+        # Polish — Pracuj.pl activity notifications
+        "zapoznał się z twoją aplikacją",   # employer viewed your application
+        "twoja aplikacja została wysłana",   # your application was sent
+        "potwierdzenie aplikacji",           # application confirmation
+        "aplikacja została przyjęta",        # application accepted
+        "dziękujemy za aplikację",           # thank you for applying
+        "pracodawca zaprosił cię",           # employer invited you
+        "zaproszenie do rozmowy",            # invitation to interview
     )
 
     def _parse_message(self, msg: dict) -> list[Job]:
