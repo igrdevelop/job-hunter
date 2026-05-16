@@ -63,7 +63,7 @@ class JustJoinSource(BaseSource):
         for wtype in WORKPLACE_TYPES:
             cursor = None
             for _ in range(MAX_PAGES):
-                params: dict = {"workplaceType": wtype, "perPage": PER_PAGE}
+                params: dict = {"workplaceType": wtype, "perPage": PER_PAGE, "sortBy": "newest"}
                 if cursor:
                     params["cursor"] = cursor
 
