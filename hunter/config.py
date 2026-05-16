@@ -241,7 +241,7 @@ EXPIRED_CHECK_FETCH_TIMEOUT: float = float(os.getenv("EXPIRED_CHECK_FETCH_TIMEOU
 # ── LibreOffice ───────────────────────────────────────────────────────────────
 SOFFICE_PATH: str = os.getenv(
     "SOFFICE_PATH",
-    r"C:\Program Files\LibreOffice\program\soffice.exe",
+    "libreoffice",  # Linux/Docker default; Windows: set SOFFICE_PATH in .env
 )
 
 # ── JustJoin source config ────────────────────────────────────────────────────
