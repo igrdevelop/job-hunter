@@ -175,7 +175,7 @@ async def _run_hunt_impl(
 
     # ── Gmail breakdown ──────────────────────────────────────────────────────
     gmail_section = ""
-    gmail_jobs = [j for j in all_jobs if j.source.startswith("gmail_")]
+    gmail_jobs = [j for j in new_jobs if j.source.startswith("gmail_")]
     if gmail_jobs:
         # Group by sub-source (gmail_linkedin, gmail_justjoin, etc.)
         from collections import defaultdict
