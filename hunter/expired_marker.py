@@ -115,14 +115,16 @@ async def run_check(
                 status = "error"
                 item = {**item, "error": str(e)}
         except Exception as e:
+            is_jobleads_cf = False
             try:
                 from job_fetch.jobleads import JobLeadsCloudflareError
-                if isinstance(e, JobLeadsCloudflareError):
-                    status = "alive"
-                    logger.debug("[expired_marker] jobleads skip: %s", item["url"])
-                else:
-                    raise
+                is_jobleads_cf = isinstance(e, JobLeadsCloudflareError)
             except ImportError:
+                pass
+            if is_jobleads_cf:
+                status = "alive"
+                logger.debug("[expired_marker] jobleads skip: %s", item["url"])
+            else:
                 status = "error"
                 item = {**item, "error": str(e)}
 
