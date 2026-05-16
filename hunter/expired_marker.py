@@ -108,9 +108,10 @@ async def run_check(
             item = {**item, "error": f"timeout after {EXPIRED_CHECK_FETCH_TIMEOUT}s"}
             logger.warning("[expired_marker] timeout: %s", item["url"])
         except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
+            code = e.response.status_code if e.response is not None else None
+            if code in (404, 410):
                 status = "expired"
-                item = {**item, "reason": "404"}
+                item = {**item, "reason": str(code)}
             else:
                 status = "error"
                 item = {**item, "error": str(e)}
