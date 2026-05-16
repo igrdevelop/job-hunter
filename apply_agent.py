@@ -789,7 +789,8 @@ def main_api(url: str, paste_text: str = "") -> None:
     # Step 4.5 — Skip React-only jobs (no Angular mentioned in stack)
     # Bypassed in force mode — user explicitly wants docs regardless of stack.
     stack = (content.get("stack") or "").lower()
-    if "react" in stack and "angular" not in stack and not _SKIP_DEDUP:
+    _angular_in_raw = "angular" in job_text.lower()
+    if "react" in stack and "angular" not in stack and not _angular_in_raw and not _SKIP_DEDUP:
         notify(
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"
