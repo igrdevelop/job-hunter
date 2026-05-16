@@ -18,7 +18,7 @@ beautifulsoup4
 pytest
 
 # Optional: headless browser for JS-heavy / SPA job boards (inhire.io etc.)
-# playwright  # install separately: pip install playwright && playwright install chromium
+playwright
 # playwright-stealth  # reduces bot-detection fingerprint for headless Playwright
 
 google-api-python-client==2.131.0
