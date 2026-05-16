@@ -42,16 +42,40 @@ TIMEOUT = 25
 _scraper = cloudscraper.create_scraper()
 
 
+def _playwright_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 class PracujSource(BaseSource):
     name = "pracuj"
 
     def search(self) -> list[Job]:
+        if _playwright_available():
+            return self._search_playwright()
+        logger.warning("[Pracuj] playwright not installed, falling back to cloudscraper")
+        return self._search_cloudscraper()
+
+    def _search_playwright(self) -> list[Job]:
+        return self._run_search(use_playwright=True)
+
+    def _search_cloudscraper(self) -> list[Job]:
+        return self._run_search(use_playwright=False)
+
+    def _run_search(self, use_playwright: bool) -> list[Job]:
         seen_norm_urls: set[str] = set()
         seen_group_ids: set[str] = set()
         jobs: list[Job] = []
 
         for url in LISTING_URLS:
-            raw_jobs = self._fetch_listing(url)
+            raw_jobs = (
+                self._fetch_listing_playwright(url)
+                if use_playwright
+                else self._fetch_listing(url)
+            )
             logger.info(f"[Pracuj] {url} -> {len(raw_jobs)} raw jobs")
             for raw in raw_jobs:
                 job = self._parse(raw)
@@ -75,6 +99,23 @@ class PracujSource(BaseSource):
         return jobs
 
     # -- Listing fetch ---------------------------------------------------------
+
+    def _fetch_listing_playwright(self, url: str) -> list[dict]:
+        from hunter.playwright_helper import chromium_page
+        try:
+            with chromium_page(url) as page:
+                html = page.content()
+        except Exception as e:
+            logger.error(f"[Pracuj] Playwright fetch failed for {url}: {e}")
+            return []
+
+        jobs = self._extract_next_data(html)
+        if jobs:
+            return jobs
+        jobs = self._extract_json_ld(html)
+        if jobs:
+            return jobs
+        return self._extract_bs4(html)
 
     def _fetch_listing(self, url: str) -> list[dict]:
         try:
