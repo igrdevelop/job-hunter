@@ -472,6 +472,113 @@ def _translate_cover_letter_pl(letter_en: str) -> str:
         return ""
 
 
+_ATS_THRESHOLD = 95.0
+_ATS_MAX_ROUNDS = 2  # rewrite attempts after the initial check
+
+_ATS_REWRITE_PROMPT = """\
+The resume scored {score:.1f}% on an independent ATS check (target: {threshold}%).
+
+Missing keywords that must be added:
+{missing}
+
+Specific recommendations:
+{recs}
+
+Gap analysis:
+{gap}
+
+Rewrite 'resume_en' to reach {threshold}%+:
+- Add ALL missing keywords naturally into the Skills section and relevant experience bullets.
+- Mirror the exact phrasing from the job description where possible.
+- Do NOT invent facts — integrate keywords into real experience the candidate has.
+- Keep the same JSON schema; return ALL fields unchanged except the ones you improve.
+
+Job posting (for keyword reference):
+{job_text}
+
+Current resume JSON:
+{content_json}"""
+
+
+def _ats_check_loop(content: dict, job_text: str) -> dict:
+    """
+    Run independent ATS check; rewrite resume if score < 95%.
+
+    Round 1: full check (keyword match + TF-IDF + LLM reviewer).
+    Round 2+: keyword + TF-IDF only (cheaper; LLM reviewer already gave its gaps).
+    Max _ATS_MAX_ROUNDS rewrite attempts.
+    """
+    from hunter import ats_checker
+
+    resume_en = content.get("resume_en", "")
+    if not resume_en:
+        print("[apply_agent] ATS check skipped — no resume_en in content")
+        return content
+
+    for attempt in range(1, _ATS_MAX_ROUNDS + 2):  # +2: initial check + N rewrites
+        run_llm = attempt == 1 and bool(LLM_API_KEY)
+        result = ats_checker.check(
+            job_text=job_text,
+            resume_text=resume_en,
+            provider=LLM_PROVIDER,
+            model=LLM_MODEL,
+            api_key=LLM_API_KEY,
+            run_llm_review=run_llm,
+        )
+        print(f"[apply_agent] ATS check (attempt {attempt}):\n{result.summary()}")
+        content["ats_check"] = result.to_dict()
+
+        if result.passed(_ATS_THRESHOLD):
+            notify(f"✅ ATS check passed: {result.score:.1f}% (attempt {attempt})")
+            break
+
+        if attempt > _ATS_MAX_ROUNDS:
+            notify(
+                f"⚠️ ATS check: {result.score:.1f}% after {_ATS_MAX_ROUNDS} rewrites "
+                f"(threshold {_ATS_THRESHOLD}%). Proceeding with best result."
+            )
+            break
+
+        # Build rewrite prompt
+        missing_str = "\n".join(f"  - {k}" for k in result.missing_keywords[:20]) or "  (none identified)"
+        recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
+        rewrite_msg = _ATS_REWRITE_PROMPT.format(
+            score=result.score,
+            threshold=_ATS_THRESHOLD,
+            missing=missing_str,
+            recs=recs_str,
+            gap=result.llm_gap_report or "N/A",
+            job_text=job_text[:3000],
+            content_json=json.dumps(
+                {k: content[k] for k in ("resume_en", "resume_pl", "skills", "stack", "ats_score") if k in content},
+                ensure_ascii=False,
+            )[:4000],
+        )
+        try:
+            from llm_client import call_llm
+            print(f"[apply_agent] ATS rewrite attempt {attempt}/{_ATS_MAX_ROUNDS}...")
+            boosted = call_llm(
+                system_prompt=(
+                    "You are rewriting a resume to pass ATS screening. "
+                    "Return the same JSON schema with improved fields."
+                ),
+                user_message=rewrite_msg,
+                provider=LLM_PROVIDER,
+                model=LLM_MODEL,
+                api_key=LLM_API_KEY,
+            )
+            for key in ("resume_en", "resume_pl", "cover_letter_en", "cover_letter_pl",
+                        "ats_score", "stack", "to_learn", "skills"):
+                if boosted.get(key):
+                    content[key] = boosted[key]
+            resume_en = content.get("resume_en", resume_en)
+        except Exception as e:
+            print(f"[apply_agent] ATS rewrite failed: {e}")
+            break
+
+    return content
+
+
 def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
     """Review and optionally rewrite cover_letter_en up to max_rounds times.
 
@@ -807,6 +914,10 @@ def main_api(url: str, paste_text: str = "") -> None:
     # Step 4.6 — Review and optionally rewrite cover letter (up to 3 rounds)
     print("[apply_agent] Step 4.6: Reviewing cover letter for AI-language patterns...")
     content = _cover_letter_review_loop(content)
+
+    # Step 4.7 — Independent ATS check + rewrite loop (target ≥ 95%)
+    print("[apply_agent] Step 4.7: Running independent ATS check...")
+    content = _ats_check_loop(content, job_text)
 
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")
