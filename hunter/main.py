@@ -96,17 +96,6 @@ async def _run_hunt_impl(
       4. AUTO_APPLY=true  → generate docs (with delay between jobs)
          AUTO_APPLY=false → send Telegram cards with Apply/Skip buttons
     """
-    try:
-        from hunter import to_send as _to_send
-        sync_result = await asyncio.to_thread(_to_send.sync_and_rebuild)
-        if sync_result["synced"]:
-            await send_text(
-                context,
-                f"📬 Synced <b>{sync_result['synced']}</b> Sent mark(s) from to_send.xlsx → tracker.xlsx",
-            )
-    except Exception as _e:
-        logger.warning("[Hunt] to_send sync failed: %s", _e)
-
     ts = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"[Hunt] Starting at {ts} sources={source_names or 'all'}")
     mode = "CLI" if (APPLY_USE_CLI or not LLM_API_KEY) else f"API ({LLM_MODEL})"
@@ -186,7 +175,7 @@ async def _run_hunt_impl(
 
     # ── Gmail breakdown ──────────────────────────────────────────────────────
     gmail_section = ""
-    gmail_jobs = [j for j in all_jobs if j.source.startswith("gmail_")]
+    gmail_jobs = [j for j in new_jobs if j.source.startswith("gmail_")]
     if gmail_jobs:
         # Group by sub-source (gmail_linkedin, gmail_justjoin, etc.)
         from collections import defaultdict
@@ -268,6 +257,19 @@ async def _run_hunt_impl(
 
 # ── Auto-apply pipeline ──────────────────────────────────────────────────────
 
+async def _sync_to_sheets(url: str) -> None:
+    """Mirror a just-applied row to Google Sheets (best-effort)."""
+    try:
+        from hunter.tracker_cache import cache
+        from hunter import gsheets_sync
+        await cache.load_from_excel(TRACKER_PATH)
+        row = await cache.get_row_by_url(url)
+        if row:
+            await gsheets_sync.mirror_new_row(row)
+    except Exception as _e:
+        logger.warning("[auto_apply] gsheets mirror failed for %s: %s", url, _e)
+
+
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
     """Process all jobs sequentially with configurable delay between them."""
     total = len(jobs)
@@ -286,6 +288,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
         if outcome == "ok":
             ok += 1
             consecutive_fails = 0
+            await _sync_to_sheets(job.url)
             await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
         elif outcome == "manual":
             manual_n += 1
@@ -350,6 +353,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
         if outcome == "ok":
             ok += 1
             await asyncio.to_thread(remove_failed, job.url)
+            await _sync_to_sheets(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1

@@ -49,16 +49,40 @@ _scraper.headers.update({
 })
 
 
+def _playwright_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 class TheProtocolSource(BaseSource):
     name = "theprotocol"
 
     def search(self) -> list[Job]:
+        if _playwright_available():
+            return self._search_playwright()
+        logger.warning("[theprotocol] playwright not installed, falling back to cloudscraper")
+        return self._search_cloudscraper()
+
+    def _search_playwright(self) -> list[Job]:
+        return self._run_search(use_playwright=True)
+
+    def _search_cloudscraper(self) -> list[Job]:
+        return self._run_search(use_playwright=False)
+
+    def _run_search(self, use_playwright: bool) -> list[Job]:
         seen_urls: set[str] = set()
         jobs: list[Job] = []
 
         for listing_url in LISTING_URLS:
             try:
-                parsed = self._fetch_listing(listing_url)
+                parsed = (
+                    self._fetch_listing_playwright(listing_url)
+                    if use_playwright
+                    else self._fetch_listing(listing_url)
+                )
                 logger.info(f"[theprotocol] {listing_url} -> {len(parsed)} raw jobs")
                 for raw in parsed:
                     job = self._parse(raw)
@@ -75,6 +99,26 @@ class TheProtocolSource(BaseSource):
         return jobs
 
     # -- Listing fetch ---------------------------------------------------------
+
+    def _fetch_listing_playwright(self, url: str) -> list[dict]:
+        from hunter.playwright_helper import chromium_page
+        try:
+            with chromium_page(url) as page:
+                html = page.content()
+        except Exception as e:
+            logger.error(f"[theprotocol] Playwright fetch failed for {url}: {e}")
+            return []
+
+        jobs = self._extract_next_data(html)
+        if jobs:
+            logger.debug(f"[theprotocol] __NEXT_DATA__ gave {len(jobs)} items from {url}")
+            return jobs
+        jobs = self._extract_bs4(html)
+        if jobs:
+            logger.debug(f"[theprotocol] BeautifulSoup gave {len(jobs)} items from {url}")
+            return jobs
+        logger.warning(f"[theprotocol] 0 jobs from {url} (HTML length={len(html)})")
+        return []
 
     def _fetch_listing(self, url: str) -> list[dict]:
         try:

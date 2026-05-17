@@ -134,7 +134,9 @@ Pick the 2 blocks that best match the job's top-2 must-have requirements. Each b
 - Healthcare / insurance → Altoros: British Hospital app (inherited, optimized perf → delivered to sale); real-time incident management system (sole FE dev, SignalR, AG Grid)
 - E-commerce / retail → Altoros multi-tenant shop platform (merchants with separate databases)
 - AI / automation tooling → Fairmarkit AI integration feature + automation dashboard
-- Dev platforms / internal tooling → Fairmarkit internal AI tooling and procurement workflow automation
+- LLM evaluation / AI infrastructure → Alten/Intel OpenVINO LLM evaluation dashboards (Apr-May 2026): daily-diff dashboards comparing inference performance across releases (latency, throughput, runtime parameters)
+- AI-assisted development / agentic workflow → Alten/Intel OpenVINO refactor: 20+ heterogeneous report pages unified into 2 reusable Angular templates using GitHub Copilot with Claude Opus in a spec-driven workflow (write strict specs → iterate step-by-step with the agent). Strong fit for roles asking about Cursor / Claude Code / Codex / Copilot / agentic AI / AI dev workflows.
+- Dev platforms / internal tooling → Fairmarkit internal AI tooling and procurement workflow automation; Alten/Intel internal LLM evaluation tooling for OpenVINO
 - Logistics / supply chain → reframe Fairmarkit procurement as supply-side logistics (use safe verbs: "adjacent to supply chain", "transferable from procurement automation")
 - Media / CMS → reframe Altoros e-commerce product/content management as CMS-adjacent (safe verbs: "familiar with content management patterns")
 

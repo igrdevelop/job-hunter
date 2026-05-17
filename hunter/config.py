@@ -28,7 +28,7 @@ GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in (
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
-MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "10"))
+MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "20"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "3"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
@@ -36,7 +36,6 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
-TO_SEND_PATH = PROJECT_DIR / "to_send.xlsx"
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
 TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
     "true",
@@ -53,6 +52,23 @@ APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
 ATS_COMPANIES_PATH = PROJECT_DIR / "hunter" / "ats_companies.json"
+
+# ── Google Sheets integration ─────────────────────────────────────────────────
+GSHEETS_ENABLED: bool = os.getenv("GSHEETS_ENABLED", "false").lower() in ("true", "1", "yes")
+# Spreadsheet ID — set after first run (bot creates the sheet and sends you the ID)
+GSHEETS_TRACKER_ID: str = os.getenv("GSHEETS_TRACKER_ID", "")
+# How often (minutes) to pull Sheets → Excel to pick up user edits
+GSHEETS_REFRESH_INTERVAL_MIN: int = int(os.getenv("GSHEETS_REFRESH_INTERVAL_MIN", "30"))
+GSHEETS_CREDENTIALS_FILE: "Path" = PROJECT_DIR / "gsheets_credentials.json"
+GSHEETS_TOKEN_FILE: "Path" = PROJECT_DIR / "gsheets_token.json"
+GSHEETS_STATE_FILE: "Path" = PROJECT_DIR / "gsheets_state.json"
+
+# ── Google Drive integration ──────────────────────────────────────────────────
+GDRIVE_ENABLED: bool = os.getenv("GDRIVE_ENABLED", "false").lower() in ("true", "1", "yes")
+# Optional: ID of an existing Drive folder to upload into (skips auto-create of root)
+GDRIVE_ROOT_FOLDER_ID: str = os.getenv("GDRIVE_ROOT_FOLDER_ID", "")
+# Name of the root folder created automatically when GDRIVE_ROOT_FOLDER_ID is not set
+GDRIVE_ROOT_FOLDER_NAME: str = os.getenv("GDRIVE_ROOT_FOLDER_NAME", "Job Hunter")
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
@@ -202,6 +218,12 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py
 GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
+# Fetch real title/company/location/salary for each URL extracted from alert emails.
+GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
+# Max parallel HTTP requests during enrichment
+GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
+# Per-job HTTP timeout (seconds) for enrichment fetches
+GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
 
 # ── Expired check schedule ───────────────────────────────────────────────────
 EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
@@ -213,6 +235,14 @@ EXPIRED_CHECK_CONCURRENCY: int = int(os.getenv("EXPIRED_CHECK_CONCURRENCY", "10"
 EXPIRED_CHECK_DOMAIN_LIMIT: int = int(os.getenv("EXPIRED_CHECK_DOMAIN_LIMIT", "2"))
 # Delay (sec) between requests to the same domain
 EXPIRED_CHECK_DOMAIN_DELAY: float = float(os.getenv("EXPIRED_CHECK_DOMAIN_DELAY", "1.0"))
+# Hard asyncio-level timeout (sec) per URL fetch — guards against TCP hangs
+EXPIRED_CHECK_FETCH_TIMEOUT: float = float(os.getenv("EXPIRED_CHECK_FETCH_TIMEOUT", "35.0"))
+
+# ── LibreOffice ───────────────────────────────────────────────────────────────
+SOFFICE_PATH: str = os.getenv(
+    "SOFFICE_PATH",
+    "libreoffice",  # Linux/Docker default; Windows: set SOFFICE_PATH in .env
+)
 
 # ── JustJoin source config ────────────────────────────────────────────────────
 JUSTJOIN_MARKER_ICONS = [

@@ -3,16 +3,25 @@
 **Name**: Ihar Petrasheuski (also known as Igor Pietraszewski)
 **Contact**: +48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland
 
-**Core Stack**: Angular (2-21), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS
+**Core Stack**: Angular (2-21), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS, React (familiar)
 **Tools**: Jest, Jasmine, Cypress, Git, Jenkins, Webpack, Node.js
+**AI Dev Tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API, Claude Opus / Sonnet (spec-driven agentic workflows)
 **Methodologies**: Agile (Scrum, SAFe), Frontend Architecture, Code Reviews, Performance Optimization, CI/CD
-**Languages**: English (Fluent), Russian (Native), Polish (B1 Intermediate)
+**Languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 **Total experience**: 10+ years (since Nov 2015). ALWAYS use "10+" in summaries and cover letters - never round down to 9+ or 8+.
 
 ---
 
 ### Work Experience
+
+**Frontend Developer (Angular, part-time contract) | Alten Poland** - Apr 2026 - May 2026
+Intel (client) | OpenVINO LLM Evaluation Tooling | Wrocław, Poland
+- Refactored 20+ heterogeneous LLM evaluation report pages into 2 unified Angular page templates, enabling ~10 new composable reports without per-report frontend rework.
+- Built daily-diff dashboards comparing LLM inference performance across releases (latency, throughput, runtime parameters), letting engineers spot regressions vs. prior day and prior release at a glance.
+- Drove the unification effort using GitHub Copilot with Claude Opus in a spec-driven workflow: wrote strict component and service specifications, then iterated step-by-step with the agent to refactor existing services, RxJS pipelines, and shared components.
+- Frontend tooling supporting OpenVINO - Intel's open-source AI inference framework for LLM optimization across CPU/GPU/NPU backends.
+Stack: Angular, TypeScript, RxJS, SCSS. AI dev tools: GitHub Copilot, Claude Opus (spec-driven agentic refactor).
 
 **Senior Frontend Developer (Angular) | Fairmarkit (via contractor)** - Jun 2025 - March 2026
 AI-powered Enterprise Procurement Platform | USA (Global)
@@ -47,7 +56,7 @@ E-commerce | Insurance | Healthcare | Grant Management
 
 <!-- SOURCE DETAILS — use selectively based on job relevance, not all at once -->
 
-- E-commerce: Built and scaled a multi-tenant e-commerce platform with a powerful admin panel — merchants and admins could create independent shops with separate databases. Stack: Angular 11-14, TypeScript, SCSS, Node.js.
+- E-commerce: Built and scaled a multi-tenant e-commerce platform with a powerful admin panel — merchants and admins could create independent shops with separate databases. Prototyped a few admin-panel modules in React during early platform exploration before the team standardized on Angular. Stack: Angular 11-14, TypeScript, React (component prototypes), SCSS, Node.js.
 
 - Healthcare (British Hospital): Inherited a partially complete app from a chain of developers; optimized performance by splitting complex queries into parallel requests, implementing lazy loading and pagination, and simplifying UI component logic — delivered the application to final client sale. Stack: Angular 11-14, RxJS, AG Grid, .NET.
 
@@ -69,4 +78,5 @@ Stack: AngularJS, JavaScript, SCSS.
 ---
 
 **Education**: Belarusian State Technological University - Bachelor, PE and Systems of Information Processing
-**Additional Courses**: Angular Updates Course, Angular Advanced Course, Angular Core Course, JS Architecture Workshop, RxJS Course, Java basic Course, Node.js Course, JavaScript Advanced Level
+**Additional Training**: IT Academy (Belarus) - Frontend / JavaScript track (HTML/CSS/JS, JavaScript Advanced)
+**Additional Courses**: Angular Updates Course, Angular Advanced Course, Angular Core Course, JS Architecture Workshop, RxJS Course, Java basic Course, Node.js Course, JavaScript Advanced Level. Frontend Angular & JavaScript courses by Ilya Kantor (learn.javascript.ru): Angular 4.x (2017), Advanced Angular Masterclass (2018), Node.js (2019).

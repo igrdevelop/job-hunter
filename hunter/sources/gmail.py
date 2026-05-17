@@ -2,6 +2,7 @@ import base64
 import logging
 from datetime import datetime, timedelta, timezone
 
+from hunter.config import GMAIL_ENRICH_ENABLED
 from hunter.gmail_client import get_gmail_service
 from hunter.gmail_parsers import PARSERS
 from hunter.models import Job
@@ -53,12 +54,40 @@ class GmailSource(BaseSource):
             jobs.extend(self._parse_message(msg))
 
         logger.info(f"[gmail] Extracted {len(jobs)} job URLs total")
+
+        if jobs and GMAIL_ENRICH_ENABLED:
+            from hunter.gmail_enricher import enrich_jobs
+            jobs = enrich_jobs(jobs)
+            logger.info(f"[gmail] After enrichment: {len(jobs)} jobs")
+
         return jobs
+
+    # Subjects that indicate confirmation/activity emails, not job alert emails.
+    # Covers English (LinkedIn) and Polish (Pracuj, NoFluffJobs) platforms.
+    _SKIP_SUBJECTS = (
+        # English
+        "you applied",
+        "your application",
+        "application received",
+        "application was sent",
+        # Polish — Pracuj.pl activity notifications
+        "zapoznał się z twoją aplikacją",   # employer viewed your application
+        "twoja aplikacja została wysłana",   # your application was sent
+        "potwierdzenie aplikacji",           # application confirmation
+        "aplikacja została przyjęta",        # application accepted
+        "dziękujemy za aplikację",           # thank you for applying
+        "pracodawca zaprosił cię",           # employer invited you
+        "zaproszenie do rozmowy",            # invitation to interview
+    )
 
     def _parse_message(self, msg: dict) -> list[Job]:
         headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
         subject = headers.get("Subject", "")
         sender = headers.get("From", "")
+
+        if any(s in subject.lower() for s in self._SKIP_SUBJECTS):
+            logger.debug(f"[gmail] skipping confirmation email: '{subject}'")
+            return []
 
         body_text, body_html = self._extract_body(msg["payload"])
 

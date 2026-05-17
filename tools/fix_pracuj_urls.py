@@ -1,12 +1,12 @@
 """
-tools/fix_pracuj_urls.py — Fix broken pracuj.pl URLs in tracker.xlsx and to_send.xlsx.
+tools/fix_pracuj_urls.py — Fix broken pracuj.pl URLs in tracker.xlsx.
 
 Finds rows where URL is https://www.pracuj.pl/praca/oferta,ID (no slug),
 reconstructs the URL using the Job Title column, and updates the cell.
 
 Usage:
     python tools/fix_pracuj_urls.py           # dry-run — shows what would change
-    python tools/fix_pracuj_urls.py --apply   # actually update both files
+    python tools/fix_pracuj_urls.py --apply   # actually update file
 """
 
 import re
@@ -25,7 +25,6 @@ import openpyxl
 from openpyxl.styles import Font
 
 TRACKER_PATH  = ROOT / "tracker.xlsx"
-TO_SEND_PATH  = ROOT / "to_send.xlsx"
 APPLY = "--apply" in sys.argv
 
 BROKEN_URL_RE = re.compile(r"^https://www\.pracuj\.pl/praca/oferta,(\d+)$")
@@ -101,12 +100,7 @@ def main():
     print(f"\n[fix_pracuj] === Fix broken pracuj.pl URLs — {mode} ===\n")
 
     print(f"📋 tracker.xlsx:")
-    n1 = fix_file(TRACKER_PATH)
-
-    print(f"\n📋 to_send.xlsx:")
-    n2 = fix_file(TO_SEND_PATH)
-
-    total = n1 + n2
+    total = fix_file(TRACKER_PATH)
     print(f"\n{'='*60}")
     if total == 0:
         print("[fix_pracuj] Nothing to fix.")

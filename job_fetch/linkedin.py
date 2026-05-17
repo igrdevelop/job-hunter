@@ -43,19 +43,21 @@ def fetch_linkedin(url: str) -> str:
     try:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     except ImportError:
-        raise RuntimeError(
-            "playwright not installed. Run:\n"
-            "  pip install playwright\n"
-            "  playwright install chromium"
+        logger.warning(
+            "[linkedin] playwright not installed — falling back to HTML fetch. "
+            "Install with: pip install playwright && playwright install chromium"
         )
+        from job_fetch.html_fallback import fetch_html
+        return fetch_html(url)
 
     storage_state = _get_storage_state_path()
     if not storage_state:
-        raise RuntimeError(
-            f"LinkedIn storage_state not set or file not found.\n"
-            f"Set {_ENV_KEY}=<path to storage_state.json> in .env\n"
-            f"Then run: python tools/linkedin_login.py"
+        logger.warning(
+            f"[linkedin] {_ENV_KEY} not set — falling back to HTML fetch. "
+            f"Run python tools/linkedin_login.py to enable full session fetch."
         )
+        from job_fetch.html_fallback import fetch_html
+        return fetch_html(url)
 
     logger.info(f"[linkedin] Fetching {url} with session from {storage_state}")
 

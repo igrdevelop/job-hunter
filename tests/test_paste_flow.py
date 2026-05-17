@@ -8,16 +8,17 @@ from hunter.telegram_bot import _extract_url, _looks_like_paste
 
 
 def test_parse_apply_cli_argv_paste_file_only() -> None:
-    url, force_cli, force, full, co, ti, paste_file = parse_apply_cli_argv(
+    url, force_cli, force, full, co, ti, paste_file, notify_start = parse_apply_cli_argv(
         ["apply_agent.py", "--paste-file", "C:/tmp/posting.txt"]
     )
     assert url == ""
     assert paste_file == "C:/tmp/posting.txt"
     assert force_cli is False and force is False and full is False
+    assert notify_start is False
 
 
 def test_parse_apply_cli_argv_paste_file_with_url() -> None:
-    url, _, _, _, _, _, paste_file = parse_apply_cli_argv(
+    url, _, _, _, _, _, paste_file, _ = parse_apply_cli_argv(
         [
             "apply_agent.py",
             "https://example.com/job/123",
@@ -30,11 +31,19 @@ def test_parse_apply_cli_argv_paste_file_with_url() -> None:
 
 
 def test_parse_apply_cli_argv_backward_compat_url_only() -> None:
-    url, _, _, _, _, _, paste_file = parse_apply_cli_argv(
+    url, _, _, _, _, _, paste_file, _ = parse_apply_cli_argv(
         ["apply_agent.py", "https://example.com/job/123", "--force"]
     )
     assert url == "https://example.com/job/123"
     assert paste_file == ""
+
+
+def test_parse_apply_cli_argv_notify_start() -> None:
+    url, _, _, _, _, _, _, notify_start = parse_apply_cli_argv(
+        ["apply_agent.py", "https://example.com/job/1", "--notify-start"]
+    )
+    assert url == "https://example.com/job/1"
+    assert notify_start is True
 
 
 # ── Telegram paste detection ─────────────────────────────────────────────────

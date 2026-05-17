@@ -32,7 +32,7 @@ COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 SENT_COL_INDEX = 8      # "Sent"
-ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used to sync to_send.xlsx → tracker
+ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -51,7 +51,9 @@ def normalize_url(url: str) -> str:
     # Drop common tracking query params
     drop_params = {
         "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+        "utm_id", "utm_term",
         "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
+        "campaignid", "adgroupid",
         "originToLandingJobPostings", "origin",
         # Pracuj.pl tracking params (email alerts, suggested jobs)
         "sendid", "send_date", "sug",
@@ -68,6 +70,10 @@ def normalize_url(url: str) -> str:
     # Strip /rss suffix (solid.jobs RSS feed vs regular URL are the same job)
     if path.endswith("/rss"):
         path = path[:-4] or "/"
+    # Normalize JustJoin URL format: /offers/{slug} → /job-offer/{slug}
+    # JustJoin changed their URL scheme; both point to the same offer.
+    if "justjoin.it" in host:
+        path = re.sub(r"^/offers/", "/job-offer/", path)
     return urlunparse((p.scheme, host, path, "", query, ""))
 
 
@@ -708,13 +714,14 @@ def add_applied(content: dict, force: bool = False) -> bool:
     return True
 
 
-def add_skipped(job: Job) -> None:
-    """Append a SKIP row to tracker so the job is never shown again."""
+def add_skipped(job: Job) -> dict | None:
+    """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
     if is_known(job.url, job.company, job.title):
-        return
+        return None
     wb, ws = _load_or_create()
     today = date.today().strftime("%Y-%m-%d")
     next_row = ws.max_row + 1
+    row_id = _new_row_id()
 
     values = [
         today,           # Date
@@ -727,7 +734,7 @@ def add_skipped(job: Job) -> None:
         "",              # Sent
         "",              # Re-application
         "",              # To Learn
-        _new_row_id(),   # ID
+        row_id,          # ID
     ]
 
     row_font = Font(name="Calibri", size=11)
@@ -742,6 +749,7 @@ def add_skipped(job: Job) -> None:
             cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
 
     _save_with_retry(wb)
+    return dict(zip(TRACKER_HEADERS, values))
 
 
 def is_react_skipped(url: str) -> bool:
@@ -868,11 +876,8 @@ def add_failed(job: Job) -> None:
     _save_with_retry(wb)
 
 
-# -- to_send.xlsx helpers -----------------------------------------------------
-
-def iter_rows_for_to_send() -> list[dict]:
-    """Return rows suitable for to_send.xlsx: all rows without a Sent value
-    (excluding SKIP rows, which are not actionable to send).
+def iter_unsent_rows() -> list[dict]:
+    """Return unsent tracker rows (no Sent value, excluding SKIP).
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
@@ -920,7 +925,7 @@ def iter_rows_for_to_send() -> list[dict]:
 
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
-    """Write Sent values from to_send.xlsx back into tracker.xlsx.
+    """Write Sent values (e.g. EXPIRED) back into tracker.xlsx.
 
     updates: {row_id: sent_value} — only non-empty sent_value entries.
     Returns number of rows updated.
@@ -939,6 +944,43 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
             if sent_val:
                 ws.cell(row=row_num, column=SENT_COL_INDEX).value = sent_val
                 updated += 1
+
+    if updated:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+    return updated
+
+
+_REAPP_COL_INDEX = 9    # "Re-application"
+_TO_LEARN_COL_INDEX = 10  # "To Learn"
+
+
+def apply_pull_updates(rows: list[dict]) -> int:
+    """Write Sheets-sourced field changes back to tracker.xlsx (pull sync).
+
+    rows: list of full row dicts (with 'ID') where Sheets had a newer value.
+    Updates Sent, Re-application, To Learn columns. Returns count of rows updated.
+    """
+    if not rows or not TRACKER_PATH.exists():
+        return 0
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    updated = 0
+
+    for row_num in range(2, ws.max_row + 1):
+        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+        if not row_id:
+            continue
+        for row_dict in rows:
+            if row_dict.get("ID", "").strip() != row_id:
+                continue
+            ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
+            ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
+            ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
+            updated += 1
+            break
 
     if updated:
         _save_with_retry(wb)
@@ -971,3 +1013,40 @@ def get_folder_by_url(url: str) -> str | None:
     finally:
         wb.close()
     return None
+
+
+# gsheets COLUMNS order: Date, Company, Job Title, Stack, ATS %, URL,
+#                        Folder, Sent, Re-application, To Learn, ID
+_GSHEETS_COLS = [
+    "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
+    "Folder", "Sent", "Re-application", "To Learn", "ID",
+]
+
+def read_all_tracker_rows() -> list[dict]:
+    """Read every data row from tracker.xlsx as a dict keyed by gsheets COLUMNS names.
+
+    Rows with no ID are skipped (they can't be synced). Empty cells become "".
+    Used by gsheets_sync.push_missing_rows() to detect what's absent from Sheets.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results: list[dict] = []
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row:
+                continue
+            # Pad to at least ID_COL_INDEX columns
+            padded = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
+            row_id = str(padded[ID_COL_INDEX - 1] or "").strip()
+            if not row_id:
+                continue
+            results.append({
+                col: str(padded[i] or "").strip()
+                for i, col in enumerate(_GSHEETS_COLS)
+            })
+    finally:
+        wb.close()
+    return results

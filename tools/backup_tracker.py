@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-shot backup of tracker.xlsx and to_send.xlsx into backups/ (or TRACKER_BACKUP_DIR).
+One-shot backup of tracker.xlsx into backups/ (or TRACKER_BACKUP_DIR).
 
 Run manually:
   python tools/backup_tracker.py

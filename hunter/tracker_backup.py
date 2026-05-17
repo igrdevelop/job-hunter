@@ -1,4 +1,4 @@
-"""Timestamped copies of tracker.xlsx and to_send.xlsx for disaster recovery."""
+"""Timestamped copies of tracker.xlsx for disaster recovery."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_tracker_backup() -> dict:
-    """Copy tracker + to_send into :data:`cfg.TRACKER_BACKUP_DIR`; prune old files.
+    """Copy tracker into :data:`cfg.TRACKER_BACKUP_DIR`; prune old files.
 
     Returns a JSON-serializable summary: ``ok``, ``copied``, ``skipped``, ``errors``, ``pruned``.
     """
@@ -47,11 +47,9 @@ def run_tracker_backup() -> dict:
             result["errors"].append(f"{label}: {e}")
 
     _copy("tracker", Path(cfg.TRACKER_PATH))
-    _copy("to_send", Path(cfg.TO_SEND_PATH))
 
     keep = cfg.TRACKER_BACKUP_KEEP_FILES
     result["pruned"] += _prune_old(backup_dir, "tracker", keep)
-    result["pruned"] += _prune_old(backup_dir, "to_send", keep)
 
     if result["errors"]:
         result["ok"] = False

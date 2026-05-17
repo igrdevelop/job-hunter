@@ -4,11 +4,9 @@ Email parsers for job aggregators.
 Each parser receives (subject, body_text, body_html) from one email
 and returns a list[Job] with URLs extracted from that email.
 
-title/company/location fields are placeholders — the main pipeline's
-dedup works on URL, and filters run after. The scraper sources already
-enrich data for justjoin/nofluffjobs/linkedin when those jobs come from
-their APIs. Gmail-sourced jobs arrive with minimal metadata but are still
-deduped correctly since the same URLs appear in both channels.
+title/company/location/salary fields are stubs — gmail_enricher.enrich_jobs()
+fills in real values by fetching each job URL before the filter pipeline runs.
+Dedup still works on URL regardless of stub content.
 
 To add a new aggregator:
   1. Find the real "From:" domain in the email header
