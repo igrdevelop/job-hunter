@@ -16,6 +16,7 @@ anthropic
 # Optional: better HTML extraction for generic job pages
 beautifulsoup4
 pytest
+scikit-learn
 
 # Optional: headless browser for JS-heavy / SPA job boards (inhire.io etc.)
 playwright
