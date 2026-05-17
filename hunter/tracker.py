@@ -51,7 +51,9 @@ def normalize_url(url: str) -> str:
     # Drop common tracking query params
     drop_params = {
         "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+        "utm_id", "utm_term",
         "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
+        "campaignid", "adgroupid",
         "originToLandingJobPostings", "origin",
         # Pracuj.pl tracking params (email alerts, suggested jobs)
         "sendid", "send_date", "sug",
