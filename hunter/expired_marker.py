@@ -94,12 +94,6 @@ async def run_check(
     async def _check_one(item: dict) -> dict:
         nonlocal done, expired_count
 
-        if "jobleads.com" in item["url"]:
-            done += 1
-            if progress_cb and done % PROGRESS_EVERY == 0:
-                await progress_cb(f"⏳ {done}/{total} проверено — ⏭ истекло: {expired_count}")
-            return {**item, "status": "skipped"}
-
         try:
             text = await limiter.fetch(item["url"], global_sem)
             status = "expired" if is_job_expired(text) else "alive"

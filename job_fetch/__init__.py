@@ -7,13 +7,29 @@ Usage:
 """
 
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from job_fetch.justjoin import fetch_justjoin
 from job_fetch.nofluffjobs import fetch_nofluffjobs
 from job_fetch.html_fallback import fetch_html
 
 logger = logging.getLogger(__name__)
+
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
+    "fbclid", "gclid", "campaignid", "adgroupid",
+    "ref", "refId", "trackingId", "trk",
+    "sendid", "send_date", "sug",
+    "originToLandingJobPostings", "origin",
+}
+
+
+def _clean_url(url: str) -> str:
+    """Strip tracking/UTM params before fetching — prevents Cloudflare false positives."""
+    p = urlparse(url)
+    qs = parse_qs(p.query, keep_blank_values=False)
+    clean = {k: v for k, v in qs.items() if k not in _TRACKING_PARAMS}
+    return urlunparse(p._replace(query=urlencode(clean, doseq=True)))
 
 
 def fetch_job_text(url: str) -> str:
@@ -23,6 +39,7 @@ def fetch_job_text(url: str) -> str:
     falls back to generic HTML extraction.
     Raises on failure (caller decides how to handle).
     """
+    url = _clean_url(url)
     domain = (urlparse(url).hostname or "").lower()
 
     if "justjoin.it" in domain:
