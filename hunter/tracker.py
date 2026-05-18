@@ -58,9 +58,15 @@ def normalize_url(url: str) -> str:
         # Pracuj.pl tracking params (email alerts, suggested jobs)
         "sendid", "send_date", "sug",
     }
-    qs = parse_qs(p.query, keep_blank_values=False)
-    clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
-    query = urlencode(clean_qs, doseq=True) if clean_qs else ""
+    # For job boards where the job identity is fully in the path, drop ALL query params.
+    # This makes dedup robust against any unknown tracking/session params.
+    _path_id_domains = {"www.pracuj.pl", "justjoin.it", "nofluffjobs.com"}
+    if host in _path_id_domains:
+        query = ""
+    else:
+        qs = parse_qs(p.query, keep_blank_values=False)
+        clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
+        query = urlencode(clean_qs, doseq=True) if clean_qs else ""
     # For LinkedIn /jobs/view/{id}/ — keep only path
     if "linkedin.com" in host and "/jobs/view/" in path:
         m = re.search(r"/jobs/view/(\d+)", path)
@@ -620,7 +626,7 @@ def add_manual_jobleads_pending(
         title.strip() or "Unknown",
         "",
         MANUAL_PENDING_ATS,
-        url,
+        normalize_url(url) if url else "",
         folder_str,
         "",
         "",
@@ -677,7 +683,7 @@ def add_applied(content: dict, force: bool = False) -> bool:
         job_title,
         stack,
         ats_display,
-        apply_url,
+        norm_url or apply_url,
         folder,
         "",
         "+" if is_reapply else "",
@@ -730,8 +736,8 @@ def add_skipped(job: Job) -> dict | None:
         job.company,     # Company
         job.title,       # Job Title
         "",              # Stack  (unknown at this point)
-        "SKIP",          # ATS %  (repurposed for status)
-        job.url,         # URL
+        "SKIP",                          # ATS %  (repurposed for status)
+        normalize_url(job.url),          # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
@@ -779,7 +785,7 @@ def add_react_skipped(content: dict, url: str) -> None:
         title,                          # Job Title
         content.get("stack", ""),       # Stack
         "SKIP",                         # ATS %
-        url,                            # URL
+        normalize_url(url) if url else "",  # URL
         "",                             # Folder
         "—",                            # Sent  ← marks React-skip
         "",                             # Re-application
@@ -818,8 +824,8 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
         company,         # Company
         title,           # Job Title
         "",              # Stack
-        "EXPIRED",       # ATS %
-        url,             # URL
+        "EXPIRED",                       # ATS %
+        normalize_url(url) if url else "",  # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
@@ -855,8 +861,8 @@ def add_failed(job: Job) -> None:
         job.company,     # Company
         job.title,       # Job Title
         "",              # Stack
-        "FAIL",          # ATS %  (repurposed for status)
-        job.url,         # URL
+        "FAIL",                          # ATS %  (repurposed for status)
+        normalize_url(job.url),          # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
