@@ -164,3 +164,21 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         logger.exception("[unsent] Failed: %s", exc)
         msg = f"❌ Не удалось прочитать трекер: <code>{exc}</code>"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Regenerate tracker.xlsx from SQLite and report row count."""
+    await update.message.reply_text("⏳ Экспортирую tracker.xlsx из SQLite…")
+    try:
+        from hunter.tracker import export_to_excel
+        n = await asyncio.to_thread(export_to_excel)
+        await update.message.reply_text(
+            f"✅ <b>tracker.xlsx обновлён</b> — {n} строк экспортировано из SQLite.",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as exc:
+        logger.exception("[export] Failed: %s", exc)
+        await update.message.reply_text(
+            f"❌ Экспорт не удался: <code>{exc}</code>",
+            parse_mode=ParseMode.HTML,
+        )

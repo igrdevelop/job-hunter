@@ -55,6 +55,22 @@ class TrackerCache:
     # Load
     # ------------------------------------------------------------------
 
+    async def load_from_db(self) -> None:
+        """Populate cache from SQLite (preferred over load_from_excel at startup)."""
+        from hunter import db as _db
+        async with self._lock:
+            self.rows.clear()
+            self.by_url.clear()
+            self.by_ctkey.clear()
+            rows = await asyncio.to_thread(_db.get_all_rows)
+            for row_dict in rows:
+                row_id = row_dict.get("ID", "").strip()
+                if not row_id:
+                    continue
+                self._index_row(row_id, row_dict, sheet_row=None)
+            self._loaded = True
+            log.info("tracker_cache: loaded %d rows from SQLite", len(self.rows))
+
     async def load_from_excel(self, path: Path = TRACKER_PATH) -> None:
         """Populate cache from tracker.xlsx. Safe to call again to reload."""
         async with self._lock:

@@ -218,56 +218,20 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
 
 def get_known_urls() -> set[str]:
     """Return all normalized URLs stored in tracker — used for deduplication."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    urls = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row and len(row) >= URL_COL_INDEX:
-            val = row[URL_COL_INDEX - 1]  # 0-based
-            if val:
-                urls.add(normalize_url(str(val)))
-    wb.close()
-    return urls
+    from hunter import db as _db
+    return _db.get_known_norm_urls()
 
 
 def get_known_company_titles() -> set[str]:
     """Return dedup_key(company, title) for all rows in tracker."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    keys = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row and len(row) >= TITLE_COL_INDEX:
-            company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-            title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-            if company and title:
-                keys.add(dedup_key(company, title))
-    wb.close()
-    return keys
+    from hunter import db as _db
+    return _db.get_known_ct_keys()
 
 
 def get_sent_companies() -> set[str]:
     """Return normalized company names for rows that have Sent info."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    companies = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < SENT_COL_INDEX:
-            continue
-        sent = str(row[SENT_COL_INDEX - 1] or "").strip()
-        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        if sent and company:
-            companies.add(normalize_company(company))
-    wb.close()
-    return companies
+    from hunter import db as _db
+    return {normalize_company(c) for c in _db.get_sent_company_names() if c}
 
 
 def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
@@ -290,53 +254,33 @@ def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
 
 def get_failed_jobs() -> list[Job]:
     """Return Job objects for all rows with ATS status 'FAIL'."""
-    if not TRACKER_PATH.exists():
-        return []
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    jobs = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
-        if ats != "FAIL":
-            continue
-        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-        url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if url:
-            jobs.append(Job(
-                title=title,
-                company=company,
-                location="",
-                salary=None,
-                url=url,
-                source="retry",
-            ))
-    wb.close()
-    return jobs
+    from hunter import db as _db
+    return [
+        Job(title=r["title"], company=r["company"], location="", salary=None,
+            url=r["url"], source="retry")
+        for r in _db.get_by_ats("FAIL")
+        if r["url"]
+    ]
 
 
 def remove_failed(url: str) -> None:
     """Remove a FAIL row from tracker (so it can be re-added as a proper entry)."""
+    from hunter import db as _db
+    norm = normalize_url(url)
+    _db.delete_where(norm, "FAIL")
+
     if not TRACKER_PATH.exists():
         return
-
     wb = openpyxl.load_workbook(TRACKER_PATH)
     ws = wb.active
-
-    norm = normalize_url(url)
     rows_to_delete = []
     for row_num in range(2, ws.max_row + 1):
         ats = str(ws.cell(row=row_num, column=ATS_COL_INDEX).value or "").strip()
         row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
         if ats == "FAIL" and normalize_url(row_url) == norm:
             rows_to_delete.append(row_num)
-
     for row_num in reversed(rows_to_delete):
         ws.delete_rows(row_num)
-
     if rows_to_delete:
         _save_with_retry(wb)
     else:
@@ -350,99 +294,75 @@ def has_successful_entry(url: str) -> bool:
 
 def get_url_status_flags(url: str) -> dict[str, bool]:
     """Return status flags for URL: successful entry and React-only skip marker."""
-    if not TRACKER_PATH.exists():
-        return {"has_success": False, "is_react_skip": False}
+    from hunter import db as _db
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-
+    rows = _db.get_by_norm_url(norm)
     has_success = False
     is_react_skip = False
-
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if not row_url or normalize_url(row_url) != norm:
-            continue
-
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-        sent = str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else ""
-
-        if ats.upper() not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
+    for r in rows:
+        ats = r["ats"].strip().upper()
+        sent = r["sent"].strip()
+        if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
             has_success = True
         elif ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
             is_react_skip = True
-
         if has_success and is_react_skip:
             break
-
-    wb.close()
     return {"has_success": has_success, "is_react_skip": is_react_skip}
 
 
 def lookup_url(url: str) -> list[dict]:
     """Find all tracker entries matching this URL (normalized). Returns row details."""
-    if not TRACKER_PATH.exists():
-        return []
-    norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if row_url and normalize_url(row_url) == norm:
-            results.append({
-                "row": row_num,
-                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
-                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
-            })
-    wb.close()
-    return results
+    from hunter import db as _db
+    rows = _db.get_by_norm_url(normalize_url(url))
+    return [
+        {
+            "row": 0,
+            "company": r["company"],
+            "title": r["title"],
+            "ats": r["ats"],
+            "folder": r["folder"],
+            "sent": r["sent"],
+        }
+        for r in rows
+    ]
 
 
 def lookup_company(company: str) -> list[dict]:
     """Find all tracker entries matching this company (normalized). Returns row details."""
-    if not TRACKER_PATH.exists():
-        return []
     norm = normalize_company(company)
     if not norm:
         return []
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        if row_company and normalize_company(row_company) == norm:
-            results.append({
-                "row": row_num,
-                "company": row_company,
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
-                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
-            })
-    wb.close()
-    return results
+    from hunter import db as _db
+    return [
+        {
+            "row": 0,
+            "company": r["Company"],
+            "title": r["Job Title"],
+            "ats": r["ATS %"],
+            "folder": r["Folder"],
+            "sent": r["Sent"],
+        }
+        for r in _db.get_all_rows()
+        if normalize_company(r.get("Company", "")) == norm
+    ]
 
 
 def is_known(url: str, company: str = "", title: str = "") -> bool:
     """Check if a job is already in tracker (by URL or company+title)."""
-    known_urls = get_known_urls()
-    if normalize_url(url) in known_urls:
-        return True
-    if company and title:
-        known_ct = get_known_company_titles()
-        if dedup_key(company, title) in known_ct:
-            return True
-    return False
+    from hunter import db as _db
+    ct = dedup_key(company, title) if company and title else ""
+    return _db.is_known(normalize_url(url), ct)
+
+
+def _db_insert(values: list, *, replace: bool = False) -> None:
+    """Insert a values list (parallel to TRACKER_HEADERS) into SQLite. Best-effort."""
+    try:
+        from hunter import db as _db
+        _db.insert_job(dict(zip(TRACKER_HEADERS, (str(v or "") for v in values))), replace=replace)
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("[tracker] db insert failed: %s", exc)
 
 
 def _company_from_content(content: dict) -> str:
@@ -482,9 +402,12 @@ def _parse_ats_score(raw: str) -> tuple[str, int | None]:
 
 def remove_manual_pending_rows(url: str) -> int:
     """Delete tracker rows for this URL where ATS is MANUAL (successful apply supersedes)."""
-    if not TRACKER_PATH.exists():
-        return 0
+    from hunter import db as _db
     norm = normalize_url(url)
+    db_deleted = _db.delete_where(norm, MANUAL_PENDING_ATS)
+
+    if not TRACKER_PATH.exists():
+        return db_deleted
     wb = openpyxl.load_workbook(TRACKER_PATH)
     ws = wb.active
     deleted = 0
@@ -500,37 +423,23 @@ def remove_manual_pending_rows(url: str) -> int:
         _save_with_retry(wb)
     else:
         wb.close()
-    return deleted
+    return db_deleted or deleted
 
 
 def manual_jobleads_job_posting_path(url: str) -> Path | None:
     """Return path to job_posting.txt for a MANUAL JobLeads row, or None."""
-    if not TRACKER_PATH.exists():
-        return None
+    from hunter import db as _db
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < URL_COL_INDEX:
-                continue
-            row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-            if not row_url or normalize_url(row_url) != norm:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            if len(row) <= URL_COL_INDEX:
-                return None
-            folder_raw = str(row[URL_COL_INDEX] or "").strip()
-            if not folder_raw:
-                return None
-            p = Path(folder_raw)
-            if not p.is_absolute():
-                p = Path(TRACKER_PATH).parent / folder_raw
-            return p / "job_posting.txt"
-    finally:
-        wb.close()
+    for r in _db.get_by_norm_url(norm):
+        if r["ats"].upper() != MANUAL_PENDING_ATS:
+            continue
+        folder_raw = r["folder"]
+        if not folder_raw:
+            return None
+        p = Path(folder_raw)
+        if not p.is_absolute():
+            p = TRACKER_PATH.parent / folder_raw
+        return p / "job_posting.txt"
     return None
 
 
@@ -544,55 +453,23 @@ def has_manual_pending(url: str) -> bool:
 
 def get_all_manual_pending() -> list[dict]:
     """Return all MANUAL-pending rows as dicts with keys: url, folder, company, title, row."""
-    if not TRACKER_PATH.exists():
-        return []
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results: list[dict] = []
-    try:
-        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
-            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
-            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
-            title = str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else ""
-            if not url:
-                continue
-            results.append({"url": url, "folder": folder, "company": company, "title": title, "row": i})
-    finally:
-        wb.close()
-    return results
+    from hunter import db as _db
+    return [
+        {"url": r["url"], "folder": r["folder"], "company": r["company"],
+         "title": r["title"], "row": r["row"]}
+        for r in _db.get_by_ats(MANUAL_PENDING_ATS)
+        if r["url"]
+    ]
 
 
 def latest_manual_pending() -> dict[str, str] | None:
-    """Return latest MANUAL row info (url, folder) or None.
-
-    Used by Telegram paste flow when the user pastes a posting without URL.
-    """
-    if not TRACKER_PATH.exists():
+    """Return latest MANUAL row info (url, folder) or None."""
+    from hunter import db as _db
+    rows = [r for r in _db.get_by_ats(MANUAL_PENDING_ATS) if r["url"]]
+    if not rows:
         return None
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    latest: dict[str, str] | None = None
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
-            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
-            if not url:
-                continue
-            latest = {"url": url, "folder": folder}
-    finally:
-        wb.close()
-    return latest
+    last = rows[-1]
+    return {"url": last["url"], "folder": last["folder"]}
 
 
 def add_manual_jobleads_pending(
@@ -625,6 +502,7 @@ def add_manual_jobleads_pending(
         "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
         _new_row_id(),
     ]
+    _db_insert(values)
     row_font = Font(name="Calibri", size=11)
     manual_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
 
@@ -659,14 +537,10 @@ def add_applied(content: dict, force: bool = False) -> bool:
     if norm_url and has_successful_entry(apply_url) and not force:
         return False
 
+    from hunter import db as _db
+    is_reapply = bool(norm_url and _db.get_by_norm_url(norm_url))
+
     wb, ws = _load_or_create()
-
-    is_reapply = any(
-        normalize_url(str(row[URL_COL_INDEX - 1] or "")) == norm_url
-        for row in ws.iter_rows(min_row=2, values_only=True)
-        if norm_url and row and len(row) >= URL_COL_INDEX and row[URL_COL_INDEX - 1]
-    )
-
     next_row = ws.max_row + 1
     row_font = Font(name="Calibri", size=11)
     values = [
@@ -682,6 +556,8 @@ def add_applied(content: dict, force: bool = False) -> bool:
         to_learn,
         _new_row_id(),
     ]
+
+    _db_insert(values, replace=force)
 
     for col, val in enumerate(values, 1):
         cell = ws.cell(row=next_row, column=col, value=val)
@@ -737,6 +613,7 @@ def add_skipped(job: Job) -> dict | None:
         row_id,          # ID
     ]
 
+    _db_insert(values)
     row_font = Font(name="Calibri", size=11)
     skip_fill = PatternFill("solid", fgColor="D9D9D9")
 
@@ -785,6 +662,7 @@ def add_react_skipped(content: dict, url: str) -> None:
         _new_row_id(),                  # ID
     ]
 
+    _db_insert(values)
     row_font = Font(name="Calibri", size=11)
     row_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
 
@@ -825,6 +703,7 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
         _new_row_id(),   # ID
     ]
 
+    _db_insert(values)
     row_font = Font(name="Calibri", size=11)
     row_fill = PatternFill("solid", fgColor="FCE4D6")  # light orange
 
@@ -862,6 +741,7 @@ def add_failed(job: Job) -> None:
         _new_row_id(),   # ID
     ]
 
+    _db_insert(values)
     row_font = Font(name="Calibri", size=11)
     fail_fill = PatternFill("solid", fgColor="F4CCCC")  # light red
 
@@ -882,46 +762,8 @@ def iter_unsent_rows() -> list[dict]:
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
     """
-    if not TRACKER_PATH.exists():
-        return []
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    try:
-        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-            if not row:
-                continue
-            row = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
-
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip()
-            sent = str(row[SENT_COL_INDEX - 1] or "").strip()
-            row_id = str(row[ID_COL_INDEX - 1] or "").strip()
-
-            if ats == "SKIP":
-                continue
-            if sent:
-                continue
-            if not row_id:
-                continue
-
-            results.append({
-                "id": row_id,
-                "row_num": row_num,
-                "date": str(row[0] or "").strip(),
-                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "stack": str(row[3] or "").strip(),
-                "ats": ats,
-                "url": str(row[URL_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[6] or "").strip(),
-                "sent": sent,
-                "reapp": str(row[8] or "").strip(),
-                "to_learn": str(row[9] or "").strip(),
-            })
-    finally:
-        wb.close()
-    return results
+    from hunter import db as _db
+    return _db.get_unsent_rows()
 
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
@@ -930,25 +772,19 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
     updates: {row_id: sent_value} — only non-empty sent_value entries.
     Returns number of rows updated.
     """
-    if not updates or not TRACKER_PATH.exists():
+    if not updates:
         return 0
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-    updated = 0
-
-    for row_num in range(2, ws.max_row + 1):
-        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
-        if row_id and row_id in updates:
-            sent_val = updates[row_id]
-            if sent_val:
-                ws.cell(row=row_num, column=SENT_COL_INDEX).value = sent_val
-                updated += 1
-
-    if updated:
+    from hunter import db as _db
+    updated = sum(_db.update_sent(rid, sv) for rid, sv in updates.items() if sv)
+    # Mirror to Excel for the human-readable view.
+    if updated and TRACKER_PATH.exists():
+        wb = openpyxl.load_workbook(TRACKER_PATH)
+        ws = wb.active
+        for row_num in range(2, ws.max_row + 1):
+            row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+            if row_id and row_id in updates and updates[row_id]:
+                ws.cell(row=row_num, column=SENT_COL_INDEX).value = updates[row_id]
         _save_with_retry(wb)
-    else:
-        wb.close()
     return updated
 
 
@@ -962,30 +798,36 @@ def apply_pull_updates(rows: list[dict]) -> int:
     rows: list of full row dicts (with 'ID') where Sheets had a newer value.
     Updates Sent, Re-application, To Learn columns. Returns count of rows updated.
     """
-    if not rows or not TRACKER_PATH.exists():
+    if not rows:
         return 0
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
+    from hunter import db as _db
     updated = 0
-
-    for row_num in range(2, ws.max_row + 1):
-        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+    for row_dict in rows:
+        row_id = row_dict.get("ID", "").strip()
         if not row_id:
             continue
-        for row_dict in rows:
-            if row_dict.get("ID", "").strip() != row_id:
+        updated += _db.update_user_fields(
+            row_id,
+            sent=row_dict.get("Sent", ""),
+            reapply=row_dict.get("Re-application", ""),
+            to_learn=row_dict.get("To Learn", ""),
+        )
+    # Mirror to Excel for the human-readable view.
+    if updated and TRACKER_PATH.exists():
+        wb = openpyxl.load_workbook(TRACKER_PATH)
+        ws = wb.active
+        for row_num in range(2, ws.max_row + 1):
+            row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
+            if not row_id:
                 continue
-            ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
-            ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
-            ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
-            updated += 1
-            break
-
-    if updated:
+            for row_dict in rows:
+                if row_dict.get("ID", "").strip() != row_id:
+                    continue
+                ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
+                ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
+                ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
+                break
         _save_with_retry(wb)
-    else:
-        wb.close()
     return updated
 
 
@@ -995,23 +837,13 @@ def get_folder_by_url(url: str) -> str | None:
     Normalizes the URL before comparing (strip trailing slash, lowercase scheme).
     Returns the raw string from the Folder column (e.g. 'Applications/2026-05-11/PeopleMore_3').
     """
-    if not TRACKER_PATH.exists():
-        return None
-
     target = normalize_url(url)
     if not target:
         return None
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            cell_url = str(row[URL_COL_INDEX - 1] or "").strip()
-            if normalize_url(cell_url) == target:
-                folder_val = row[URL_COL_INDEX]  # column 7 = index 6 = URL_COL_INDEX
-                return str(folder_val).strip() if folder_val else None
-    finally:
-        wb.close()
+    from hunter import db as _db
+    for r in _db.get_by_norm_url(target):
+        if r.get("folder"):
+            return r["folder"]
     return None
 
 
@@ -1023,30 +855,86 @@ _GSHEETS_COLS = [
 ]
 
 def read_all_tracker_rows() -> list[dict]:
-    """Read every data row from tracker.xlsx as a dict keyed by gsheets COLUMNS names.
+    """Read every data row as a dict keyed by TRACKER_HEADERS names.
 
-    Rows with no ID are skipped (they can't be synced). Empty cells become "".
-    Used by gsheets_sync.push_missing_rows() to detect what's absent from Sheets.
+    Rows with no ID are skipped. Used by gsheets_sync.push_missing_rows().
     """
-    if not TRACKER_PATH.exists():
-        return []
+    from hunter import db as _db
+    return _db.get_all_rows()
 
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+
+def export_to_excel(path: Path = TRACKER_PATH) -> int:
+    """Regenerate tracker.xlsx from SQLite. Overwrites the file.
+
+    Returns number of rows written. Uses the same formatting as normal writes.
+    Called by /export Telegram command.
+    """
+    from hunter import db as _db
+    rows = _db.get_all_rows()
+
+    wb = openpyxl.Workbook()
     ws = wb.active
-    results: list[dict] = []
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            # Pad to at least ID_COL_INDEX columns
-            padded = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
-            row_id = str(padded[ID_COL_INDEX - 1] or "").strip()
-            if not row_id:
-                continue
-            results.append({
-                col: str(padded[i] or "").strip()
-                for i, col in enumerate(_GSHEETS_COLS)
-            })
-    finally:
-        wb.close()
-    return results
+    ws.title = "Applications"
+
+    header_fill = PatternFill("solid", fgColor="2B579A")
+    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12]
+
+    for col, (header, width) in enumerate(zip(TRACKER_HEADERS, widths), 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+    ws.row_dimensions[1].height = 20
+    ws.freeze_panes = "A2"
+
+    _ATS_STATUS_FILLS = {
+        "SKIP":    PatternFill("solid", fgColor="D9D9D9"),
+        "FAIL":    PatternFill("solid", fgColor="F4CCCC"),
+        "EXPIRED": PatternFill("solid", fgColor="FCE4D6"),
+        "MANUAL":  PatternFill("solid", fgColor="FFF2CC"),
+    }
+
+    for row_num, row in enumerate(rows, 2):
+        ats = str(row.get("ATS %") or "").strip()
+        sent = str(row.get("Sent") or "").strip()
+
+        # Determine row fill
+        if ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
+            row_fill = PatternFill("solid", fgColor="FFF2CC")  # react-skip: light yellow
+        elif ats in _ATS_STATUS_FILLS:
+            row_fill = _ATS_STATUS_FILLS[ats]
+        elif row_num % 2 == 0:
+            row_fill = PatternFill("solid", fgColor="EEF2FA")
+        else:
+            row_fill = None
+
+        _, ats_numeric = _parse_ats_score(ats)
+
+        for col, header in enumerate(TRACKER_HEADERS, 1):
+            val = row.get(header, "")
+            cell = ws.cell(row=row_num, column=col, value=val)
+            cell.font = Font(name="Calibri", size=11)
+            if row_fill:
+                cell.fill = row_fill
+            if col == URL_COL_INDEX and val:
+                cell.hyperlink = str(val)
+                cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+            if col == ATS_COL_INDEX and ats and ats_numeric is not None:
+                cell.alignment = Alignment(horizontal="center")
+                if ats_numeric >= 80:
+                    cell.fill = PatternFill("solid", fgColor="C6EFCE")
+                    cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
+                elif ats_numeric >= 60:
+                    cell.fill = PatternFill("solid", fgColor="FFEB9C")
+                    cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
+                else:
+                    cell.fill = PatternFill("solid", fgColor="FFC7CE")
+                    cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
+            if col in (SENT_COL_INDEX, 9):
+                cell.alignment = Alignment(horizontal="center")
+
+    _save_with_retry(wb, retries=3, delay=2.0)
+    return len(rows)

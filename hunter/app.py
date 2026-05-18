@@ -5,6 +5,7 @@ build_application() wires together all command handlers, scheduled jobs,
 and the post-init hook. Called from hunter.py (or hunter/__main__.py).
 """
 
+import asyncio
 import logging
 import time as _time
 from datetime import time as dt_time
@@ -44,6 +45,7 @@ from hunter.telegram_bot import (
     send_job_cards,
 )
 from hunter.commands.status import (
+    cmd_export,
     cmd_schedule,
     cmd_start,
     cmd_stats,
@@ -75,6 +77,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
         BotCommand("unsent",          "Unsent applications count + Angular"),
+        BotCommand("export",          "Regenerate tracker.xlsx from SQLite"),
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
@@ -127,11 +130,22 @@ async def _post_init(app: Application) -> None:
     except Exception as e:
         logger.warning("[gsheets] startup init failed: %s", e)
 
-    # Load tracker cache so /unsent, /sync_sent, and scheduled reports are
-    # correct immediately after startup.
+    # Initialize SQLite store. Migrate from Excel if db is empty and Excel exists.
+    try:
+        from hunter import db as _db
+        _db.init_db()
+        if _db.is_empty():
+            migrated = await asyncio.to_thread(_db.migrate_from_excel, TRACKER_PATH)
+            logger.info("[startup] db: migrated %d rows from tracker.xlsx", migrated)
+        else:
+            logger.info("[startup] db: %d rows", _db.row_count())
+    except Exception as e:
+        logger.warning("[startup] db init failed: %s", e)
+
+    # Load tracker cache from SQLite (fast, no Excel parse).
     try:
         from hunter.tracker_cache import cache
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         logger.info("[startup] tracker_cache loaded")
     except Exception as e:
         logger.warning("[startup] tracker_cache load failed: %s", e)
@@ -161,6 +175,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("stats",          cmd_stats))
     app.add_handler(CommandHandler("schedule",       cmd_schedule))
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
+    app.add_handler(CommandHandler("export",         cmd_export))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
