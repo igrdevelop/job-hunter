@@ -13,6 +13,9 @@ pytz
 anthropic
 # openai
 
+# Optional: JSON structured logging (set LOG_FORMAT=json in .env)
+python-json-logger
+
 # Optional: better HTML extraction for generic job pages
 beautifulsoup4
 pytest

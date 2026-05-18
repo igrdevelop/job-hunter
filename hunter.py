@@ -9,37 +9,12 @@ Usage:
 
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
-from hunter.config import PROJECT_DIR, validate_config
+from hunter.config import PROJECT_DIR, LOG_FORMAT, validate_config
+from hunter.logging_setup import setup_logging
 from hunter.telegram_bot import build_application
 
-# ── Console handler (INFO+) ───────────────────────────────────────────────────
-_fmt = logging.Formatter(
-    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-_console = logging.StreamHandler(sys.stdout)
-_console.setLevel(logging.INFO)
-_console.setFormatter(_fmt)
-
-# ── File handler (WARNING+ with full tracebacks) ──────────────────────────────
-_log_dir = PROJECT_DIR / "logs"
-_log_dir.mkdir(exist_ok=True)
-_file_handler = RotatingFileHandler(
-    _log_dir / "hunter_errors.log",
-    maxBytes=5 * 1024 * 1024,   # 5 MB per file
-    backupCount=10,              # keep 10 rotated files → up to 50 MB history
-    encoding="utf-8",
-)
-_file_handler.setLevel(logging.WARNING)
-_file_handler.setFormatter(_fmt)
-
-logging.root.setLevel(logging.DEBUG)
-logging.root.addHandler(_console)
-logging.root.addHandler(_file_handler)
-
+setup_logging(log_dir=PROJECT_DIR / "logs", log_format=LOG_FORMAT)
 logger = logging.getLogger("hunter")
 
 
