@@ -364,6 +364,32 @@ def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
     return content
 
 
+def _resume_to_text(resume_en) -> str:
+    """Flatten resume_en dict to plain text for ATS keyword scoring."""
+    if isinstance(resume_en, str):
+        return resume_en
+    if not isinstance(resume_en, dict):
+        return str(resume_en)
+    parts: list[str] = []
+    if summary := resume_en.get("summary"):
+        parts.append(str(summary))
+    if skills := resume_en.get("skills"):
+        if isinstance(skills, dict):
+            parts.extend(str(v) for v in skills.values())
+        else:
+            parts.append(str(skills))
+    for exp in resume_en.get("experience") or []:
+        if isinstance(exp, dict):
+            parts.append(exp.get("title", ""))
+            parts.append(exp.get("stack_line", ""))
+            parts.extend(exp.get("bullets") or [])
+    if education := resume_en.get("education"):
+        parts.append(str(education))
+    if courses := resume_en.get("courses"):
+        parts.append(str(courses))
+    return "\n".join(p for p in parts if p)
+
+
 def _ats_check_loop(content: dict, job_text: str) -> dict:
     """Run independent ATS check; rewrite resume if score < 95%."""
     from hunter import ats_checker  # type: ignore[import]
@@ -377,7 +403,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
             job_text=job_text,
-            resume_text=resume_en,
+            resume_text=_resume_to_text(resume_en),
             provider=LLM_PROVIDER,
             model=LLM_MODEL,
             api_key=LLM_API_KEY,
