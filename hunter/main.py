@@ -26,7 +26,7 @@ from hunter.models import Job
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
-    get_known_urls, get_known_company_titles,
+    get_known_urls, get_known_company_titles,  # fallback when cache not loaded
     dedup_key, normalize_url,
     add_failed, get_failed_jobs, remove_failed, is_known,
 )
@@ -134,22 +134,29 @@ async def _run_hunt_impl(
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple
     # open roles and we don't want to block all of them just because one was sent.
-    try:
-        known_urls = await asyncio.to_thread(get_known_urls)
-        known_ct = await asyncio.to_thread(get_known_company_titles)
-    except Exception as e:
-        logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
-        hint = str(e)[:400]
-        await send_text(
-            context,
-            "❌ <b>Не удалось прочитать tracker.xlsx</b> (дедуп перед охотой).\n\n"
-            f"<pre>{hint}</pre>\n\n"
-            "Типичная причина сообщения про <code>[Content_Types].xml</code> — файл "
-            "не настоящий Excel (обрезан, 0 байт, переименованный HTML/CSV, битый архив). "
-            f"Проверь: <code>{TRACKER_PATH}</code>\n"
-            "Открой в Excel или восстанови из бэкапа.",
-        )
-        return
+    from hunter.tracker_cache import cache as tracker_cache
+    if tracker_cache.loaded:
+        # Fast path: O(1) set membership, no file I/O.
+        known_urls: set[str] = set(tracker_cache.by_url)
+        known_ct: set[str] = set(tracker_cache.by_ctkey)
+    else:
+        # Fallback: cache not yet populated — read Excel directly.
+        try:
+            known_urls = await asyncio.to_thread(get_known_urls)
+            known_ct = await asyncio.to_thread(get_known_company_titles)
+        except Exception as e:
+            logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
+            hint = str(e)[:400]
+            await send_text(
+                context,
+                "❌ <b>Не удалось прочитать tracker.xlsx</b> (дедуп перед охотой).\n\n"
+                f"<pre>{hint}</pre>\n\n"
+                "Типичная причина сообщения про <code>[Content_Types].xml</code> — файл "
+                "не настоящий Excel (обрезан, 0 байт, переименованный HTML/CSV, битый архив). "
+                f"Проверь: <code>{TRACKER_PATH}</code>\n"
+                "Открой в Excel или восстанови из бэкапа.",
+            )
+            return
 
     seen_urls_this_run: set[str] = set()
     seen_ct_this_run: set[str] = set()
