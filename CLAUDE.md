@@ -355,46 +355,30 @@ GSHEETS_ENABLED=true
 
 ## Refactoring Plan
 
-### Phase 1 — Cleanup (LOW risk, immediate value)
+> Full plan with tasks and acceptance criteria: [`docs/REFACTORING_PLAN.md`](docs/REFACTORING_PLAN.md)  
+> Analysis behind decisions: [`docs/PROJECT_ANALYSIS_2026_05.md`](docs/PROJECT_ANALYSIS_2026_05.md)
 
-- [x] **1.1** Delete stale docs: `PLAN.md`, `HUNTER_PLAN.md`, `EXPIRED_PLAN.md`, `PROJECT_REVIEW_AND_REFACTOR_PLAN.md`, `WEBSITE_PLAN.md`
-- [x] **1.2** Delete debug artifacts: `_probe*.py`, `tracker_broken.xlsx`
-- [x] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs (was already done)
-- [x] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
+| Phase | What | Risk | Status |
+|-------|------|------|--------|
+| **0** | Config validation + `_parse_bool` | ZERO | pending |
+| **1.1** | Source import guard (`sources/__init__.py`) | LOW | pending |
+| **1.2** | Domain matching fix (`job_fetch/__init__.py`) | LOW | pending |
+| **1.3** | Persistent `_pending_jobs` (survive restart) | LOW | pending |
+| **1.4** | TrackerCache dedup in `main.py` (drop Excel reads) | LOW | pending |
+| **1.5** | `/stats` command | LOW | pending |
+| **1.6** | Structured JSON logging | LOW | pending |
+| **2** | Split `apply_agent.py` → notify / shared / api / cli | MEDIUM | pending |
+| **3** | Split `telegram_bot.py` → commands/ + app.py + healthcheck | MEDIUM | pending |
+| **4** | SQLite tracker (replace Excel writes) | HIGH impact | pending |
+| **5** | Packaging: pyproject.toml + pytz→zoneinfo + pip-audit | LOW | pending |
 
-### Phase 2 — Split telegram_bot.py (MEDIUM risk)
+### Previously completed
 
-- [ ] **2.1** Extract command handlers into `hunter/commands/` module (hunt, force, status, expired, etc.)
-- [ ] **2.2** Extract `build_application()` + schedule setup into `hunter/app.py`
-- [ ] **2.3** Keep `telegram_bot.py` as thin dispatcher + send_text/send_job_cards API
-
-### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk)
-
-- [ ] **3.1** Add `fetch_text(url) -> str` method to `BaseSource` ABC
-- [ ] **3.2** Move `job_fetch/*.py` logic into corresponding `hunter/sources/*.py`
-- [ ] **3.3** Update `apply_agent.py` to call `source.fetch_text(url)` instead of `job_fetch.fetch_job_text()`
-- [ ] **3.4** Delete `job_fetch/` package
-
-### Phase 4 — Split apply_agent.py (MEDIUM risk)
-
-- [ ] **4.1** Extract API pipeline into `hunter/apply_api.py`
-- [ ] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
-- [ ] **4.3** Make apply callable as import (not just subprocess)
-- [ ] **4.4** Keep `apply_agent.py` as thin CLI entry point
-
-### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk)
-
-- [ ] **5.1** Create `hunter/db.py` with SQLite schema
-- [ ] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
-- [ ] **5.3** Add `/export` command for Excel export
-- [ ] **5.4** Keep openpyxl only for doc generation formatting
-- [ ] **5.5** gsheets_sync: replace tracker_cache with db queries
-
-### Phase 6 — Project structure (after phases 1-5)
-
-- [ ] **6.1** Add `pyproject.toml` with metadata and mypy config
-- [ ] **6.2** Make project installable (`pip install -e .`)
-- [ ] **6.3** Entry point: `python -m hunter` instead of `python hunter.py`
+- [x] Delete stale docs / debug artifacts (Phase 1 old plan)
+- [x] Unify `_run_apply_agent` → `services/apply_service.py`
+- [x] Subprocess timeout/kill, tracker writes centralized, config unified, 373 tests added
+- [x] Google Sheets integration (gsheets_client, tracker_cache, mirror/pull/resync)
+- [x] Google Drive upload (gdrive_client, gdrive_sync, upload_application_folder)
 
 ---
 
@@ -445,6 +429,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-05-18 | sonnet | Deep codebase analysis → docs/PROJECT_ANALYSIS_2026_05.md; full refactoring plan → docs/REFACTORING_PLAN.md; CLAUDE.md Refactoring Plan updated |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
