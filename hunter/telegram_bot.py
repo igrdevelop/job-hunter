@@ -1247,6 +1247,15 @@ def build_application() -> Application:
     )
     logger.info("[Schedule] gsheets_resync every 5 min")
 
+    # Upload missing Drive folders every 3 hours (no-op when GDRIVE_ENABLED=false)
+    app.job_queue.run_repeating(
+        callback=_scheduled_gdrive_upload_missing,
+        interval=3 * 3600,
+        first=300,
+        name="gdrive_upload_missing",
+    )
+    logger.info("[Schedule] gdrive_upload_missing every 3 h")
+
     # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
     if GSHEETS_ENABLED:
         pull_interval_sec = max(60, GSHEETS_REFRESH_INTERVAL_MIN * 60)
@@ -1350,6 +1359,21 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             pass
+
+
+async def _scheduled_gdrive_upload_missing(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every-3-hour job: upload application folders missing from Google Drive (no-op if disabled)."""
+    from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+    if not GDRIVE_ENABLED:
+        return
+    try:
+        from hunter import gdrive_sync
+        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR)
+        uploaded = result.get("uploaded", 0)
+        if uploaded:
+            logger.info("[scheduled_gdrive_upload_missing] uploaded %d folder(s)", uploaded)
+    except Exception as e:
+        logger.warning("[scheduled_gdrive_upload_missing] failed: %s", e)
 
 
 async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
