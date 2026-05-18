@@ -127,6 +127,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
         "/schedule - show source schedule\n"
         "/status - show schedule + bot status\n"
+        "/stats - статистика за последние 30 дней\n"
         "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
         "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
         "<code>job_posting.txt</code>)\n"
@@ -141,6 +142,64 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
+
+
+_REACT_SENT_MARKERS = {"—", "–", "-"}
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show 30-day hunt statistics from tracker.xlsx."""
+    from datetime import date, timedelta
+    from collections import Counter
+    from hunter.tracker import read_all_tracker_rows
+
+    rows = await asyncio.to_thread(read_all_tracker_rows)
+    cutoff = (date.today() - timedelta(days=30)).isoformat()
+
+    applied_scores: list[float] = []
+    counts: Counter[str] = Counter()
+    company_counter: Counter[str] = Counter()
+
+    for row in rows:
+        row_date = row.get("Date", "")[:10]
+        if len(row_date) < 10 or row_date < cutoff:
+            continue
+        ats = row.get("ATS %", "").strip()
+        if not ats or ats in ("—", "-", "–"):
+            continue
+        sent = row.get("Sent", "").strip()
+        try:
+            score = float(ats)
+            counts["applied"] += 1
+            applied_scores.append(score)
+            company = row.get("Company", "").strip()
+            if company:
+                company_counter[company] += 1
+        except ValueError:
+            status = ats.upper()
+            # React-only skip is stored as SKIP + Sent="—"
+            if status == "SKIP" and sent in _REACT_SENT_MARKERS:
+                counts["react"] += 1
+            else:
+                counts[status] += 1
+
+    total = sum(counts.values())
+    avg = f"{sum(applied_scores) / len(applied_scores):.0f}%" if applied_scores else "—"
+
+    top = company_counter.most_common(5)
+    top_line = ", ".join(f"{c} ({n})" for c, n in top) if top else "—"
+
+    lines = [
+        "📊 <b>Job Hunt Stats (last 30 days)</b>",
+        f"  Applied:     <b>{counts['applied']}</b>  (avg ATS: {avg})",
+        f"  Skipped:     <b>{counts.get('SKIP', 0)}</b>",
+        f"  React-only:  <b>{counts.get('react', 0)}</b>",
+        f"  Expired:     <b>{counts.get('EXPIRED', 0)}</b>",
+        f"  Failed:      <b>{counts.get('FAIL', 0)}</b>",
+        f"  Total rows:  {total}",
+        f"\n🏢 Top companies: {top_line}",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 def _parse_hunt_source_args(args: list[str], valid_names: set[str]) -> tuple[list[str] | None, list[str]]:
@@ -1138,6 +1197,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("start",           "Show help"),
         BotCommand("hunt",            "Run search (optional: source names)"),
         BotCommand("status",          "Bot status and schedule"),
+        BotCommand("stats",           "30-day hunt statistics"),
         BotCommand("schedule",        "Show source schedule"),
         BotCommand("force",           "Process URL even if already in tracker"),
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
@@ -1222,6 +1282,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
+    app.add_handler(CommandHandler("stats",          cmd_stats))
     app.add_handler(CommandHandler("schedule",       cmd_schedule))
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
