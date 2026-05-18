@@ -771,7 +771,17 @@ def main_api(url: str, paste_text: str = "") -> None:
             print(f"[apply_agent] FETCH ERROR: {e}")
             sys.exit(1)
 
-    # Step 1.5 — Check for expired offer (skip before calling LLM)
+    # Step 1.5a — Abort if fetched text is too short to be a real posting (B2)
+    from hunter.validation import is_job_text_too_short
+    if is_job_text_too_short(job_text):
+        notify(
+            f"⚠️ <b>Job text too short — skipped</b>\n"
+            f"Got {len((job_text or '').strip())} chars (min 200).\n🔗 {url}"
+        )
+        print(f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}")
+        sys.exit(0)
+
+    # Step 1.5b — Check for expired offer (skip before calling LLM)
     from hunter.expired_check import is_job_expired
     if is_job_expired(job_text):
         notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
@@ -922,6 +932,17 @@ def main_api(url: str, paste_text: str = "") -> None:
 
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")
+
+    # B1 — Abort if LLM produced a bogus/placeholder company name
+    from hunter.validation import is_bogus_company
+    if is_bogus_company(company):
+        notify(
+            f"⚠️ <b>Bogus company name — skipped</b>\n"
+            f"LLM returned: <code>{company}</code>\n🔗 {url}"
+        )
+        print(f"[apply_agent] ABORT — bogus company name {company!r}: {url}")
+        sys.exit(0)
+
     output_folder = compute_output_folder(company)
     output_folder.mkdir(parents=True, exist_ok=True)
 
