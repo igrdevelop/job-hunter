@@ -98,8 +98,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🤖 <b>Job Hunter Bot</b>\n\n"
         "Commands:\n"
         "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
-        "/schedule - show source schedule\n"
-        "/status - show schedule + bot status\n"
+        "/status - source schedule + bot status\n"
         "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
         "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
         "<code>job_posting.txt</code>)\n"
@@ -309,14 +308,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"{lock_status}\n"
         f"📋 Pending decisions: {pending} jobs"
         f"{active_lines}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the full source schedule as a clean table."""
-    await update.message.reply_text(
-        _build_schedule_text(),
         parse_mode=ParseMode.HTML,
     )
 
@@ -1089,8 +1080,7 @@ async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start",           "Show help"),
         BotCommand("hunt",            "Run search (optional: source names)"),
-        BotCommand("status",          "Bot status and schedule"),
-        BotCommand("schedule",        "Show source schedule"),
+        BotCommand("status",          "Bot status and source schedule"),
         BotCommand("force",           "Process URL even if already in tracker"),
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
@@ -1170,7 +1160,6 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
-    app.add_handler(CommandHandler("schedule",       cmd_schedule))
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
