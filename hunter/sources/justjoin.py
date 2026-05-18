@@ -17,7 +17,7 @@ Working approach (updated 2026-05):
      the listing API returns full salary/location/skills data)
   4. City filtering is handled by the global filter (location field)
 
-Rate: 3–6 API calls per run (1–2 pages × 3 workplace types).
+Rate: 3–15 API calls per run (1–5 pages × 3 workplace types).
 """
 
 import logging
@@ -47,7 +47,7 @@ JSON_HEADERS = {**HEADERS, "Accept": "application/json, text/plain, */*"}
 
 TIMEOUT = 20
 PER_PAGE = 100    # items per API page
-MAX_PAGES = 2     # max pages per workplaceType — 200 items each, ~600 total
+MAX_PAGES = 5     # max pages per workplaceType — 500 items each, ~1500 total
 PAGE_DELAY = 0.3  # seconds between pages
 
 WORKPLACE_TYPES = ["remote", "hybrid", "office"]

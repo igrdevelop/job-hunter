@@ -1,6 +1,8 @@
 import logging
 
 from hunter.config import (
+    JUSTJOIN_ENABLED,
+    NOFLUFFJOBS_ENABLED,
     LINKEDIN_ENABLED,
     BULLDOGJOB_ENABLED,
     PRACUJ_ENABLED,
@@ -18,16 +20,10 @@ from hunter.config import (
     ATS_AGGREGATOR_ENABLED,
     GMAIL_ENABLED,
 )
-from hunter.sources.justjoin import JustJoinSource
-from hunter.sources.nofluffjobs import NoFluffJobsSource
 
 _log = logging.getLogger(__name__)
 
-# Registry — add new sources here as you build them
-ALL_SOURCES = [
-    JustJoinSource(),
-    NoFluffJobsSource(),
-]
+ALL_SOURCES: list = []
 
 
 def _try_add(flag: bool, module: str, cls_name: str) -> None:
@@ -40,6 +36,8 @@ def _try_add(flag: bool, module: str, cls_name: str) -> None:
         _log.warning("%s disabled — import error: %s", cls_name, exc)
 
 
+_try_add(JUSTJOIN_ENABLED,       "hunter.sources.justjoin",       "JustJoinSource")
+_try_add(NOFLUFFJOBS_ENABLED,    "hunter.sources.nofluffjobs",    "NoFluffJobsSource")
 _try_add(LINKEDIN_ENABLED,       "hunter.sources.linkedin",       "LinkedInSource")
 _try_add(BULLDOGJOB_ENABLED,     "hunter.sources.bulldogjob",     "BulldogJobSource")
 _try_add(PRACUJ_ENABLED,         "hunter.sources.pracuj",         "PracujSource")

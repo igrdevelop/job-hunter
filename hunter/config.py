@@ -144,6 +144,12 @@ FILTER = {
     "exclude_german_language_required": True,
 }
 
+# ── JustJoin.it source config ────────────────────────────────────────────────
+JUSTJOIN_ENABLED: bool = _parse_bool("JUSTJOIN_ENABLED", default=True)
+
+# ── NoFluffJobs source config ─────────────────────────────────────────────────
+NOFLUFFJOBS_ENABLED: bool = _parse_bool("NOFLUFFJOBS_ENABLED", default=True)
+
 # ── LinkedIn source config ────────────────────────────────────────────────────
 LINKEDIN_ENABLED: bool = _parse_bool("LINKEDIN_ENABLED", default=True)
 
