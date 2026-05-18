@@ -1,3 +1,5 @@
+import logging
+
 from hunter.config import (
     LINKEDIN_ENABLED,
     BULLDOGJOB_ENABLED,
@@ -19,72 +21,38 @@ from hunter.config import (
 from hunter.sources.justjoin import JustJoinSource
 from hunter.sources.nofluffjobs import NoFluffJobsSource
 
+_log = logging.getLogger(__name__)
+
 # Registry — add new sources here as you build them
 ALL_SOURCES = [
     JustJoinSource(),
     NoFluffJobsSource(),
 ]
 
-if LINKEDIN_ENABLED:
-    from hunter.sources.linkedin import LinkedInSource
-    ALL_SOURCES.append(LinkedInSource())
 
-if BULLDOGJOB_ENABLED:
-    from hunter.sources.bulldogjob import BulldogJobSource
-    ALL_SOURCES.append(BulldogJobSource())
+def _try_add(flag: bool, module: str, cls_name: str) -> None:
+    if not flag:
+        return
+    try:
+        mod = __import__(module, fromlist=[cls_name])
+        ALL_SOURCES.append(getattr(mod, cls_name)())
+    except Exception as exc:
+        _log.warning("%s disabled — import error: %s", cls_name, exc)
 
-if PRACUJ_ENABLED:
-    from hunter.sources.pracuj import PracujSource
-    ALL_SOURCES.append(PracujSource())
 
-if THEPROTOCOL_ENABLED:
-    from hunter.sources.theprotocol import TheProtocolSource
-    ALL_SOURCES.append(TheProtocolSource())
-
-if SOLIDJOBS_ENABLED:
-    from hunter.sources.solidjobs import SolidJobsSource
-    ALL_SOURCES.append(SolidJobsSource())
-
-if INHIRE_ENABLED:
-    from hunter.sources.inhire import InhireSource
-    ALL_SOURCES.append(InhireSource())
-
-if JOBLEADS_ENABLED:
-    from hunter.sources.jobleads import JobLeadsSource
-    ALL_SOURCES.append(JobLeadsSource())
-
-if ARBEITNOW_ENABLED:
-    from hunter.sources.arbeitnow import ArbeitnowSource
-    ALL_SOURCES.append(ArbeitnowSource())
-
-if REMOTIVE_ENABLED:
-    from hunter.sources.remotive import RemotiveSource
-    ALL_SOURCES.append(RemotiveSource())
-
-if REMOTEOK_ENABLED:
-    from hunter.sources.remoteok import RemoteOkSource
-    ALL_SOURCES.append(RemoteOkSource())
-
-if HIMALAYAS_ENABLED:
-    from hunter.sources.himalayas import HimalayasSource
-    ALL_SOURCES.append(HimalayasSource())
-
-if FOURDAYWEEK_ENABLED:
-    from hunter.sources.fourdayweek import FourdayweekSource
-    ALL_SOURCES.append(FourdayweekSource())
-
-if WEWORKREMOTELY_ENABLED:
-    from hunter.sources.weworkremotely import WeworkremotelySource
-    ALL_SOURCES.append(WeworkremotelySource())
-
-if REMOTELEAF_ENABLED:
-    from hunter.sources.remoteleaf import RemoteleafSource
-    ALL_SOURCES.append(RemoteleafSource())
-
-if ATS_AGGREGATOR_ENABLED:
-    from hunter.sources.ats_aggregator import AtsAggregatorSource
-    ALL_SOURCES.append(AtsAggregatorSource())
-
-if GMAIL_ENABLED:
-    from hunter.sources.gmail import GmailSource
-    ALL_SOURCES.append(GmailSource())
+_try_add(LINKEDIN_ENABLED,       "hunter.sources.linkedin",       "LinkedInSource")
+_try_add(BULLDOGJOB_ENABLED,     "hunter.sources.bulldogjob",     "BulldogJobSource")
+_try_add(PRACUJ_ENABLED,         "hunter.sources.pracuj",         "PracujSource")
+_try_add(THEPROTOCOL_ENABLED,    "hunter.sources.theprotocol",    "TheProtocolSource")
+_try_add(SOLIDJOBS_ENABLED,      "hunter.sources.solidjobs",      "SolidJobsSource")
+_try_add(INHIRE_ENABLED,         "hunter.sources.inhire",         "InhireSource")
+_try_add(JOBLEADS_ENABLED,       "hunter.sources.jobleads",       "JobLeadsSource")
+_try_add(ARBEITNOW_ENABLED,      "hunter.sources.arbeitnow",      "ArbeitnowSource")
+_try_add(REMOTIVE_ENABLED,       "hunter.sources.remotive",       "RemotiveSource")
+_try_add(REMOTEOK_ENABLED,       "hunter.sources.remoteok",       "RemoteOkSource")
+_try_add(HIMALAYAS_ENABLED,      "hunter.sources.himalayas",      "HimalayasSource")
+_try_add(FOURDAYWEEK_ENABLED,    "hunter.sources.fourdayweek",    "FourdayweekSource")
+_try_add(WEWORKREMOTELY_ENABLED, "hunter.sources.weworkremotely", "WeworkremotelySource")
+_try_add(REMOTELEAF_ENABLED,     "hunter.sources.remoteleaf",     "RemoteleafSource")
+_try_add(ATS_AGGREGATOR_ENABLED, "hunter.sources.ats_aggregator", "AtsAggregatorSource")
+_try_add(GMAIL_ENABLED,          "hunter.sources.gmail",          "GmailSource")
