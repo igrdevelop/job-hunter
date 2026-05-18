@@ -1,30 +1,33 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+
+def _parse_bool(name: str, default: bool) -> bool:
+    val = os.getenv(name, "true" if default else "false").lower().strip()
+    return val in ("true", "1", "yes")
+
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: int = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 # After apply_agent success, also send .pdf/.docx via sendDocument (Bot API 50MB/file cap)
-TELEGRAM_SEND_DOCS: bool = os.getenv("TELEGRAM_SEND_DOCS", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+TELEGRAM_SEND_DOCS: bool = _parse_bool("TELEGRAM_SEND_DOCS", default=True)
 
 # ── Auto-apply ────────────────────────────────────────────────────────────────
-AUTO_APPLY: bool = os.getenv("AUTO_APPLY", "false").lower() in ("true", "1", "yes")
+AUTO_APPLY: bool = _parse_bool("AUTO_APPLY", default=False)
 
 # ── LLM config (used by apply_agent.py in API mode) ──────────────────────────
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
 LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-3-5-haiku-20241022")
 LLM_API_KEY: str = os.getenv("LLM_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
-APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1", "yes")
+APPLY_USE_CLI: bool = _parse_bool("APPLY_USE_CLI", default=False)
 
 # ── Resume generation ─────────────────────────────────────────────────────────
-GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
+GENERATE_PL_RESUME: bool = _parse_bool("GENERATE_PL_RESUME", default=False)
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
@@ -37,11 +40,7 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
-TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+TRACKER_BACKUP_ENABLED: bool = _parse_bool("TRACKER_BACKUP_ENABLED", default=True)
 TRACKER_BACKUP_DIR: Path = Path(
     os.getenv("TRACKER_BACKUP_DIR", str(PROJECT_DIR / "backups"))
 ).expanduser()
@@ -54,7 +53,7 @@ APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
 ATS_COMPANIES_PATH = PROJECT_DIR / "hunter" / "ats_companies.json"
 
 # ── Google Sheets integration ─────────────────────────────────────────────────
-GSHEETS_ENABLED: bool = os.getenv("GSHEETS_ENABLED", "false").lower() in ("true", "1", "yes")
+GSHEETS_ENABLED: bool = _parse_bool("GSHEETS_ENABLED", default=False)
 # Spreadsheet ID — set after first run (bot creates the sheet and sends you the ID)
 GSHEETS_TRACKER_ID: str = os.getenv("GSHEETS_TRACKER_ID", "")
 # How often (minutes) to pull Sheets → Excel to pick up user edits
@@ -64,7 +63,7 @@ GSHEETS_TOKEN_FILE: "Path" = PROJECT_DIR / "gsheets_token.json"
 GSHEETS_STATE_FILE: "Path" = PROJECT_DIR / "gsheets_state.json"
 
 # ── Google Drive integration ──────────────────────────────────────────────────
-GDRIVE_ENABLED: bool = os.getenv("GDRIVE_ENABLED", "false").lower() in ("true", "1", "yes")
+GDRIVE_ENABLED: bool = _parse_bool("GDRIVE_ENABLED", default=False)
 # Optional: ID of an existing Drive folder to upload into (skips auto-create of root)
 GDRIVE_ROOT_FOLDER_ID: str = os.getenv("GDRIVE_ROOT_FOLDER_ID", "")
 # Name of the root folder created automatically when GDRIVE_ROOT_FOLDER_ID is not set
@@ -146,80 +145,64 @@ FILTER = {
 }
 
 # ── LinkedIn source config ────────────────────────────────────────────────────
-LINKEDIN_ENABLED: bool = os.getenv("LINKEDIN_ENABLED", "true").lower() in ("true", "1", "yes")
+LINKEDIN_ENABLED: bool = _parse_bool("LINKEDIN_ENABLED", default=True)
 
 # ── Bulldogjob source config ──────────────────────────────────────────────────
-BULLDOGJOB_ENABLED: bool = os.getenv("BULLDOGJOB_ENABLED", "true").lower() in ("true", "1", "yes")
+BULLDOGJOB_ENABLED: bool = _parse_bool("BULLDOGJOB_ENABLED", default=True)
 
 # ── Pracuj.pl source config ──────────────────────────────────────────────────
-PRACUJ_ENABLED: bool = os.getenv("PRACUJ_ENABLED", "true").lower() in ("true", "1", "yes")
+PRACUJ_ENABLED: bool = _parse_bool("PRACUJ_ENABLED", default=True)
 
 # ── theprotocol.it source config ─────────────────────────────────────────────
 # Disabled by default: site is a full SPA behind Cloudflare, listing scraper
 # cannot extract data without a headless browser. Manual URL fetch still works.
-THEPROTOCOL_ENABLED: bool = os.getenv("THEPROTOCOL_ENABLED", "true").lower() in ("true", "1", "yes")
+THEPROTOCOL_ENABLED: bool = _parse_bool("THEPROTOCOL_ENABLED", default=True)
 
 # ── Solid.Jobs source config ─────────────────────────────────────────────────
-SOLIDJOBS_ENABLED: bool = os.getenv("SOLIDJOBS_ENABLED", "true").lower() in ("true", "1", "yes")
+SOLIDJOBS_ENABLED: bool = _parse_bool("SOLIDJOBS_ENABLED", default=True)
 
 # ── Inhire.io source config ───────────────────────────────────────────────────
 # Requires Playwright: pip install playwright && python -m playwright install chromium
-INHIRE_ENABLED: bool = os.getenv("INHIRE_ENABLED", "true").lower() in ("true", "1", "yes")
+INHIRE_ENABLED: bool = _parse_bool("INHIRE_ENABLED", default=True)
 
 # ── JobLeads source config ────────────────────────────────────────────────────
 # Detail pages are often Cloudflare-blocked; apply_agent then writes MANUAL tracker
 # rows + stub job_posting.txt — paste description and re-run apply on the same URL.
-JOBLEADS_ENABLED: bool = os.getenv("JOBLEADS_ENABLED", "true").lower() in ("true", "1", "yes")
+JOBLEADS_ENABLED: bool = _parse_bool("JOBLEADS_ENABLED", default=True)
 
 # ── Arbeitnow source config ───────────────────────────────────────────────────
-ARBEITNOW_ENABLED: bool = os.getenv("ARBEITNOW_ENABLED", "true").lower() in ("true", "1", "yes")
+ARBEITNOW_ENABLED: bool = _parse_bool("ARBEITNOW_ENABLED", default=True)
 
 # ── Remotive source config ────────────────────────────────────────────────────
-REMOTIVE_ENABLED: bool = os.getenv("REMOTIVE_ENABLED", "true").lower() in ("true", "1", "yes")
+REMOTIVE_ENABLED: bool = _parse_bool("REMOTIVE_ENABLED", default=True)
 
 # ── Remote OK source config ───────────────────────────────────────────────────
-REMOTEOK_ENABLED: bool = os.getenv("REMOTEOK_ENABLED", "true").lower() in ("true", "1", "yes")
+REMOTEOK_ENABLED: bool = _parse_bool("REMOTEOK_ENABLED", default=True)
 
 # ── Himalayas source config ───────────────────────────────────────────────────
-HIMALAYAS_ENABLED: bool = os.getenv("HIMALAYAS_ENABLED", "true").lower() in ("true", "1", "yes")
+HIMALAYAS_ENABLED: bool = _parse_bool("HIMALAYAS_ENABLED", default=True)
 
 # ── 4dayweek.io source config ───────────────────────────────────────────────
-FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+FOURDAYWEEK_ENABLED: bool = _parse_bool("FOURDAYWEEK_ENABLED", default=True)
 
 # ── We Work Remotely source config ────────────────────────────────────────────
-WEWORKREMOTELY_ENABLED: bool = os.getenv("WEWORKREMOTELY_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+WEWORKREMOTELY_ENABLED: bool = _parse_bool("WEWORKREMOTELY_ENABLED", default=True)
 
 # ── RemoteLeaf source config ─────────────────────────────────────────────────
 # HTML listing parser — set false if site layout changes and scraper breaks.
-REMOTELEAF_ENABLED: bool = os.getenv("REMOTELEAF_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+REMOTELEAF_ENABLED: bool = _parse_bool("REMOTELEAF_ENABLED", default=True)
 
 # ── ATS Aggregator source config ─────────────────────────────────────────────
 # Reads career pages of companies listed in hunter/ats_companies.json through
 # their ATS provider's public JSON API (Workable / Greenhouse / Lever / …).
-ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
+ATS_AGGREGATOR_ENABLED: bool = _parse_bool("ATS_AGGREGATOR_ENABLED", default=True)
 
 # ── Gmail source config ───────────────────────────────────────────────────────
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py
-GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
+GMAIL_ENABLED: bool = _parse_bool("GMAIL_ENABLED", default=False)
 # Fetch real title/company/location/salary for each URL extracted from alert emails.
-GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
+GMAIL_ENRICH_ENABLED: bool = _parse_bool("GMAIL_ENRICH_ENABLED", default=True)
 # Max parallel HTTP requests during enrichment
 GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches
@@ -250,3 +233,22 @@ JUSTJOIN_MARKER_ICONS = [
     "javascript",
     "html",
 ]
+
+# ── Structured logging ────────────────────────────────────────────────────────
+# Set LOG_FORMAT=json to emit JSON lines (useful in Docker / log aggregators)
+LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text")
+
+
+def validate_config() -> None:
+    """Fail fast on fatal misconfiguration. Call once at bot startup."""
+    errors: list[str] = []
+    if not TELEGRAM_BOT_TOKEN:
+        errors.append("TELEGRAM_BOT_TOKEN is not set")
+    if not TELEGRAM_CHAT_ID:
+        errors.append("TELEGRAM_CHAT_ID is not set")
+    if SCHEDULE_SOURCE_OFFSET_MIN < 0:
+        errors.append("SCHEDULE_SOURCE_OFFSET_MIN must be >= 0")
+    if MAX_JOBS_PER_RUN < 1:
+        errors.append("MAX_JOBS_PER_RUN must be >= 1")
+    if errors:
+        sys.exit("Config errors:\n" + "\n".join(f"  - {e}" for e in errors))

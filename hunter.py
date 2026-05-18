@@ -12,7 +12,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROJECT_DIR
+from hunter.config import PROJECT_DIR, validate_config
 from hunter.telegram_bot import build_application
 
 # ── Console handler (INFO+) ───────────────────────────────────────────────────
@@ -43,21 +43,8 @@ logging.root.addHandler(_file_handler)
 logger = logging.getLogger("hunter")
 
 
-def _check_config() -> bool:
-    ok = True
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN is not set in .env")
-        ok = False
-    if not TELEGRAM_CHAT_ID:
-        logger.error("TELEGRAM_CHAT_ID is not set in .env")
-        ok = False
-    # ANTHROPIC_API_KEY not required — apply_agent uses claude CLI (Pro plan)
-    return ok
-
-
 def main() -> None:
-    if not _check_config():
-        sys.exit(1)
+    validate_config()
 
     run_now = "--now" in sys.argv
 
