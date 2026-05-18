@@ -1,11 +1,13 @@
 """
 telegram_bot.py — Telegram bot: notifications, inline buttons, callback handlers.
 
-Pending jobs are stored in memory (dict job_id → Job) per session.
-If the bot restarts, old buttons become "expired" — that's acceptable.
+Pending jobs (Apply/Skip buttons) are persisted to pending_jobs.json so buttons
+survive bot restarts.
 """
 
 import asyncio
+import dataclasses
+import json
 import logging
 import re
 import subprocess
@@ -27,6 +29,7 @@ from telegram.ext import (
 
 from hunter.config import (
     APPLY_AGENT_PATH,
+    PROJECT_DIR,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TIMEZONE,
@@ -51,9 +54,31 @@ from hunter.tracker import (
 
 logger = logging.getLogger(__name__)
 
+_PENDING_JOBS_FILE = PROJECT_DIR / "pending_jobs.json"
+
 # In-memory store: job_id (10-char hash) → Job
-# Cleared on bot restart — acceptable trade-off vs complexity of persistence
+# Persisted to _PENDING_JOBS_FILE so Apply/Skip buttons survive restarts.
 _pending_jobs: dict[str, Job] = {}
+
+
+def _save_pending() -> None:
+    try:
+        data = {jid: dataclasses.asdict(job) for jid, job in _pending_jobs.items()}
+        _PENDING_JOBS_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[pending] save failed: %s", exc)
+
+
+def _load_pending() -> None:
+    if not _PENDING_JOBS_FILE.exists():
+        return
+    try:
+        data = json.loads(_PENDING_JOBS_FILE.read_text(encoding="utf-8"))
+        for jid, job_dict in data.items():
+            _pending_jobs[jid] = Job(**job_dict)
+        logger.info("[pending] restored %d pending job(s) from disk", len(_pending_jobs))
+    except Exception as exc:
+        logger.warning("[pending] load failed (ignoring): %s", exc)
 
 
 # ── Keyboard factory ──────────────────────────────────────────────────────────
@@ -89,6 +114,8 @@ async def send_job_cards(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) ->
             reply_markup=_make_keyboard(jid),
             disable_web_page_preview=True,
         )
+    if jobs:
+        _save_pending()
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -616,6 +643,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _handle_skip(query, job: Job, job_id: str) -> None:
     row = await asyncio.to_thread(add_skipped, job)
     _pending_jobs.pop(job_id, None)
+    _save_pending()
     if row:
         try:
             from hunter.tracker_cache import cache
@@ -636,6 +664,7 @@ async def _handle_skip(query, job: Job, job_id: str) -> None:
 
 async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     _pending_jobs.pop(job_id, None)
+    _save_pending()
 
     original = query.message.text
     await query.edit_message_text(
@@ -1175,6 +1204,9 @@ async def _post_init(app: Application) -> None:
         logger.info("[startup] tracker_cache loaded")
     except Exception as e:
         logger.warning("[startup] tracker_cache load failed: %s", e)
+
+    # Restore pending jobs so Apply/Skip buttons work after restart.
+    _load_pending()
 
 
 def build_application() -> Application:

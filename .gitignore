@@ -38,6 +38,7 @@ backups/
 
 # Tracker (per-user data)
 tracker.xlsx
+pending_jobs.json
 tracker.backup.*.xlsx
 to_send.xlsx
 to_send.backup.*.xlsx
