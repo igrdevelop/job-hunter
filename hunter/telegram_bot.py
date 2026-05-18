@@ -108,7 +108,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
         "/check_expired - проверить трекер на истёкшие вакансии\n"
         "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
         "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n"
         "/gdrive_upload_missing - загрузить все папки из tracker.xlsx на Google Drive\n\n"
         "Or just send a job URL to generate docs.",
@@ -465,29 +464,11 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     dirty = report.get("dirty_count", 0)
     lines.append(f"  Грязных строк: {dirty}")
     if dirty:
-        lines.append("  ℹ️ Запусти /gsheets_resync для повторной отправки")
+        lines.append("  ℹ️ Запусти /gsheets_push_missing для повторной отправки")
     await update.message.reply_text(
         "\n".join(lines),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-    )
-
-
-async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Retry dirty rows → Google Sheets."""
-    from hunter import gsheets_sync
-    await update.message.reply_text("⏳ Повторная отправка грязных строк в Sheets…")
-    try:
-        synced = await gsheets_sync.resync_dirty()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-    await update.message.reply_text(
-        f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
-        parse_mode=ParseMode.HTML,
     )
 
 
@@ -1117,7 +1098,6 @@ async def _post_init(app: Application) -> None:
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
-        BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
     ])
@@ -1196,7 +1176,6 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
     app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
     app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
 
