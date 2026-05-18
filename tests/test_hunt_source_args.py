@@ -1,6 +1,6 @@
 """Tests for /hunt source name parsing."""
 
-from hunter.telegram_bot import _parse_hunt_source_args
+from hunter.commands.hunt import _parse_hunt_source_args
 
 
 def test_hunt_args_empty_means_all() -> None:

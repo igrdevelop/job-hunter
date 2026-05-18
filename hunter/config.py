@@ -238,6 +238,10 @@ JUSTJOIN_MARKER_ICONS = [
 # Set LOG_FORMAT=json to emit JSON lines (useful in Docker / log aggregators)
 LOG_FORMAT: str = os.getenv("LOG_FORMAT", "text")
 
+# ── Healthcheck endpoint ──────────────────────────────────────────────────────
+# Set to a port number to enable (e.g. HEALTHCHECK_PORT=8080). 0 = disabled.
+HEALTHCHECK_PORT: int = int(os.getenv("HEALTHCHECK_PORT", "0"))
+
 
 def validate_config() -> None:
     """Fail fast on fatal misconfiguration. Call once at bot startup."""

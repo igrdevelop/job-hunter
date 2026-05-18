@@ -12,7 +12,7 @@ import sys
 
 from hunter.config import PROJECT_DIR, LOG_FORMAT, validate_config
 from hunter.logging_setup import setup_logging
-from hunter.telegram_bot import build_application
+from hunter.app import build_application
 
 setup_logging(log_dir=PROJECT_DIR / "logs", log_format=LOG_FORMAT)
 logger = logging.getLogger("hunter")
