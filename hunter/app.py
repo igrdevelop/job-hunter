@@ -10,7 +10,7 @@ import logging
 import time as _time
 from datetime import time as dt_time
 
-import pytz
+from zoneinfo import ZoneInfo
 from telegram import BotCommand
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -191,7 +191,7 @@ def build_application() -> Application:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_url))
 
     # ── Scheduled jobs ────────────────────────────────────────────────────────
-    tz = pytz.timezone(TIMEZONE)
+    tz = ZoneInfo(TIMEZONE)
     from hunter.sources import ALL_SOURCES
 
     # Staggered per-source hunts

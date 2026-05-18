@@ -1,0 +1,31 @@
+[project]
+name = "job-hunter"
+version = "0.1.0"
+description = "Autonomous job-hunting bot for Angular/Frontend roles"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "cloudscraper",
+    "python-dotenv",
+    "openpyxl",
+    "python-docx",
+    "python-telegram-bot[job-queue]",
+    "anthropic",
+    "python-json-logger",
+    "beautifulsoup4",
+    "scikit-learn",
+    "google-api-python-client==2.131.0",
+    "google-auth==2.29.0",
+    "google-auth-oauthlib==1.2.0",
+    "google-auth-httplib2==0.2.0",
+]
+
+[project.scripts]
+job-hunter = "hunter.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
