@@ -29,6 +29,7 @@ from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
     add_failed, get_failed_jobs, remove_failed, is_known,
+    is_in_cooldown,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -156,6 +157,7 @@ async def _run_hunt_impl(
     new_jobs: list[Job] = []
     dup_url = 0
     dup_ct = 0
+    dup_cooldown = 0
     for j in filtered:
         norm = normalize_url(j.url)
         if norm in known_urls or norm in seen_urls_this_run:
@@ -166,12 +168,19 @@ async def _run_hunt_impl(
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
             continue
+        if await asyncio.to_thread(is_in_cooldown, j.company, j.title):
+            logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
+            dup_cooldown += 1
+            continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
         new_jobs.append(j)
 
-    skipped_total = dup_url + dup_ct
-    logger.info(f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct})")
+    skipped_total = dup_url + dup_ct + dup_cooldown
+    logger.info(
+        f"[Hunt] New: {len(new_jobs)} "
+        f"(dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
+    )
 
     # ── Gmail breakdown ──────────────────────────────────────────────────────
     gmail_section = ""
