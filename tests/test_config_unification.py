@@ -1,7 +1,7 @@
 import sys
 
-import apply_agent
 import hunter.config as config
+from hunter.services.tracker_service import should_skip_url
 
 
 def test_hunter_config_exposes_cli_retry_settings() -> None:
@@ -13,8 +13,11 @@ def test_hunter_config_exposes_cli_retry_settings() -> None:
     assert config.CLI_RETRY_DELAY >= 0
 
 
-def test_already_processed_does_not_mutate_sys_path() -> None:
+def test_should_skip_url_does_not_mutate_sys_path() -> None:
     before = list(sys.path)
-    apply_agent._already_processed("https://example.com/jobs/42")
+    try:
+        should_skip_url("https://example.com/jobs/42")
+    except Exception:
+        pass  # tracker.xlsx may not exist in test env
     after = list(sys.path)
     assert after == before

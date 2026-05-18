@@ -1,6 +1,6 @@
 """Banned opener/body patterns — classic openers OK; resume-site junk flagged."""
 
-from apply_agent import _body_banlist_hits, _opener_banlist_hits
+from hunter.apply_shared import _body_banlist_hits, _opener_banlist_hits
 
 
 # ── should TRIGGER the banlist ───────────────────────────────────────────────
