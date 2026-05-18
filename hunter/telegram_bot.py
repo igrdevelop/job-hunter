@@ -98,8 +98,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🤖 <b>Job Hunter Bot</b>\n\n"
         "Commands:\n"
         "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
-        "/schedule - show source schedule\n"
-        "/status - show schedule + bot status\n"
+        "/status - source schedule + bot status\n"
         "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
         "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
         "<code>job_posting.txt</code>)\n"
@@ -108,7 +107,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
         "/check_expired - проверить трекер на истёкшие вакансии\n"
         "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
         "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n"
         "/gdrive_upload_missing - загрузить все папки из tracker.xlsx на Google Drive\n\n"
         "Or just send a job URL to generate docs.",
@@ -314,14 +312,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
-async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the full source schedule as a clean table."""
-    await update.message.reply_text(
-        _build_schedule_text(),
-        parse_mode=ParseMode.HTML,
-    )
-
-
 async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Сколько неотосланных заявок в трекере и сколько с ANGULAR в Stack."""
     try:
@@ -465,29 +455,11 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     dirty = report.get("dirty_count", 0)
     lines.append(f"  Грязных строк: {dirty}")
     if dirty:
-        lines.append("  ℹ️ Запусти /gsheets_resync для повторной отправки")
+        lines.append("  ℹ️ Запусти /gsheets_push_missing для повторной отправки")
     await update.message.reply_text(
         "\n".join(lines),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-    )
-
-
-async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Retry dirty rows → Google Sheets."""
-    from hunter import gsheets_sync
-    await update.message.reply_text("⏳ Повторная отправка грязных строк в Sheets…")
-    try:
-        synced = await gsheets_sync.resync_dirty()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-    await update.message.reply_text(
-        f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
-        parse_mode=ParseMode.HTML,
     )
 
 
@@ -1108,8 +1080,7 @@ async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start",           "Show help"),
         BotCommand("hunt",            "Run search (optional: source names)"),
-        BotCommand("status",          "Bot status and schedule"),
-        BotCommand("schedule",        "Show source schedule"),
+        BotCommand("status",          "Bot status and source schedule"),
         BotCommand("force",           "Process URL even if already in tracker"),
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
@@ -1117,7 +1088,6 @@ async def _post_init(app: Application) -> None:
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
-        BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
     ])
@@ -1190,13 +1160,11 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
-    app.add_handler(CommandHandler("schedule",       cmd_schedule))
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
     app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
     app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
 
@@ -1278,6 +1246,15 @@ def build_application() -> Application:
         name="gsheets_resync",
     )
     logger.info("[Schedule] gsheets_resync every 5 min")
+
+    # Upload missing Drive folders every 3 hours (no-op when GDRIVE_ENABLED=false)
+    app.job_queue.run_repeating(
+        callback=_scheduled_gdrive_upload_missing,
+        interval=3 * 3600,
+        first=300,
+        name="gdrive_upload_missing",
+    )
+    logger.info("[Schedule] gdrive_upload_missing every 3 h")
 
     # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
     if GSHEETS_ENABLED:
@@ -1382,6 +1359,21 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             pass
+
+
+async def _scheduled_gdrive_upload_missing(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every-3-hour job: upload application folders missing from Google Drive (no-op if disabled)."""
+    from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+    if not GDRIVE_ENABLED:
+        return
+    try:
+        from hunter import gdrive_sync
+        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR)
+        uploaded = result.get("uploaded", 0)
+        if uploaded:
+            logger.info("[scheduled_gdrive_upload_missing] uploaded %d folder(s)", uploaded)
+    except Exception as e:
+        logger.warning("[scheduled_gdrive_upload_missing] failed: %s", e)
 
 
 async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:

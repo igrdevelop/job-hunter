@@ -88,3 +88,31 @@ def test_dedup_key_polish_form_vs_short() -> None:
     k1 = dedup_key("UpvantaSpółkaZOgraniczonąOdpowiedzialnoś", "Frontend Engineer")
     k2 = dedup_key("Upvanta", "Frontend Engineer")
     assert k1 == k2
+
+
+# ---------------------------------------------------------------------------
+# B4 — numeric folder suffixes (_2, _3) stripped from company name
+# ---------------------------------------------------------------------------
+# compute_output_folder() appends _2/_3 when a same-day folder already exists.
+# That suffix must not create a new dedup_key.
+
+@pytest.mark.parametrize("variant", [
+    "EdgeOneSolutions_2",
+    "EdgeOneSolutions_3",
+    "EdgeOneSolutions_10",
+    "EdgeOneSolutions",
+])
+def test_normalize_company_strips_numeric_folder_suffix(variant: str) -> None:
+    assert normalize_company(variant) == normalize_company("EdgeOneSolutions"), (
+        f"normalize_company({variant!r}) diverged from base"
+    )
+
+
+@pytest.mark.parametrize("pair", [
+    ("Upvanta_2", "Upvanta"),
+    ("LinkGroup_3", "LinkGroup"),
+    ("NASK_2", "NASK"),
+])
+def test_dedup_key_numeric_suffix_equals_base(pair: tuple[str, str]) -> None:
+    suffixed, base = pair
+    assert dedup_key(suffixed, "Developer") == dedup_key(base, "Developer")
