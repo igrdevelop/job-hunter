@@ -515,11 +515,18 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         print("[apply_agent] ATS check skipped — no resume_en in content")
         return content
 
+    # ATS checker expects plain text; resume_en may be a structured dict from LLM
+    if isinstance(resume_en, dict):
+        import json as _json
+        resume_text_for_ats = _json.dumps(resume_en, ensure_ascii=False)
+    else:
+        resume_text_for_ats = str(resume_en)
+
     for attempt in range(1, _ATS_MAX_ROUNDS + 2):  # +2: initial check + N rewrites
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
             job_text=job_text,
-            resume_text=resume_en,
+            resume_text=resume_text_for_ats,
             provider=LLM_PROVIDER,
             model=LLM_MODEL,
             api_key=LLM_API_KEY,
@@ -870,6 +877,7 @@ def main_api(url: str, paste_text: str = "") -> None:
 
     # Step 4.4 — ATS boost pass (force mode only): if score < 95%, do a second LLM pass
     if _SKIP_DEDUP:
+        from hunter.tracker import _parse_ats_score
         _raw_ats = str(content.get("ats_score", "") or "")
         _, _ats_num = _parse_ats_score(_raw_ats)
         if _ats_num is not None and _ats_num < 95:
@@ -903,11 +911,12 @@ def main_api(url: str, paste_text: str = "") -> None:
             except Exception as _boost_err:
                 print(f"[apply_agent] ATS boost failed (using first pass): {_boost_err}")
 
-    # Step 4.5 — Skip React-only jobs (no Angular mentioned in stack)
+    # Step 4.5 — Skip React-only jobs (no Angular in LLM-identified stack)
+    # Trust the LLM's stack judgment — raw text scan was too permissive (sidebar content
+    # from fetched pages could mention Angular in unrelated job listings).
     # Bypassed in force mode — user explicitly wants docs regardless of stack.
     stack = (content.get("stack") or "").lower()
-    _angular_in_raw = "angular" in job_text.lower()
-    if "react" in stack and "angular" not in stack and not _angular_in_raw and not _SKIP_DEDUP:
+    if "react" in stack and "angular" not in stack and not _SKIP_DEDUP:
         notify(
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"

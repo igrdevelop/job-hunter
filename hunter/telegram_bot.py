@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -290,26 +291,44 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from hunter.main import _hunt_lock
     from hunter.config import AUTO_APPLY
-    from hunter.sources import ALL_SOURCES
 
-    pending = len(_pending_jobs)
-    lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
     mode = "AUTO" if AUTO_APPLY else "MANUAL"
+    hunting = "🔒 Hunt in progress" if _hunt_lock.locked() else "🔓 Idle"
+    pending = len(_pending_jobs)
 
-    active_lines = ""
+    lines = [
+        f"🔧 Mode: <b>{mode}</b>  |  {hunting}",
+        f"📋 Pending decisions: <b>{pending}</b>",
+    ]
+
     if _active_apply_urls:
-        urls_list = "\n".join(f"  • {u}" for u in sorted(_active_apply_urls))
-        active_lines = f"\n⚙️ Generating ({len(_active_apply_urls)}):\n{urls_list}"
+        now = datetime.now(timezone.utc)
+        lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")
+        for url, started in _active_apply_urls.items():
+            elapsed = int((now - started).total_seconds())
+            mins, secs = divmod(elapsed, 60)
+            timeout_warn = " ⚠️ timeout soon" if elapsed > _APPLY_AGENT_TIMEOUT - 60 else ""
+            short_url = url[:80] + "…" if len(url) > 80 else url
+            lines.append(f"  • {mins}m{secs:02d}s — <code>{short_url}</code>{timeout_warn}")
+    else:
+        lines.append("\n💤 No active generation")
 
-    schedule_str = _build_schedule_text()
-    await update.message.reply_text(
-        f"{schedule_str}\n\n"
-        f"🔧 Mode: {mode}\n"
-        f"{lock_status}\n"
-        f"📋 Pending decisions: {pending} jobs"
-        f"{active_lines}",
-        parse_mode=ParseMode.HTML,
-    )
+    try:
+        from hunter.tracker import get_failed_jobs
+        failed_count = len(await asyncio.to_thread(get_failed_jobs))
+        if failed_count:
+            lines.append(f"\n🔁 FAIL queue: <b>{failed_count}</b> jobs (will retry on next hunt)")
+    except Exception:
+        pass
+
+    lines.append("\n<i>Use /schedule to see hunt timetable</i>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
+                                    disable_web_page_preview=True)
+
+
+async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(_build_schedule_text(), parse_mode=ParseMode.HTML)
 
 
 async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -625,8 +644,8 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
 
 _APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
 
-# Active manual apply_agent URLs — used by /status to show in-progress jobs.
-_active_apply_urls: set[str] = set()
+# Active manual apply_agent URLs → start datetime, used by /status.
+_active_apply_urls: dict[str, "datetime"] = {}
 
 
 async def _tg_notify(text: str) -> None:
@@ -658,7 +677,7 @@ async def _run_apply_agent(
 
     label = url or "(pasted text)"
     if url:
-        _active_apply_urls.add(url)
+        _active_apply_urls[url] = datetime.now(timezone.utc)
     try:
         outcome, error_detail = await run_apply_agent_for_url(
             url=url,
@@ -710,7 +729,7 @@ async def _run_apply_agent(
         logger.error(f"[apply_agent] exception: {e}")
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
     finally:
-        _active_apply_urls.discard(url)
+        _active_apply_urls.pop(url, None)
         if paste_file:
             try:
                 Path(paste_file).unlink(missing_ok=True)
@@ -1032,6 +1051,8 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
 async def _run_linkedin_batch(job_ids: list[str], update) -> None:
     """Run apply_agent sequentially for each LinkedIn job id."""
     from job_fetch.linkedin_parse import job_view_url
+    from hunter.models import Job
+    from hunter.tracker import add_failed
 
     total = len(job_ids)
     ok = failed = 0
@@ -1062,6 +1083,12 @@ async def _run_linkedin_batch(job_ids: list[str], update) -> None:
         else:
             failed += 1
             logger.error(f"[linkedin_batch] FAIL job {jid}: {stderr.decode(errors='replace')[-300:]}")
+            try:
+                stub = Job(title=f"LinkedIn {jid}", company="LinkedIn", url=url,
+                           source="linkedin", location="")
+                await asyncio.to_thread(add_failed, stub)
+            except Exception as e:
+                logger.warning(f"[linkedin_batch] could not write FAIL to tracker for {jid}: {e}")
 
     try:
         await update.message.reply_text(
@@ -1080,7 +1107,8 @@ async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start",           "Show help"),
         BotCommand("hunt",            "Run search (optional: source names)"),
-        BotCommand("status",          "Bot status and source schedule"),
+        BotCommand("status",          "Current activity: active jobs, pending, FAIL queue"),
+        BotCommand("schedule",        "Hunt timetable per source"),
         BotCommand("force",           "Process URL even if already in tracker"),
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
@@ -1160,6 +1188,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("force",          cmd_force))
     app.add_handler(CommandHandler("process_manual", cmd_process_manual))
     app.add_handler(CommandHandler("status",         cmd_status))
+    app.add_handler(CommandHandler("schedule",       cmd_schedule))
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))

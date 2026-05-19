@@ -57,6 +57,7 @@ jobs:
           script: |
             cd ${{ secrets.VPS_WORK_DIR }}
             curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/master/docker-compose.yml -o docker-compose.yml
+            touch gsheets_state.json
             echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull
             docker compose up -d

@@ -16,7 +16,11 @@ services:
       - ./gmail_token.json:/app/gmail_token.json
       - ./gsheets_credentials.json:/app/gsheets_credentials.json
       - ./gsheets_token.json:/app/gsheets_token.json
+      # WARNING: gsheets_state.json must be a FILE on the host before first run.
+      # If it doesn't exist Docker will auto-create a directory, breaking GSheets sync.
+      # Fix: touch ./gsheets_state.json  (or echo '{}' > ./gsheets_state.json)
       - ./gsheets_state.json:/app/gsheets_state.json
+      - ./logs:/app/logs
     logging:
       driver: "json-file"
       options:

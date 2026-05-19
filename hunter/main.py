@@ -279,6 +279,22 @@ async def _sync_to_sheets(url: str) -> None:
         logger.warning("[auto_apply] gsheets mirror failed for %s: %s", url, _e)
 
 
+async def _upload_to_drive(url: str) -> None:
+    """Upload application folder to Google Drive immediately after apply (best-effort)."""
+    try:
+        from hunter.config import GDRIVE_ENABLED
+        if not GDRIVE_ENABLED:
+            return
+        from hunter.tracker import get_folder_by_url
+        from hunter.config import PROJECT_DIR
+        from hunter import gdrive_sync
+        folder_str = await asyncio.to_thread(get_folder_by_url, url)
+        if folder_str:
+            await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str)
+    except Exception as _e:
+        logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
+
+
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
     """Process all jobs sequentially with configurable delay between them."""
     total = len(jobs)
@@ -298,6 +314,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             ok += 1
             consecutive_fails = 0
             await _sync_to_sheets(job.url)
+            await _upload_to_drive(job.url)
             await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
         elif outcome == "manual":
             manual_n += 1
@@ -363,6 +380,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             ok += 1
             await asyncio.to_thread(remove_failed, job.url)
             await _sync_to_sheets(job.url)
+            await _upload_to_drive(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1

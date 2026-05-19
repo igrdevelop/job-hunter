@@ -31,7 +31,6 @@ BASE = "https://theprotocol.it"
 
 LISTING_URLS = [
     f"{BASE}/filtry/frontend;sp/wroclaw;wp",
-    f"{BASE}/filtry/angular;sp?remote=true",
     f"{BASE}/filtry/frontend;sp?remote=true",
 ]
 
