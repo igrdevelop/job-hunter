@@ -911,11 +911,12 @@ def main_api(url: str, paste_text: str = "") -> None:
             except Exception as _boost_err:
                 print(f"[apply_agent] ATS boost failed (using first pass): {_boost_err}")
 
-    # Step 4.5 — Skip React-only jobs (no Angular mentioned in stack)
+    # Step 4.5 — Skip React-only jobs (no Angular in LLM-identified stack)
+    # Trust the LLM's stack judgment — raw text scan was too permissive (sidebar content
+    # from fetched pages could mention Angular in unrelated job listings).
     # Bypassed in force mode — user explicitly wants docs regardless of stack.
     stack = (content.get("stack") or "").lower()
-    _angular_in_raw = "angular" in job_text.lower()
-    if "react" in stack and "angular" not in stack and not _angular_in_raw and not _SKIP_DEDUP:
+    if "react" in stack and "angular" not in stack and not _SKIP_DEDUP:
         notify(
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"
