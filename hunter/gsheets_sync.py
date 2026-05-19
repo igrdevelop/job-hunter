@@ -40,6 +40,13 @@ _state: dict = {}   # {"sheet_id": "..."}
 
 def _read_state() -> dict:
     """Load gsheets_state.json. Returns {} if missing or malformed."""
+    if GSHEETS_STATE_FILE.is_dir():
+        log.error(
+            "gsheets_sync: %s is a directory, not a file — Docker Volume misconfiguration. "
+            "Fix on server: stop container, run `rm -rf %s && echo '{}' > %s`, restart.",
+            GSHEETS_STATE_FILE, GSHEETS_STATE_FILE, GSHEETS_STATE_FILE,
+        )
+        return {}
     try:
         if GSHEETS_STATE_FILE.exists():
             return json.loads(GSHEETS_STATE_FILE.read_text(encoding="utf-8"))
@@ -50,6 +57,8 @@ def _read_state() -> dict:
 
 def _write_state(data: dict) -> None:
     """Persist runtime state to gsheets_state.json (atomic-ish via write+rename)."""
+    if GSHEETS_STATE_FILE.is_dir():
+        return  # already logged in _read_state
     try:
         tmp = GSHEETS_STATE_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
