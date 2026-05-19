@@ -1032,6 +1032,8 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
 async def _run_linkedin_batch(job_ids: list[str], update) -> None:
     """Run apply_agent sequentially for each LinkedIn job id."""
     from job_fetch.linkedin_parse import job_view_url
+    from hunter.models import Job
+    from hunter.tracker import add_failed
 
     total = len(job_ids)
     ok = failed = 0
@@ -1062,6 +1064,12 @@ async def _run_linkedin_batch(job_ids: list[str], update) -> None:
         else:
             failed += 1
             logger.error(f"[linkedin_batch] FAIL job {jid}: {stderr.decode(errors='replace')[-300:]}")
+            try:
+                stub = Job(title=f"LinkedIn {jid}", company="LinkedIn", url=url,
+                           source="linkedin", location="")
+                await asyncio.to_thread(add_failed, stub)
+            except Exception as e:
+                logger.warning(f"[linkedin_batch] could not write FAIL to tracker for {jid}: {e}")
 
     try:
         await update.message.reply_text(
