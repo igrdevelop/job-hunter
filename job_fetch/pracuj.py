@@ -42,6 +42,24 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
+_ARCHIVED_PATTERNS = (
+    'data-test="section-archived"',
+    "data-apply-type=\"ArchivedApplyPanel\"",
+    "Pracodawca zakończył zbieranie zgłoszeń",
+    "oferta wygasła",
+    "offer expired",
+)
+
+
+def _extract_archived_notice(html: str) -> str:
+    """Return expiry notice text if the page HTML contains an archived marker."""
+    html_lower = html.lower()
+    for marker in _ARCHIVED_PATTERNS:
+        if marker.lower() in html_lower:
+            return "\nPracodawca zakończył zbieranie zgłoszeń na tę ofertę\n"
+    return ""
+
+
 def fetch_pracuj(url: str) -> str:
     """Fetch Pracuj.pl offer and return plain text for LLM consumption."""
     try:
@@ -53,25 +71,30 @@ def fetch_pracuj(url: str) -> str:
         from job_fetch.html_fallback import fetch_html
         return fetch_html(url)
 
+    # Check for archived/expired page before content extraction —
+    # archived text lives only in the DOM and is not included in JSON-LD / __NEXT_DATA__.
+    archived_notice = _extract_archived_notice(html)
+
     # Strategy 1: JSON-LD
     text = _try_json_ld(html)
     if text and len(text) > 100:
-        return text
+        return text + archived_notice
 
     # Strategy 2: __NEXT_DATA__
     text = _try_next_data(html)
     if text and len(text) > 100:
-        return text
+        return text + archived_notice
 
     # Strategy 3: BeautifulSoup DOM parsing
     text = _try_bs4(html)
     if text and len(text) > 100:
-        return text
+        return text + archived_notice
 
     # Strategy 4: generic html_fallback
     logger.warning("[pracuj] All extraction strategies failed, using html_fallback")
     from job_fetch.html_fallback import fetch_html
-    return fetch_html(url)
+    result = fetch_html(url)
+    return result + archived_notice if result else result
 
 
 def _try_json_ld(html: str) -> str:

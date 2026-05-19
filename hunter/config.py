@@ -145,6 +145,15 @@ FILTER = {
     "exclude_german_language_required": True,
 }
 
+# ── JustJoin.it source config ────────────────────────────────────────────────
+JUSTJOIN_ENABLED: bool = os.getenv("JUSTJOIN_ENABLED", "true").lower() in ("true", "1", "yes")
+# Pages per workplaceType (remote/hybrid/office). 1 page = 100 items.
+# Default 3 → up to 900 items per type, ~2700 total (pre-filter reduces to ~tens).
+JUSTJOIN_MAX_PAGES: int = int(os.getenv("JUSTJOIN_MAX_PAGES", "3"))
+
+# ── NoFluffJobs source config ─────────────────────────────────────────────────
+NOFLUFFJOBS_ENABLED: bool = os.getenv("NOFLUFFJOBS_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── LinkedIn source config ────────────────────────────────────────────────────
 LINKEDIN_ENABLED: bool = os.getenv("LINKEDIN_ENABLED", "true").lower() in ("true", "1", "yes")
 
