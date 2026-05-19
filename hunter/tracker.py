@@ -58,9 +58,15 @@ def normalize_url(url: str) -> str:
         # Pracuj.pl tracking params (email alerts, suggested jobs)
         "sendid", "send_date", "sug",
     }
-    qs = parse_qs(p.query, keep_blank_values=False)
-    clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
-    query = urlencode(clean_qs, doseq=True) if clean_qs else ""
+    # For job boards where the job identity is fully in the path, drop ALL query params.
+    # This makes dedup robust against any unknown tracking/session params.
+    _path_id_domains = {"www.pracuj.pl", "justjoin.it", "nofluffjobs.com"}
+    if host in _path_id_domains:
+        query = ""
+    else:
+        qs = parse_qs(p.query, keep_blank_values=False)
+        clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
+        query = urlencode(clean_qs, doseq=True) if clean_qs else ""
     # For LinkedIn /jobs/view/{id}/ — keep only path
     if "linkedin.com" in host and "/jobs/view/" in path:
         m = re.search(r"/jobs/view/(\d+)", path)
@@ -122,7 +128,8 @@ def normalize_company(company: str) -> str:
       - "UpvantaSpółkaZOgraniczonąOdpowiedzialnoś"
     """
     s = company.lower()
-    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
+    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)  # date suffixes: _2026-04-11, _2026-04-11_2
+    s = re.sub(r'_\d+$', '', s)                          # numeric folder suffixes: _2, _3, _10
     s = _strip_diacritics(s)
     s = _strip_legal_suffixes(s)
     s = re.sub(r'[^a-z0-9]', '', s)
@@ -134,6 +141,7 @@ def dedup_key(company: str, title: str) -> str:
     def _norm(s: str) -> str:
         s = s.lower()
         s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
+        s = re.sub(r'_\d+$', '', s)
         s = _strip_diacritics(s)
         s = _strip_legal_suffixes(s)
         s = re.sub(r'[^a-z0-9]', '', s)
@@ -618,7 +626,7 @@ def add_manual_jobleads_pending(
         title.strip() or "Unknown",
         "",
         MANUAL_PENDING_ATS,
-        url,
+        normalize_url(url) if url else "",
         folder_str,
         "",
         "",
@@ -675,7 +683,7 @@ def add_applied(content: dict, force: bool = False) -> bool:
         job_title,
         stack,
         ats_display,
-        apply_url,
+        norm_url or apply_url,
         folder,
         "",
         "+" if is_reapply else "",
@@ -728,8 +736,8 @@ def add_skipped(job: Job) -> dict | None:
         job.company,     # Company
         job.title,       # Job Title
         "",              # Stack  (unknown at this point)
-        "SKIP",          # ATS %  (repurposed for status)
-        job.url,         # URL
+        "SKIP",                          # ATS %  (repurposed for status)
+        normalize_url(job.url),          # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
@@ -777,7 +785,7 @@ def add_react_skipped(content: dict, url: str) -> None:
         title,                          # Job Title
         content.get("stack", ""),       # Stack
         "SKIP",                         # ATS %
-        url,                            # URL
+        normalize_url(url) if url else "",  # URL
         "",                             # Folder
         "—",                            # Sent  ← marks React-skip
         "",                             # Re-application
@@ -816,8 +824,8 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
         company,         # Company
         title,           # Job Title
         "",              # Stack
-        "EXPIRED",       # ATS %
-        url,             # URL
+        "EXPIRED",                       # ATS %
+        normalize_url(url) if url else "",  # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
@@ -853,8 +861,8 @@ def add_failed(job: Job) -> None:
         job.company,     # Company
         job.title,       # Job Title
         "",              # Stack
-        "FAIL",          # ATS %  (repurposed for status)
-        job.url,         # URL
+        "FAIL",                          # ATS %  (repurposed for status)
+        normalize_url(job.url),          # URL
         "",              # Folder
         "",              # Sent
         "",              # Re-application
@@ -1050,3 +1058,53 @@ def read_all_tracker_rows() -> list[dict]:
     finally:
         wb.close()
     return results
+
+
+# ── Cooldown (B5) ─────────────────────────────────────────────────────────────
+
+_COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
+
+
+def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
+    """Return True if company+title was applied to within the last cooldown_days.
+
+    Only counts rows where ATS % is a real percentage (genuine application),
+    not SKIP/FAIL/MANUAL/EXPIRED rows.
+    """
+    import datetime as _dt
+
+    if not TRACKER_PATH.exists():
+        return False
+
+    target_key = dedup_key(company, title)
+    today = date.today()
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    most_recent: date | None = None
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < ATS_COL_INDEX:
+                continue
+            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+            row_title = str(row[TITLE_COL_INDEX - 1] or "").strip()
+            if not row_company and not row_title:
+                continue
+            if dedup_key(row_company, row_title) != target_key:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats in _COOLDOWN_SKIP_STATUSES or not ats:
+                continue
+            row_date = row[0]
+            if isinstance(row_date, _dt.datetime):
+                row_date = row_date.date()
+            if not isinstance(row_date, _dt.date):
+                continue
+            if most_recent is None or row_date > most_recent:
+                most_recent = row_date
+    finally:
+        wb.close()
+
+    if most_recent is None:
+        return False
+    return (today - most_recent).days < cooldown_days
