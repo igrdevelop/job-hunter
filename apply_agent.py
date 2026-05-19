@@ -515,11 +515,18 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         print("[apply_agent] ATS check skipped — no resume_en in content")
         return content
 
+    # ATS checker expects plain text; resume_en may be a structured dict from LLM
+    if isinstance(resume_en, dict):
+        import json as _json
+        resume_text_for_ats = _json.dumps(resume_en, ensure_ascii=False)
+    else:
+        resume_text_for_ats = str(resume_en)
+
     for attempt in range(1, _ATS_MAX_ROUNDS + 2):  # +2: initial check + N rewrites
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
             job_text=job_text,
-            resume_text=resume_en,
+            resume_text=resume_text_for_ats,
             provider=LLM_PROVIDER,
             model=LLM_MODEL,
             api_key=LLM_API_KEY,
