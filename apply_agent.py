@@ -870,6 +870,7 @@ def main_api(url: str, paste_text: str = "") -> None:
 
     # Step 4.4 — ATS boost pass (force mode only): if score < 95%, do a second LLM pass
     if _SKIP_DEDUP:
+        from hunter.tracker import _parse_ats_score
         _raw_ats = str(content.get("ats_score", "") or "")
         _, _ats_num = _parse_ats_score(_raw_ats)
         if _ats_num is not None and _ats_num < 95:
