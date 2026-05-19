@@ -1,4 +1,6 @@
 from hunter.config import (
+    JUSTJOIN_ENABLED,
+    NOFLUFFJOBS_ENABLED,
     LINKEDIN_ENABLED,
     BULLDOGJOB_ENABLED,
     PRACUJ_ENABLED,
@@ -16,14 +18,17 @@ from hunter.config import (
     ATS_AGGREGATOR_ENABLED,
     GMAIL_ENABLED,
 )
-from hunter.sources.justjoin import JustJoinSource
-from hunter.sources.nofluffjobs import NoFluffJobsSource
 
 # Registry — add new sources here as you build them
-ALL_SOURCES = [
-    JustJoinSource(),
-    NoFluffJobsSource(),
-]
+ALL_SOURCES = []
+
+if JUSTJOIN_ENABLED:
+    from hunter.sources.justjoin import JustJoinSource
+    ALL_SOURCES.append(JustJoinSource())
+
+if NOFLUFFJOBS_ENABLED:
+    from hunter.sources.nofluffjobs import NoFluffJobsSource
+    ALL_SOURCES.append(NoFluffJobsSource())
 
 if LINKEDIN_ENABLED:
     from hunter.sources.linkedin import LinkedInSource

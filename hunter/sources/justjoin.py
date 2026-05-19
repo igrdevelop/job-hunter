@@ -26,7 +26,7 @@ from typing import Optional
 
 import requests
 
-from hunter.config import FILTER
+from hunter.config import FILTER, JUSTJOIN_MAX_PAGES
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 
@@ -46,9 +46,9 @@ HEADERS = {
 JSON_HEADERS = {**HEADERS, "Accept": "application/json, text/plain, */*"}
 
 TIMEOUT = 20
-PER_PAGE = 100    # items per API page
-MAX_PAGES = 2     # max pages per workplaceType — 200 items each, ~600 total
-PAGE_DELAY = 0.3  # seconds between pages
+PER_PAGE = 100                      # items per API page
+MAX_PAGES = JUSTJOIN_MAX_PAGES      # configurable via JUSTJOIN_MAX_PAGES env var (default 3)
+PAGE_DELAY = 0.3                    # seconds between pages
 
 WORKPLACE_TYPES = ["remote", "hybrid", "office"]
 
