@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from hunter.gmail_client import get_gmail_service
+
 logger = logging.getLogger(__name__)
 
 # Sender domains we query for confirmation emails
@@ -283,7 +285,6 @@ def run_confirmation_check(lookback_days: int | None = None) -> list[MatchResult
 
     days = lookback_days if lookback_days is not None else _DEFAULT_DAYS
 
-    from hunter.gmail_client import get_gmail_service
     service = get_gmail_service()
     emails = fetch_confirmation_emails(service, days)
 
