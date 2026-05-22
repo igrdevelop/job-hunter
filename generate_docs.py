@@ -65,14 +65,16 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
     lang_u = (lang or "EN").strip().upper()[:2] or "EN"
     ext = ".docx"
-    safe = _safe_stack_segment(stack, max_len=22)
-    primary = f"CV_{safe}_2026_{lang_u}{ext}"
+    # Fixed parts: "Ihar_Petrasheuski_CV_" (21) + "_2026_XX.docx" (13) = 34 chars reserved
+    max_stack = MAX_ATTACHMENT_BASENAME_LEN - 34
+    safe = _safe_stack_segment(stack, max_len=max_stack)
+    primary = f"Ihar_Petrasheuski_CV_{safe}_2026_{lang_u}{ext}"
     if len(primary) <= MAX_ATTACHMENT_BASENAME_LEN:
         return primary
-    fallback = f"CV_2026_{lang_u}{ext}"
+    fallback = f"Ihar_Petrasheuski_CV_2026_{lang_u}{ext}"
     if len(fallback) <= MAX_ATTACHMENT_BASENAME_LEN:
         return fallback
-    return f"CV_{lang_u}{ext}"
+    return f"CV_2026_{lang_u}{ext}"
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
