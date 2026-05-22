@@ -1278,3 +1278,39 @@ def set_confirmation(row_num: int, date_str: str) -> None:
     if date_str:
         cell.fill = _CONFIRMED_FILL
     _save_with_retry(wb)
+
+
+DATE_COL_INDEX = 1  # "Date" — application date
+
+
+def get_applications_on_date(date_str: str) -> list[dict]:
+    """Return all tracker rows where Date == *date_str* (format 'YYYY-MM-DD').
+
+    Each result dict has: date, company, title, ats, url.
+    Skips rows with no company name.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+    results: list[dict] = []
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row:
+                continue
+            row_date = str(row[DATE_COL_INDEX - 1] or "").strip()
+            if row_date != date_str:
+                continue
+            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
+            if not company:
+                continue
+            results.append({
+                "date": row_date,
+                "company": company,
+                "title": str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else "",
+                "ats": str(row[ATS_COL_INDEX - 1] or "").strip() if len(row) >= ATS_COL_INDEX else "",
+                "url": str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else "",
+            })
+    finally:
+        wb.close()
+    return results

@@ -39,7 +39,8 @@ from hunter.config import (
     GSHEETS_ENABLED,
     GSHEETS_REFRESH_INTERVAL_MIN,
     TRACKER_PATH,
-    EMAIL_RESPONSE_CHECK_INTERVAL_MIN,
+    EMAIL_RESPONSE_CHECK_TIME,
+    EMAIL_RESPONSE_LOOKBACK_DAYS,
 )
 from hunter.models import Job
 from hunter.tracker import (
@@ -628,14 +629,34 @@ def _format_check_responses_report(results) -> str:
 
 
 async def cmd_check_responses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check Gmail for application confirmation emails and update tracker."""
+    """Check Gmail for application confirmation emails and update tracker.
+
+    Usage: /check_responses [days]
+      days — how many days back to scan (default: EMAIL_RESPONSE_LOOKBACK_DAYS = 2).
+      Example: /check_responses 60  — backfill last 60 days.
+    """
+    days: int | None = None
+    if context.args:
+        try:
+            days = int(context.args[0])
+            if days < 1:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                f"⚠️ Invalid argument: <code>{context.args[0]}</code>\n"
+                "Usage: <code>/check_responses [days]</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+    days_label = days if days is not None else EMAIL_RESPONSE_LOOKBACK_DAYS
     status_msg = await update.message.reply_text(
-        "📬 Checking Gmail for confirmation emails…",
+        f"📬 Checking Gmail for confirmation emails (last {days_label} day(s))…",
         parse_mode=ParseMode.HTML,
     )
     try:
         from hunter.email_response_checker import run_confirmation_check
-        results = await asyncio.to_thread(run_confirmation_check)
+        results = await asyncio.to_thread(run_confirmation_check, days)
     except FileNotFoundError:
         await status_msg.edit_text(
             "❌ <b>Gmail not configured.</b>\n"
@@ -1195,7 +1216,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("gsheets_status",        "Google Sheets integration status"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
-        BotCommand("check_responses",       "Check Gmail for application confirmations"),
+        BotCommand("check_responses",       "Check Gmail confirmations [days]"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -1364,18 +1385,29 @@ def build_application() -> Application:
     )
     logger.info("[Schedule] gdrive_upload_missing every 3 h")
 
-    # Check email confirmations every EMAIL_RESPONSE_CHECK_INTERVAL_MIN (no-op if 0)
-    if EMAIL_RESPONSE_CHECK_INTERVAL_MIN > 0:
-        app.job_queue.run_repeating(
-            callback=_scheduled_check_email_responses,
-            interval=EMAIL_RESPONSE_CHECK_INTERVAL_MIN * 60,
-            first=120,
-            name="check_email_responses",
+    # Daily email confirmation check at EMAIL_RESPONSE_CHECK_TIME (default 09:00)
+    try:
+        erch, ercm = map(int, EMAIL_RESPONSE_CHECK_TIME.strip().split(":"))
+    except (ValueError, AttributeError):
+        erch, ercm = 9, 0
+        logger.warning(
+            "[Schedule] Invalid EMAIL_RESPONSE_CHECK_TIME=%r — using 09:00",
+            EMAIL_RESPONSE_CHECK_TIME,
         )
-        logger.info(
-            "[Schedule] check_email_responses every %d min",
-            EMAIL_RESPONSE_CHECK_INTERVAL_MIN,
-        )
+    app.job_queue.run_daily(
+        callback=_scheduled_check_email_responses,
+        time=dt_time(erch, ercm, tzinfo=tz),
+        name="check_email_responses",
+    )
+    logger.info("[Schedule] check_email_responses at %02d:%02d %s", erch, ercm, TIMEZONE)
+
+    # Daily applications summary at 00:01 Warsaw time
+    app.job_queue.run_daily(
+        callback=_scheduled_daily_summary,
+        time=dt_time(0, 1, tzinfo=tz),
+        name="daily_summary",
+    )
+    logger.info("[Schedule] daily_summary at 00:01 %s", TIMEZONE)
 
     # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
     if GSHEETS_ENABLED:
@@ -1591,3 +1623,43 @@ async def _scheduled_check_email_responses(context: ContextTypes.DEFAULT_TYPE) -
         )
     except Exception as e:
         logger.warning("[scheduled_check_email_responses] send failed: %s", e)
+
+
+# ── Daily applications summary ────────────────────────────────────────────────
+
+def _format_daily_summary(apps: list[dict], date_str: str) -> str:
+    """Format yesterday's applications as an HTML list."""
+    if not apps:
+        return f"📋 No applications recorded on {date_str}."
+    lines = [f"📋 <b>Applications on {date_str} — {len(apps)} total:</b>"]
+    for a in apps:
+        ats = a.get("ats", "")
+        ats_label = f" ({ats})" if ats and ats not in ("-", "—", "") else ""
+        lines.append(f"  • <b>{a['company']}</b> — {a['title']}{ats_label}")
+    return "\n".join(lines)
+
+
+async def _scheduled_daily_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Daily job at 00:01: send a summary of how many applications were made yesterday."""
+    from datetime import date as _date, timedelta
+    from hunter.tracker import get_applications_on_date
+
+    yesterday = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        apps = await asyncio.to_thread(get_applications_on_date, yesterday)
+    except Exception as e:
+        logger.warning("[scheduled_daily_summary] failed to read tracker: %s", e)
+        return
+
+    if not apps:
+        return  # silent when nothing was applied to yesterday
+
+    text = _format_daily_summary(apps, yesterday)
+    try:
+        await context.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.warning("[scheduled_daily_summary] send failed: %s", e)
