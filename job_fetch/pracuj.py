@@ -60,14 +60,27 @@ def _extract_archived_notice(html: str) -> str:
     return ""
 
 
-def fetch_pracuj(url: str) -> str:
-    """Fetch Pracuj.pl offer and return plain text for LLM consumption."""
+def _fetch_raw_html(url: str) -> str:
+    """Try cloudscraper first, fall back to plain requests. Returns raw HTML or raises."""
     try:
         resp = _scraper.get(url, timeout=TIMEOUT)
         resp.raise_for_status()
-        html = resp.text
+        return resp.text
+    except Exception as cs_err:
+        logger.warning(f"[pracuj] cloudscraper failed ({cs_err}), trying plain requests")
+        import requests as _req
+        from job_fetch.html_fallback import HEADERS as _FB_HEADERS
+        resp = _req.get(url, headers=_FB_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.text
+
+
+def fetch_pracuj(url: str) -> str:
+    """Fetch Pracuj.pl offer and return plain text for LLM consumption."""
+    try:
+        html = _fetch_raw_html(url)
     except Exception as e:
-        logger.warning(f"[pracuj] HTTP fetch failed ({e}), trying html_fallback")
+        logger.warning(f"[pracuj] all HTTP strategies failed ({e}), using html_fallback")
         from job_fetch.html_fallback import fetch_html
         return fetch_html(url)
 
