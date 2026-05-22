@@ -541,7 +541,7 @@ def run_confirmation_check(lookback_days: int | None = None) -> list[MatchResult
     Raises FileNotFoundError if gmail_token.json is missing.
     """
     from hunter.config import EMAIL_RESPONSE_LOOKBACK_DAYS as _DEFAULT_DAYS
-    from hunter.tracker import set_response
+    from hunter.tracker import set_confirmation
 
     days = lookback_days if lookback_days is not None else _DEFAULT_DAYS
 
@@ -552,11 +552,11 @@ def run_confirmation_check(lookback_days: int | None = None) -> list[MatchResult
     for email in emails:
         result = match_email(email)
         if result.match_type in ("exact", "fuzzy") and result.row_num is not None:
-            existing = result.candidates[0].get("response", "")
+            existing = result.candidates[0].get("confirmation", "")
             if not existing:
-                set_response(result.row_num, "CONFIRMED")
+                set_confirmation(result.row_num, email.date)
                 logger.info(
-                    f"[email_response] CONFIRMED row {result.row_num}: "
+                    f"[email_response] confirmed row {result.row_num}: "
                     f"{result.candidates[0]['company']} — {result.candidates[0]['title']}"
                 )
         results.append(result)

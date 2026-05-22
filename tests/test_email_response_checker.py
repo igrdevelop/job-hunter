@@ -73,13 +73,13 @@ def _make_tracker(tmp_path, rows: list[dict]) -> None:
     ws = wb.active
     ws.append([
         "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-        "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL", "Response",
+        "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL", "Confirmation", "Answer",
     ])
     for i, r in enumerate(rows):
         ws.append([
             "2026-05-22", r.get("company", "Acme"), r.get("title", "Dev"),
             "Angular", r.get("ats", "85%"), r.get("url", f"https://example.com/{i}"),
-            "", "", "", "", r.get("id", f"id{i}"), "", r.get("response", ""),
+            "", "", "", "", r.get("id", f"id{i}"), "", r.get("confirmation", ""), "",
         ])
     wb.save(tmp_path / "tracker.xlsx")
 
@@ -667,18 +667,18 @@ def test_run_writes_confirmed(tmp_path, monkeypatch):
     assert results[0].match_type in ("exact", "fuzzy")
     wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
     ws = wb.active
-    from hunter.tracker import COL_RESPONSE
-    assert ws.cell(row=2, column=COL_RESPONSE).value == "CONFIRMED"
+    from hunter.tracker import COL_CONFIRMATION
+    assert ws.cell(row=2, column=COL_CONFIRMATION).value == "2026-05-20"
     wb.close()
 
 
-def test_run_does_not_overwrite_existing_response(tmp_path, monkeypatch):
+def test_run_does_not_overwrite_existing_confirmation(tmp_path, monkeypatch):
     import hunter.tracker as t
     import hunter.email_response_checker as checker
 
     monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
     _make_tracker(tmp_path, [
-        {"company": "NASK", "title": "Senior Frontend Developer", "response": "INTERVIEW"}
+        {"company": "NASK", "title": "Senior Frontend Developer", "confirmation": "2026-04-01"}
     ])
 
     confirmed_email = ConfirmationEmail(
@@ -692,6 +692,6 @@ def test_run_does_not_overwrite_existing_response(tmp_path, monkeypatch):
 
     wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
     ws = wb.active
-    from hunter.tracker import COL_RESPONSE
-    assert ws.cell(row=2, column=COL_RESPONSE).value == "INTERVIEW"  # untouched
+    from hunter.tracker import COL_CONFIRMATION
+    assert ws.cell(row=2, column=COL_CONFIRMATION).value == "2026-04-01"  # untouched
     wb.close()

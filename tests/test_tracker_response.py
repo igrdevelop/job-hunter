@@ -1,4 +1,4 @@
-"""Tests for tracker Response column: set_response, lookup_by_company_and_title,
+"""Tests for tracker Confirmation column: set_confirmation, lookup_by_company_and_title,
 _title_tokens, _title_similarity."""
 
 import openpyxl
@@ -6,7 +6,7 @@ import pytest
 
 from hunter import tracker
 from hunter.tracker import (
-    COL_RESPONSE,
+    COL_CONFIRMATION,
     _title_similarity,
     _title_tokens,
 )
@@ -18,13 +18,13 @@ from hunter.tracker import (
 
 def _make_tracker(tmp_path, rows: list[dict]) -> None:
     """Write a minimal tracker.xlsx. Supported row keys:
-    company, title, ats, url, sent, response, id."""
+    company, title, ats, url, sent, confirmation, id."""
     tracker_path = tmp_path / "tracker.xlsx"
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append([
         "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-        "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL", "Response",
+        "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL", "Confirmation", "Answer",
     ])
     for i, r in enumerate(rows):
         ws.append([
@@ -40,7 +40,8 @@ def _make_tracker(tmp_path, rows: list[dict]) -> None:
             "",
             r.get("id", f"abc1234{i}"),
             r.get("drive_url", ""),
-            r.get("response", ""),
+            r.get("confirmation", ""),
+            r.get("answer", ""),
         ])
     wb.save(tracker_path)
 
@@ -173,11 +174,11 @@ def test_lookup_sorted_by_score_descending(tmp_path, monkeypatch):
     assert result[1]["title"] == "Angular Engineer"
 
 
-def test_lookup_returns_response_field(tmp_path, monkeypatch):
+def test_lookup_returns_confirmation_field(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer", "response": "CONFIRMED"}])
+    _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer", "confirmation": "2026-05-20"}])
     result = tracker.lookup_by_company_and_title("Acme", "Angular Developer")
-    assert result[0]["response"] == "CONFIRMED"
+    assert result[0]["confirmation"] == "2026-05-20"
 
 
 def test_lookup_response_empty_for_old_row(tmp_path, monkeypatch):
@@ -193,66 +194,79 @@ def test_lookup_response_empty_for_old_row(tmp_path, monkeypatch):
 
     result = tracker.lookup_by_company_and_title("Acme", "Angular Developer")
     assert len(result) == 1
-    assert result[0]["response"] == ""
+    assert result[0]["confirmation"] == ""
 
 
 # ---------------------------------------------------------------------------
-# set_response
+# set_confirmation
 # ---------------------------------------------------------------------------
 
-def test_set_response_noop_when_no_tracker(tmp_path, monkeypatch):
+def test_set_confirmation_noop_when_no_tracker(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    tracker.set_response(2, "CONFIRMED")  # must not raise
+    tracker.set_confirmation(2, "2026-05-20")  # must not raise
 
 
-def test_set_response_writes_confirmed(tmp_path, monkeypatch):
+def test_set_confirmation_writes_date(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
     _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer"}])
-    tracker.set_response(2, "CONFIRMED")
+    tracker.set_confirmation(2, "2026-05-20")
 
     wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
     ws = wb.active
-    val = ws.cell(row=2, column=COL_RESPONSE).value
+    val = ws.cell(row=2, column=COL_CONFIRMATION).value
     wb.close()
-    assert val == "CONFIRMED"
+    assert val == "2026-05-20"
 
 
-def test_set_response_noop_for_out_of_range_row(tmp_path, monkeypatch):
+def test_set_confirmation_applies_green_fill(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
     _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer"}])
-    tracker.set_response(99, "CONFIRMED")  # row 99 doesn't exist — must not raise
+    tracker.set_confirmation(2, "2026-05-20")
+
+    wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", data_only=True)
+    ws = wb.active
+    fill = ws.cell(row=2, column=COL_CONFIRMATION).fill
+    wb.close()
+    assert fill.fgColor.rgb[-6:] == "C6EFCE"  # last 6 hex chars = the color
+
+
+def test_set_confirmation_noop_for_out_of_range_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
+    _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer"}])
+    tracker.set_confirmation(99, "2026-05-20")  # row 99 doesn't exist — must not raise
 
     wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
     ws = wb.active
     assert ws.max_row == 2  # only header + 1 data row, nothing added
 
 
-def test_set_response_overwrites_existing_value(tmp_path, monkeypatch):
+def test_set_confirmation_overwrites_existing_date(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "Acme", "title": "Dev", "response": "CONFIRMED"}])
-    tracker.set_response(2, "INTERVIEW")
+    _make_tracker(tmp_path, [{"company": "Acme", "title": "Dev", "confirmation": "2026-04-01"}])
+    tracker.set_confirmation(2, "2026-05-20")
 
     wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
     ws = wb.active
-    val = ws.cell(row=2, column=COL_RESPONSE).value
+    val = ws.cell(row=2, column=COL_CONFIRMATION).value
     wb.close()
-    assert val == "INTERVIEW"
+    assert val == "2026-05-20"
 
 
-def test_set_response_roundtrip_via_lookup(tmp_path, monkeypatch):
+def test_set_confirmation_roundtrip_via_lookup(tmp_path, monkeypatch):
     monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
     _make_tracker(tmp_path, [{"company": "Acme", "title": "Angular Developer"}])
-    tracker.set_response(2, "CONFIRMED")
+    tracker.set_confirmation(2, "2026-05-20")
 
     result = tracker.lookup_by_company_and_title("Acme", "Angular Developer")
-    assert result[0]["response"] == "CONFIRMED"
+    assert result[0]["confirmation"] == "2026-05-20"
 
 
 # ---------------------------------------------------------------------------
-# Schema: TRACKER_HEADERS includes Response
+# Schema: TRACKER_HEADERS includes Confirmation and Answer
 # ---------------------------------------------------------------------------
 
-def test_tracker_headers_include_response():
+def test_tracker_headers_include_confirmation_and_answer():
     from hunter.tracker import TRACKER_HEADERS
-    assert "Response" in TRACKER_HEADERS
-    assert TRACKER_HEADERS.index("Response") == COL_RESPONSE - 1
+    assert "Confirmation" in TRACKER_HEADERS
+    assert "Answer" in TRACKER_HEADERS
+    assert TRACKER_HEADERS.index("Confirmation") == COL_CONFIRMATION - 1

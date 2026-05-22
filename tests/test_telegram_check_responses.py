@@ -20,8 +20,8 @@ def run(coro):
 
 
 def _confirmed_result(company="NASK", title="Senior Frontend Developer",
-                      platform="erecruiter", existing_response=""):
-    """MatchResult for a confirmed email (response was empty before run)."""
+                      platform="erecruiter", existing_confirmation=""):
+    """MatchResult for a confirmed email (confirmation was empty before run)."""
     email = ConfirmationEmail(
         company=company, title=title,
         date="2026-05-20", subject="...", platform=platform,
@@ -29,7 +29,7 @@ def _confirmed_result(company="NASK", title="Senior Frontend Developer",
     candidate = {
         "row": 2, "company": company, "title": title,
         "ats": "85%", "sent": "", "url": "https://example.com/1",
-        "response": existing_response,
+        "confirmation": existing_confirmation,
         "title_score": 1.0,
     }
     return MatchResult(email=email, match_type="exact",
@@ -188,9 +188,9 @@ def test_scheduled_silent_when_no_new_confirmed():
     context = MagicMock()
     context.bot = AsyncMock()
 
-    # existing_response="CONFIRMED" → was already confirmed → not newly written
+    # existing_confirmation="2026-05-01" → was already confirmed → not newly written
     results = [_confirmed_result("NASK", "Senior Frontend Developer",
-                                 existing_response="CONFIRMED")]
+                                 existing_confirmation="2026-05-01")]
 
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=results)):
@@ -208,7 +208,7 @@ def test_scheduled_notifies_when_newly_confirmed():
     context.bot = AsyncMock()
 
     results = [_confirmed_result("NASK", "Senior Frontend Developer",
-                                 existing_response="")]  # was empty → newly written
+                                 existing_confirmation="")]  # was empty → newly written
 
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=results)):
