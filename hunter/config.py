@@ -234,6 +234,12 @@ GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches
 GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
 
+# ── Email response checker ────────────────────────────────────────────────────
+# How many days back to scan for confirmation emails
+EMAIL_RESPONSE_LOOKBACK_DAYS: int = int(os.getenv("EMAIL_RESPONSE_LOOKBACK_DAYS", "7"))
+# Auto-check interval (minutes); 0 = disabled
+EMAIL_RESPONSE_CHECK_INTERVAL_MIN: int = int(os.getenv("EMAIL_RESPONSE_CHECK_INTERVAL_MIN", "120"))
+
 # ── Expired check schedule ───────────────────────────────────────────────────
 EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
 
