@@ -341,10 +341,12 @@ def main():
         build_cover_letter(doc, content["cover_letter_pl"])
         save_docx(doc, Path(output_folder) / "Cover_Letter_PL.docx")
 
-    # --- About Me (full mode only) ---
-    if full_mode:
+    # --- About Me ---
+    _about_me_pl = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
+    if full_mode or _about_me_pl:
         from hunter.about_me_agent import generate_about_me
-        generate_about_me(Path(output_folder), lang="en")
+        if full_mode:
+            generate_about_me(Path(output_folder), lang="en")
         generate_about_me(Path(output_folder), lang="pl")
 
     # --- Update tracker.xlsx before PDF step so a LibreOffice crash doesn't lose the record ---
