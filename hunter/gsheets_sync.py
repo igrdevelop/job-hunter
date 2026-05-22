@@ -334,14 +334,14 @@ async def init_or_load_spreadsheet(
     if notify_cb:
         try:
             await notify_cb(
-                "📊 <b>Google Sheets tracker создан!</b>\n\n"
-                f'🔗 <a href="{sheet_url}">Открыть таблицу</a>\n\n'
-                "Сохрани ID в .env:\n"
+                "📊 <b>Google Sheets tracker created!</b>\n\n"
+                f'🔗 <a href="{sheet_url}">Open spreadsheet</a>\n\n'
+                "Save the ID in .env:\n"
                 f"<code>GSHEETS_TRACKER_ID={sheet_id}</code>\n\n"
-                "💡 <b>Фильтр-вид для отправки:</b>\n"
-                "1. Данные → Создать фильтр-вид\n"
-                "2. Столбец «Sent» → Фильтровать: пусто\n"
-                "3. Сохрани вид — будет показывать только неотосланные."
+                "💡 <b>Filter view for sending:</b>\n"
+                "1. Data → Create filter view\n"
+                "2. Column «Sent» → Filter: empty\n"
+                "3. Save the view — shows only unsent applications."
             )
         except Exception as e:
             log.warning("gsheets_sync: notify_cb failed: %s", e)

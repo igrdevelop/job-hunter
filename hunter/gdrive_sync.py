@@ -194,7 +194,7 @@ async def upload_missing_folders(
 
     for i, (company, job_url, folder_path) in enumerate(to_upload, 1):
         if progress_cb and i % 5 == 0:
-            await progress_cb(f"⏳ {i}/{total} загружено…")
+            await progress_cb(f"⏳ {i}/{total} uploaded…")
         try:
             date_name = folder_path.parent.name
             date_id = await asyncio.wait_for(

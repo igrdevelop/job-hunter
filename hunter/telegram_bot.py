@@ -100,16 +100,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Commands:\n"
         "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
         "/status - source schedule + bot status\n"
-        "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
-        "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
+        "/force — force generation: <code>/force URL</code> or <code>/force</code> "
+        "+ full job posting text (bypasses dedup and React-only; JobLeads: "
         "<code>job_posting.txt</code>)\n"
         "/process_manual - process MANUAL rows with filled job_posting.txt\n"
         "/sync_sent - sync Sent column from Google Sheets → tracker.xlsx\n"
-        "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
-        "/check_expired - проверить трекер на истёкшие вакансии\n"
-        "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n"
-        "/gdrive_upload_missing - загрузить все папки из tracker.xlsx на Google Drive\n\n"
+        "/unsent - count unsent applications and how many have ANGULAR in stack\n"
+        "/check_expired - check tracker for expired vacancies\n"
+        "/gsheets_status - Google Sheets integration status\n"
+        "/gsheets_push_missing - push tracker.xlsx rows missing from Sheets\n"
+        "/gdrive_upload_missing - upload all tracker.xlsx folders to Google Drive\n\n"
         "Or just send a job URL to generate docs.",
         parse_mode=ParseMode.HTML,
     )
@@ -174,19 +174,19 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not body:
         await update.message.reply_text(
-            "<b>/force</b> — принудительная генерация (<code>--force</code>):\n\n"
-            "• <code>/force https://…</code> — по ссылке\n"
-            "• <code>/force</code> и с новой строки (или через пробел) полный текст вакансии — "
-            "как обычная вставка, но с обходом дедупа и React-only\n\n"
-            "Текст должен быть достаточно длинным (как при вставке JD), иначе пришли http-ссылку.",
+            "<b>/force</b> — force generation (<code>--force</code>):\n\n"
+            "• <code>/force https://…</code> — by URL\n"
+            "• <code>/force</code> followed by full job posting text — "
+            "same as paste flow but bypasses dedup and React-only\n\n"
+            "Text must be long enough (like a full JD); otherwise send an http URL.",
             parse_mode=ParseMode.HTML,
         )
         return
 
     if _looks_like_paste(body):
         await update.message.reply_text(
-            f"🔧 <b>Force + текст вакансии</b> — {len(body.strip())} симв. "
-            "Обход: дедуп трекера, React-only. Запускаю…",
+            f"🔧 <b>Force + job text</b> — {len(body.strip())} chars. "
+            "Bypasses: tracker dedup, React-only. Starting…",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
@@ -197,10 +197,10 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if body.startswith("http"):
         url = _extract_url(body) or body.split()[0].strip()
         await update.message.reply_text(
-            f"⏳ <b>Force: запускаю генерацию</b> (<code>--force</code>)\n"
+            f"⏳ <b>Force: starting generation</b> (<code>--force</code>)\n"
             f"🔗 {url}\n\n"
-            "Обход: дедуп трекера, React-only skip; для JobLeads — вставленный "
-            "<code>job_posting.txt</code> подставится при fetch.",
+            "Bypasses: tracker dedup, React-only skip; for JobLeads — existing "
+            "<code>job_posting.txt</code> will be used on fetch.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
@@ -209,8 +209,8 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.message.reply_text(
-        "После <code>/force</code> нужна <b>http(s)-ссылка</b> или длинный текст вакансии "
-        "(как при обычной вставке). Одно слово без ссылки не подходит.",
+        "After <code>/force</code> provide an <b>http(s) URL</b> or full job posting text "
+        "(same as paste flow). A single word without a URL is not valid.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -222,7 +222,7 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     rows = await asyncio.to_thread(get_all_manual_pending)
     if not rows:
-        await update.message.reply_text("✅ Нет MANUAL вакансий для обработки.")
+        await update.message.reply_text("✅ No MANUAL vacancies to process.")
         return
 
     ready = []
@@ -238,17 +238,17 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for r in rows
         ]
         await update.message.reply_text(
-            f"📝 <b>Найдено {len(rows)} MANUAL вакансий, но ни одна не готова.</b>\n\n"
+            f"📝 <b>Found {len(rows)} MANUAL vacancies, none ready.</b>\n\n"
             + "\n".join(lines)
-            + "\n\nДобавь текст вакансии под маркером в <code>job_posting.txt</code> и повтори.",
+            + "\n\nAdd the job text below the marker in <code>job_posting.txt</code> and retry.",
             parse_mode=ParseMode.HTML,
         )
         return
 
     not_ready_count = len(rows) - len(ready)
-    note = f" (ещё {not_ready_count} ожидают текста)" if not_ready_count else ""
+    note = f" ({not_ready_count} waiting for text)" if not_ready_count else ""
     await update.message.reply_text(
-        f"🚀 <b>Запускаю обработку {len(ready)} готовых вакансий{note}…</b>",
+        f"🚀 <b>Processing {len(ready)} ready vacancies{note}…</b>",
         parse_mode=ParseMode.HTML,
     )
     logger.info(f"[process_manual] Processing {len(ready)} ready MANUAL rows")
@@ -283,7 +283,7 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"[process_manual] FAIL: {url}\n{stderr.decode(errors='replace')[-300:]}")
 
     await update.message.reply_text(
-        f"🏁 <b>process_manual завершён</b>\n✅ {ok} / ❌ {failed} / Всего: {total}",
+        f"🏁 <b>process_manual done</b>\n✅ {ok} / ❌ {failed} / Total: {total}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -332,7 +332,7 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Сколько неотосланных заявок в трекере и сколько с ANGULAR в Stack."""
+    """Count unsent applications in tracker and how many have ANGULAR in stack."""
     try:
         from hunter.tracker_cache import cache
         if not cache.loaded:
@@ -340,15 +340,15 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         total = await cache.unsent_count()
         angular_n = await cache.unsent_angular_count()
         if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет.</b>"
+            msg = "📭 <b>No unsent applications.</b>"
         else:
             msg = (
-                f"📋 <b>Неотосланных заявок:</b> {total}\n"
-                f"🔷 <b>С ANGULAR в Stack:</b> {angular_n}"
+                f"📋 <b>Unsent applications:</b> {total}\n"
+                f"🔷 <b>With ANGULAR in stack:</b> {angular_n}"
             )
     except Exception as exc:
         logger.exception("[unsent] Failed: %s", exc)
-        msg = f"❌ Не удалось прочитать трекер: <code>{exc}</code>"
+        msg = f"❌ Failed to read tracker: <code>{exc}</code>"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
@@ -357,8 +357,8 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     from hunter.expired_marker import run_check
 
     status_msg = await update.message.reply_text(
-        "🔍 Проверяю трекер на истёкшие вакансии...\n"
-        "<i>EXPIRED будет записан прямо в tracker.xlsx.</i>",
+        "🔍 Checking tracker for expired vacancies…\n"
+        "<i>EXPIRED will be written directly to tracker.xlsx.</i>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -373,7 +373,7 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     except Exception as e:
         logger.exception("[check_expired] Failed: %s", e)
         await status_msg.edit_text(
-            f"❌ Ошибка: <code>{str(e)[:200]}</code>",
+            f"❌ Error: <code>{str(e)[:200]}</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -384,26 +384,26 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     errors  = result["errors"]
     skipped = result.get("skipped", [])
 
-    lines = [f"✅ <b>Проверка завершена</b> — {total} вакансий\n"]
+    lines = [f"✅ <b>Check complete</b> — {total} vacancies\n"]
 
     if expired:
-        lines.append(f"⏭ <b>Истекло ({len(expired)}):</b>")
+        lines.append(f"⏭ <b>Expired ({len(expired)}):</b>")
         for item in expired:
             lines.append(f"  • {item['company']} — {item['title']}")
-        lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
+        lines.append(f"\n📊 tracker.xlsx updated — {len(expired)} row(s) marked EXPIRED.")
         lines.append("")
 
     if errors:
-        lines.append(f"⚠️ <b>Ошибки загрузки ({len(errors)}):</b>")
+        lines.append(f"⚠️ <b>Fetch errors ({len(errors)}):</b>")
         for item in errors[:5]:
             lines.append(f"  • {item['company']}: {item['error'][:60]}")
         if len(errors) > 5:
-            lines.append(f"  … ещё {len(errors) - 5}")
+            lines.append(f"  … {len(errors) - 5} more")
         lines.append("")
 
-    lines.append(f"✅ Живых: <b>{alive}</b>")
+    lines.append(f"✅ Alive: <b>{alive}</b>")
     if skipped:
-        lines.append(f"⏩ Пропущено (jobleads): <b>{len(skipped)}</b>")
+        lines.append(f"⏩ Skipped (jobleads): <b>{len(skipped)}</b>")
 
     await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -415,17 +415,17 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not GSHEETS_ENABLED:
         await update.message.reply_text(
-            "ℹ️ Google Sheets отключён (GSHEETS_ENABLED=false). /sync_sent недоступен.",
+            "ℹ️ Google Sheets disabled (GSHEETS_ENABLED=false). /sync_sent unavailable.",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    await update.message.reply_text("⏳ Синхронизирую Sheets → tracker.xlsx…")
+    await update.message.reply_text("⏳ Syncing Sheets → tracker.xlsx…")
     try:
         result = await gsheets_sync.pull_full_snapshot()
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Ошибка pull: <code>{e}</code>",
+            f"❌ Pull error: <code>{e}</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -434,11 +434,11 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     updated = result["updated"]
     errors = result["errors"]
 
-    lines = [f"✅ <b>sync_sent завершён</b>"]
-    lines.append(f"  Строк из Sheets: {pulled}")
-    lines.append(f"  Обновлено в tracker.xlsx: {updated}")
+    lines = [f"✅ <b>sync_sent done</b>"]
+    lines.append(f"  Rows from Sheets: {pulled}")
+    lines.append(f"  Updated in tracker.xlsx: {updated}")
     if errors:
-        lines.append(f"⚠️ Ошибки: {'; '.join(errors[:2])}")
+        lines.append(f"⚠️ Errors: {'; '.join(errors[:2])}")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -449,7 +449,7 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         report = await gsheets_sync.status_report()
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Не удалось получить статус: <code>{e}</code>",
+            f"❌ Failed to get status: <code>{e}</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -457,24 +457,24 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     enabled = report["enabled"]
     if not enabled:
         await update.message.reply_text(
-            "ℹ️ <b>Google Sheets отключён</b> (GSHEETS_ENABLED=false).\n"
-            "Задай GSHEETS_ENABLED=true в .env чтобы включить.",
+            "ℹ️ <b>Google Sheets disabled</b> (GSHEETS_ENABLED=false).\n"
+            "Set GSHEETS_ENABLED=true in .env to enable.",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    lines = ["📊 <b>Google Sheets статус</b>"]
-    lines.append(f"  Сервис: {'✅ OK' if report['service_ok'] else '❌ не инициализирован'}")
+    lines = ["📊 <b>Google Sheets status</b>"]
+    lines.append(f"  Service: {'✅ OK' if report['service_ok'] else '❌ not initialized'}")
     if report.get("sheet_url"):
-        lines.append(f"  Таблица: <a href=\"{report['sheet_url']}\">открыть</a>")
+        lines.append(f"  Sheet: <a href=\"{report['sheet_url']}\">open</a>")
     elif report.get("sheet_id"):
         lines.append(f"  ID: <code>{report['sheet_id']}</code>")
     else:
-        lines.append("  Таблица: не настроена")
+        lines.append("  Sheet: not configured")
     dirty = report.get("dirty_count", 0)
-    lines.append(f"  Грязных строк: {dirty}")
+    lines.append(f"  Dirty rows: {dirty}")
     if dirty:
-        lines.append("  ℹ️ Запусти /gsheets_push_missing для повторной отправки")
+        lines.append("  ℹ️ Run /gsheets_push_missing to resync")
     await update.message.reply_text(
         "\n".join(lines),
         parse_mode=ParseMode.HTML,
@@ -483,66 +483,69 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Upload all tracker.xlsx application folders to Google Drive."""
+    """Upload all tracker.xlsx application folders to Google Drive (runs in background)."""
     from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
     if not GDRIVE_ENABLED:
         await update.message.reply_text(
-            "⚠️ GDRIVE_ENABLED=false — Google Drive не активирован.",
+            "⚠️ GDRIVE_ENABLED=false — Google Drive is not enabled.",
             parse_mode=ParseMode.HTML,
         )
         return
 
     status_msg = await update.message.reply_text(
-        "⏳ Загружаю папки из tracker.xlsx на Google Drive…",
+        "⏳ Upload to Google Drive started in background…",
         parse_mode=ParseMode.HTML,
     )
 
-    async def _progress(text: str) -> None:
-        try:
-            await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
+    async def _run() -> None:
+        async def _progress(text: str) -> None:
+            try:
+                await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
 
-    try:
-        from hunter import gdrive_sync
-        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
-    except Exception as e:
+        try:
+            from hunter import gdrive_sync
+            result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ gdrive_upload_missing error: <code>{e}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        uploaded = result["uploaded"]
+        already = result.get("already_uploaded", 0)
+        skipped = result["skipped_missing"]
+        errors = result.get("errors", [])
+        err_note = ""
+        if errors:
+            err_lines = "\n".join(f"  • {e[:120]}" for e in errors[:5])
+            err_note = f"\n⚠️ Errors ({len(errors)}):\n<code>{err_lines}</code>"
         await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
+            f"✅ <b>gdrive_upload_missing</b>\n"
+            f"  📤 Uploaded: {uploaded}\n"
+            f"  ✔ Already on Drive: {already}\n"
+            f"  ⏭ Missing locally: {skipped}"
+            f"{err_note}",
             parse_mode=ParseMode.HTML,
         )
-        return
 
-    uploaded = result["uploaded"]
-    already = result.get("already_uploaded", 0)
-    skipped = result["skipped_missing"]
-    errors = result.get("errors", [])
-    err_note = ""
-    if errors:
-        err_lines = "\n".join(f"  • {e[:120]}" for e in errors[:5])
-        err_note = f"\n⚠️ Ошибки ({len(errors)}):\n<code>{err_lines}</code>"
-    await update.message.reply_text(
-        f"✅ <b>gdrive_upload_missing</b>\n"
-        f"  📤 Загружено: {uploaded}\n"
-        f"  ✔ Уже на Drive: {already}\n"
-        f"  ⏭ Нет локально: {skipped}"
-        f"{err_note}",
-        parse_mode=ParseMode.HTML,
-    )
+    context.application.create_task(_run())
 
 
 async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Push tracker.xlsx rows that are absent from Google Sheets (by ID)."""
     from hunter import gsheets_sync
     await update.message.reply_text(
-        "⏳ Ищу строки в tracker.xlsx, которых нет в Sheets…",
+        "⏳ Looking for tracker.xlsx rows absent from Sheets…",
         parse_mode=ParseMode.HTML,
     )
     try:
         result = await gsheets_sync.push_missing_rows()
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
+            f"❌ Error: <code>{e}</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -553,8 +556,8 @@ async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT
     err_note = f"\n⚠️ <code>{errors[0][:200]}</code>" if errors else ""
     await update.message.reply_text(
         f"✅ <b>gsheets_push_missing</b>\n"
-        f"  📤 Добавлено: {pushed}\n"
-        f"  ✔️ Уже были: {already}"
+        f"  📤 Pushed: {pushed}\n"
+        f"  ✔️ Already present: {already}"
         f"{err_note}",
         parse_mode=ParseMode.HTML,
     )
@@ -575,7 +578,7 @@ def _build_schedule_text() -> str:
 
     schedule_str = "\n".join(lines)
     return (
-        f"⏰ <b>Расписание</b> ({TIMEZONE}, интервал {SCHEDULE_SOURCE_OFFSET_MIN} мин):\n"
+        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset {SCHEDULE_SOURCE_OFFSET_MIN} min):\n"
         f"{schedule_str}"
     )
 
@@ -695,7 +698,7 @@ async def _run_apply_agent(
                 f"\n\n<pre>{error_detail[:800]}</pre>" if error_detail else ""
             )
             await _tg_notify(
-                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}{err_block}"
+                f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}"
             )
         else:
             logger.info(f"[apply_agent] done ({outcome}) for {label}")
@@ -723,7 +726,7 @@ async def _run_apply_agent(
                         )
                         if drive_url:
                             await _tg_notify(
-                                f'📁 <a href="{drive_url}">Открыть папку на Drive</a>'
+                                f'📁 <a href="{drive_url}">Open folder on Drive</a>'
                             )
             except Exception as _e:
                 logger.warning("[apply_agent] gdrive upload failed: %s", _e)
@@ -837,7 +840,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if _looks_like_paste(text):
         n = len(text.strip())
         await update.message.reply_text(
-            f"📥 <b>Текст вакансии получен</b> — {n} симв. Сохраняю и проверяю трекер…",
+            f"📥 <b>Job posting received</b> — {n} chars. Saving and checking tracker…",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
@@ -846,10 +849,10 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not text.startswith("http"):
         await update.message.reply_text(
-            "ℹ️ Отправь ссылку на вакансию (начинается с http) и я сгенерирую документы.\n"
-            "Либо вставь сюда полный текст вакансии (можно с ссылкой или без) — "
-            "я обработаю его напрямую.\n\n"
-            "Также можно отправить ссылку из LinkedIn алерта — вытащу все вакансии из неё.",
+            "ℹ️ Send a job URL (starting with http) to generate docs.\n"
+            "Or paste the full job posting text (with or without a URL) — "
+            "it will be processed directly.\n\n"
+            "You can also send a LinkedIn alert URL — all job ids will be extracted.",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -865,8 +868,8 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         job_ids = parse_linkedin_job_ids(text)
         if not job_ids:
             await update.message.reply_text(
-                "⚠️ LinkedIn ссылка распознана, но id вакансий не найдены.\n"
-                "Попробуй прислать прямую ссылку на конкретную вакансию.",
+                "⚠️ LinkedIn URL recognised but no job ids found.\n"
+                "Try sending a direct link to a specific vacancy.",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -875,9 +878,9 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         skipped = len(job_ids) - len(capped)
 
         msg = (
-            f"🔗 <b>LinkedIn алерт</b>: найдено <b>{len(job_ids)}</b> вакансий\n"
-            + (f"⚠️ Обрабатываю первые {MAX_JOBS_PER_RUN} (MAX_JOBS_PER_RUN)\n" if skipped else "")
-            + f"Запускаю последовательно..."
+            f"🔗 <b>LinkedIn alert</b>: found <b>{len(job_ids)}</b> jobs\n"
+            + (f"⚠️ Processing first {MAX_JOBS_PER_RUN} (MAX_JOBS_PER_RUN)\n" if skipped else "")
+            + "Starting sequentially…"
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         logger.info(f"[URL handler] LinkedIn batch: {len(capped)} jobs from alert")
@@ -894,8 +897,8 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             manual_content = await asyncio.to_thread(try_load_manual_job_posting, text)
             if manual_content:
                 await update.message.reply_text(
-                    f"✅ <b>Текст вакансии найден в файле — запускаю генерацию…</b>\n"
-                    f"🔗 {text}\n\nЭто займёт 1-2 минуты.",
+                    f"✅ <b>Job posting found in file — starting generation…</b>\n"
+                    f"🔗 {text}\n\nEstimated 1–2 minutes.",
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
@@ -906,10 +909,10 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 e = entries[-1]
                 folder_info = f'\n📁 <code>{e["folder"]}</code>' if e.get("folder") else ""
                 await update.message.reply_text(
-                    f"📝 <b>Вакансия ожидает текста (MANUAL)</b>\n\n"
+                    f"📝 <b>Vacancy waiting for text (MANUAL)</b>\n\n"
                     f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
-                    f"Вставь полный текст вакансии под маркером в <code>job_posting.txt</code> и пришли эту ссылку ещё раз.\n"
-                    f"Либо отправь сюда текст вакансии (можно вместе со ссылкой) — обработаю сразу.",
+                    f"Paste the full job text below the marker in <code>job_posting.txt</code> and send this URL again.\n"
+                    f"Or send the job text here (with or without the URL) — it will be processed immediately.",
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
@@ -925,16 +928,16 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         detail = "\n".join(lines)
         await update.message.reply_text(
-            f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
+            f"⚠️ <b>This vacancy is already in the tracker!</b>\n\n"
             f"{detail}\n\n"
-            f"Отправь /force {text}\nесли хочешь обработать заново.",
+            f"Send /force {text}\nto process it again.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
         return
 
     await update.message.reply_text(
-        f"⏳ <b>Запускаю генерацию...</b>\n🔗 {text}\n\nЭто займёт 1-2 минуты.",
+        f"⏳ <b>Starting generation…</b>\n🔗 {text}\n\nEstimated 1–2 minutes.",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -969,9 +972,9 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
                 for e in entries
             )
             await update.message.reply_text(
-                f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
+                f"⚠️ <b>This vacancy is already in the tracker!</b>\n\n"
                 f"{detail}\n\n"
-                f"Отправь <code>/force {url}</code> или <code>/force</code> с полным текстом.",
+                f"Send <code>/force {url}</code> or <code>/force</code> with full text to reprocess.",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
@@ -991,18 +994,18 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
                     jp.write_text(text.strip() + "\n", encoding="utf-8")
             except Exception as e:
                 await update.message.reply_text(
-                    f"❌ Не удалось записать текст в <code>{jp}</code>\n<pre>{str(e)[:500]}</pre>",
+                    f"❌ Failed to write text to <code>{jp}</code>\n<pre>{str(e)[:500]}</pre>",
                     parse_mode=ParseMode.HTML,
                 )
                 return
 
-            inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
+            inferred_note = " (URL recovered from tracker)" if url_inferred else ""
             force_note = " <code>--force</code>" if force else ""
             await update.message.reply_text(
-                "✅ <b>Подтверждаю:</b> текст записан в <code>job_posting.txt</code>, "
-                f"запускаю генерацию документов{force_note}.\n"
+                "✅ <b>Confirmed:</b> text written to <code>job_posting.txt</code>, "
+                f"starting document generation{force_note}.\n"
                 f"🔗 {url}{inferred_note}\n\n"
-                "Ориентировочно 1–2 мин; готовые файлы пришлю отдельным сообщением.",
+                "Estimated 1–2 min; files will be sent in a separate message.",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
@@ -1024,23 +1027,23 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     except Exception as e:
         logger.exception("[paste handler] failed to write temp file")
         await update.message.reply_text(
-            f"❌ Не удалось сохранить присланный текст во временный файл: <code>{e}</code>",
+            f"❌ Failed to save posted text to temp file: <code>{e}</code>",
             parse_mode=ParseMode.HTML,
         )
         return
 
     chars = len(text)
     if url:
-        inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
+        inferred_note = " (URL recovered from tracker)" if url_inferred else ""
         url_line = f"🔗 {url}{inferred_note}"
     else:
-        url_line = "🔗 (ссылка не найдена — обрабатываю без неё)"
-    mode = "режим вставки + <code>--force</code>" if force else "режим вставки"
+        url_line = "🔗 (no URL found — processing without one)"
+    mode = "paste + <code>--force</code>" if force else "paste mode"
     await update.message.reply_text(
-        "✅ <b>Подтверждаю:</b> текст сохранён, запускаю <code>apply_agent</code> "
-        f"({mode}, {chars} симв.).\n"
+        "✅ <b>Confirmed:</b> text saved, launching <code>apply_agent</code> "
+        f"({mode}, {chars} chars).\n"
         f"{url_line}\n\n"
-        "Ориентировочно 1–2 мин; результат пришлю сюда же.",
+        "Estimated 1–2 min; result will be sent here.",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -1135,7 +1138,7 @@ async def _post_init(app: Application) -> None:
                 try:
                     await app.bot.send_message(
                         chat_id=TELEGRAM_CHAT_ID,
-                        text=f"⚠️ <b>Google Sheets не готов</b>\n<code>{err}</code>",
+                        text=f"⚠️ <b>Google Sheets not ready</b>\n<code>{err}</code>",
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception:
@@ -1326,15 +1329,15 @@ async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("[scheduled_check_expired] Nothing expired.")
         return
 
-    lines = [f"🌙 <b>Ночная проверка истёкших</b>\n"]
-    lines.append(f"⏭ Истекло: <b>{len(expired)}</b>")
+    lines = [f"🌙 <b>Nightly expired check</b>\n"]
+    lines.append(f"⏭ Expired: <b>{len(expired)}</b>")
     for item in expired:
         lines.append(f"  • {item['company']} — {item['title']}")
     if skipped:
-        lines.append(f"⏩ Пропущено (jobleads): {len(skipped)}")
+        lines.append(f"⏩ Skipped (jobleads): {len(skipped)}")
     if errors:
-        lines.append(f"⚠️ Ошибок: {len(errors)}")
-    lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
+        lines.append(f"⚠️ Errors: {len(errors)}")
+    lines.append(f"\n📊 tracker.xlsx updated — {len(expired)} row(s) marked EXPIRED.")
     await context.bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text="\n".join(lines),
@@ -1379,8 +1382,8 @@ async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
         extra = ""
         if "Content_Types" in str(e) or "archive" in str(e).lower():
             extra = (
-                "\n\n<i>Скорее всего повреждён или не-xlsx файл tracker.xlsx — "
-                "не ошибка борда в скобках.</i>"
+                "\n\n<i>Likely corrupt or non-xlsx tracker.xlsx file — "
+                "not a board error in parentheses.</i>"
             )
         try:
             await context.bot.send_message(
@@ -1443,17 +1446,17 @@ async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             await cache.load_from_excel(TRACKER_PATH)
         total = await cache.unsent_count()
         if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет.</b>"
+            msg = "📭 <b>No unsent applications.</b>"
         else:
             rows = await cache.all_unsent()
             fail_n = sum(1 for r in rows if r.get("ATS %") == "FAIL")
             manual_n = sum(1 for r in rows if r.get("ATS %") == "MANUAL")
             ready_n = total - fail_n - manual_n
-            parts = [f"📋 <b>Неотосланных заявок: {total}</b>"]
+            parts = [f"📋 <b>Unsent applications: {total}</b>"]
             if ready_n:
-                parts.append(f"  ✅ Готовы к отправке: {ready_n}")
+                parts.append(f"  ✅ Ready to send: {ready_n}")
             if manual_n:
-                parts.append(f"  📝 MANUAL (нужен текст): {manual_n}")
+                parts.append(f"  📝 MANUAL (text needed): {manual_n}")
             if fail_n:
                 parts.append(f"  ❌ FAIL: {fail_n}")
             msg = "\n".join(parts)
