@@ -1,8 +1,12 @@
 """Tests for hunter/email_response_checker.py.
 
 Test data based on real observed confirmation emails:
-  - eRecruiter ATS (mail@stage.erecruiter.pl) used by NASK, EXATEL, Nexio, Medicover
-  - SmartRecruiters (notification@smartrecruiters.com) used by Sigma Software
+  - eRecruiter ATS (mail@stage.erecruiter.pl): NASK, EXATEL, Nexio, Medicover
+  - SmartRecruiters (notification@smartrecruiters.com): Sigma Software
+  - Pracuj.pl status (noreply@aplikacje.pracuj.pl): Hiberus, Get It Together, Devapo
+  - SmartJobs Smart Tracker (noreply@thesmartjobs.com): Devapo, Hiberus
+  - theprotocol.it (system@mailing.theprotocol.it): ITEAMLY
+  - Recruitify.ai (system@recruitify.ai): title only, no company
   - Direct company emails (inspeerity.com, consdata.com, etc.)
 """
 
@@ -19,6 +23,10 @@ from hunter.email_response_checker import (
     _message_date,
     _parse_erecruiter,
     _parse_smartrecruiters,
+    _parse_pracuj_status,
+    _parse_smartjobs,
+    _parse_theprotocol,
+    _parse_recruitify,
     _parse_direct,
     _parse_message,
     fetch_confirmation_emails,
@@ -246,6 +254,175 @@ def test_parse_direct_english_body_position():
         "HR <hr@company.com>",
     )
     assert title == "Frontend Engineer"
+
+
+# ---------------------------------------------------------------------------
+# _parse_pracuj_status — real Pracuj.pl status emails
+# ---------------------------------------------------------------------------
+
+def test_parse_pracuj_status_title_from_subject():
+    title_in_subject = "Frontend Developer (Angular + AI)"
+    company, title = _parse_pracuj_status(
+        f"{title_in_subject}: pracodawca udziela bezpośrednich informacji.",
+        "",
+    )
+    assert title == title_in_subject
+
+
+def test_parse_pracuj_status_company_from_body():
+    body = (
+        "Sprawdź szczegóły oferty:\n"
+        "logo firmy HIBERUS POLAND SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ\n"
+        "Frontend Developer (Angular + AI)\n"
+    )
+    company, title = _parse_pracuj_status(
+        "Frontend Developer (Angular + AI): pracodawca udziela bezpośrednich informacji.",
+        body,
+    )
+    assert "HIBERUS" in company
+    assert title == "Frontend Developer (Angular + AI)"
+
+
+def test_parse_pracuj_status_no_match():
+    company, title = _parse_pracuj_status("Nowe oferty dla Ciebie", "")
+    assert company == ""
+    assert title == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_smartjobs — real SmartJobs Smart Tracker emails
+# ---------------------------------------------------------------------------
+
+def test_parse_smartjobs_from_body():
+    """Real SmartJobs email body contains stanowisko + w firmie."""
+    body = (
+        "Oto Smart Tracker dla Twojej aplikacji na stanowisko Senior Angular Developer "
+        "w firmie Devapo. Smart Tracker to link śledzący..."
+    )
+    company, title = _parse_smartjobs(
+        "Twój Smart Tracker dla Senior Angular Developer",
+        body,
+    )
+    assert company == "Devapo"
+    assert title == "Senior Angular Developer"
+
+
+def test_parse_smartjobs_hiberus():
+    body = (
+        "Oto Smart Tracker dla Twojej aplikacji na stanowisko Frontend Developer (Angular + AI) "
+        "w firmie Hiberus Poland."
+    )
+    company, title = _parse_smartjobs("Twój Smart Tracker dla Frontend Developer (Angular + AI)", body)
+    assert company == "Hiberus Poland"
+    assert title == "Frontend Developer (Angular + AI)"
+
+
+def test_parse_smartjobs_title_fallback_from_subject():
+    """When body parsing fails, fall back to subject."""
+    company, title = _parse_smartjobs(
+        "Twój Smart Tracker dla Senior Angular Developer",
+        "",
+    )
+    assert title == "Senior Angular Developer"
+    assert company == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_theprotocol — real theprotocol.it confirmation emails
+# ---------------------------------------------------------------------------
+
+def test_parse_theprotocol_iteamly():
+    """Real theprotocol.it subject."""
+    company, title = _parse_theprotocol(
+        "Potwierdzenie zgłoszenia - ITEAMLY SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ:"
+        " Senior Frontend Developer (Angular)",
+        "",
+    )
+    assert "ITEAMLY" in company
+    assert title == "Senior Frontend Developer (Angular)"
+
+
+def test_parse_theprotocol_no_match():
+    company, title = _parse_theprotocol("Nowe oferty pracy", "")
+    assert company == ""
+    assert title == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_recruitify — real Recruitify.ai emails
+# ---------------------------------------------------------------------------
+
+def test_parse_recruitify_title_from_body():
+    body = "Hello Igor\n\nThanks for applying. Your application is being processed.\n\nPosition: Frontend Developer (Angular)\n"
+    company, title = _parse_recruitify(
+        "Thanks for filling up the questionnaire.",
+        body,
+    )
+    assert title == "Frontend Developer (Angular)"
+    assert company == ""  # Recruitify doesn't include company
+
+
+def test_parse_recruitify_no_body():
+    company, title = _parse_recruitify("Thanks for filling up the questionnaire.", "")
+    assert company == ""
+    assert title == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_message routing — new platforms
+# ---------------------------------------------------------------------------
+
+def test_parse_message_pracuj_status():
+    msg = _make_msg(
+        subject="Senior Angular Developer: pracodawca udziela bezpośrednich informacji.",
+        sender="Pracuj.pl - Status aplikacji <noreply@aplikacje.pracuj.pl>",
+        body_text="logo firmy DEVAPO SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ\nSenior Angular Developer\n",
+    )
+    result = _parse_message(msg)
+    assert result is not None
+    assert result.platform == "pracuj_status"
+    assert result.title == "Senior Angular Developer"
+    assert "DEVAPO" in result.company
+
+
+def test_parse_message_smartjobs():
+    body = "aplikacja na stanowisko Senior Angular Developer w firmie Devapo."
+    msg = _make_msg(
+        subject="Twój Smart Tracker dla Senior Angular Developer",
+        sender="Smart Tracker <noreply@thesmartjobs.com>",
+        body_text=body,
+    )
+    result = _parse_message(msg)
+    assert result is not None
+    assert result.platform == "smartjobs"
+    assert result.company == "Devapo"
+    assert result.title == "Senior Angular Developer"
+
+
+def test_parse_message_theprotocol():
+    msg = _make_msg(
+        subject="Potwierdzenie zgłoszenia - ITEAMLY SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ: Senior Frontend Developer (Angular)",
+        sender="the:protocol <system@mailing.theprotocol.it>",
+    )
+    result = _parse_message(msg)
+    assert result is not None
+    assert result.platform == "theprotocol"
+    assert "ITEAMLY" in result.company
+    assert result.title == "Senior Frontend Developer (Angular)"
+
+
+def test_parse_message_recruitify():
+    body = "Position: Frontend Developer (Angular)\n"
+    msg = _make_msg(
+        subject="Thanks for filling up the questionnaire.",
+        sender="Recruitify.ai <system@recruitify.ai>",
+        body_text=body,
+    )
+    result = _parse_message(msg)
+    assert result is not None
+    assert result.platform == "recruitify"
+    assert result.title == "Frontend Developer (Angular)"
+    assert result.company == ""
 
 
 # ---------------------------------------------------------------------------

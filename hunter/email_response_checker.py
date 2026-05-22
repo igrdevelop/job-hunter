@@ -35,7 +35,12 @@ _CONFIRMATION_SENDERS = [
     "workable.com",
     "greenhouse.io",
     "lever.co",
-    # Job boards (speculative — may send per-apply confirmations)
+    # Confirmed real-world job board / tracking platforms
+    "aplikacje.pracuj.pl",      # Pracuj.pl status notifications
+    "thesmartjobs.com",         # SmartJobs Smart Tracker
+    "mailing.theprotocol.it",   # theprotocol.it confirmation
+    "recruitify.ai",            # Recruitify ATS
+    # Speculative (may send per-apply confirmations)
     "linkedin.com",
     "pracuj.pl",
     "nofluffjobs.com",
@@ -48,6 +53,11 @@ _SUBJECT_QUERY_KEYWORDS = [
     "thank you for applying",
     "thanks for applying",
     "thank you for submitting",
+    # Confirmed real-world patterns
+    "pracodawca udziela bezpośrednich informacji",
+    "potwierdzenie zgłoszenia",
+    "smart tracker",
+    "thanks for filling",
 ]
 
 # Subject substrings for local filtering (broader, case-insensitive)
@@ -57,9 +67,14 @@ _CONFIRMATION_SUBJECTS = [
     "thank you for applying",
     "thanks for applying",
     "thank you for submitting",
+    "thanks for filling",
     "application submitted",
     "application received",
-    # older guesses kept as fallbacks
+    # Confirmed real-world patterns
+    "pracodawca udziela bezpośrednich informacji",  # Pracuj.pl status
+    "potwierdzenie zgłoszenia",                     # theprotocol.it
+    "smart tracker",                                # SmartJobs
+    # Speculative fallbacks
     "application was sent",
     "application sent",
     "potwierdzenie aplikacji",
@@ -189,6 +204,81 @@ def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, 
     return company, title
 
 
+# ── Confirmed new-platform parsers ───────────────────────────────────────────
+
+def _parse_pracuj_status(subject: str, body_text: str) -> tuple[str, str]:
+    """Pracuj.pl status notifications (noreply@aplikacje.pracuj.pl).
+
+    Subject: "Frontend Developer (Angular): pracodawca udziela bezpośrednich informacji."
+    Body:    "logo firmy {COMPANY}\n{Title}\n{COMPANY} {City, region}"
+    """
+    title = ""
+    m = re.search(r"^(.+?):\s*pracodawca udziela", subject, re.IGNORECASE)
+    if m:
+        title = m.group(1).strip()
+
+    company = ""
+    if body_text:
+        # Company appears right after "logo firmy" label
+        cm = re.search(r"logo firmy\s*\n?\s*(.+?)(?:\n|$)", body_text, re.IGNORECASE)
+        if cm:
+            company = cm.group(1).strip()
+
+    return company, title
+
+
+def _parse_smartjobs(subject: str, body_text: str) -> tuple[str, str]:
+    """SmartJobs Smart Tracker (noreply@thesmartjobs.com).
+
+    Subject: "Twój Smart Tracker dla Senior Angular Developer"
+    Body:    "aplikacja na stanowisko {Title} w firmie {Company}"
+    """
+    # Title + company from body (most reliable)
+    if body_text:
+        m = re.search(
+            r"(?:aplikacj[ię] na stanowisko|stanowisko)\s+(.+?)\s+w firmie\s+(.+?)(?:\.|$|\n)",
+            body_text, re.IGNORECASE,
+        )
+        if m:
+            return m.group(2).strip(), m.group(1).strip()
+
+    # Title from subject as fallback
+    title = ""
+    m = re.search(r"Smart Tracker dla\s+(.+)", subject, re.IGNORECASE)
+    if m:
+        title = m.group(1).strip()
+    return "", title
+
+
+def _parse_theprotocol(subject: str, body_text: str) -> tuple[str, str]:
+    """theprotocol.it confirmation (system@mailing.theprotocol.it).
+
+    Subject: "Potwierdzenie zgłoszenia - ITEAMLY SPÓŁKA Z O.O.: Senior Frontend Developer (Angular)"
+    """
+    m = re.search(
+        r"Potwierdzenie zgłoszenia\s*[-–]\s*(.+?):\s+(.+)",
+        subject, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return "", ""
+
+
+def _parse_recruitify(subject: str, body_text: str) -> tuple[str, str]:
+    """Recruitify.ai ATS (system@recruitify.ai).
+
+    Subject: "Thanks for filling up the questionnaire."
+    Body:    "Position: Frontend Developer (Angular)"
+    Company not included in email.
+    """
+    title = ""
+    if body_text:
+        m = re.search(r"Position:\s+(.+?)(?:\n|$)", body_text, re.IGNORECASE)
+        if m:
+            title = m.group(1).strip()
+    return "", title
+
+
 # ── Speculative job-board parsers (kept for future coverage) ──────────────────
 
 def _parse_linkedin(subject: str, body_text: str) -> tuple[str, str]:
@@ -282,6 +372,18 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
     elif "smartrecruiters.com" in sender:
         company, title = _parse_smartrecruiters(subject, body_text, from_header)
         platform = "smartrecruiters"
+    elif "aplikacje.pracuj.pl" in sender:
+        company, title = _parse_pracuj_status(subject, body_text)
+        platform = "pracuj_status"
+    elif "thesmartjobs.com" in sender:
+        company, title = _parse_smartjobs(subject, body_text)
+        platform = "smartjobs"
+    elif "mailing.theprotocol.it" in sender:
+        company, title = _parse_theprotocol(subject, body_text)
+        platform = "theprotocol"
+    elif "recruitify.ai" in sender:
+        company, title = _parse_recruitify(subject, body_text)
+        platform = "recruitify"
     elif "linkedin.com" in sender:
         company, title = _parse_linkedin(subject, body_text)
         platform = "linkedin"
@@ -295,7 +397,7 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
         company, title = _parse_justjoin(subject, body_text)
         platform = "justjoin"
     else:
-        # Direct company email or other ATS — generic fallback
+        # Direct company email or unknown ATS — generic fallback
         company, title = _parse_direct(subject, body_text, from_header)
         platform = "direct"
 
