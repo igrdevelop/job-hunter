@@ -25,6 +25,7 @@ APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
+GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
