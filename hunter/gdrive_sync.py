@@ -77,7 +77,10 @@ async def _do_upload(folder_path: Path) -> str:
     return folder_url(company_id)
 
 
-async def upload_application_folder(folder_path: Path) -> str | None:
+async def upload_application_folder(
+    folder_path: Path,
+    job_url: str | None = None,
+) -> str | None:
     """
     Upload Applications/{date}/{company}/ to Google Drive.
 
@@ -86,6 +89,9 @@ async def upload_application_folder(folder_path: Path) -> str | None:
         {date} /
           {company} /
             <all files>
+
+    If job_url is provided, writes the Drive URL back to tracker.xlsx (col 12)
+    after a successful upload so the row is not re-uploaded by upload_missing_folders.
 
     Returns the Drive URL for the company folder, or None on error / disabled.
     """
@@ -99,6 +105,9 @@ async def upload_application_folder(folder_path: Path) -> str | None:
     try:
         url = await _do_upload(folder_path)
         log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
+        if job_url:
+            from hunter.tracker import set_drive_url
+            await asyncio.to_thread(set_drive_url, job_url, url)
         return url
     except Exception as e:
         log.warning("gdrive_sync: upload failed for %s: %s", folder_path, e)
@@ -112,31 +121,40 @@ async def upload_missing_folders(
     project_dir: Path,
     progress_cb=None,
 ) -> dict:
-    """Upload all tracker.xlsx application folders to Drive.
+    """Upload tracker.xlsx application folders that haven't been uploaded to Drive yet.
 
-    Reads every row with a non-empty Folder column, resolves the path relative
-    to project_dir, and uploads it.
-    Already-uploaded files are overwritten idempotently (Drive deduplicates by name).
+    Skips rows that already have a Drive URL in col 12. After each successful
+    upload, writes the Drive URL back to tracker so the row is not re-uploaded.
 
     progress_cb: optional async callable(str) for Telegram progress updates.
 
     Returns:
-      {"uploaded": int, "skipped_missing": int, "errors": list[str]}
+      {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str]}
     """
     if not _ready():
-        return {"uploaded": 0, "skipped_missing": 0, "errors": ["GDRIVE_ENABLED is false or service not ready"]}
+        return {
+            "uploaded": 0, "already_uploaded": 0, "skipped_missing": 0,
+            "errors": ["GDRIVE_ENABLED is false or service not ready"],
+        }
 
     from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
-    from hunter.tracker import read_all_tracker_rows
+    from hunter.tracker import read_all_tracker_rows, set_drive_url
 
     rows = await asyncio.to_thread(read_all_tracker_rows)
 
-    # Collect folders that exist locally.
-    to_upload: list[tuple[str, Path]] = []
+    # Collect folders that need uploading.
+    to_upload: list[tuple[str, str, Path]] = []  # (company, job_url, folder_path)
+    already_uploaded = 0
     skipped_missing = 0
+
     for row in rows:
         folder_str = row.get("Folder", "").strip()
         if not folder_str:
+            continue
+        # Skip rows that already have a Drive URL.
+        existing_drive_url = row.get("Drive URL", "").strip()
+        if existing_drive_url and existing_drive_url not in ("-", "—"):
+            already_uploaded += 1
             continue
         folder_path = Path(folder_str)
         if not folder_path.is_absolute():
@@ -145,10 +163,13 @@ async def upload_missing_folders(
             skipped_missing += 1
             log.debug("gdrive_sync: folder not found locally, skipping: %s", folder_path)
             continue
-        to_upload.append((row.get("Company", folder_path.name), folder_path))
+        to_upload.append((row.get("Company", folder_path.name), row.get("URL", ""), folder_path))
 
     if not to_upload:
-        return {"uploaded": 0, "skipped_missing": skipped_missing, "errors": []}
+        return {
+            "uploaded": 0, "already_uploaded": already_uploaded,
+            "skipped_missing": skipped_missing, "errors": [],
+        }
 
     svc = _get_service()
     errors: list[str] = []
@@ -164,11 +185,14 @@ async def upload_missing_folders(
                 timeout=30,
             )
     except Exception as e:
-        return {"uploaded": 0, "skipped_missing": skipped_missing, "errors": [f"root folder: {e}"]}
+        return {
+            "uploaded": 0, "already_uploaded": already_uploaded,
+            "skipped_missing": skipped_missing, "errors": [f"root folder: {e}"],
+        }
 
     total = len(to_upload)
 
-    for i, (company, folder_path) in enumerate(to_upload, 1):
+    for i, (company, job_url, folder_path) in enumerate(to_upload, 1):
         if progress_cb and i % 5 == 0:
             await progress_cb(f"⏳ {i}/{total} загружено…")
         try:
@@ -181,9 +205,11 @@ async def upload_missing_folders(
                 asyncio.to_thread(upload_folder, svc, folder_path, date_id),
                 timeout=_UPLOAD_TIMEOUT,
             )
-            url = folder_url(company_id)
-            log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
+            drive_url = folder_url(company_id)
+            log.info("gdrive_sync: uploaded %s → %s", folder_path.name, drive_url)
             uploaded += 1
+            if job_url:
+                await asyncio.to_thread(set_drive_url, job_url, drive_url)
         except asyncio.TimeoutError:
             msg = f"{company}: timeout after {_UPLOAD_TIMEOUT}s"
             errors.append(msg)
@@ -192,4 +218,9 @@ async def upload_missing_folders(
             errors.append(f"{company}: {e}")
             log.warning("gdrive_sync: upload failed for %s: %s", company, e)
 
-    return {"uploaded": uploaded, "skipped_missing": skipped_missing, "errors": errors}
+    return {
+        "uploaded": uploaded,
+        "already_uploaded": already_uploaded,
+        "skipped_missing": skipped_missing,
+        "errors": errors,
+    }
