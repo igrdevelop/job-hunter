@@ -2,14 +2,16 @@
 email_response_checker.py — detect application-confirmation emails in Gmail
 and match them against tracker rows.
 
-Supported platforms (sender domain → parser):
-  linkedin.com    — "You applied to {title} at {company}"
-  pracuj.pl       — "Potwierdzenie aplikacji na stanowisko {title} w {company}"
-  nofluffjobs.com — "Application sent to {company} - {title}"
-  justjoin.it     — "Dziękujemy za aplikację na stanowisko {title} w {company}"
+Real-world sources (from observed emails):
+  erecruiter.pl       — Polish ATS used by NASK, EXATEL, Nexio, Medicover etc.
+                        Subject: "{Company} - Dziękujemy za złożenie aplikacji na stanowisko {Title}"
+  smartrecruiters.com — International ATS (Sigma Software etc.)
+                        Subject: "Thank you for applying to {Company}"
+                        Body:    "application for the position of {Title}"
+  Direct company mail — Highly variable; caught via subject keywords.
 
-Only called when gmail_token.json exists (GMAIL_ENABLED is not required —
-the checker is useful independently of the job-alert scraping).
+Gmail is queried by ATS sender domains OR subject keywords — not by job-board
+domains (LinkedIn, Pracuj etc. rarely send per-apply confirmations).
 """
 
 import base64
@@ -22,25 +24,36 @@ from hunter.gmail_client import get_gmail_service
 
 logger = logging.getLogger(__name__)
 
-# Sender domains we query for confirmation emails
+# Known ATS platforms that send confirmation emails
 _CONFIRMATION_SENDERS = [
-    "linkedin.com",
-    "pracuj.pl",
-    "nofluffjobs.com",
-    "justjoin.it",
+    "erecruiter.pl",
+    "smartrecruiters.com",
+    "workable.com",
+    "greenhouse.io",
+    "lever.co",
 ]
 
-# Subject substrings that indicate a confirmation (case-insensitive)
+# Subject phrases that trigger Gmail query (short, for API query string)
+_SUBJECT_QUERY_KEYWORDS = [
+    "dziękujemy za złożenie aplikacji",
+    "thank you for applying",
+    "thanks for applying",
+    "thank you for submitting",
+]
+
+# Subject substrings for local filtering (broader, case-insensitive)
 _CONFIRMATION_SUBJECTS = [
-    "you applied",
-    "application was sent",
-    "your application was sent",
+    "dziękujemy za złożenie aplikacji",
+    "dziękujemy za zainteresowanie",
+    "thank you for applying",
+    "thanks for applying",
+    "thank you for submitting",
     "application submitted",
+    "application received",
+    # older guesses kept as fallbacks
+    "application was sent",
     "application sent",
-    "aplikacja została wysłana",
-    "twoja aplikacja",
     "potwierdzenie aplikacji",
-    "dziękujemy za aplikację",
 ]
 
 
@@ -48,76 +61,123 @@ _CONFIRMATION_SUBJECTS = [
 
 @dataclass
 class ConfirmationEmail:
-    company: str        # extracted company name; may be "" if parsing failed
-    title: str          # extracted job title; may be ""
-    date: str           # "YYYY-MM-DD" (UTC)
-    subject: str        # raw email subject
-    platform: str       # "linkedin" | "pracuj" | "nofluffjobs" | "justjoin" | "unknown"
+    company: str    # extracted company name; may be "" if parsing failed
+    title: str      # extracted job title; may be ""
+    date: str       # "YYYY-MM-DD" (UTC)
+    subject: str    # raw email subject
+    platform: str   # "erecruiter" | "smartrecruiters" | "direct" | "unknown"
 
 
 @dataclass
 class MatchResult:
     email: ConfirmationEmail
-    match_type: str                         # "exact" | "fuzzy" | "ambiguous" | "no_match"
-    candidates: list[dict] = field(default_factory=list)   # rows from lookup_by_company_and_title
-    row_num: int | None = None              # set for exact/fuzzy matches
+    match_type: str                       # "exact" | "fuzzy" | "ambiguous" | "no_match"
+    candidates: list[dict] = field(default_factory=list)
+    row_num: int | None = None            # set for exact/fuzzy matches
 
 
-# ── Per-platform subject/body parsers ─────────────────────────────────────────
+# ── Per-platform parsers ──────────────────────────────────────────────────────
 
-def _parse_linkedin(subject: str, body_text: str) -> tuple[str, str]:
-    # "You applied to Senior Angular Developer at Acme Corp"
-    m = re.search(r"you applied to (.+?) at (.+)", subject, re.IGNORECASE)
-    if m:
-        return m.group(2).strip(), m.group(1).strip()
-    # "Your application was sent to Acme Corp"
-    m = re.search(r"(?:application was sent|application submitted) to (.+)", subject, re.IGNORECASE)
-    if m:
-        return m.group(1).strip(), ""
-    return "", ""
+def _parse_erecruiter(subject: str, body_text: str) -> tuple[str, str]:
+    """eRecruiter ATS (mail@stage.erecruiter.pl).
 
-
-def _parse_pracuj(subject: str, body_text: str) -> tuple[str, str]:
-    # "Potwierdzenie aplikacji na stanowisko: Senior Angular Developer w Acme Corp"
-    m = re.search(r"stanowisko[:\s]+(.+?)\s+w\s+(.+)", subject, re.IGNORECASE)
-    if m:
-        return m.group(2).strip(), m.group(1).strip()
-    # Fallback: scan body for "Stanowisko: X" and "Firma: Y"
-    if body_text:
-        title_m = re.search(r"stanowisko[:\s]+(.+)", body_text, re.IGNORECASE)
-        company_m = re.search(r"(?:firma|pracodawca)[:\s]+(.+)", body_text, re.IGNORECASE)
-        title = title_m.group(1).strip() if title_m else ""
-        company = company_m.group(1).strip() if company_m else ""
-        return company, title
-    return "", ""
-
-
-def _parse_nofluffjobs(subject: str, body_text: str) -> tuple[str, str]:
-    # "Application sent to Acme Corp - Senior Angular Developer"
-    m = re.search(r"(?:application sent|aplikacja wysłana) to (.+?) [-–] (.+)", subject, re.IGNORECASE)
+    Subject: "NASK - Dziękujemy za złożenie aplikacji na stanowisko Senior Frontend Developer"
+    """
+    # Company before the dash, title after "stanowisko"
+    m = re.search(
+        r"^(.+?)\s*[-–]\s*Dzi[eę]kujemy za z[lł]o[zż]enie aplikacji na stanowisko\s+(.+)",
+        subject, re.IGNORECASE,
+    )
     if m:
         return m.group(1).strip(), m.group(2).strip()
-    # "Application sent to Acme Corp"
-    m = re.search(r"(?:application sent|aplikacja wysłana) to (.+)", subject, re.IGNORECASE)
+
+    # Body fallback: "złożenie aplikacji na stanowisko {Title}"
+    title = ""
+    if body_text:
+        bm = re.search(r"z[lł]o[zż]enie aplikacji na stanowisko\s+(.+?)(?:\s+i\s+czas|\.|$)",
+                       body_text, re.IGNORECASE)
+        if bm:
+            title = bm.group(1).strip()
+    return "", title
+
+
+def _parse_smartrecruiters(subject: str, body_text: str, from_header: str) -> tuple[str, str]:
+    """SmartRecruiters ATS (notification@smartrecruiters.com).
+
+    From:    "Sigma Software <notification@smartrecruiters.com>"
+    Subject: "Thank you for applying to Sigma Software"
+    Body:    "application for the position of Middle Front-End Developer"
+    """
+    # Company from subject: "Thank you for applying to {Company}"
+    company = ""
+    m = re.search(r"(?:thank you for applying|thanks for applying) to (.+)",
+                  subject, re.IGNORECASE)
     if m:
-        return m.group(1).strip(), ""
-    return "", ""
+        company = m.group(1).strip()
+
+    # Company from From display name as fallback: "Acme Corp <notification@...>"
+    if not company:
+        dm = re.match(r'"?([^"<@]+?)"?\s*<', from_header)
+        if dm:
+            company = dm.group(1).strip()
+
+    # Title from body: "application for the position of {Title}"
+    title = ""
+    if body_text:
+        bm = re.search(r"(?:application for the position of|position of)\s+(.+?)(?:[.\n]|$)",
+                       body_text, re.IGNORECASE)
+        if bm:
+            title = bm.group(1).strip()
+
+    return company, title
 
 
-def _parse_justjoin(subject: str, body_text: str) -> tuple[str, str]:
-    # "Dziękujemy za aplikację na stanowisko Senior Angular Developer w Acme Corp"
-    m = re.search(r"stanowisko\s+(.+?)\s+w\s+(.+)", subject, re.IGNORECASE)
-    if m:
-        return m.group(2).strip(), m.group(1).strip()
-    return "", ""
+def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, str]:
+    """Generic parser for direct company emails.
 
+    Tries to extract title from body using common Polish/English patterns.
+    Company extracted from From display name or sender domain.
+    """
+    # Title from body (Polish)
+    title = ""
+    if body_text:
+        for pattern in (
+            r"z[lł]o[zż]enie aplikacji na stanowisko\s+(.+?)(?:\s+i\s+czas|\.|$)",
+            r"aplikacj[ię] na stanowisko[:\s]+(.+?)(?:[.\n]|$)",
+            r"na stanowisko[:\s]+(.+?)(?:[.\n]|$)",
+        ):
+            bm = re.search(pattern, body_text, re.IGNORECASE)
+            if bm:
+                title = bm.group(1).strip()
+                break
 
-_PLATFORM_PARSERS: dict[str, tuple[str, callable]] = {
-    "linkedin.com":    ("linkedin",    _parse_linkedin),
-    "pracuj.pl":       ("pracuj",      _parse_pracuj),
-    "nofluffjobs.com": ("nofluffjobs", _parse_nofluffjobs),
-    "justjoin.it":     ("justjoin",    _parse_justjoin),
-}
+        # Title from body (English) — stop before auxiliary verb or punctuation
+        if not title:
+            bm = re.search(
+                r"(?:position of|position:)\s+(.+?)(?:\s+(?:is|are|was|will|has|have)\b|[.,\n]|$)",
+                body_text, re.IGNORECASE,
+            )
+            if bm:
+                title = bm.group(1).strip()
+
+    # Company from From display name: "Zespół HR <recruitment@company.com>"
+    company = ""
+    dm = re.match(r'"?([^"<@\d][^"<@]*?)"?\s*<', from_header)
+    if dm:
+        raw = dm.group(1).strip()
+        # Skip generic sender names
+        if raw.lower() not in ("notification", "noreply", "no-reply", "recruiter",
+                               "hr", "recruitment", "careers", "talent"):
+            company = raw
+
+    # Company from domain as last resort: "recruitment@sigma-software.com" → "Sigma Software"
+    if not company:
+        domain_m = re.search(r"@([\w-]+)\.", from_header)
+        if domain_m:
+            domain_part = domain_m.group(1).replace("-", " ").replace("_", " ")
+            company = domain_part.title()
+
+    return company, title
 
 
 # ── Gmail helpers ─────────────────────────────────────────────────────────────
@@ -152,7 +212,8 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
     """Parse one Gmail message. Returns ConfirmationEmail or None if not a confirmation."""
     headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
     subject = headers.get("Subject", "")
-    sender = headers.get("From", "").lower()
+    from_header = headers.get("From", "")
+    sender = from_header.lower()
 
     if not _is_confirmation_subject(subject):
         return None
@@ -160,24 +221,27 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
     body_text = _extract_body_text(msg["payload"])
     date_str = _message_date(msg)
 
-    for domain, (platform, parser_fn) in _PLATFORM_PARSERS.items():
-        if domain in sender:
-            try:
-                company, title = parser_fn(subject, body_text)
-            except Exception as exc:
-                logger.debug(f"[email_response] parser error ({domain}): {exc}")
-                company, title = "", ""
-            return ConfirmationEmail(
-                company=company.strip(),
-                title=title.strip(),
-                date=date_str,
-                subject=subject,
-                platform=platform,
-            )
+    if "erecruiter.pl" in sender:
+        company, title = _parse_erecruiter(subject, body_text)
+        platform = "erecruiter"
+    elif "smartrecruiters.com" in sender:
+        company, title = _parse_smartrecruiters(subject, body_text, from_header)
+        platform = "smartrecruiters"
+    elif any(d in sender for d in _CONFIRMATION_SENDERS):
+        # Other known ATS — try generic
+        company, title = _parse_direct(subject, body_text, from_header)
+        platform = "direct"
+    else:
+        # Direct company email caught by subject keyword
+        company, title = _parse_direct(subject, body_text, from_header)
+        platform = "direct"
 
-    # Sender matched a confirmation subject but no known platform
     return ConfirmationEmail(
-        company="", title="", date=date_str, subject=subject, platform="unknown"
+        company=company.strip(),
+        title=title.strip(),
+        date=date_str,
+        subject=subject,
+        platform=platform,
     )
 
 
@@ -186,13 +250,16 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
 def fetch_confirmation_emails(service, lookback_days: int = 7) -> list[ConfirmationEmail]:
     """Query Gmail for confirmation emails and return parsed results.
 
+    Queries by ATS sender domains OR subject keywords to catch both
+    ATS-platform emails and direct company confirmation emails.
     May return items where company/title are empty (parsing failed).
     """
     after_ts = int(
         (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
     )
     sender_filter = " OR ".join(f"from:{d}" for d in _CONFIRMATION_SENDERS)
-    query = f"({sender_filter}) after:{after_ts}"
+    subject_filter = " OR ".join(f'subject:"{kw}"' for kw in _SUBJECT_QUERY_KEYWORDS)
+    query = f"({sender_filter} OR {subject_filter}) after:{after_ts}"
 
     try:
         results = (
@@ -237,21 +304,19 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
       "exact"     — single candidate, title_score == 1.0
       "fuzzy"     — single candidate, title_score in [0.4, 1.0)
       "ambiguous" — multiple candidates at similar score; human review needed
-      "no_match"  — company not found or no title candidates above threshold
+      "no_match"  — company not found or no candidates above threshold
     """
     from hunter.tracker import lookup_by_company_and_title
 
     if not email.company:
         return MatchResult(email=email, match_type="no_match")
 
-    # When title is empty use threshold 0.0 to get all rows for this company
     threshold = 0.4 if email.title else 0.0
     candidates = lookup_by_company_and_title(email.company, email.title, title_min_score=threshold)
 
     if not candidates:
         return MatchResult(email=email, match_type="no_match")
 
-    # No title available → single company row is a fuzzy match
     if not email.title:
         if len(candidates) == 1:
             return MatchResult(
@@ -261,7 +326,6 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
         return MatchResult(email=email, match_type="ambiguous", candidates=candidates)
 
     top = candidates[0]
-    # Ambiguous: runner-up is close to top
     if len(candidates) > 1 and candidates[1]["title_score"] >= top["title_score"] * 0.85:
         return MatchResult(email=email, match_type="ambiguous", candidates=candidates)
 
