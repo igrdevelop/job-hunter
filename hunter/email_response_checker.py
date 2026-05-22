@@ -2,16 +2,19 @@
 email_response_checker.py — detect application-confirmation emails in Gmail
 and match them against tracker rows.
 
-Real-world sources (from observed emails):
-  erecruiter.pl       — Polish ATS used by NASK, EXATEL, Nexio, Medicover etc.
+Confirmed real-world sources:
+  erecruiter.pl       — Polish ATS (NASK, EXATEL, Nexio, Medicover etc.)
                         Subject: "{Company} - Dziękujemy za złożenie aplikacji na stanowisko {Title}"
   smartrecruiters.com — International ATS (Sigma Software etc.)
                         Subject: "Thank you for applying to {Company}"
                         Body:    "application for the position of {Title}"
   Direct company mail — Highly variable; caught via subject keywords.
 
-Gmail is queried by ATS sender domains OR subject keywords — not by job-board
-domains (LinkedIn, Pracuj etc. rarely send per-apply confirmations).
+Speculative sources (not yet observed, kept for coverage):
+  linkedin.com        — "You applied to {Title} at {Company}"
+  pracuj.pl           — "Potwierdzenie aplikacji na stanowisko {Title} w {Company}"
+  nofluffjobs.com     — "Application sent to {Company} - {Title}"
+  justjoin.it         — "Dziękujemy za aplikację na stanowisko {Title} w {Company}"
 """
 
 import base64
@@ -24,13 +27,19 @@ from hunter.gmail_client import get_gmail_service
 
 logger = logging.getLogger(__name__)
 
-# Known ATS platforms that send confirmation emails
+# Known sender domains — ATS platforms + job boards that may send confirmations
 _CONFIRMATION_SENDERS = [
+    # Confirmed real-world ATS
     "erecruiter.pl",
     "smartrecruiters.com",
     "workable.com",
     "greenhouse.io",
     "lever.co",
+    # Job boards (speculative — may send per-apply confirmations)
+    "linkedin.com",
+    "pracuj.pl",
+    "nofluffjobs.com",
+    "justjoin.it",
 ]
 
 # Subject phrases that trigger Gmail query (short, for API query string)
@@ -180,6 +189,52 @@ def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, 
     return company, title
 
 
+# ── Speculative job-board parsers (kept for future coverage) ──────────────────
+
+def _parse_linkedin(subject: str, body_text: str) -> tuple[str, str]:
+    # "You applied to Senior Angular Developer at Acme Corp"
+    m = re.search(r"you applied to (.+?) at (.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
+    # "Your application was sent to Acme Corp"
+    m = re.search(r"(?:application was sent|application submitted) to (.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), ""
+    return "", ""
+
+
+def _parse_pracuj(subject: str, body_text: str) -> tuple[str, str]:
+    # "Potwierdzenie aplikacji na stanowisko: Senior Angular Developer w Acme Corp"
+    m = re.search(r"stanowisko[:\s]+(.+?)\s+w\s+(.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
+    if body_text:
+        title_m = re.search(r"stanowisko[:\s]+(.+)", body_text, re.IGNORECASE)
+        company_m = re.search(r"(?:firma|pracodawca)[:\s]+(.+)", body_text, re.IGNORECASE)
+        return (company_m.group(1).strip() if company_m else ""), \
+               (title_m.group(1).strip() if title_m else "")
+    return "", ""
+
+
+def _parse_nofluffjobs(subject: str, body_text: str) -> tuple[str, str]:
+    # "Application sent to Acme Corp - Senior Angular Developer"
+    m = re.search(r"(?:application sent|aplikacja wysłana) to (.+?) [-–] (.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    m = re.search(r"(?:application sent|aplikacja wysłana) to (.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), ""
+    return "", ""
+
+
+def _parse_justjoin(subject: str, body_text: str) -> tuple[str, str]:
+    # "Dziękujemy za aplikację na stanowisko Senior Angular Developer w Acme Corp"
+    m = re.search(r"stanowisko\s+(.+?)\s+w\s+(.+)", subject, re.IGNORECASE)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
+    return "", ""
+
+
 # ── Gmail helpers ─────────────────────────────────────────────────────────────
 
 def _extract_body_text(payload: dict) -> str:
@@ -227,12 +282,20 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
     elif "smartrecruiters.com" in sender:
         company, title = _parse_smartrecruiters(subject, body_text, from_header)
         platform = "smartrecruiters"
-    elif any(d in sender for d in _CONFIRMATION_SENDERS):
-        # Other known ATS — try generic
-        company, title = _parse_direct(subject, body_text, from_header)
-        platform = "direct"
+    elif "linkedin.com" in sender:
+        company, title = _parse_linkedin(subject, body_text)
+        platform = "linkedin"
+    elif "pracuj.pl" in sender:
+        company, title = _parse_pracuj(subject, body_text)
+        platform = "pracuj"
+    elif "nofluffjobs.com" in sender:
+        company, title = _parse_nofluffjobs(subject, body_text)
+        platform = "nofluffjobs"
+    elif "justjoin.it" in sender:
+        company, title = _parse_justjoin(subject, body_text)
+        platform = "justjoin"
     else:
-        # Direct company email caught by subject keyword
+        # Direct company email or other ATS — generic fallback
         company, title = _parse_direct(subject, body_text, from_header)
         platform = "direct"
 
