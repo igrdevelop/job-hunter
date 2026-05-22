@@ -234,6 +234,13 @@ GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches
 GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
 
+# ── Email response checker ────────────────────────────────────────────────────
+# Default look-back window for /check_responses (and the daily scheduled run).
+# Pass a larger number directly to the command: /check_responses 60
+EMAIL_RESPONSE_LOOKBACK_DAYS: int = int(os.getenv("EMAIL_RESPONSE_LOOKBACK_DAYS", "2"))
+# Time of day (Warsaw) for the daily automatic confirmation check
+EMAIL_RESPONSE_CHECK_TIME: str = os.getenv("EMAIL_RESPONSE_CHECK_TIME", "09:00")
+
 # ── Expired check schedule ───────────────────────────────────────────────────
 EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
 
