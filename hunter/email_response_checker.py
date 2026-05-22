@@ -2,19 +2,50 @@
 email_response_checker.py — detect application-confirmation emails in Gmail
 and match them against tracker rows.
 
-Confirmed real-world sources:
-  erecruiter.pl       — Polish ATS (NASK, EXATEL, Nexio, Medicover etc.)
-                        Subject: "{Company} - Dziękujemy za złożenie aplikacji na stanowisko {Title}"
-  smartrecruiters.com — International ATS (Sigma Software etc.)
-                        Subject: "Thank you for applying to {Company}"
-                        Body:    "application for the position of {Title}"
-  Direct company mail — Highly variable; caught via subject keywords.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONFIRMED REAL-WORLD SOURCES (parsers verified against real emails):
 
-Speculative sources (not yet observed, kept for coverage):
-  linkedin.com        — "You applied to {Title} at {Company}"
-  pracuj.pl           — "Potwierdzenie aplikacji na stanowisko {Title} w {Company}"
-  nofluffjobs.com     — "Application sent to {Company} - {Title}"
-  justjoin.it         — "Dziękujemy za aplikację na stanowisko {Title} w {Company}"
+  erecruiter.pl        — Polish ATS (NASK, EXATEL, Nexio, Medicover...)
+                         Subject: "{Company} - Dziękujemy za złożenie aplikacji na stanowisko {Title}"
+  smartrecruiters.com  — International ATS (Sigma Software...)
+                         Subject: "Thank you for applying to {Company}"
+                         Body:    "application for the position of {Title}"
+  aplikacje.pracuj.pl  — Pracuj.pl status notifications (Hiberus, Devapo, Get It Together...)
+                         Subject: "{Title}: pracodawca udziela bezpośrednich informacji."
+                         Body:    "logo firmy {COMPANY}"
+  thesmartjobs.com     — SmartJobs Smart Tracker (Devapo, Hiberus...)
+                         Body:    "stanowisko {Title} w firmie {Company}"
+  mailing.theprotocol.it — theprotocol.it (ITEAMLY...)
+                         Subject: "Potwierdzenie zgłoszenia - {Company}: {Title}"
+  recruitify.ai        — Recruitify ATS
+                         Body:    "Position: {Title}"  (no company in email)
+  Direct company mail  — Highly variable; caught via subject keywords + _parse_direct.
+
+SPECULATIVE SOURCES (parsers written, real format not yet observed):
+
+  linkedin.com         — "You applied to {Title} at {Company}"
+  pracuj.pl            — "Potwierdzenie aplikacji na stanowisko {Title} w {Company}"
+  nofluffjobs.com      — "Application sent to {Company} - {Title}"
+  justjoin.it          — "Dziękujemy za aplikację na stanowisko {Title} w {Company}"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO ADD A NEW PLATFORM when you receive a confirmation email from it:
+
+  1. Note the sender domain (From header) and exact Subject line.
+  2. Add sender domain to _CONFIRMATION_SENDERS.
+  3. Add subject keyword(s) to _CONFIRMATION_SUBJECTS and _SUBJECT_QUERY_KEYWORDS.
+  4. Write _parse_<platform>(subject, body_text) -> tuple[str, str] returning (company, title).
+  5. Wire into _parse_message() elif chain (before the generic "else" branch).
+  6. Add tests in tests/test_email_response_checker.py with real subject/body fixtures.
+
+Platforms likely to add next (common Polish/EU ATS not yet observed):
+  - traffit.com        — Polish ATS used by many startups
+  - teamtailor.com     — Scandinavian ATS, present in Poland
+  - bullhorn.com       — International ATS
+  - hrlink.pl          — Polish HR platform
+  - successfactors.com — SAP ATS (enterprise)
+  - taleo.net          — Oracle ATS (enterprise)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import base64
