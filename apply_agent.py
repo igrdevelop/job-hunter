@@ -128,11 +128,11 @@ _TELEGRAM_SEND_DOC_TIMEOUT = 120
 
 # Shown after React-only auto-skip — /force already sets --force (bypasses this filter).
 _REACT_SKIP_FORCE_HINT = (
-    "\n\n📌 <b>Нужны документы всё равно?</b> В Telegram:\n"
-    "• <code>/force</code> и тот же URL (строка 🔗 выше), или\n"
-    "• <code>/force</code> и сразу под ним полный текст вакансии (как при обычной вставке).\n"
-    "Так включается <code>--force</code> (без React-only); для JobLeads подтянется "
-    "<code>job_posting.txt</code>, если ты его уже заполнял."
+    "\n\n📌 <b>Need docs anyway?</b> In Telegram:\n"
+    "• <code>/force</code> and the same URL (🔗 above), or\n"
+    "• <code>/force</code> followed by the full job posting text (same as paste flow).\n"
+    "This enables <code>--force</code> (bypasses React-only filter); for JobLeads "
+    "<code>job_posting.txt</code> will be used if already filled in."
 )
 
 
@@ -656,22 +656,22 @@ def _handle_jobleads_fetch_blocked(url: str, err: str) -> None:
 
     if has_manual_pending(url):
         jp = manual_jobleads_job_posting_path(url)
-        hint = f"\nФайл: <code>{jp}</code>" if jp else ""
+        hint = f"\nFile: <code>{jp}</code>" if jp else ""
         notify(
-            "📋 <b>JobLeads — запись MANUAL уже есть</b>\n"
-            "Вставь текст вакансии в <code>job_posting.txt</code> (ниже маркера) и снова запусти apply "
-            "с той же ссылкой.\n"
+            "📋 <b>JobLeads — MANUAL row already exists</b>\n"
+            "Paste the job text into <code>job_posting.txt</code> (below the marker) and run apply "
+            "again with the same URL.\n"
             f"🔗 {url}{hint}\n"
-            "<i>Dedup: строка уже в tracker.xlsx</i>"
+            "<i>Dedup: row already in tracker.xlsx</i>"
         )
         print(f"[apply_agent] MANUAL_PENDING (existing) exit={APPLY_MANUAL_EXIT_CODE}")
         sys.exit(APPLY_MANUAL_EXIT_CODE)
 
     if lookup_url(url):
         notify(
-            "📋 <b>JobLeads — URL уже в tracker.xlsx</b> (дедуп).\n"
+            "📋 <b>JobLeads — URL already in tracker.xlsx</b> (dedup).\n"
             f"🔗 {url}\n"
-            "Если там статус FAIL и хочешь MANUAL-режим — удали эту строку в Excel и повтори."
+            "If the row has status FAIL and you want MANUAL mode — delete that row in Excel and retry."
         )
         print(f"[apply_agent] MANUAL_PENDING (URL already tracked) exit={APPLY_MANUAL_EXIT_CODE}")
         sys.exit(APPLY_MANUAL_EXIT_CODE)
@@ -700,16 +700,16 @@ def _handle_jobleads_fetch_blocked(url: str, err: str) -> None:
     )
     folder_display = str(output_folder).replace("\\", "/")
     notify(
-        "📋 <b>JobLeads — нужно вручную дописать описание</b>\n\n"
-        "Страница недоступна для бота (Cloudflare). Создана строка в <b>tracker.xlsx</b> "
-        "(ATS = <code>MANUAL</code>) и папка:\n"
+        "📋 <b>JobLeads — manual description required</b>\n\n"
+        "Page blocked by Cloudflare. Row added to <b>tracker.xlsx</b> "
+        "(ATS = <code>MANUAL</code>), folder created:\n"
         f"📁 <code>{folder_display}/</code>\n\n"
-        "1. Открой <code>job_posting.txt</code> в этой папке\n"
-        "2. Вставь полный текст вакансии <b>под</b> строкой-маркером\n"
-        "3. Сохрани файл и снова запусти apply <b>с той же ссылкой</b>\n\n"
+        "1. Open <code>job_posting.txt</code> in that folder\n"
+        "2. Paste the full job posting <b>below</b> the marker line\n"
+        "3. Save the file and run apply again <b>with the same URL</b>\n\n"
         f"🔗 {url}\n\n"
         f"<pre>{(err or '')[:280]}</pre>"
-        + ("" if written else "\n\n<i>Строка tracker не добавлена (редкий конфликт).</i>"),
+        + ("" if written else "\n\n<i>Tracker row not added (rare conflict).</i>"),
     )
     print(f"[apply_agent] MANUAL_PENDING exit={APPLY_MANUAL_EXIT_CODE} tracker_row={written}")
     sys.exit(APPLY_MANUAL_EXIT_CODE)
@@ -1457,7 +1457,7 @@ if __name__ == "__main__":
     # Only set when triggered manually from Telegram (not from auto-apply).
     if notify_start:
         label = url if url else "(pasted text)"
-        notify(f"🔄 <b>Обрабатываю...</b>\n🔗 {label}\n\nFetching job text & calling LLM…")
+        notify(f"🔄 <b>Processing...</b>\n🔗 {label}\n\nFetching job text & calling LLM…")
 
     _APPLY_META_COMPANY = co
     _APPLY_META_TITLE = ti

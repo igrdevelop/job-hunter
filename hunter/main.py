@@ -143,12 +143,12 @@ async def _run_hunt_impl(
         hint = str(e)[:400]
         await send_text(
             context,
-            "❌ <b>Не удалось прочитать tracker.xlsx</b> (дедуп перед охотой).\n\n"
+            "❌ <b>Failed to read tracker.xlsx</b> (dedup before hunt).\n\n"
             f"<pre>{hint}</pre>\n\n"
-            "Типичная причина сообщения про <code>[Content_Types].xml</code> — файл "
-            "не настоящий Excel (обрезан, 0 байт, переименованный HTML/CSV, битый архив). "
-            f"Проверь: <code>{TRACKER_PATH}</code>\n"
-            "Открой в Excel или восстанови из бэкапа.",
+            "Common cause of <code>[Content_Types].xml</code> errors — the file is not a real "
+            "Excel workbook (truncated, 0 bytes, renamed HTML/CSV, corrupt archive). "
+            f"Check: <code>{TRACKER_PATH}</code>\n"
+            "Open in Excel or restore from backup.",
         )
         return
 
@@ -195,18 +195,18 @@ async def _run_hunt_impl(
         gmail_lines = ["\n<b>--- Gmail ---</b>"]
         for src, jobs in sorted(by_source.items()):
             aggregator = src.replace("gmail_", "")
-            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} вакансий:")
+            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} jobs:")
             # Group by email subject
             by_subject: dict[str, list[Job]] = defaultdict(list)
             for j in jobs:
                 by_subject[j.title].append(j)
             for subject, sjobs in by_subject.items():
                 subj_short = subject[:60] + ("…" if len(subject) > 60 else "")
-                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)} шт.)")
+                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)})")
                 for j in sjobs[:5]:  # max 5 URLs per email
                     gmail_lines.append(f"      🔗 {j.url}")
                 if len(sjobs) > 5:
-                    gmail_lines.append(f"      … ещё {len(sjobs) - 5}")
+                    gmail_lines.append(f"      … {len(sjobs) - 5} more")
         gmail_section = "\n".join(gmail_lines)
 
     # ── Send detailed report ─────────────────────────────────────────────────
@@ -322,8 +322,8 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             await send_text(
                 context,
                 f"📋 [{i}/{total}] <b>JobLeads — MANUAL</b>: {job.company} — {job.title}\n"
-                "См. сообщение выше: допиши <code>job_posting.txt</code> и снова Apply по той же ссылке.\n"
-                "<i>tracker.xlsx обновлён, дедуп по URL включён.</i>",
+                "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
+                "<i>tracker.xlsx updated, URL dedup active.</i>",
             )
         else:
             failed += 1
@@ -387,7 +387,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             await send_text(
                 context,
                 f"📋 Retry → MANUAL: {job.company} — {job.title}\n"
-                "(JobLeads: см. сообщение apply_agent про job_posting.txt)",
+                "(JobLeads: see apply_agent message about job_posting.txt)",
             )
         else:
             logger.info(f"[retry] Still failing: {job.company} - {job.title}")

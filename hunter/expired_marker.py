@@ -127,7 +127,7 @@ async def run_check(
         if status == "expired":
             expired_count += 1
         if progress_cb and done % PROGRESS_EVERY == 0:
-            await progress_cb(f"⏳ {done}/{total} проверено — ⏭ истекло: {expired_count}")
+            await progress_cb(f"⏳ {done}/{total} checked — expired: {expired_count}")
         return {**item, "status": status}
 
     results = await asyncio.gather(*[_check_one(item) for item in to_check])

@@ -164,7 +164,7 @@ class NoFluffJobsSource(BaseSource):
             elif low:
                 amount = f"{int(low):,}+".replace(",", " ")
             else:
-                amount = f"до {int(high):,}".replace(",", " ")
+                amount = f"up to {int(high):,}".replace(",", " ")
             label = f"{amount} {currency}"
             if emp_type:
                 label += f" {emp_type}"
