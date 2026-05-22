@@ -25,9 +25,9 @@ from hunter.models import Job
 TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
     "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
-    "Drive URL",
+    "Drive URL", "Confirmation", "Answer",
 ]
-# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID, 12 Drive URL
+# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID, 12 Drive URL, 13 Confirmation, 14 Answer
 URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedup)
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
@@ -35,6 +35,8 @@ ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 SENT_COL_INDEX = 8      # "Sent"
 ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
 COL_DRIVE_URL = 12      # "Drive URL" — Google Drive folder URL after upload
+COL_CONFIRMATION = 13   # "Confirmation" — date ATS acknowledged application (green when filled)
+COL_ANSWER = 14         # "Answer" — future: company reply (rejection / interview / offer)
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -207,6 +209,23 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
             cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.column_dimensions[get_column_letter(COL_DRIVE_URL)].width = 55
             _changed = True
+        if ws.max_column < COL_CONFIRMATION:
+            cell = ws.cell(row=1, column=COL_CONFIRMATION, value="Confirmation")
+            cell.font = _hdr_font
+            cell.fill = _hdr_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[get_column_letter(COL_CONFIRMATION)].width = 15
+            _changed = True
+        elif ws.cell(row=1, column=COL_CONFIRMATION).value == "Response":
+            ws.cell(row=1, column=COL_CONFIRMATION).value = "Confirmation"
+            _changed = True
+        if ws.max_column < COL_ANSWER:
+            cell = ws.cell(row=1, column=COL_ANSWER, value="Answer")
+            cell.font = _hdr_font
+            cell.fill = _hdr_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[get_column_letter(COL_ANSWER)].width = 15
+            _changed = True
         if _ensure_ids(ws):
             _changed = True
         if _changed:
@@ -220,7 +239,7 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
 
     header_fill = PatternFill("solid", fgColor="2B579A")
     header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12, 55]
+    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12, 55, 15, 15]
 
     for col, (header, width) in enumerate(zip(TRACKER_HEADERS, widths), 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -1167,3 +1186,131 @@ def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
     if most_recent is None:
         return False
     return (today - most_recent).days < cooldown_days
+
+
+# ── Email response tracking ───────────────────────────────────────────────────
+
+_TITLE_STOP = frozenset({
+    "senior", "junior", "mid", "lead", "principal", "staff", "head",
+    "the", "and", "for", "with", "of", "a", "an", "in", "at",
+})
+
+
+def _title_tokens(title: str) -> set[str]:
+    """Meaningful word tokens from a job title for similarity scoring."""
+    tokens = re.findall(r"[a-z]+", _strip_diacritics(title.lower()))
+    return {t for t in tokens if len(t) >= 3 and t not in _TITLE_STOP}
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Jaccard-style overlap score [0.0–1.0] between two job titles."""
+    ta, tb = _title_tokens(a), _title_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(len(ta), len(tb))
+
+
+def lookup_by_company_and_title(
+    company: str,
+    title: str,
+    title_min_score: float = 0.5,
+) -> list[dict]:
+    """Find tracker rows where company normalizes to the same key and title
+    similarity is at or above *title_min_score*.
+
+    Returns list of dicts (same shape as lookup_url) with an added
+    ``title_score`` field (0.0–1.0). Sorted by score descending.
+    Rows with status SKIP/FAIL/EXPIRED/MANUAL are included — caller decides.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+    norm_company = normalize_company(company)
+    if not norm_company:
+        return []
+
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    results = []
+    try:
+        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+            if not row or len(row) < TITLE_COL_INDEX:
+                continue
+            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+            if not row_company or normalize_company(row_company) != norm_company:
+                continue
+            row_title = str(row[TITLE_COL_INDEX - 1] or "").strip()
+            score = _title_similarity(title, row_title)
+            if score < title_min_score:
+                continue
+            results.append({
+                "row": row_num,
+                "company": row_company,
+                "title": row_title,
+                "ats": str(row[ATS_COL_INDEX - 1] or "").strip() if len(row) >= ATS_COL_INDEX else "",
+                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
+                "url": str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else "",
+                "confirmation": str(row[COL_CONFIRMATION - 1] or "").strip() if len(row) >= COL_CONFIRMATION else "",
+                "title_score": score,
+            })
+    finally:
+        wb.close()
+
+    results.sort(key=lambda r: r["title_score"], reverse=True)
+    return results
+
+
+_CONFIRMED_FILL = PatternFill("solid", fgColor="C6EFCE")  # light green
+
+
+def set_confirmation(row_num: int, date_str: str) -> None:
+    """Write *date_str* to the Confirmation column of *row_num* with green fill.
+
+    No-op if tracker does not exist or row_num is out of range.
+    """
+    if not TRACKER_PATH.exists():
+        return
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    if row_num < 2 or row_num > ws.max_row:
+        wb.close()
+        return
+    cell = ws.cell(row=row_num, column=COL_CONFIRMATION, value=date_str)
+    if date_str:
+        cell.fill = _CONFIRMED_FILL
+    _save_with_retry(wb)
+
+
+DATE_COL_INDEX = 1  # "Date" — application date
+
+
+def get_applications_on_date(date_str: str) -> list[dict]:
+    """Return all tracker rows where Date == *date_str* (format 'YYYY-MM-DD').
+
+    Each result dict has: date, company, title, ats, url.
+    Skips rows with no company name.
+    """
+    if not TRACKER_PATH.exists():
+        return []
+    results: list[dict] = []
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row:
+                continue
+            row_date = str(row[DATE_COL_INDEX - 1] or "").strip()
+            if row_date != date_str:
+                continue
+            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
+            if not company:
+                continue
+            results.append({
+                "date": row_date,
+                "company": company,
+                "title": str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else "",
+                "ats": str(row[ATS_COL_INDEX - 1] or "").strip() if len(row) >= ATS_COL_INDEX else "",
+                "url": str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else "",
+            })
+    finally:
+        wb.close()
+    return results
