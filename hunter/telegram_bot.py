@@ -514,6 +514,7 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         return
 
     uploaded = result["uploaded"]
+    already = result.get("already_uploaded", 0)
     skipped = result["skipped_missing"]
     errors = result.get("errors", [])
     err_note = ""
@@ -523,6 +524,7 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(
         f"✅ <b>gdrive_upload_missing</b>\n"
         f"  📤 Загружено: {uploaded}\n"
+        f"  ✔ Уже на Drive: {already}\n"
         f"  ⏭ Нет локально: {skipped}"
         f"{err_note}",
         parse_mode=ParseMode.HTML,
@@ -717,7 +719,7 @@ async def _run_apply_agent(
                     if folder_str:
                         from hunter import gdrive_sync
                         drive_url = await gdrive_sync.upload_application_folder(
-                            PROJECT_DIR / folder_str
+                            PROJECT_DIR / folder_str, job_url=url
                         )
                         if drive_url:
                             await _tg_notify(

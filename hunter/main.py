@@ -290,7 +290,7 @@ async def _upload_to_drive(url: str) -> None:
         from hunter import gdrive_sync
         folder_str = await asyncio.to_thread(get_folder_by_url, url)
         if folder_str:
-            await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str)
+            await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
     except Exception as _e:
         logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
 
