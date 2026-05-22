@@ -25,14 +25,16 @@ from hunter.models import Job
 TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
     "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
+    "Drive URL",
 ]
-# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID
+# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID, 12 Drive URL
 URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedup)
 COMPANY_COL_INDEX = 2   # "Company"
 TITLE_COL_INDEX = 3     # "Job Title"
 ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
 SENT_COL_INDEX = 8      # "Sent"
 ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
+COL_DRIVE_URL = 12      # "Drive URL" — Google Drive folder URL after upload
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 
 # ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
@@ -188,15 +190,26 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
         wb = openpyxl.load_workbook(TRACKER_PATH)
         ws = wb.active
         # Ensure header row has ID column (migration for existing files)
+        _hdr_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+        _hdr_fill = PatternFill("solid", fgColor="2B579A")
+        _changed = False
         if ws.max_column < ID_COL_INDEX:
-            header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-            header_fill = PatternFill("solid", fgColor="2B579A")
             cell = ws.cell(row=1, column=ID_COL_INDEX, value="ID")
-            cell.font = header_font
-            cell.fill = header_fill
+            cell.font = _hdr_font
+            cell.fill = _hdr_fill
             cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.column_dimensions[get_column_letter(ID_COL_INDEX)].width = 12
+            _changed = True
+        if ws.max_column < COL_DRIVE_URL:
+            cell = ws.cell(row=1, column=COL_DRIVE_URL, value="Drive URL")
+            cell.font = _hdr_font
+            cell.fill = _hdr_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[get_column_letter(COL_DRIVE_URL)].width = 55
+            _changed = True
         if _ensure_ids(ws):
+            _changed = True
+        if _changed:
             _save_with_retry(wb)
         return wb, ws
 
@@ -207,7 +220,7 @@ def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.W
 
     header_fill = PatternFill("solid", fgColor="2B579A")
     header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12]
+    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12, 55]
 
     for col, (header, width) in enumerate(zip(TRACKER_HEADERS, widths), 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -1023,18 +1036,62 @@ def get_folder_by_url(url: str) -> str | None:
     return None
 
 
+def get_drive_url_by_url(url: str) -> str | None:
+    """Return the Drive URL stored in col 12 for this job URL, or None."""
+    if not TRACKER_PATH.exists():
+        return None
+    target = normalize_url(url)
+    if not target:
+        return None
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < URL_COL_INDEX:
+                continue
+            cell_url = str(row[URL_COL_INDEX - 1] or "").strip()
+            if normalize_url(cell_url) != target:
+                continue
+            val = row[COL_DRIVE_URL - 1] if len(row) >= COL_DRIVE_URL else None
+            return str(val).strip() if val else None
+    finally:
+        wb.close()
+    return None
+
+
+def set_drive_url(url: str, drive_url: str) -> None:
+    """Write drive_url into col 12 for the first tracker row matching this job URL."""
+    if not TRACKER_PATH.exists() or not url or not drive_url:
+        return
+    target = normalize_url(url)
+    if not target:
+        return
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+    for row_num in range(2, ws.max_row + 1):
+        cell_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
+        if normalize_url(cell_url) != target:
+            continue
+        ws.cell(row=row_num, column=COL_DRIVE_URL).value = drive_url
+        _save_with_retry(wb)
+        return
+    wb.close()
+
+
 # gsheets COLUMNS order: Date, Company, Job Title, Stack, ATS %, URL,
 #                        Folder, Sent, Re-application, To Learn, ID
+# Drive URL (col 12) is local-only — not pushed to Sheets.
 _GSHEETS_COLS = [
     "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
     "Folder", "Sent", "Re-application", "To Learn", "ID",
 ]
 
 def read_all_tracker_rows() -> list[dict]:
-    """Read every data row from tracker.xlsx as a dict keyed by gsheets COLUMNS names.
+    """Read every data row from tracker.xlsx as a dict keyed by column names.
 
     Rows with no ID are skipped (they can't be synced). Empty cells become "".
-    Used by gsheets_sync.push_missing_rows() to detect what's absent from Sheets.
+    Returns dicts with keys from _GSHEETS_COLS plus "Drive URL" (col 12).
+    Used by gsheets_sync and gdrive_sync.
     """
     if not TRACKER_PATH.exists():
         return []
@@ -1046,15 +1103,17 @@ def read_all_tracker_rows() -> list[dict]:
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row:
                 continue
-            # Pad to at least ID_COL_INDEX columns
-            padded = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
+            # Pad to at least COL_DRIVE_URL columns
+            padded = tuple(row) + ("",) * max(0, COL_DRIVE_URL - len(row))
             row_id = str(padded[ID_COL_INDEX - 1] or "").strip()
             if not row_id:
                 continue
-            results.append({
+            d = {
                 col: str(padded[i] or "").strip()
                 for i, col in enumerate(_GSHEETS_COLS)
-            })
+            }
+            d["Drive URL"] = str(padded[COL_DRIVE_URL - 1] or "").strip()
+            results.append(d)
     finally:
         wb.close()
     return results
