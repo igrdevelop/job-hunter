@@ -510,30 +510,29 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             else:
                 lines.append("   ❌ Not found in tracker at all (not applied, or URL mismatch)")
 
-        # 2. Quick HTML check
+        # 2. Quick HTML check — use _fetch_quick_html so we don't double-fetch
+        from hunter.expired_marker import _fetch_quick_html, _check_html_expired
+        from hunter.expired_check import HTML_EXPIRED_MARKERS
         lines.append("\n<b>Step 1 — quick HTML check:</b>")
-        import cloudscraper as _cs
-        import requests as _req
-        _scraper = _cs.create_scraper()
         try:
-            resp = await asyncio.to_thread(lambda: _scraper.get(clean, timeout=20))
-            html = resp.text
-            lines.append(f"  cloudscraper → HTTP {resp.status_code}, {len(html)} bytes")
-            lines.append(f"  is_cloudflare_challenge: {_is_cloudflare_challenge(html)}")
-            lines.append(f"  is_expired_by_html: {is_expired_by_html(html, domain)}")
+            fetch_html, fetch_status = await asyncio.to_thread(_fetch_quick_html, url)
+            lines.append(f"  fetch → HTTP {fetch_status}, {len(fetch_html)} bytes")
+            cf_challenge = _is_cloudflare_challenge(fetch_html)
+            html_expired = is_expired_by_html(fetch_html, domain)
+            lines.append(f"  is_cloudflare_challenge: {cf_challenge}")
+            lines.append(f"  is_expired_by_html: {html_expired}")
             # show which marker matched
-            from hunter.expired_check import HTML_EXPIRED_MARKERS
             for key, markers in HTML_EXPIRED_MARKERS.items():
                 if key in domain:
                     for m in markers:
-                        if m.lower() in html.lower():
+                        if m.lower() in fetch_html.lower():
                             lines.append(f"  ✅ HTML marker hit: <code>{m[:50]}</code>")
                             break
+            # reuse the same HTML — avoids a second request that may get throttled
+            check_result = _check_html_expired(fetch_html, domain, url=url)
+            lines.append(f"  _check_html_expired → <b>{check_result}</b>")
         except Exception as e:
-            lines.append(f"  cloudscraper ERROR: {str(e)[:100]}")
-
-        quick_result = await asyncio.to_thread(_quick_html_expired, url, domain)
-        lines.append(f"  _quick_html_expired → <b>{quick_result}</b>")
+            lines.append(f"  ERROR: {str(e)[:100]}")
 
         # 3. Full fetch
         lines.append("\n<b>Step 2 — full fetch_job_text:</b>")
