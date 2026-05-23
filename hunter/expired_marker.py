@@ -20,12 +20,64 @@ from hunter.config import (
     EXPIRED_CHECK_DOMAIN_DELAY,
     EXPIRED_CHECK_FETCH_TIMEOUT,
 )
-from hunter.expired_check import is_job_expired
+from hunter.expired_check import is_job_expired, is_expired_by_html
 from hunter.tracker import apply_sent_updates, iter_unsent_rows as _iter_unsent
 
 logger = logging.getLogger(__name__)
 
 PROGRESS_EVERY = 5
+
+# Domains where a lightweight raw-HTML check is more reliable than the full
+# fetch_job_text pipeline (Playwright/cloudscraper failures → false "alive").
+_QUICK_CHECK_DOMAINS = ("pracuj.pl", "linkedin.com")
+
+_QUICK_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+_QUICK_TIMEOUT = 20
+
+
+def _quick_html_expired(url: str, domain: str) -> bool | None:
+    """Fetch raw HTML for known domains and scan for expiry markers.
+
+    Returns True (expired), False (clearly alive) or None (can't determine).
+    Only called for domains in _QUICK_CHECK_DOMAINS.
+    """
+    try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper()
+        resp = scraper.get(url, timeout=_QUICK_TIMEOUT)
+        html = resp.text if resp.status_code == 200 else ""
+    except Exception:
+        try:
+            resp = requests.get(url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
+            html = resp.text if resp.status_code == 200 else ""
+        except Exception:
+            return None
+
+    if not html:
+        return None
+
+    if is_expired_by_html(html, domain):
+        return True
+
+    # LinkedIn: if we got a login/auth wall instead of the real page,
+    # we can't determine expiry — return None so the caller skips gracefully.
+    if "linkedin.com" in domain:
+        html_lower = html.lower()
+        login_wall = (
+            "authwall" in html_lower
+            or "join linkedin" in html_lower
+            or ("sign in" in html_lower and "job description" not in html_lower)
+        )
+        if login_wall:
+            return None  # can't check — treat as skipped
+
+    return None  # no expiry signal found, but not conclusively alive either
 
 
 # ── Per-domain rate limiting ──────────────────────────────────────────────────
@@ -94,8 +146,29 @@ async def run_check(
     async def _check_one(item: dict) -> dict:
         nonlocal done, expired_count
 
+        url = item["url"]
+        dom = _domain(url)
+
+        # Fast path: lightweight raw-HTML check for Pracuj / LinkedIn.
+        # Avoids full cloudscraper/Playwright fetch when the archived marker
+        # is visible directly in the HTML (or when a login wall blocks detection).
+        if any(d in dom for d in _QUICK_CHECK_DOMAINS):
+            quick = await asyncio.to_thread(_quick_html_expired, url, dom)
+            if quick is True:
+                done += 1
+                expired_count += 1
+                if progress_cb and done % PROGRESS_EVERY == 0:
+                    await progress_cb(f"⏳ {done}/{total} checked — expired: {expired_count}")
+                return {**item, "status": "expired", "reason": "html-marker"}
+            if quick is None and "linkedin.com" in dom:
+                # Login wall — can't determine expiry without a session.
+                done += 1
+                if progress_cb and done % PROGRESS_EVERY == 0:
+                    await progress_cb(f"⏳ {done}/{total} checked — expired: {expired_count}")
+                return {**item, "status": "skipped", "reason": "linkedin-login-wall"}
+
         try:
-            text = await limiter.fetch(item["url"], global_sem)
+            text = await limiter.fetch(url, global_sem)
             status = "expired" if is_job_expired(text) else "alive"
         except asyncio.TimeoutError:
             status = "error"
