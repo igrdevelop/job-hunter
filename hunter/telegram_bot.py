@@ -410,6 +410,92 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Diagnostic: show step-by-step expired detection for a single URL.
+
+    Usage: /debug_url <url>
+    """
+    args = (context.args or [])
+    if not args:
+        await update.message.reply_text(
+            "Usage: /debug_url &lt;url&gt;\n"
+            "Example: /debug_url https://www.pracuj.pl/praca/x,oferta,123",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    url = args[0].strip()
+    msg = await update.message.reply_text(f"🔍 Diagnosing: <code>{url[:80]}</code>…", parse_mode=ParseMode.HTML)
+
+    lines = [f"🔍 <b>debug_url</b>: <code>{url[:80]}</code>\n"]
+
+    try:
+        from urllib.parse import urlparse
+        from job_fetch import _clean_url, fetch_job_text
+        from hunter.expired_check import is_job_expired, is_expired_by_html
+        from hunter.expired_marker import _quick_html_expired, _is_cloudflare_challenge
+        from hunter.tracker import iter_unsent_rows
+
+        domain = urlparse(url).hostname or ""
+        clean = _clean_url(url)
+        lines.append(f"<b>Domain:</b> {domain}")
+        lines.append(f"<b>Clean URL:</b> <code>{clean[:80]}</code>")
+
+        # 1. Is it in unsent rows?
+        rows = await asyncio.to_thread(iter_unsent_rows)
+        offer_id = url.split(",oferta,")[-1].split("?")[0] if ",oferta," in url else ""
+        matching = [r for r in rows if (offer_id and offer_id in r.get("url", "")) or r.get("url") == clean]
+        if matching:
+            r = matching[0]
+            lines.append(f"\n✅ <b>In tracker:</b> {r['company']} — {r['title']}")
+            lines.append(f"   ATS={r['ats']} | Sent={repr(r['sent'])} | ID={r['id'][:8]}")
+        else:
+            lines.append("\n⚠️ <b>NOT in unsent tracker rows</b> (SKIP / already Sent / no ID / missing)")
+
+        # 2. Quick HTML check
+        lines.append("\n<b>Step 1 — quick HTML check:</b>")
+        import cloudscraper as _cs
+        import requests as _req
+        _scraper = _cs.create_scraper()
+        try:
+            resp = await asyncio.to_thread(lambda: _scraper.get(clean, timeout=20))
+            html = resp.text
+            lines.append(f"  cloudscraper → HTTP {resp.status_code}, {len(html)} bytes")
+            lines.append(f"  is_cloudflare_challenge: {_is_cloudflare_challenge(html)}")
+            lines.append(f"  is_expired_by_html: {is_expired_by_html(html, domain)}")
+            # show which marker matched
+            from hunter.expired_check import HTML_EXPIRED_MARKERS
+            for key, markers in HTML_EXPIRED_MARKERS.items():
+                if key in domain:
+                    for m in markers:
+                        if m.lower() in html.lower():
+                            lines.append(f"  ✅ HTML marker hit: <code>{m[:50]}</code>")
+                            break
+        except Exception as e:
+            lines.append(f"  cloudscraper ERROR: {str(e)[:100]}")
+
+        quick_result = await asyncio.to_thread(_quick_html_expired, url, domain)
+        lines.append(f"  _quick_html_expired → <b>{quick_result}</b>")
+
+        # 3. Full fetch
+        lines.append("\n<b>Step 2 — full fetch_job_text:</b>")
+        try:
+            text = await asyncio.to_thread(fetch_job_text, url)
+            lines.append(f"  length: {len(text)} chars")
+            expired = is_job_expired(text)
+            lines.append(f"  is_job_expired: <b>{expired}</b>")
+            # show last 300 chars (where archived notice appears)
+            tail = text[-300:].replace("<", "&lt;").replace(">", "&gt;")
+            lines.append(f"  tail:\n<pre>{tail}</pre>")
+        except Exception as e:
+            lines.append(f"  ERROR: {str(e)[:150]}")
+
+    except Exception as e:
+        lines.append(f"\n❌ Diagnostic failed: {e}")
+
+    await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Pull Sent/To Learn/Re-application changes from Google Sheets → tracker.xlsx."""
     from hunter import gsheets_sync
@@ -1212,6 +1298,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
         BotCommand("unsent",          "Unsent applications count + Angular"),
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
+        BotCommand("debug_url",       "Diagnose expired detection for a single URL"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
@@ -1291,6 +1378,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
+    app.add_handler(CommandHandler("debug_url",      cmd_debug_url))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
     app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
     app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
