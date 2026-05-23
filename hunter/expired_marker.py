@@ -27,9 +27,14 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_EVERY = 5
 
-# Domains where a lightweight raw-HTML check is more reliable than the full
-# fetch_job_text pipeline (Playwright/cloudscraper failures → false "alive").
-_QUICK_CHECK_DOMAINS = ("pracuj.pl", "linkedin.com")
+# Domains where a lightweight raw-HTML check is attempted before the full
+# fetch_job_text pipeline.
+# NOTE: pracuj.pl is intentionally excluded — its Cloudflare protection blocks
+# fresh cloudscraper sessions (HTTP 403), while fetch_pracuj reuses a persistent
+# module-level scraper that has accumulated session cookies. The full pipeline
+# already handles pracuj.pl archived detection reliably via _extract_archived_notice
+# and the isActive:false __NEXT_DATA__ check, so a quick pre-check adds nothing.
+_QUICK_CHECK_DOMAINS = ("linkedin.com",)
 
 _QUICK_HEADERS = {
     "User-Agent": (

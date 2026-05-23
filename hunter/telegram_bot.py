@@ -407,6 +407,20 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if skipped:
         lines.append(f"⏩ Skipped (jobleads): <b>{len(skipped)}</b>")
 
+    # Always flush dirty rows to Sheets after expired check.
+    # mirror_expired_batch is best-effort; if it failed (e.g. after bot restart
+    # the in-memory cache has no sheet_row_index), rows get marked dirty instead
+    # of being written. Calling resync_dirty() here ensures EXPIRED stamps reach
+    # Google Sheets without needing a manual /gsheets_resync.
+    if GSHEETS_ENABLED and expired:
+        try:
+            from hunter import gsheets_sync
+            synced = await gsheets_sync.resync_dirty()
+            if synced:
+                lines.append(f"\n🔄 Sheets: {synced} row(s) resynced.")
+        except Exception as e:
+            logger.warning("[check_expired] gsheets resync_dirty failed: %s", e)
+
     await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
