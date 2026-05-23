@@ -41,14 +41,12 @@ _QUICK_HEADERS = {
 _QUICK_TIMEOUT = 20
 
 
-def _quick_html_expired(url: str, domain: str) -> bool | None:
-    """Fetch raw HTML for known domains and scan for expiry markers.
+def _fetch_quick_html(url: str) -> tuple[str, int]:
+    """Fetch raw HTML for a URL, stripping tracking params first.
 
-    Returns True (expired), False (clearly alive) or None (can't determine).
-    Only called for domains in _QUICK_CHECK_DOMAINS.
+    Returns (html, status_code). html is "" on non-200 or error.
+    Tries cloudscraper first, falls back to plain requests.
     """
-    # Strip tracking params — Pracuj (and others) may serve a different page
-    # (without the archived panel) when UTM/sendid params are present.
     from job_fetch import _clean_url
     fetch_url = _clean_url(url)
 
@@ -56,28 +54,39 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
         import cloudscraper
         scraper = cloudscraper.create_scraper()
         resp = scraper.get(fetch_url, timeout=_QUICK_TIMEOUT)
-        html = resp.text if resp.status_code == 200 else ""
-    except Exception:
-        try:
-            resp = requests.get(fetch_url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
-            html = resp.text if resp.status_code == 200 else ""
-        except Exception:
-            return None
+        logger.debug("[expired_marker] quick fetch %s → HTTP %s, %d bytes",
+                     fetch_url, resp.status_code, len(resp.text))
+        return (resp.text if resp.status_code == 200 else ""), resp.status_code
+    except Exception as cs_err:
+        logger.debug("[expired_marker] cloudscraper failed (%s), trying plain requests", cs_err)
 
+    try:
+        resp = requests.get(fetch_url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
+        logger.debug("[expired_marker] plain-requests fetch %s → HTTP %s, %d bytes",
+                     fetch_url, resp.status_code, len(resp.text))
+        return (resp.text if resp.status_code == 200 else ""), resp.status_code
+    except Exception as req_err:
+        logger.debug("[expired_marker] plain-requests also failed: %s", req_err)
+        return "", 0
+
+
+def _check_html_expired(html: str, domain: str, url: str = "") -> bool | None:
+    """Check already-fetched HTML for expiry signals.
+
+    Returns True (expired), None (can't determine / login wall / CF challenge).
+    Separated from fetching so callers can reuse HTML without a second request.
+    """
     if not html:
         return None
 
-    # If Cloudflare served a challenge page (200 but not real content),
-    # return None so we fall through to the full pipeline or mark as skipped.
     if _is_cloudflare_challenge(html):
-        logger.debug("[expired_marker] Cloudflare challenge detected for %s", url)
+        logger.debug("[expired_marker] Cloudflare challenge detected for %s", url or domain)
         return None
 
     if is_expired_by_html(html, domain):
         return True
 
-    # LinkedIn: if we got a login/auth wall instead of the real page,
-    # we can't determine expiry — return None so the caller skips gracefully.
+    # LinkedIn: login wall → can't determine expiry without a session.
     if "linkedin.com" in domain:
         html_lower = html.lower()
         login_wall = (
@@ -89,6 +98,16 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
             return None  # can't check — treat as skipped
 
     return None  # no expiry signal found, but not conclusively alive either
+
+
+def _quick_html_expired(url: str, domain: str) -> bool | None:
+    """Fetch raw HTML for known domains and scan for expiry markers.
+
+    Returns True (expired) or None (can't determine).
+    Only called for domains in _QUICK_CHECK_DOMAINS.
+    """
+    html, _status = _fetch_quick_html(url)
+    return _check_html_expired(html, domain, url=url)
 
 
 def _is_cloudflare_challenge(html: str) -> bool:
