@@ -37,9 +37,11 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "pracuj.pl": (
         'data-apply-type="ArchivedApplyPanel"',
         'data-test="section-archived"',
-        "Pracodawca zakończy",      # prefix — avoids diacritic encoding edge cases
+        "Pracodawca zakończy",          # prefix — avoids diacritic encoding edge cases
         "zakończył zbieranie zgłosze",
         "oferta wygasła",
+        '"isActive":false',             # __NEXT_DATA__ JSON field — most reliable
+        '"isActive": false',            # space variant
     ),
     "linkedin.com": (
         "No longer accepting applications",

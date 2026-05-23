@@ -62,6 +62,12 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
     if not html:
         return None
 
+    # If Cloudflare served a challenge page (200 but not real content),
+    # return None so we fall through to the full pipeline or mark as skipped.
+    if _is_cloudflare_challenge(html):
+        logger.debug("[expired_marker] Cloudflare challenge detected for %s", url)
+        return None
+
     if is_expired_by_html(html, domain):
         return True
 
@@ -78,6 +84,23 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
             return None  # can't check — treat as skipped
 
     return None  # no expiry signal found, but not conclusively alive either
+
+
+def _is_cloudflare_challenge(html: str) -> bool:
+    """Return True if the HTML looks like a Cloudflare challenge/bot-check page."""
+    if len(html) < 1500:  # real job pages are much larger
+        lower = html.lower()
+        return (
+            "just a moment" in lower
+            or "enable javascript and cookies" in lower
+            or "_cf_chl" in lower
+            or "cf-browser-verification" in lower
+        )
+    lower = html.lower()
+    return (
+        "just a moment" in lower
+        and ("cloudflare" in lower or "_cf_chl" in lower)
+    )
 
 
 # ── Per-domain rate limiting ──────────────────────────────────────────────────
