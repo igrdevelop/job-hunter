@@ -47,14 +47,19 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
     Returns True (expired), False (clearly alive) or None (can't determine).
     Only called for domains in _QUICK_CHECK_DOMAINS.
     """
+    # Strip tracking params — Pracuj (and others) may serve a different page
+    # (without the archived panel) when UTM/sendid params are present.
+    from job_fetch import _clean_url
+    fetch_url = _clean_url(url)
+
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper()
-        resp = scraper.get(url, timeout=_QUICK_TIMEOUT)
+        resp = scraper.get(fetch_url, timeout=_QUICK_TIMEOUT)
         html = resp.text if resp.status_code == 200 else ""
     except Exception:
         try:
-            resp = requests.get(url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
+            resp = requests.get(fetch_url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
             html = resp.text if resp.status_code == 200 else ""
         except Exception:
             return None
