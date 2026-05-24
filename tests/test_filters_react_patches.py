@@ -92,9 +92,19 @@ def test_magento_blocked_from_gmail() -> None:
     assert reasons["exclude_pattern"] == 1
 
 
-def test_angular_developer_gmail_passes_despite_no_location() -> None:
-    """Gmail Angular jobs should still pass even with non-matching location."""
+def test_angular_developer_gmail_warsaw_now_rejected() -> None:
+    """Gmail jobs now go through the standard location check (bypass removed).
+    Warsaw (anti-hybrid city, not in allowed whitelist) → rejected.
+    """
     job = _gmail_job(title="Senior Angular Developer", location="Warsaw")
+    result, reasons = apply_filters_with_stats([job])
+    assert result == []
+    assert reasons["location"] == 1
+
+
+def test_angular_developer_gmail_remote_passes() -> None:
+    """Gmail Angular job with Remote location passes after location bypass removal."""
+    job = _gmail_job(title="Senior Angular Developer", location="remote")
     result = apply_filters(jobs=[job])
     assert len(result) == 1
 
