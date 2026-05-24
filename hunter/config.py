@@ -105,6 +105,19 @@ FILTER = {
         "stażysta",
         "praktykant",
         "staz",
+        # П-8.1: management / leadership / non-IC roles
+        "tech lead",
+        "tech-lead",
+        "techlead",
+        "project lead",
+        "engineering manager",
+        "head of engineering",
+        "vp of engineering",
+        "cto",
+        # Part-time — not relevant for full-time search
+        "part-time",
+        "part time",
+        "parttime",
     ],
 
     "locations": [
@@ -127,15 +140,48 @@ FILTER = {
         r"\bsdet\b",
         r"quality\s+assurance",
         r"test\s+automation",
-        r"\bfullstack\b",
-        r"\bfull-stack\b",
-        r"\bfull stack\b",
+        # fullstack WITHOUT angular is handled by _is_fullstack_without_angular()
+        # in filters.py — we don't put it in exclude_patterns so Angular fullstack passes.
         r"\bbackend\b",
         r"\bback-end\b",
         r"\bvue\b",
         r"\bnuxt\b",
         r"\bmagento\b",
         r"\bruby\b",
+        # П-3.3: React Native — mobile-only, not FE web
+        r"\breact\s+native\b",
+        r"\breact[- ]native\b",
+        # П-4.1: eCommerce/CMS platforms — not web-FE stack
+        r"\bhyv[äa]\b",           # Hyva (Magento theme) — Finnish spelling variants
+        r"\badobe\s+commerce\b",   # Adobe Commerce = Magento rebranded
+        r"\bpwa\s+studio\b",       # Magento PWA Studio
+        r"\bshopware\b",
+        r"\bshopify\b",
+        r"\bbigcommerce\b",
+        r"\bwoocommerce\b",
+        r"\bdrupal\b",
+        r"\bwordpress\b",
+        r"\bsharepoint\b",
+        r"\bsap\b",
+        # П-7.1: Salesforce / DevOps / SRE / mobile / test-automation roles
+        r"\bsalesforce\b",
+        r"\bdevops\b",
+        r"\bdev-ops\b",
+        r"\bsre\b",                    # Site Reliability Engineer
+        r"\bplatform\s+engineer\b",
+        r"\bcloud\s+engineer\b",
+        r"\binfrastructure\s+engineer\b",
+        r"\bandroid\b",
+        r"\bios\s+developer\b",
+        r"\bswift\s+developer\b",
+        r"\bkotlin\s+developer\b",
+        r"\bflutter\b",
+        r"\bautomation\s+engineer\b",
+        r"\btesting\s+engineer\b",
+        # П-8.1: management / non-IC roles (regex for mixed-case not caught by exclude_levels)
+        r"\btech\s+lead\b",
+        r"\bproject\s+lead\b",
+        r"\bpart[- ]?time\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)

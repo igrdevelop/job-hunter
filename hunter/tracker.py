@@ -140,8 +140,53 @@ def normalize_company(company: str) -> str:
     return s
 
 
+# Marketing verb patterns that signal the start of Gmail-enricher copy.
+# Used in _MARKETING_TAIL_RE to avoid stripping tech-stack separators like
+# "Angular – React Developer" (where – is a role separator, not enricher copy).
+_MARKETING_VERBS = (
+    r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
+    r'transform|craft|deliver|grow|work|define|change|redefine'
+)
+
+# Separators injected by Gmail job-alert enrichers to append marketing copy.
+# Examples:
+#   "Angular Developer — Build High-Performance Frontends at Acme"
+#   "Senior Frontend Engineer | Help us shape the future of fintech"
+#   "Frontend Dev - Join a team that ships"
+# The regex matches:
+#   • em-dash or en-dash with spaces, ONLY when followed by a marketing verb
+#     (avoids false-positive on "Angular – React Developer" tech separators)
+#   • pipe with surrounding spaces  (|)
+#   • plain hyphen with spaces followed by a marketing verb
+_MARKETING_TAIL_RE = re.compile(
+    r'\s+[—–]\s+(?=' + _MARKETING_VERBS + r')'     # em/en-dash + marketing verb
+    r'|\s+\|\s+'                                    # pipe separator
+    r'|\s+-\s+(?=' + _MARKETING_VERBS + r')',       # hyphen + marketing verb
+    re.IGNORECASE,
+)
+
+
+def _strip_marketing_tail(title: str) -> str:
+    """Remove Gmail-enricher marketing suffix from a job title.
+
+    Gmail job alerts often append marketing copy after the real title:
+      "Angular Developer — Build High-Performance Frontends"
+      "Senior Frontend Engineer | Help us shape the future"
+    Only the leading role description is meaningful for dedup.
+    """
+    m = _MARKETING_TAIL_RE.search(title)
+    if m:
+        return title[:m.start()].strip()
+    return title
+
+
 def dedup_key(company: str, title: str) -> str:
-    """Normalized key for company+title dedup (cross-source, cross-URL)."""
+    """Normalized key for company+title dedup (cross-source, cross-URL).
+
+    Strips Gmail-enricher marketing tails from titles before normalization
+    so "Angular Developer" and "Angular Developer — Build great UIs" map to
+    the same key.
+    """
     def _norm(s: str) -> str:
         s = s.lower()
         s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
@@ -150,7 +195,7 @@ def dedup_key(company: str, title: str) -> str:
         s = _strip_legal_suffixes(s)
         s = re.sub(r'[^a-z0-9]', '', s)
         return s
-    return _norm(company) + "|" + _norm(title)
+    return _norm(company) + "|" + _norm(_strip_marketing_tail(title))
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -916,8 +961,22 @@ def add_failed(job: Job) -> None:
     _save_with_retry(wb)
 
 
+def _is_unsent(sent: str) -> bool:
+    """Return True if the Sent cell value represents "not sent yet".
+
+    Empty string and dash markers (—, –, -) are treated as unsent.
+    A real date string or "EXPIRED" means the row has been processed.
+    """
+    return not sent or sent in REACT_SKIP_SENT_MARKERS
+
+
 def iter_unsent_rows() -> list[dict]:
     """Return unsent tracker rows (no Sent value, excluding SKIP).
+
+    Includes rows where Sent is empty OR a dash marker (—, –, -).
+    Dash markers are written by the /skip workflow as visual placeholders
+    but do not represent a real sent date — they must be expired-checked
+    like any other unsent row.
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
@@ -940,7 +999,7 @@ def iter_unsent_rows() -> list[dict]:
 
             if ats == "SKIP":
                 continue
-            if sent:
+            if not _is_unsent(sent):
                 continue
             if not row_id:
                 continue
@@ -1143,9 +1202,11 @@ def read_all_tracker_rows() -> list[dict]:
 _COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
 
 
-def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
+def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
     """Return True if company+title was applied to within the last cooldown_days.
 
+    12-day default: short enough to see re-posted listings quickly, long
+    enough to avoid sending the same application twice in one hiring cycle.
     Only counts rows where ATS % is a real percentage (genuine application),
     not SKIP/FAIL/MANUAL/EXPIRED rows.
     """
@@ -1186,6 +1247,57 @@ def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
     if most_recent is None:
         return False
     return (today - most_recent).days < cooldown_days
+
+
+def company_cooldown_active(company: str, days: int = 180) -> bool:
+    """Return True if ANY application to this company was made in the last *days*.
+
+    Unlike is_in_cooldown (which checks company+title), this check is title-
+    agnostic: if we applied to Acme for any role within the last 6 months we
+    skip Acme entirely — hiring managers see all applications, so submitting
+    again so soon looks bad.
+
+    Only counts rows with a real ATS % (genuine application); SKIP/FAIL/
+    MANUAL/EXPIRED rows don't trigger the cooldown.
+    """
+    import datetime as _dt
+
+    if not TRACKER_PATH.exists():
+        return False
+
+    norm = normalize_company(company)
+    if not norm:
+        return False
+
+    today = date.today()
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    most_recent: date | None = None
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < ATS_COL_INDEX:
+                continue
+            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+            if not row_company:
+                continue
+            if normalize_company(row_company) != norm:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats in _COOLDOWN_SKIP_STATUSES or not ats:
+                continue
+            row_date = row[0]
+            if isinstance(row_date, _dt.datetime):
+                row_date = row_date.date()
+            if not isinstance(row_date, _dt.date):
+                continue
+            if most_recent is None or row_date > most_recent:
+                most_recent = row_date
+    finally:
+        wb.close()
+
+    if most_recent is None:
+        return False
+    return (today - most_recent).days < days
 
 
 # ── Email response tracking ───────────────────────────────────────────────────
