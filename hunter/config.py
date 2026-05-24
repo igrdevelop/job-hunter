@@ -151,6 +151,21 @@ FILTER = {
         r"\bwordpress\b",
         r"\bsharepoint\b",
         r"\bsap\b",
+        # П-7.1: Salesforce / DevOps / SRE / mobile / test-automation roles
+        r"\bsalesforce\b",
+        r"\bdevops\b",
+        r"\bdev-ops\b",
+        r"\bsre\b",                    # Site Reliability Engineer
+        r"\bplatform\s+engineer\b",
+        r"\bcloud\s+engineer\b",
+        r"\binfrastructure\s+engineer\b",
+        r"\bandroid\b",
+        r"\bios\s+developer\b",
+        r"\bswift\s+developer\b",
+        r"\bkotlin\s+developer\b",
+        r"\bflutter\b",
+        r"\bautomation\s+engineer\b",
+        r"\btesting\s+engineer\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
