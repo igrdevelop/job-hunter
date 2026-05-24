@@ -382,14 +382,14 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
     """Filter jobs and return (passing_jobs, reason_counts).
 
     Gmail-sourced jobs (source starts with 'gmail_') bypass only the
-    title-keyword and location checks — the user's alert subscriptions
-    already pre-filter for relevance/location.
-
-    However, hard safety filters run for ALL sources including gmail_*:
+    title-keyword and require-angular checks — the user's alert subscriptions
+    already pre-filter for relevance.  All other checks run uniformly for
+    every source including gmail_*:
       - level exclusions  (intern / manager / tech lead)
       - title-only React check  (_is_react_only_title)
       - exclude_pattern  (Java, .NET, Magento, React Native …)
       - raw-skills React check  (_is_react_without_angular)
+      - location check  (_matches_location — same whitelist as all sources)
       - German language requirement
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
@@ -452,11 +452,10 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
             reasons["react_no_angular"] += 1
             continue
 
-        # ── Location — Gmail bypass (alert geo already restricts) ──────────────────
-        if not is_gmail:
-            if not _matches_location(job):
-                reasons["location"] += 1
-                continue
+        # ── Location — uniform check for ALL sources ──────────────────────────────
+        if not _matches_location(job):
+            reasons["location"] += 1
+            continue
 
         # German language requirement — check full text blob for all sources
         if _is_german_language_required(job):
