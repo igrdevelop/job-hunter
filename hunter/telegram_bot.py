@@ -407,19 +407,16 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if skipped:
         lines.append(f"⏩ Skipped (jobleads): <b>{len(skipped)}</b>")
 
-    # Always flush dirty rows to Sheets after expired check.
-    # mirror_expired_batch is best-effort; if it failed (e.g. after bot restart
-    # the in-memory cache has no sheet_row_index), rows get marked dirty instead
-    # of being written. Calling resync_dirty() here ensures EXPIRED stamps reach
-    # Google Sheets without needing a manual /gsheets_resync.
+    # Push EXPIRED stamps to Sheets — reads tracker.xlsx directly so it works
+    # even after a bot restart (no dependency on the in-memory dirty cache).
     if GSHEETS_ENABLED and expired:
         try:
             from hunter import gsheets_sync
-            synced = await gsheets_sync.resync_dirty()
-            if synced:
-                lines.append(f"\n🔄 Sheets: {synced} row(s) resynced.")
+            pushed = await gsheets_sync.push_sent_column()
+            if pushed["updated"]:
+                lines.append(f"\n🔄 Sheets: {pushed['updated']} row(s) updated.")
         except Exception as e:
-            logger.warning("[check_expired] gsheets resync_dirty failed: %s", e)
+            logger.warning("[check_expired] gsheets push_sent_column failed: %s", e)
 
     await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -718,6 +715,40 @@ async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT
         f"  📤 Pushed: {pushed}\n"
         f"  ✔️ Already present: {already}"
         f"{err_note}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_gsheets_push_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Push Sent column from tracker.xlsx to Sheets for rows where they differ.
+
+    Fixes EXPIRED/dates that are in tracker.xlsx but missing in Sheets —
+    works even after bot restart (reads tracker.xlsx directly, no cache needed).
+    """
+    from hunter import gsheets_sync
+    from hunter.config import GSHEETS_ENABLED
+    if not GSHEETS_ENABLED:
+        await update.message.reply_text("ℹ️ Google Sheets disabled.")
+        return
+
+    await update.message.reply_text("⏳ Comparing Sent column: tracker.xlsx → Sheets…")
+    try:
+        result = await gsheets_sync.push_sent_column()
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Error: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    checked = result["checked"]
+    updated = result["updated"]
+    errors  = result["errors"]
+    await update.message.reply_text(
+        f"✅ <b>gsheets_push_sent</b>\n"
+        f"  🔍 Rows with Sent in tracker: {checked}\n"
+        f"  📤 Updated in Sheets: {updated}\n"
+        f"  ⚠️ Errors: {errors}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -1373,6 +1404,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
+        BotCommand("gsheets_push_sent",     "Sync Sent/EXPIRED from tracker.xlsx → Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
         BotCommand("check_responses",       "Check Gmail confirmations [days]"),
     ])
@@ -1453,6 +1485,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
     app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
     app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
+    app.add_handler(CommandHandler("gsheets_push_sent",    cmd_gsheets_push_sent))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
     app.add_handler(CommandHandler("check_responses",      cmd_check_responses))
 
