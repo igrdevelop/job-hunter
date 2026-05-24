@@ -104,6 +104,38 @@ def _append_technology_field(tech_texts: list[str], technology) -> None:
                 tech_texts.append(_lower_text_fragment(item))
 
 
+def _is_node_only_title(title: str) -> bool:
+    """Return True when the title signals a Node.js backend role with no FE signal.
+
+    Catches "TypeScript/Node.js Developer", "Node.js Backend Engineer", etc.
+    that aren't caught by \bbackend\b because the word 'backend' isn't in the title.
+    Runs for ALL sources.
+
+    Does NOT fire when the title also contains a front-end signal (angular,
+    frontend, react, ui, spa, ux) — those are full-stack roles we want to see.
+    """
+    if not FILTER.get("exclude_react_without_angular", False):
+        # Re-use the same enable flag; Node filtering is part of "FE-only" mode
+        return False
+
+    t = title.lower()
+    # Front-end signals — don't block if any of these are present
+    _FE_SIGNALS = (
+        "angular", "frontend", "front-end", "react", "vue",
+        " ui ", "ui/ux", "spa", " ux",
+    )
+    if any(sig in t for sig in _FE_SIGNALS):
+        return False
+
+    # Node.js in title + absence of FE signals = backend/full-stack role
+    node_patterns = (
+        r"\bnode\.?js\b",
+        r"\bnode\s+developer\b",
+        r"\bnode\s+engineer\b",
+    )
+    return any(re.search(p, t, re.IGNORECASE) for p in node_patterns)
+
+
 def _is_react_only_title(title: str) -> bool:
     """Return True when the job title signals React-only with no Angular involvement.
 
@@ -320,6 +352,12 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
         # Title-only React check (П-3.1) — catches "React Developer" from any source
         if _is_react_only_title(job.title):
             reasons["react_no_angular"] += 1
+            continue
+
+        # Node.js backend title check (П-5.1) — catches "TypeScript/Node.js Developer"
+        # where 'backend' is absent but the role is clearly BE
+        if _is_node_only_title(job.title):
+            reasons["exclude_pattern"] += 1
             continue
 
         # Exclude-pattern: Java, .NET, Magento, React Native, Node backend …
