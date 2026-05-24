@@ -139,6 +139,18 @@ FILTER = {
         # П-3.3: React Native — mobile-only, not FE web
         r"\breact\s+native\b",
         r"\breact[- ]native\b",
+        # П-4.1: eCommerce/CMS platforms — not web-FE stack
+        r"\bhyv[äa]\b",           # Hyva (Magento theme) — Finnish spelling variants
+        r"\badobe\s+commerce\b",   # Adobe Commerce = Magento rebranded
+        r"\bpwa\s+studio\b",       # Magento PWA Studio
+        r"\bshopware\b",
+        r"\bshopify\b",
+        r"\bbigcommerce\b",
+        r"\bwoocommerce\b",
+        r"\bdrupal\b",
+        r"\bwordpress\b",
+        r"\bsharepoint\b",
+        r"\bsap\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
