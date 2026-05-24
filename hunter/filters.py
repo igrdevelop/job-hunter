@@ -18,6 +18,7 @@ _GERMAN_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bgerman\s+speaking\b",
         r"\bspeaking\s+german\b",
         # English
+        r"\bfluent\s+in\s+german\b",
         r"\bnative(?:[-\s]+level)?\s+german\b",
         r"\bgerman\s+native\b",
         r"\bprofessional\s+proficiency\s+in\s+german\b",

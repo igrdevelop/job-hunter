@@ -34,7 +34,7 @@ def _make_cache(*rows: tuple[str, str, str]) -> TrackerCache:
 def test_fuzzy_ct_remote_prefix() -> None:
     """'Remote Angular Developer' should match stored 'Angular Developer'."""
     cache = _make_cache(("id1", "Acme", "Angular Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "Remote Angular Developer")
     )
     assert result is True
@@ -43,7 +43,7 @@ def test_fuzzy_ct_remote_prefix() -> None:
 def test_fuzzy_ct_senior_prefix() -> None:
     """'Senior Angular Developer' should match stored 'Angular Developer' (senior in stop-list)."""
     cache = _make_cache(("id1", "Acme", "Angular Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "Senior Angular Developer")
     )
     assert result is True
@@ -52,7 +52,7 @@ def test_fuzzy_ct_senior_prefix() -> None:
 def test_fuzzy_ct_marketing_tail_stripped_before_compare() -> None:
     """'Remote Angular Developer — Build great UIs' should match 'Angular Developer'."""
     cache = _make_cache(("id1", "Acme", "Angular Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "Remote Angular Developer — Build great UIs")
     )
     assert result is True
@@ -61,7 +61,7 @@ def test_fuzzy_ct_marketing_tail_stripped_before_compare() -> None:
 def test_fuzzy_ct_company_variation() -> None:
     """Company legal-suffix variation should still match."""
     cache = _make_cache(("id1", "Acme Sp. z o.o.", "Frontend Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("ACME", "Frontend Developer")
     )
     assert result is True
@@ -74,7 +74,7 @@ def test_fuzzy_ct_company_variation() -> None:
 def test_fuzzy_ct_different_technology() -> None:
     """'React Developer' should NOT match 'Angular Developer'."""
     cache = _make_cache(("id1", "Acme", "Angular Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "React Developer")
     )
     assert result is False
@@ -83,7 +83,7 @@ def test_fuzzy_ct_different_technology() -> None:
 def test_fuzzy_ct_different_role() -> None:
     """'Frontend Developer' should NOT match 'Backend Developer'."""
     cache = _make_cache(("id1", "Acme", "Frontend Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "Backend Developer")
     )
     assert result is False
@@ -92,7 +92,7 @@ def test_fuzzy_ct_different_role() -> None:
 def test_fuzzy_ct_different_company() -> None:
     """Same title but different company → no match."""
     cache = _make_cache(("id1", "Acme", "Angular Developer"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("OtherCorp", "Angular Developer")
     )
     assert result is False
@@ -102,7 +102,7 @@ def test_fuzzy_ct_empty_cache() -> None:
     """Empty cache always returns False."""
     cache = TrackerCache()
     cache._loaded = True
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "Angular Developer")
     )
     assert result is False
@@ -113,7 +113,7 @@ def test_fuzzy_ct_below_threshold() -> None:
     # "TypeScript" vs "TypeScript Developer": tokens {"typescript"} vs {"typescript","developer"}
     # score = 1/2 = 0.5
     cache = _make_cache(("id1", "Acme", "TypeScript"))
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         cache.is_fuzzy_ct("Acme", "TypeScript Developer")
     )
     assert result is False
