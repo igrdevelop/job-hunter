@@ -145,6 +145,22 @@ def _is_node_only_title(title: str) -> bool:
     return any(re.search(p, t, re.IGNORECASE) for p in node_patterns)
 
 
+def _is_fullstack_without_angular(title: str) -> bool:
+    """Return True when the title says 'fullstack' but Angular is absent.
+
+    "Fullstack (Angular + React)" → Angular present → False (passes through).
+    "Fullstack Developer"         → no Angular    → True  (blocked).
+    "Full Stack Node.js"          → no Angular    → True  (blocked).
+
+    We no longer put bare fullstack patterns in exclude_patterns so that
+    Angular fullstack roles are visible.
+    """
+    t = title.lower()
+    if "angular" in t:
+        return False
+    return bool(re.search(r"\bfull[-\s]?stack\b", t, re.IGNORECASE))
+
+
 def _is_react_only_title(title: str) -> bool:
     """Return True when the job title signals React-only with no Angular involvement.
 
@@ -417,6 +433,12 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
         # Node.js backend title check (П-5.1) — catches "TypeScript/Node.js Developer"
         # where 'backend' is absent but the role is clearly BE
         if _is_node_only_title(job.title):
+            reasons["exclude_pattern"] += 1
+            continue
+
+        # Fullstack without Angular — blocked; fullstack WITH Angular passes
+        # (bare patterns removed from exclude_patterns so this check owns the logic)
+        if _is_fullstack_without_angular(job.title):
             reasons["exclude_pattern"] += 1
             continue
 

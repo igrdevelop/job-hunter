@@ -140,9 +140,8 @@ FILTER = {
         r"\bsdet\b",
         r"quality\s+assurance",
         r"test\s+automation",
-        r"\bfullstack\b",
-        r"\bfull-stack\b",
-        r"\bfull stack\b",
+        # fullstack WITHOUT angular is handled by _is_fullstack_without_angular()
+        # in filters.py — we don't put it in exclude_patterns so Angular fullstack passes.
         r"\bbackend\b",
         r"\bback-end\b",
         r"\bvue\b",
