@@ -1188,11 +1188,13 @@ def read_all_tracker_rows() -> list[dict]:
 _COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
 
 
-def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
+def is_in_cooldown(company: str, title: str, cooldown_days: int = 90) -> bool:
     """Return True if company+title was applied to within the last cooldown_days.
 
-    Only counts rows where ATS % is a real percentage (genuine application),
-    not SKIP/FAIL/MANUAL/EXPIRED rows.
+    Default window raised from 30 → 90 days: hiring cycles are typically
+    2-3 months, so a 30-day cooldown caused re-submissions within the same
+    cycle.  Only counts rows where ATS % is a real percentage (genuine
+    application), not SKIP/FAIL/MANUAL/EXPIRED rows.
     """
     import datetime as _dt
 
@@ -1231,6 +1233,57 @@ def is_in_cooldown(company: str, title: str, cooldown_days: int = 30) -> bool:
     if most_recent is None:
         return False
     return (today - most_recent).days < cooldown_days
+
+
+def company_cooldown_active(company: str, days: int = 180) -> bool:
+    """Return True if ANY application to this company was made in the last *days*.
+
+    Unlike is_in_cooldown (which checks company+title), this check is title-
+    agnostic: if we applied to Acme for any role within the last 6 months we
+    skip Acme entirely — hiring managers see all applications, so submitting
+    again so soon looks bad.
+
+    Only counts rows with a real ATS % (genuine application); SKIP/FAIL/
+    MANUAL/EXPIRED rows don't trigger the cooldown.
+    """
+    import datetime as _dt
+
+    if not TRACKER_PATH.exists():
+        return False
+
+    norm = normalize_company(company)
+    if not norm:
+        return False
+
+    today = date.today()
+    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
+    ws = wb.active
+    most_recent: date | None = None
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < ATS_COL_INDEX:
+                continue
+            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
+            if not row_company:
+                continue
+            if normalize_company(row_company) != norm:
+                continue
+            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
+            if ats in _COOLDOWN_SKIP_STATUSES or not ats:
+                continue
+            row_date = row[0]
+            if isinstance(row_date, _dt.datetime):
+                row_date = row_date.date()
+            if not isinstance(row_date, _dt.date):
+                continue
+            if most_recent is None or row_date > most_recent:
+                most_recent = row_date
+    finally:
+        wb.close()
+
+    if most_recent is None:
+        return False
+    return (today - most_recent).days < days
 
 
 # ── Email response tracking ───────────────────────────────────────────────────
