@@ -104,6 +104,35 @@ def _append_technology_field(tech_texts: list[str], technology) -> None:
                 tech_texts.append(_lower_text_fragment(item))
 
 
+def _is_react_only_title(title: str) -> bool:
+    """Return True when the job title signals React-only with no Angular involvement.
+
+    Title-only check that runs for ALL sources (including gmail_*) before the
+    more expensive raw-data check.  Catches "React Developer", "React Native
+    Engineer", "Frontend (React)" etc. that slip through the Gmail bypass.
+
+    Only triggers when 'angular' is absent from the title.
+    """
+    if not FILTER.get("exclude_react_without_angular", False):
+        return False
+    t = title.lower()
+    if "angular" in t:
+        return False
+    # Plain React role in title — must have a role word to avoid false positives
+    # on descriptions like "React + Angular Developer"
+    react_title_patterns = (
+        r"\breact\s+developer\b",
+        r"\breact\s+engineer\b",
+        r"\breact\s+native\b",
+        r"\breact\.js\s+developer\b",
+        r"\breact\.js\s+engineer\b",
+        r"\bfrontend\s+(?:developer|engineer)\s*[\(\[\{]?\s*react\b",
+        r"\bsoftware\s+engineer\s+react\b",
+        r"(?:^|\s)react\s*(?:developer|engineer|programm)",
+    )
+    return any(re.search(p, t, re.IGNORECASE) for p in react_title_patterns)
+
+
 def _is_react_without_angular(job: Job) -> bool:
     """Skip React-only jobs: check title AND raw skills/tech data from API."""
     if not FILTER.get("exclude_react_without_angular", False):
@@ -244,9 +273,16 @@ def apply_filters(jobs: list[Job]) -> list[Job]:
 def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]]:
     """Filter jobs and return (passing_jobs, reason_counts).
 
-    Gmail-sourced jobs (source starts with 'gmail_') bypass title/location
-    filters — the user's alert subscriptions already pre-filter for relevance.
-    Only level exclusions apply to them.
+    Gmail-sourced jobs (source starts with 'gmail_') bypass only the
+    title-keyword and location checks — the user's alert subscriptions
+    already pre-filter for relevance/location.
+
+    However, hard safety filters run for ALL sources including gmail_*:
+      - level exclusions  (intern / manager / tech lead)
+      - title-only React check  (_is_react_only_title)
+      - exclude_pattern  (Java, .NET, Magento, React Native …)
+      - raw-skills React check  (_is_react_without_angular)
+      - German language requirement
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
                         react_no_angular, location, german
@@ -265,6 +301,7 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
     for job in jobs:
         is_gmail = job.source.startswith("gmail_")
 
+        # ── Title-keyword / require-angular — Gmail bypass (pre-filtered by alerts) ──
         if not is_gmail:
             if not _matches_title_keywords(job.title):
                 reasons["title_kw"] += 1
@@ -272,22 +309,40 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
             if not _requires_angular_check(job.title):
                 reasons["require_angular"] += 1
                 continue
+
+        # ── Hard filters — apply to ALL sources including gmail_* ──────────────────
+
+        # Level/seniority exclusions (intern, manager, tech lead, etc.)
         if _is_excluded_level(job.title):
             reasons["level"] += 1
             continue
+
+        # Title-only React check (П-3.1) — catches "React Developer" from any source
+        if _is_react_only_title(job.title):
+            reasons["react_no_angular"] += 1
+            continue
+
+        # Exclude-pattern: Java, .NET, Magento, React Native, Node backend …
+        if _matches_exclude_pattern(job.title):
+            reasons["exclude_pattern"] += 1
+            continue
+
+        # Raw-skills React check (needs API data — may be absent for gmail_*)
+        if _is_react_without_angular(job):
+            reasons["react_no_angular"] += 1
+            continue
+
+        # ── Location — Gmail bypass (alert geo already restricts) ──────────────────
         if not is_gmail:
-            if _matches_exclude_pattern(job.title):
-                reasons["exclude_pattern"] += 1
-                continue
-            if _is_react_without_angular(job):
-                reasons["react_no_angular"] += 1
-                continue
             if not _matches_location(job):
                 reasons["location"] += 1
                 continue
+
+        # German language requirement — check full text blob for all sources
         if _is_german_language_required(job):
             reasons["german"] += 1
             continue
+
         result.append(job)
 
     return result, reasons
