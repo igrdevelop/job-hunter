@@ -961,8 +961,22 @@ def add_failed(job: Job) -> None:
     _save_with_retry(wb)
 
 
+def _is_unsent(sent: str) -> bool:
+    """Return True if the Sent cell value represents "not sent yet".
+
+    Empty string and dash markers (—, –, -) are treated as unsent.
+    A real date string or "EXPIRED" means the row has been processed.
+    """
+    return not sent or sent in REACT_SKIP_SENT_MARKERS
+
+
 def iter_unsent_rows() -> list[dict]:
     """Return unsent tracker rows (no Sent value, excluding SKIP).
+
+    Includes rows where Sent is empty OR a dash marker (—, –, -).
+    Dash markers are written by the /skip workflow as visual placeholders
+    but do not represent a real sent date — they must be expired-checked
+    like any other unsent row.
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn, row_num.
@@ -985,7 +999,7 @@ def iter_unsent_rows() -> list[dict]:
 
             if ats == "SKIP":
                 continue
-            if sent:
+            if not _is_unsent(sent):
                 continue
             if not row_id:
                 continue
