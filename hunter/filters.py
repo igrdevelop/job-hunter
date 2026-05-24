@@ -288,13 +288,59 @@ def _is_german_language_required(job: Job) -> bool:
     return any(p.search(blob) for p in _GERMAN_REQUIRED_RES)
 
 
+# Cities where hybrid work is NOT acceptable (too far from Wrocław).
+# A job whose location or title contains one of these AND doesn't contain an
+# allowed location token (remote/wroclaw) is rejected.
+# LinkedIn often returns "Poland" as location with the city in the title (e.g.
+# "Jlabs Angular Dev Kraków - Zabłocie"), so we check BOTH location and title.
+_ANTI_HYBRID_CITIES: frozenset[str] = frozenset({
+    "kraków", "krakow", "cracow",
+    "warszawa", "warsaw",
+    "gdańsk", "gdansk", "gdynia", "trójmiasto", "trojmiasto",
+    "poznań", "poznan",
+    "łódź", "lodz",
+    "katowice", "silesia", "śląsk", "slask",
+    "rzeszów", "rzeszow",
+    "lublin",
+    "szczecin",
+    "bydgoszcz",
+    "toruń", "torun",
+    "białystok", "bialystok",
+})
+
+
 def _matches_location(job: Job) -> bool:
-    """Check if job location matches allowed locations (all sources including LinkedIn)."""
+    """Check if job location matches allowed locations.
+
+    Anti-hybrid-city logic (П-6.1): if the location or title contains a city
+    in _ANTI_HYBRID_CITIES with no allowed location token (remote/wroclaw), the
+    job is rejected even if the top-level location field says just 'Poland'.
+    This catches LinkedIn listings where city appears only in the title.
+    """
     locations = FILTER.get("locations", [])
     if not locations:
         return True
+
     loc = job.location.lower() if isinstance(job.location, str) else str(job.location).lower()
-    return any(token in loc for token in locations)
+
+    # If any allowed token is present in location, accept immediately
+    if any(token in loc for token in locations):
+        return True
+
+    # Check title for anti-hybrid cities — LinkedIn often puts city there
+    # (e.g. "Angular Dev Kraków - Zabłocie" with location="Poland")
+    title_lower = (job.title or "").lower()
+    blob = f"{loc} {title_lower}"
+
+    # If blob contains an anti-city but NO allowed token → reject
+    has_anti_city = any(city in blob for city in _ANTI_HYBRID_CITIES)
+    has_allowed = any(token in blob for token in locations)
+
+    if has_anti_city and not has_allowed:
+        return False
+
+    # No positive match and no anti-city exclusion → fall back to whitelist
+    return False  # location didn't match any allowed token
 
 
 def apply_filters(jobs: list[Job]) -> list[Job]:
