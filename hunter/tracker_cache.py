@@ -24,7 +24,10 @@ from hunter.tracker import (
     TRACKER_PATH,
     TRACKER_HEADERS,
     normalize_url,
+    normalize_company,
     dedup_key,
+    _strip_marketing_tail,
+    _title_similarity,
     URL_COL_INDEX,
     COMPANY_COL_INDEX,
     TITLE_COL_INDEX,
@@ -176,6 +179,37 @@ class TrackerCache:
         """Return True if company+title dedup key is already in tracker."""
         async with self._lock:
             return dedup_key(company, title) in self.by_ctkey
+
+    async def is_fuzzy_ct(
+        self,
+        company: str,
+        title: str,
+        threshold: float = 0.6,
+    ) -> bool:
+        """Return True if a same-company row with a similar title already exists.
+
+        Used as a soft dedup when URL and exact company+title checks both miss —
+        e.g. Gmail enriches "Angular Developer" → "Remote Angular Developer —
+        Build great UIs", which П-1.1 reduces to "Remote Angular Developer" but
+        still doesn't exactly match the stored "Angular Developer".
+
+        The check is O(n) in rows-per-company (typically 1-5) so it is only
+        worth calling after both fast checks have already failed.
+        """
+        norm_company = normalize_company(company)
+        if not norm_company:
+            return False
+        # Strip marketing tail from the incoming title before comparison so
+        # "Angular Dev — Build great UIs" becomes "Angular Dev" before scoring.
+        clean_title = _strip_marketing_tail(title)
+        async with self._lock:
+            for row in self.rows.values():
+                if normalize_company(row.get("Company", "")) != norm_company:
+                    continue
+                stored_title = row.get("Job Title", "")
+                if _title_similarity(clean_title, stored_title) >= threshold:
+                    return True
+        return False
 
     async def get_row_by_url(self, url: str) -> dict | None:
         """Return the row dict for a URL, or None if not found."""

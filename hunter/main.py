@@ -168,6 +168,19 @@ async def _run_hunt_impl(
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
             continue
+        # Fuzzy title dedup — catches Gmail-enriched variants such as
+        # "Remote Angular Developer" vs stored "Angular Developer" (same company).
+        # Only called when URL and exact CT checks both miss (hot path unaffected).
+        try:
+            from hunter.tracker_cache import cache as _cache
+            if await _cache.is_fuzzy_ct(j.company, j.title):
+                logger.info(
+                    f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}"
+                )
+                dup_ct += 1
+                continue
+        except Exception as _fe:
+            logger.debug("[Hunt] fuzzy CT check failed: %s", _fe)
         if await asyncio.to_thread(is_in_cooldown, j.company, j.title):
             logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
             dup_cooldown += 1
