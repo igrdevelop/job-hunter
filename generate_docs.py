@@ -303,6 +303,18 @@ def main():
     with open(json_path, "r", encoding="utf-8") as f:
         content = json.load(f)
 
+    # Belt-and-suspenders: sanitize company names + education/courses even if
+    # apply_agent already ran sanitizer (handles manual / re-run scenarios).
+    try:
+        from hunter.resume_sanitizer import sanitize_content
+        content = sanitize_content(content)
+        # Persist corrected content back to disk
+        Path(json_path).write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as _san_err:
+        print(f"  [WARN] resume sanitizer: {_san_err}")
+
     output_folder = content["output_folder"]
     stack = content["stack"]
 

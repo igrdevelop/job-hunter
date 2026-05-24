@@ -52,6 +52,8 @@ Rules:
 RED LINES (never cross):
 - NEVER mention iGaming, gambling, or gaming in experience. The candidate never worked in these domains - this is a red flag for recruiters.
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
+- NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
+- NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
 
 ### Step 3 - Generate Content
 
@@ -59,7 +61,7 @@ RED LINES (never cross):
 - Headline: `Senior Frontend Developer ({stack})`
 - Summary (3-4 sentences): mirror job posting language, include "10+ years" + primary stack, 1-2 achievements, domain match.
 - Skills: reorder - job-relevant first, keep all existing skills, add all plausible skills from the job posting
-- Experience: include ALL 6 roles in reverse chronological order. Aggressively reframe bullets to emphasize relevance to THIS job. You may enrich "Stack:" lines with plausible technologies. You may rewrite bullets to naturally include job keywords. Do NOT invent entire roles.
+- Experience: include ALL roles from the candidate profile in reverse chronological order (currently 7; the most recent role MUST be first). Aggressively reframe bullets to emphasize relevance to THIS job. You may enrich "Stack:" lines with plausible technologies. You may rewrite bullets to naturally include job keywords. Do NOT invent entire roles.
 - ATS rules: single column, no tables/graphics/icons, standard section names (SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, ADDITIONAL COURSES), contact info in body
 - Max 2 pages: keep bullets concise (1-2 lines each), limit to 3-4 bullets per role
 - No first-person pronouns (I, we, my) anywhere in resume body
@@ -215,6 +217,6 @@ Return ONLY a valid JSON object with this exact structure:
 Rules:
 - "resume_pl": ALWAYS populate with a full Polish-translated resume (same structure as resume_en but in Polish)
 - "cover_letter_pl" and "about_me_pl": ALWAYS populate regardless of language
-- Experience array MUST include ALL 6 jobs in reverse chronological order
+- Experience array MUST include ALL roles from the candidate profile in reverse chronological order (currently 7; the most recent role MUST appear first)
 - Use literal \n for paragraph breaks in cover letter text
 - "to_learn": only list skills genuinely missing that are worth studying (not the plausible ones you already added)
