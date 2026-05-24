@@ -105,6 +105,19 @@ FILTER = {
         "stażysta",
         "praktykant",
         "staz",
+        # П-8.1: management / leadership / non-IC roles
+        "tech lead",
+        "tech-lead",
+        "techlead",
+        "project lead",
+        "engineering manager",
+        "head of engineering",
+        "vp of engineering",
+        "cto",
+        # Part-time — not relevant for full-time search
+        "part-time",
+        "part time",
+        "parttime",
     ],
 
     "locations": [
@@ -166,6 +179,10 @@ FILTER = {
         r"\bflutter\b",
         r"\bautomation\s+engineer\b",
         r"\btesting\s+engineer\b",
+        # П-8.1: management / non-IC roles (regex for mixed-case not caught by exclude_levels)
+        r"\btech\s+lead\b",
+        r"\bproject\s+lead\b",
+        r"\bpart[- ]?time\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
