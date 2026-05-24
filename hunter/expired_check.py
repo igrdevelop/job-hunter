@@ -9,7 +9,7 @@ EXPIRED_PATTERNS: tuple[re.Pattern, ...] = tuple(
         r"\boffer\s+expired\b",
         r"\bhas\s+expired\b",
         r"\bthis\s+(?:job\s+)?(?:offer|posting|position)\s+(?:has\s+)?expired\b",
-        r"\bjob\s+(?:no\s+longer\s+)?available\b",
+        r"\bjob\s+(?:is\s+)?(?:no\s+longer\s+)?available\b",
         r"\bposition\s+(?:has\s+been\s+)?filled\b",
         r"\bapplication\s+(?:period\s+)?(?:has\s+)?closed\b",
         r"\bno\s+longer\s+accepting\s+applications\b",
