@@ -217,6 +217,69 @@ async def resync_dirty() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Push Sent column — tracker.xlsx → Sheets
+# ---------------------------------------------------------------------------
+
+async def push_sent_column() -> dict:
+    """Push the Sent column from tracker.xlsx to Sheets for rows that differ.
+
+    Unlike resync_dirty() (which relies on the in-memory dirty cache and loses
+    state on restart), this function reads tracker.xlsx directly and compares
+    against live Sheets data — so it works reliably after any bot restart.
+
+    Useful for:
+    - EXPIRED stamps that were written to tracker.xlsx but never reached Sheets
+    - Any Sent value mismatch between tracker.xlsx and Sheets
+
+    Returns: {"checked": int, "updated": int, "errors": int}
+    """
+    if not _ready():
+        return {"checked": 0, "updated": 0, "errors": 0}
+
+    from hunter.gsheets_client import read_all, update_cell
+    from hunter.tracker import read_all_tracker_rows
+
+    svc = _get_service()
+    sid = _sheet_id()
+
+    # Read Sheets: build ID → (sheet_row_index, current_sent) map
+    sheets_rows = await asyncio.to_thread(read_all, svc, sid)
+    sheets_map: dict[str, tuple[int, str]] = {}
+    for row_idx, row_dict in sheets_rows:
+        row_id = row_dict.get("ID", "").strip()
+        if row_id:
+            sheets_map[row_id] = (row_idx, row_dict.get("Sent", "").strip())
+
+    # Read tracker.xlsx rows that have a non-empty Sent value
+    tracker_rows = await asyncio.to_thread(read_all_tracker_rows)
+
+    checked = updated = errors = 0
+    for row in tracker_rows:
+        tracker_sent = row.get("Sent", "").strip()
+        if not tracker_sent:
+            continue
+        row_id = row.get("ID", "").strip()
+        if not row_id or row_id not in sheets_map:
+            continue
+        sheet_row_idx, sheets_sent = sheets_map[row_id]
+        checked += 1
+        if tracker_sent == sheets_sent:
+            continue  # already in sync
+        try:
+            await asyncio.to_thread(
+                update_cell, svc, sid, sheet_row_idx, "Sent", tracker_sent
+            )
+            updated += 1
+            log.info("push_sent_column: %s → Sent=%s (was %r)", row_id[:8], tracker_sent, sheets_sent)
+        except Exception as e:
+            errors += 1
+            log.warning("push_sent_column: failed for %s: %s", row_id[:8], e)
+
+    log.info("push_sent_column: checked=%d updated=%d errors=%d", checked, updated, errors)
+    return {"checked": checked, "updated": updated, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Pull — Sheets → tracker.xlsx
 # ---------------------------------------------------------------------------
 
