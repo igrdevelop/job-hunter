@@ -29,7 +29,7 @@ from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
     add_failed, get_failed_jobs, remove_failed, is_known,
-    is_in_cooldown, company_cooldown_active,
+    is_in_cooldown,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -154,7 +154,6 @@ async def _run_hunt_impl(
 
     seen_urls_this_run: set[str] = set()
     seen_ct_this_run: set[str] = set()
-    seen_companies_this_run: set[str] = set()  # for company-level cooldown
     new_jobs: list[Job] = []
     dup_url = 0
     dup_ct = 0
@@ -186,21 +185,8 @@ async def _run_hunt_impl(
             logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
             dup_cooldown += 1
             continue
-        # Company-level cooldown (180 days): skip if we applied to this company
-        # for ANY role recently.  Hiring managers see all applications.
-        from hunter.tracker import normalize_company as _nc
-        _cnorm = _nc(j.company)
-        if _cnorm and (
-            _cnorm in seen_companies_this_run
-            or await asyncio.to_thread(company_cooldown_active, j.company)
-        ):
-            logger.info(f"[Hunt] Company cooldown: {j.company}")
-            dup_cooldown += 1
-            continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
-        if _cnorm:
-            seen_companies_this_run.add(_cnorm)
         new_jobs.append(j)
 
     skipped_total = dup_url + dup_ct + dup_cooldown
