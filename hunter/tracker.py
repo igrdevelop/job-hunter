@@ -140,8 +140,47 @@ def normalize_company(company: str) -> str:
     return s
 
 
+# Separators injected by Gmail job-alert enrichers to append marketing copy.
+# Examples:
+#   "Angular Developer — Build High-Performance Frontends at Acme"
+#   "Senior Frontend Engineer | Help us shape the future of fintech"
+#   "Frontend Dev - Join a team that ships"
+# The regex matches:
+#   • em-dash / en-dash with surrounding spaces  (— –)
+#   • pipe with surrounding spaces  (|)
+#   • plain hyphen with spaces followed by a common marketing verb
+_MARKETING_TAIL_RE = re.compile(
+    r'\s+[—–]\s+'                      # em-dash or en-dash
+    r'|\s+\|\s+'                        # pipe separator
+    r'|\s+-\s+(?='                      # hyphen before a marketing verb
+    r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
+    r'transform|craft|deliver|grow|work|define|change|redefine'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _strip_marketing_tail(title: str) -> str:
+    """Remove Gmail-enricher marketing suffix from a job title.
+
+    Gmail job alerts often append marketing copy after the real title:
+      "Angular Developer — Build High-Performance Frontends"
+      "Senior Frontend Engineer | Help us shape the future"
+    Only the leading role description is meaningful for dedup.
+    """
+    m = _MARKETING_TAIL_RE.search(title)
+    if m:
+        return title[:m.start()].strip()
+    return title
+
+
 def dedup_key(company: str, title: str) -> str:
-    """Normalized key for company+title dedup (cross-source, cross-URL)."""
+    """Normalized key for company+title dedup (cross-source, cross-URL).
+
+    Strips Gmail-enricher marketing tails from titles before normalization
+    so "Angular Developer" and "Angular Developer — Build great UIs" map to
+    the same key.
+    """
     def _norm(s: str) -> str:
         s = s.lower()
         s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
@@ -150,7 +189,7 @@ def dedup_key(company: str, title: str) -> str:
         s = _strip_legal_suffixes(s)
         s = re.sub(r'[^a-z0-9]', '', s)
         return s
-    return _norm(company) + "|" + _norm(title)
+    return _norm(company) + "|" + _norm(_strip_marketing_tail(title))
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
