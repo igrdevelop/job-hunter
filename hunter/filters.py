@@ -124,12 +124,15 @@ def _is_node_only_title(title: str) -> bool:
         return False
 
     t = title.lower()
-    # Front-end signals — don't block if any of these are present
-    _FE_SIGNALS = (
-        "angular", "frontend", "front-end", "react", "vue",
-        " ui ", "ui/ux", "spa", " ux",
+    # Front-end signals — don't block if any of these appear as whole words
+    _FE_SIGNAL_RES = (
+        r"\bangular\b", r"\bfrontend\b", r"\bfront-end\b",
+        r"\breact\b", r"\bvue\b",
+        r"\bui\b",      # "UI / Node.js Developer" — UI is FE
+        r"\bux\b",
+        r"\bspa\b",
     )
-    if any(sig in t for sig in _FE_SIGNALS):
+    if any(re.search(p, t, re.IGNORECASE) for p in _FE_SIGNAL_RES):
         return False
 
     # Node.js in title + absence of FE signals = backend/full-stack role
@@ -344,8 +347,13 @@ def _matches_location(job: Job) -> bool:
     if has_anti_city and not has_allowed:
         return False
 
-    # No positive match and no anti-city exclusion → fall back to whitelist
-    return False  # location didn't match any allowed token
+    # Allowed token found somewhere in location+title (e.g. "Wrocław" in title
+    # with location="Poland") → accept
+    if has_allowed:
+        return True
+
+    # No positive match → reject (strict whitelist)
+    return False
 
 
 def apply_filters(jobs: list[Job]) -> list[Job]:
