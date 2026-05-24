@@ -96,13 +96,16 @@ def test_gmail_warsaw_location_rejected():
     assert reasons["location"] == 1
 
 
-def test_gmail_empty_location_rejected():
-    """Gmail job with empty location (no title signal) is rejected by strict whitelist."""
+def test_gmail_empty_location_passes():
+    """Gmail job with empty location and no geo signal in title → passes.
+    We only reject when we have a positive bad-location signal (known anti-city).
+    Unknown/ambiguous location is treated as 'could be remote' — let it through.
+    """
     job = _gmail_job("Angular Developer", "")
     with patch("hunter.filters.FILTER", _PATCH_FILTER):
         result, reasons = apply_filters_with_stats([job])
-    assert not result, "No-location Gmail job with no geo signal should be rejected"
-    assert reasons["location"] == 1
+    assert result, "No-location job with no anti-city should pass"
+    assert reasons["location"] == 0
 
 
 def test_gmail_empty_location_remote_title_passes():

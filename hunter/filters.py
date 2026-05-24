@@ -369,7 +369,14 @@ def _matches_location(job: Job) -> bool:
     if has_allowed:
         return True
 
-    # No positive match → reject (strict whitelist)
+    # Location field is empty/blank and title has no anti-city → we have no
+    # geo information at all.  Treat as unknown: let it through rather than
+    # silently dropping a potentially remote offer.
+    if not loc.strip():
+        return True
+
+    # Non-empty location that matched neither the whitelist nor anti-cities
+    # (e.g. "Berlin", "Poland") → reject (strict whitelist).
     return False
 
 
