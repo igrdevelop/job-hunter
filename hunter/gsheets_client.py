@@ -287,6 +287,75 @@ def create_spreadsheet(service: Any, title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Delete row
+# ---------------------------------------------------------------------------
+
+def get_tab_sheet_id(service: Any, spreadsheet_id: str, tab: str = "Tracker") -> int | None:
+    """Return the integer sheetId for the named tab.
+
+    The integer sheetId is required by batchUpdate requests (e.g. deleteDimension).
+    Different from the spreadsheet string ID returned by create_spreadsheet().
+    """
+    try:
+        meta = (
+            service.spreadsheets()
+            .get(spreadsheetId=spreadsheet_id, fields="sheets.properties")
+            .execute()
+        )
+        for sheet in meta.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("title") == tab:
+                return props["sheetId"]
+        log.warning("gsheets get_tab_sheet_id: tab %r not found in spreadsheet %s", tab, spreadsheet_id)
+        return None
+    except HttpError as e:
+        log.error("gsheets get_tab_sheet_id failed: %s", e)
+        raise
+
+
+def delete_sheet_row(
+    service: Any,
+    sheet_id: str,
+    row_idx: int,
+    tab: str = "Tracker",
+) -> None:
+    """Permanently delete a single row by 1-based sheet row index.
+
+    Uses batchUpdate/deleteDimension. Rows below the deleted row shift up,
+    so any cached sheet_row_index values for those rows become stale.
+
+    Callers should invalidate the cache after calling this.
+    """
+    tab_sheet_id = get_tab_sheet_id(service, sheet_id, tab)
+    if tab_sheet_id is None:
+        raise ValueError(f"Tab {tab!r} not found in spreadsheet {sheet_id!r}")
+
+    # Sheets API uses 0-based startIndex
+    start_index = row_idx - 1  # convert 1-based → 0-based
+
+    try:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body={
+                "requests": [{
+                    "deleteDimension": {
+                        "range": {
+                            "sheetId": tab_sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": start_index,
+                            "endIndex": start_index + 1,
+                        }
+                    }
+                }]
+            },
+        ).execute()
+        log.info("gsheets delete_sheet_row: deleted row %d (tab=%r)", row_idx, tab)
+    except HttpError as e:
+        log.error("gsheets delete_sheet_row(%d) failed: %s", row_idx, e)
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Batch write (migration / full upload)
 # ---------------------------------------------------------------------------
 

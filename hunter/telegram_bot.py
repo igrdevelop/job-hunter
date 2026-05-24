@@ -194,7 +194,21 @@ async def _force_cleanup(url: str, update: Update) -> str:
     else:
         lines.append("ℹ️ Tracker: no existing rows found")
 
-    # 2. Invalidate in-memory cache
+    # 2. Delete stale Sheets row BEFORE cache invalidation
+    #    (sheet_row_index lives in cache and is needed to locate the row)
+    if deleted_rows:
+        try:
+            from hunter import gsheets_sync
+            sheets_deleted = await gsheets_sync.delete_row_by_url(url)
+            if sheets_deleted:
+                lines.append("🗑 Sheets: old row deleted")
+            else:
+                lines.append("ℹ️ Sheets: row not in Sheets (or Sheets disabled)")
+        except Exception as e:
+            lines.append(f"⚠️ Sheets row delete failed: <code>{e}</code>")
+            logger.warning("[force_cleanup] gsheets delete_row_by_url failed: %s", e)
+
+    # 2b. Invalidate in-memory cache
     try:
         await cache.invalidate_url(url)
     except Exception as e:
