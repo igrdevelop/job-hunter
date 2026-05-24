@@ -114,6 +114,29 @@ async def upload_application_folder(
         return None
 
 
+async def delete_application_folder(drive_url: str) -> bool:
+    """Delete a Drive folder by its URL (e.g. the one stored in tracker col 12).
+
+    Returns True if deleted, False if disabled / not found / error (best-effort).
+    """
+    if not _ready():
+        return False
+
+    from hunter.gdrive_client import folder_id_from_url, delete_folder
+
+    folder_id = folder_id_from_url(drive_url)
+    if not folder_id:
+        log.warning("gdrive_sync.delete_application_folder: cannot parse folder_id from %r", drive_url)
+        return False
+
+    try:
+        result = await asyncio.to_thread(delete_folder, _get_service(), folder_id)
+        return result
+    except Exception as e:
+        log.warning("gdrive_sync.delete_application_folder: error deleting %s: %s", folder_id, e)
+        return False
+
+
 _UPLOAD_TIMEOUT = 120  # seconds per folder
 
 

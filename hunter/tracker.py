@@ -428,6 +428,55 @@ def remove_failed(url: str) -> None:
         wb.close()
 
 
+def delete_all_by_url(url: str) -> dict:
+    """Delete ALL tracker rows matching this URL (any status: success, FAIL, SKIP, MANUAL…).
+
+    Returns a dict with:
+      {
+        "deleted": int,          # number of rows removed
+        "folder": str | None,    # Folder value from the first matched row (col 7)
+        "drive_url": str | None, # Drive URL from the first matched row (col 12)
+      }
+
+    Use before /force re-processing so the new run gets a clean slate.
+    """
+    result = {"deleted": 0, "folder": None, "drive_url": None}
+    if not TRACKER_PATH.exists():
+        return result
+
+    norm = normalize_url(url)
+    if not norm:
+        return result
+
+    wb = openpyxl.load_workbook(TRACKER_PATH)
+    ws = wb.active
+
+    rows_to_delete: list[int] = []
+    for row_num in range(2, ws.max_row + 1):
+        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
+        if normalize_url(row_url) != norm:
+            continue
+        # Capture folder + drive_url from the first matched row
+        if result["folder"] is None:
+            folder_val = ws.cell(row=row_num, column=7).value
+            result["folder"] = str(folder_val).strip() if folder_val else None
+        if result["drive_url"] is None:
+            drive_val = ws.cell(row=row_num, column=COL_DRIVE_URL).value
+            result["drive_url"] = str(drive_val).strip() if drive_val else None
+        rows_to_delete.append(row_num)
+
+    for row_num in reversed(rows_to_delete):
+        ws.delete_rows(row_num)
+
+    result["deleted"] = len(rows_to_delete)
+    if rows_to_delete:
+        _save_with_retry(wb)
+    else:
+        wb.close()
+
+    return result
+
+
 def has_successful_entry(url: str) -> bool:
     """True if tracker has a non-FAIL, non-SKIP entry for this URL (= docs were generated)."""
     return get_url_status_flags(url)["has_success"]
