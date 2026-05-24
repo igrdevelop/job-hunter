@@ -11,8 +11,13 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 _GERMAN_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
+        # П-9.1: Job title signals — "Frontend Developer with German", "(German)", etc.
+        # These appear in the title itself when German is a hard requirement.
+        r"\bwith\s+german\b",
+        r"\(german\)",
+        r"\bgerman\s+speaking\b",
+        r"\bspeaking\s+german\b",
         # English
-        r"\bfluent\s+in\s+german\b",
         r"\bnative(?:[-\s]+level)?\s+german\b",
         r"\bgerman\s+native\b",
         r"\bprofessional\s+proficiency\s+in\s+german\b",
