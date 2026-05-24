@@ -117,21 +117,21 @@ def test_cooldown_skipped_rows_not_counted(tmp_path: Path) -> None:
         assert not is_in_cooldown("Acme", "Angular Dev", cooldown_days=30)
 
 
-def test_cooldown_default_is_90_days(tmp_path: Path) -> None:
-    """П-1.4: default cooldown raised from 30 → 90 days."""
+def test_cooldown_default_is_12_days(tmp_path: Path) -> None:
+    """П-1.4 (revised): default cooldown is 12 days."""
     today = datetime.date.today()
     path = _make_tracker(tmp_path, [
-        # Applied 60 days ago — within new 90-day default but outside old 30-day
-        {"date": today - datetime.timedelta(days=60), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
+        # Applied 5 days ago — within 12-day default
+        {"date": today - datetime.timedelta(days=5), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
     ])
     with patch("hunter.tracker.TRACKER_PATH", path):
-        assert is_in_cooldown("Acme", "Angular Dev")  # default cooldown_days=90
+        assert is_in_cooldown("Acme", "Angular Dev")  # default cooldown_days=12
 
 
-def test_cooldown_default_90_not_triggered_after_95_days(tmp_path: Path) -> None:
+def test_cooldown_default_12_not_triggered_after_13_days(tmp_path: Path) -> None:
     today = datetime.date.today()
     path = _make_tracker(tmp_path, [
-        {"date": today - datetime.timedelta(days=95), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
+        {"date": today - datetime.timedelta(days=13), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
     ])
     with patch("hunter.tracker.TRACKER_PATH", path):
         assert not is_in_cooldown("Acme", "Angular Dev")

@@ -1202,13 +1202,13 @@ def read_all_tracker_rows() -> list[dict]:
 _COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
 
 
-def is_in_cooldown(company: str, title: str, cooldown_days: int = 90) -> bool:
+def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
     """Return True if company+title was applied to within the last cooldown_days.
 
-    Default window raised from 30 → 90 days: hiring cycles are typically
-    2-3 months, so a 30-day cooldown caused re-submissions within the same
-    cycle.  Only counts rows where ATS % is a real percentage (genuine
-    application), not SKIP/FAIL/MANUAL/EXPIRED rows.
+    12-day default: short enough to see re-posted listings quickly, long
+    enough to avoid sending the same application twice in one hiring cycle.
+    Only counts rows where ATS % is a real percentage (genuine application),
+    not SKIP/FAIL/MANUAL/EXPIRED rows.
     """
     import datetime as _dt
 
