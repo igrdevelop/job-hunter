@@ -140,22 +140,28 @@ def normalize_company(company: str) -> str:
     return s
 
 
+# Marketing verb patterns that signal the start of Gmail-enricher copy.
+# Used in _MARKETING_TAIL_RE to avoid stripping tech-stack separators like
+# "Angular – React Developer" (where – is a role separator, not enricher copy).
+_MARKETING_VERBS = (
+    r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
+    r'transform|craft|deliver|grow|work|define|change|redefine'
+)
+
 # Separators injected by Gmail job-alert enrichers to append marketing copy.
 # Examples:
 #   "Angular Developer — Build High-Performance Frontends at Acme"
 #   "Senior Frontend Engineer | Help us shape the future of fintech"
 #   "Frontend Dev - Join a team that ships"
 # The regex matches:
-#   • em-dash / en-dash with surrounding spaces  (— –)
+#   • em-dash or en-dash with spaces, ONLY when followed by a marketing verb
+#     (avoids false-positive on "Angular – React Developer" tech separators)
 #   • pipe with surrounding spaces  (|)
-#   • plain hyphen with spaces followed by a common marketing verb
+#   • plain hyphen with spaces followed by a marketing verb
 _MARKETING_TAIL_RE = re.compile(
-    r'\s+[—–]\s+'                      # em-dash or en-dash
-    r'|\s+\|\s+'                        # pipe separator
-    r'|\s+-\s+(?='                      # hyphen before a marketing verb
-    r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
-    r'transform|craft|deliver|grow|work|define|change|redefine'
-    r')',
+    r'\s+[—–]\s+(?=' + _MARKETING_VERBS + r')'     # em/en-dash + marketing verb
+    r'|\s+\|\s+'                                    # pipe separator
+    r'|\s+-\s+(?=' + _MARKETING_VERBS + r')',       # hyphen + marketing verb
     re.IGNORECASE,
 )
 
