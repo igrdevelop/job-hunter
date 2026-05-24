@@ -136,6 +136,9 @@ FILTER = {
         r"\bnuxt\b",
         r"\bmagento\b",
         r"\bruby\b",
+        # П-3.3: React Native — mobile-only, not FE web
+        r"\breact\s+native\b",
+        r"\breact[- ]native\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
