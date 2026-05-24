@@ -9,7 +9,7 @@ EXPIRED_PATTERNS: tuple[re.Pattern, ...] = tuple(
         r"\boffer\s+expired\b",
         r"\bhas\s+expired\b",
         r"\bthis\s+(?:job\s+)?(?:offer|posting|position)\s+(?:has\s+)?expired\b",
-        r"\bjob\s+(?:no\s+longer\s+)?available\b",
+        r"\bjob\s+(?:is\s+)?(?:no\s+longer\s+)?available\b",
         r"\bposition\s+(?:has\s+been\s+)?filled\b",
         r"\bapplication\s+(?:period\s+)?(?:has\s+)?closed\b",
         r"\bno\s+longer\s+accepting\s+applications\b",
@@ -37,9 +37,11 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "pracuj.pl": (
         'data-apply-type="ArchivedApplyPanel"',
         'data-test="section-archived"',
-        "Pracodawca zakończy",      # prefix — avoids diacritic encoding edge cases
+        "Pracodawca zakończy",          # prefix — avoids diacritic encoding edge cases
         "zakończył zbieranie zgłosze",
         "oferta wygasła",
+        '"isActive":false',             # __NEXT_DATA__ JSON field — most reliable
+        '"isActive": false',            # space variant
     ),
     "linkedin.com": (
         "No longer accepting applications",
@@ -53,6 +55,28 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
         '"isExpired":true',
         '"expired":true',
         "This job offer has expired",
+    ),
+    "smartrecruiters.com": (
+        # Shown when the job posting has been deactivated by the recruiter
+        "Hey, requested application form is inactive",
+        "this job is no longer accepting applications",
+        "job is no longer active",
+    ),
+    "theprotocol.it": (
+        # Dehydrated state signals offer ended
+        '"isActive":false',
+        '"isActive": false',
+        "oferta jest nieaktywna",
+        "ta oferta wygasła",
+    ),
+    "greenhouse.io": (
+        "This job has been closed",
+        "this position has been filled",
+        "Job Closed",
+    ),
+    "lever.co": (
+        "This job posting is no longer available",
+        "No longer accepting applications",
     ),
 }
 

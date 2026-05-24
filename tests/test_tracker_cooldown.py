@@ -6,7 +6,7 @@ from unittest.mock import patch
 import openpyxl
 import pytest
 
-from hunter.tracker import is_in_cooldown, COMPANY_COL_INDEX, TITLE_COL_INDEX
+from hunter.tracker import is_in_cooldown, company_cooldown_active, COMPANY_COL_INDEX, TITLE_COL_INDEX
 
 
 # ---------------------------------------------------------------------------
@@ -117,10 +117,75 @@ def test_cooldown_skipped_rows_not_counted(tmp_path: Path) -> None:
         assert not is_in_cooldown("Acme", "Angular Dev", cooldown_days=30)
 
 
-def test_cooldown_default_is_30_days(tmp_path: Path) -> None:
+def test_cooldown_default_is_12_days(tmp_path: Path) -> None:
+    """П-1.4 (revised): default cooldown is 12 days."""
     today = datetime.date.today()
     path = _make_tracker(tmp_path, [
-        {"date": today - datetime.timedelta(days=20), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
+        # Applied 5 days ago — within 12-day default
+        {"date": today - datetime.timedelta(days=5), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
     ])
     with patch("hunter.tracker.TRACKER_PATH", path):
-        assert is_in_cooldown("Acme", "Angular Dev")  # default cooldown_days=30
+        assert is_in_cooldown("Acme", "Angular Dev")  # default cooldown_days=12
+
+
+def test_cooldown_default_12_not_triggered_after_13_days(tmp_path: Path) -> None:
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=13), "company": "Acme", "title": "Angular Dev", "ats": "97%"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        assert not is_in_cooldown("Acme", "Angular Dev")
+
+
+# ---------------------------------------------------------------------------
+# company_cooldown_active — П-1.3
+# ---------------------------------------------------------------------------
+
+def test_company_cooldown_true_when_applied_recently(tmp_path: Path) -> None:
+    """Recent apply to Acme for ANY role should block all Acme listings."""
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=30), "company": "Acme", "title": "Angular Developer", "ats": "97%"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        # Different title, same company — should be blocked
+        assert company_cooldown_active("Acme", days=180)
+
+
+def test_company_cooldown_false_when_only_skip_rows(tmp_path: Path) -> None:
+    """SKIP rows don't count — company cooldown only triggers on real applications."""
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=10), "company": "Acme", "title": "Angular Dev", "ats": "SKIP"},
+        {"date": today - datetime.timedelta(days=10), "company": "Acme", "title": "Backend Dev", "ats": "EXPIRED"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        assert not company_cooldown_active("Acme", days=180)
+
+
+def test_company_cooldown_false_for_different_company(tmp_path: Path) -> None:
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=10), "company": "OtherCo", "title": "Angular Dev", "ats": "97%"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        assert not company_cooldown_active("Acme", days=180)
+
+
+def test_company_cooldown_false_when_old_enough(tmp_path: Path) -> None:
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=200), "company": "Acme", "title": "Angular Dev", "ats": "99%"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        assert not company_cooldown_active("Acme", days=180)
+
+
+def test_company_cooldown_legal_suffix_normalization(tmp_path: Path) -> None:
+    """Acme Sp. z o.o. and ACME should share the same company cooldown."""
+    today = datetime.date.today()
+    path = _make_tracker(tmp_path, [
+        {"date": today - datetime.timedelta(days=10), "company": "Acme Sp. z o.o.", "title": "Angular Dev", "ats": "97%"},
+    ])
+    with patch("hunter.tracker.TRACKER_PATH", path):
+        assert company_cooldown_active("ACME", days=180)

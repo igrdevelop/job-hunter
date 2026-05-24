@@ -781,9 +781,10 @@ def main_api(url: str, paste_text: str = "") -> None:
     # Step 1.5a — Abort if fetched text is too short to be a real posting (B2)
     from hunter.validation import is_job_text_too_short
     if is_job_text_too_short(job_text):
+        from hunter.validation import MIN_JOB_TEXT_LEN
         notify(
             f"⚠️ <b>Job text too short — skipped</b>\n"
-            f"Got {len((job_text or '').strip())} chars (min 200).\n🔗 {url}"
+            f"Got {len((job_text or '').strip())} chars (min {MIN_JOB_TEXT_LEN}).\n🔗 {url}"
         )
         print(f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}")
         sys.exit(0)

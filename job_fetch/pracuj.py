@@ -213,6 +213,11 @@ def _try_next_data(html: str) -> str:
     if not isinstance(offer, dict) or not offer:
         return ""
 
+    # isActive=false in __NEXT_DATA__ is the most reliable archived signal —
+    # it appears even when the HTML archived panel is rendered client-side.
+    if offer.get("isActive") is False:
+        return "\nPracodawca zakończył zbieranie zgłoszeń na tę ofertę\n"
+
     return _format_next_data_offer(offer)
 
 

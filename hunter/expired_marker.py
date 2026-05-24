@@ -27,9 +27,14 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_EVERY = 5
 
-# Domains where a lightweight raw-HTML check is more reliable than the full
-# fetch_job_text pipeline (Playwright/cloudscraper failures → false "alive").
-_QUICK_CHECK_DOMAINS = ("pracuj.pl", "linkedin.com")
+# Domains where a lightweight raw-HTML check is attempted before the full
+# fetch_job_text pipeline.
+# NOTE: pracuj.pl is intentionally excluded — its Cloudflare protection blocks
+# fresh cloudscraper sessions (HTTP 403), while fetch_pracuj reuses a persistent
+# module-level scraper that has accumulated session cookies. The full pipeline
+# already handles pracuj.pl archived detection reliably via _extract_archived_notice
+# and the isActive:false __NEXT_DATA__ check, so a quick pre-check adds nothing.
+_QUICK_CHECK_DOMAINS = ("linkedin.com",)
 
 _QUICK_HEADERS = {
     "User-Agent": (
@@ -41,32 +46,52 @@ _QUICK_HEADERS = {
 _QUICK_TIMEOUT = 20
 
 
-def _quick_html_expired(url: str, domain: str) -> bool | None:
-    """Fetch raw HTML for known domains and scan for expiry markers.
+def _fetch_quick_html(url: str) -> tuple[str, int]:
+    """Fetch raw HTML for a URL, stripping tracking params first.
 
-    Returns True (expired), False (clearly alive) or None (can't determine).
-    Only called for domains in _QUICK_CHECK_DOMAINS.
+    Returns (html, status_code). html is "" on non-200 or error.
+    Tries cloudscraper first, falls back to plain requests.
     """
+    from job_fetch import _clean_url
+    fetch_url = _clean_url(url)
+
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper()
-        resp = scraper.get(url, timeout=_QUICK_TIMEOUT)
-        html = resp.text if resp.status_code == 200 else ""
-    except Exception:
-        try:
-            resp = requests.get(url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
-            html = resp.text if resp.status_code == 200 else ""
-        except Exception:
-            return None
+        resp = scraper.get(fetch_url, timeout=_QUICK_TIMEOUT)
+        logger.debug("[expired_marker] quick fetch %s → HTTP %s, %d bytes",
+                     fetch_url, resp.status_code, len(resp.text))
+        return (resp.text if resp.status_code == 200 else ""), resp.status_code
+    except Exception as cs_err:
+        logger.debug("[expired_marker] cloudscraper failed (%s), trying plain requests", cs_err)
 
+    try:
+        resp = requests.get(fetch_url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
+        logger.debug("[expired_marker] plain-requests fetch %s → HTTP %s, %d bytes",
+                     fetch_url, resp.status_code, len(resp.text))
+        return (resp.text if resp.status_code == 200 else ""), resp.status_code
+    except Exception as req_err:
+        logger.debug("[expired_marker] plain-requests also failed: %s", req_err)
+        return "", 0
+
+
+def _check_html_expired(html: str, domain: str, url: str = "") -> bool | None:
+    """Check already-fetched HTML for expiry signals.
+
+    Returns True (expired), None (can't determine / login wall / CF challenge).
+    Separated from fetching so callers can reuse HTML without a second request.
+    """
     if not html:
+        return None
+
+    if _is_cloudflare_challenge(html):
+        logger.debug("[expired_marker] Cloudflare challenge detected for %s", url or domain)
         return None
 
     if is_expired_by_html(html, domain):
         return True
 
-    # LinkedIn: if we got a login/auth wall instead of the real page,
-    # we can't determine expiry — return None so the caller skips gracefully.
+    # LinkedIn: login wall → can't determine expiry without a session.
     if "linkedin.com" in domain:
         html_lower = html.lower()
         login_wall = (
@@ -78,6 +103,33 @@ def _quick_html_expired(url: str, domain: str) -> bool | None:
             return None  # can't check — treat as skipped
 
     return None  # no expiry signal found, but not conclusively alive either
+
+
+def _quick_html_expired(url: str, domain: str) -> bool | None:
+    """Fetch raw HTML for known domains and scan for expiry markers.
+
+    Returns True (expired) or None (can't determine).
+    Only called for domains in _QUICK_CHECK_DOMAINS.
+    """
+    html, _status = _fetch_quick_html(url)
+    return _check_html_expired(html, domain, url=url)
+
+
+def _is_cloudflare_challenge(html: str) -> bool:
+    """Return True if the HTML looks like a Cloudflare challenge/bot-check page."""
+    if len(html) < 1500:  # real job pages are much larger
+        lower = html.lower()
+        return (
+            "just a moment" in lower
+            or "enable javascript and cookies" in lower
+            or "_cf_chl" in lower
+            or "cf-browser-verification" in lower
+        )
+    lower = html.lower()
+    return (
+        "just a moment" in lower
+        and ("cloudflare" in lower or "_cf_chl" in lower)
+    )
 
 
 # ── Per-domain rate limiting ──────────────────────────────────────────────────

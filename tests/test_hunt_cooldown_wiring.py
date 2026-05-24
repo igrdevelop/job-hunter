@@ -81,10 +81,10 @@ def test_cooldown_job_excluded_from_new_jobs(tmp_path: Path) -> None:
 
 
 def test_expired_cooldown_job_passes_through(tmp_path: Path) -> None:
-    """Job applied to 45 days ago is past cooldown — must be shown again."""
+    """Job applied 20 days ago is past the 12-day default cooldown — must show again."""
     today = datetime.date.today()
     tracker = _make_tracker(tmp_path, [
-        {"date": today - datetime.timedelta(days=45),
+        {"date": today - datetime.timedelta(days=20),
          "company": "Acme", "title": "Angular Dev",
          "url": "https://example.com/old", "ats": "97%"},
     ])
