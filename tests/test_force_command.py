@@ -235,3 +235,173 @@ def test_force_cleanup_no_existing_entry():
         assert "no existing" in summary.lower() or "0 row" in summary.lower() or "not found" in summary.lower()
 
     run(_run())
+
+
+# ---------------------------------------------------------------------------
+# gsheets_client — delete_sheet_row / get_tab_sheet_id
+# ---------------------------------------------------------------------------
+
+def _make_sheets_service(tab_sheet_id=999):
+    """Build a minimal mock Sheets service for delete tests."""
+    svc = MagicMock()
+    # spreadsheets().get().execute() returns sheet metadata
+    meta = {
+        "sheets": [
+            {"properties": {"title": "Tracker", "sheetId": tab_sheet_id}},
+        ]
+    }
+    svc.spreadsheets().get().execute.return_value = meta
+    # spreadsheets().batchUpdate().execute() returns {}
+    svc.spreadsheets().batchUpdate().execute.return_value = {}
+    return svc
+
+
+def test_get_tab_sheet_id_found():
+    from hunter.gsheets_client import get_tab_sheet_id
+    svc = _make_sheets_service(tab_sheet_id=42)
+    result = get_tab_sheet_id(svc, "spreadsheet-id-123")
+    assert result == 42
+
+
+def test_get_tab_sheet_id_not_found():
+    from hunter.gsheets_client import get_tab_sheet_id
+    svc = MagicMock()
+    svc.spreadsheets().get().execute.return_value = {
+        "sheets": [{"properties": {"title": "OtherTab", "sheetId": 0}}]
+    }
+    result = get_tab_sheet_id(svc, "spreadsheet-id-123", tab="Tracker")
+    assert result is None
+
+
+def test_delete_sheet_row_calls_batch_update():
+    """delete_sheet_row issues a deleteDimension batchUpdate with correct 0-based index."""
+    from hunter.gsheets_client import delete_sheet_row
+    svc = _make_sheets_service(tab_sheet_id=7)
+
+    delete_sheet_row(svc, "sheet-id", row_idx=5)
+
+    # Capture the body passed to batchUpdate
+    call_kwargs = svc.spreadsheets().batchUpdate.call_args
+    body = call_kwargs[1]["body"] if call_kwargs[1] else call_kwargs[0][1]
+    req = body["requests"][0]["deleteDimension"]["range"]
+    assert req["sheetId"] == 7
+    assert req["startIndex"] == 4   # row_idx=5 → 0-based 4
+    assert req["endIndex"] == 5
+    assert req["dimension"] == "ROWS"
+
+
+# ---------------------------------------------------------------------------
+# gsheets_sync — delete_row_by_url
+# ---------------------------------------------------------------------------
+
+def test_delete_row_by_url_success():
+    """delete_row_by_url returns True and calls delete_sheet_row when URL is cached."""
+    from hunter.tracker_cache import TrackerCache
+
+    async def _run():
+        c = TrackerCache()
+        row = {
+            "ID": "abc123", "URL": "https://example.com/job/1",
+            "Company": "AcmeCorp", "Job Title": "Dev",
+            "ATS %": "95", "Sent": "", "Stack": "Angular",
+            "Folder": "Applications/AcmeCorp", "Re-application": "",
+            "To Learn": "", "Drive URL": "",
+        }
+        await c.add(row, sheet_row=5)
+
+        import hunter.gsheets_sync as gsync
+
+        with patch.object(gsync, "_ready", return_value=True), \
+             patch.object(gsync, "_get_service", return_value=MagicMock()), \
+             patch.object(gsync, "_sheet_id", return_value="sheet-id-abc"), \
+             patch.object(gsync, "cache", c), \
+             patch("hunter.gsheets_client.delete_sheet_row") as mock_del:
+            result = await gsync.delete_row_by_url("https://example.com/job/1")
+
+        assert result is True
+        # Confirm delete_sheet_row was called with correct row index
+        mock_del.assert_called_once()
+        _, _, row_idx = mock_del.call_args[0]
+        assert row_idx == 5
+
+    run(_run())
+
+
+def test_delete_row_by_url_not_in_cache():
+    """delete_row_by_url returns False when URL is not cached."""
+
+    async def _run():
+        from hunter.tracker_cache import TrackerCache
+        c = TrackerCache()  # empty
+
+        with patch("hunter.gsheets_sync.cache", c):
+            with patch("hunter.gsheets_sync._ready", return_value=True):
+                from hunter import gsheets_sync
+                result = await gsheets_sync.delete_row_by_url("https://notfound.com/job/1")
+
+        assert result is False
+
+    run(_run())
+
+
+def test_delete_row_by_url_no_sheet_index():
+    """delete_row_by_url returns False when row has no sheet_row_index."""
+    from hunter.tracker_cache import TrackerCache
+
+    async def _run():
+        c = TrackerCache()
+        row = {
+            "ID": "xyz999", "URL": "https://example.com/job/no-index",
+            "Company": "Corp", "Job Title": "Dev",
+            "ATS %": "80", "Sent": "", "Stack": "React",
+            "Folder": "", "Re-application": "", "To Learn": "", "Drive URL": "",
+        }
+        await c.add(row, sheet_row=None)  # no sheet_row → not in sheet_row_index
+
+        with patch("hunter.gsheets_sync.cache", c):
+            with patch("hunter.gsheets_sync._ready", return_value=True):
+                from hunter import gsheets_sync
+                result = await gsheets_sync.delete_row_by_url("https://example.com/job/no-index")
+
+        assert result is False
+
+    run(_run())
+
+
+def test_force_cleanup_calls_sheets_delete():
+    """_force_cleanup calls gsheets_sync.delete_row_by_url and includes result in summary."""
+    import hunter.telegram_bot as bot
+
+    async def _run():
+        tracker_result = {"deleted": 1, "folder": None, "drive_url": None}
+        update = _make_update("dummy")
+
+        with patch("hunter.tracker.delete_all_by_url", return_value=tracker_result), \
+             patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock), \
+             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=True) as mock_sheets:
+
+            summary = await bot._force_cleanup("https://example.com/job/1", update)
+
+        mock_sheets.assert_called_once_with("https://example.com/job/1")
+        assert "sheet" in summary.lower()
+
+    run(_run())
+
+
+def test_force_cleanup_sheets_delete_skipped_when_nothing_deleted():
+    """_force_cleanup does NOT call delete_row_by_url when tracker had 0 rows."""
+    import hunter.telegram_bot as bot
+
+    async def _run():
+        tracker_result = {"deleted": 0, "folder": None, "drive_url": None}
+        update = _make_update("dummy")
+
+        with patch("hunter.tracker.delete_all_by_url", return_value=tracker_result), \
+             patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock), \
+             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock) as mock_sheets:
+
+            await bot._force_cleanup("https://new-vacancy.com/job/99", update)
+
+        mock_sheets.assert_not_called()
+
+    run(_run())
