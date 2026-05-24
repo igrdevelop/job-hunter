@@ -56,6 +56,28 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
         '"expired":true',
         "This job offer has expired",
     ),
+    "smartrecruiters.com": (
+        # Shown when the job posting has been deactivated by the recruiter
+        "Hey, requested application form is inactive",
+        "this job is no longer accepting applications",
+        "job is no longer active",
+    ),
+    "theprotocol.it": (
+        # Dehydrated state signals offer ended
+        '"isActive":false',
+        '"isActive": false',
+        "oferta jest nieaktywna",
+        "ta oferta wygasła",
+    ),
+    "greenhouse.io": (
+        "This job has been closed",
+        "this position has been filled",
+        "Job Closed",
+    ),
+    "lever.co": (
+        "This job posting is no longer available",
+        "No longer accepting applications",
+    ),
 }
 
 
