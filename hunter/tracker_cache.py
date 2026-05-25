@@ -151,6 +151,25 @@ class TrackerCache:
                 raise ValueError(f"Unknown field {field!r}")
             self.rows[row_id][field] = value
 
+    async def invalidate_url(self, url: str) -> None:
+        """Remove all cache entries for this URL (by_url, by_ctkey, rows).
+
+        Call after delete_all_by_url() so the next hunt/apply sees a clean slate.
+        """
+        norm = normalize_url(url)
+        async with self._lock:
+            row_id = self.by_url.pop(norm, None)
+            if row_id is None:
+                return
+            row = self.rows.pop(row_id, None)
+            if row:
+                company = row.get("Company", "")
+                title = row.get("Job Title", "")
+                if company and title:
+                    self.by_ctkey.pop(dedup_key(company, title), None)
+            self.sheet_row_index.pop(row_id, None)
+            self.dirty_ids.discard(row_id)
+
     async def mark_dirty(self, row_id: str) -> None:
         """Flag row for Sheets resync retry."""
         async with self._lock:

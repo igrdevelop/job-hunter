@@ -58,6 +58,9 @@ logger = logging.getLogger(__name__)
 # Cleared on bot restart — acceptable trade-off vs complexity of persistence
 _pending_jobs: dict[str, Job] = {}
 
+# chat_ids waiting for a URL/text after bare /force
+_force_waiting: set[int] = set()
+
 
 # ── Keyboard factory ──────────────────────────────────────────────────────────
 
@@ -168,53 +171,151 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await run_hunt(context)
 
 
+async def _force_cleanup(url: str, update: Update) -> str:
+    """Delete old Drive folder, server folder, and tracker rows for this URL.
+
+    Returns a human-readable summary of what was deleted (for Telegram message).
+    Best-effort: errors are logged, not raised.
+    """
+    from hunter.tracker import delete_all_by_url
+    from hunter.tracker_cache import cache
+    import shutil
+
+    lines: list[str] = []
+
+    # 1. Read folder + drive_url from tracker before deletion
+    tracker_result = await asyncio.to_thread(delete_all_by_url, url)
+    deleted_rows = tracker_result.get("deleted", 0)
+    folder_str = tracker_result.get("folder") or ""
+    drive_url = tracker_result.get("drive_url") or ""
+
+    if deleted_rows:
+        lines.append(f"🗑 Tracker: removed {deleted_rows} row(s)")
+    else:
+        lines.append("ℹ️ Tracker: no existing rows found")
+
+    # 2. Delete stale Sheets row BEFORE cache invalidation
+    #    (sheet_row_index lives in cache and is needed to locate the row)
+    if deleted_rows:
+        try:
+            from hunter import gsheets_sync
+            sheets_deleted = await gsheets_sync.delete_row_by_url(url)
+            if sheets_deleted:
+                lines.append("🗑 Sheets: old row deleted")
+            else:
+                lines.append("ℹ️ Sheets: row not in Sheets (or Sheets disabled)")
+        except Exception as e:
+            lines.append(f"⚠️ Sheets row delete failed: <code>{e}</code>")
+            logger.warning("[force_cleanup] gsheets delete_row_by_url failed: %s", e)
+
+    # 2b. Invalidate in-memory cache
+    try:
+        await cache.invalidate_url(url)
+    except Exception as e:
+        logger.warning("[force_cleanup] cache invalidate failed: %s", e)
+
+    # 3. Delete server folder
+    if folder_str:
+        folder_path = Path(folder_str)
+        if not folder_path.is_absolute():
+            folder_path = PROJECT_DIR / folder_str
+        if folder_path.exists() and folder_path.is_dir():
+            try:
+                shutil.rmtree(folder_path)
+                lines.append(f"🗑 Server: deleted <code>{folder_path.name}</code>")
+                logger.info("[force_cleanup] Deleted server folder: %s", folder_path)
+            except Exception as e:
+                lines.append(f"⚠️ Server folder delete failed: <code>{e}</code>")
+                logger.warning("[force_cleanup] rmtree failed for %s: %s", folder_path, e)
+        else:
+            lines.append(f"ℹ️ Server folder not found: <code>{folder_str}</code>")
+
+    # 4. Delete Google Drive folder
+    if drive_url and drive_url not in ("-", "—"):
+        try:
+            from hunter import gdrive_sync
+            deleted = await gdrive_sync.delete_application_folder(drive_url)
+            if deleted:
+                lines.append("🗑 Drive: folder deleted")
+            else:
+                lines.append("ℹ️ Drive: folder not found or GDRIVE disabled")
+        except Exception as e:
+            lines.append(f"⚠️ Drive delete failed: <code>{e}</code>")
+            logger.warning("[force_cleanup] gdrive delete failed: %s", e)
+    elif not drive_url or drive_url in ("-", "—"):
+        lines.append("ℹ️ Drive: no folder URL in tracker")
+
+    return "\n".join(lines)
+
+
+async def _force_run(update: Update, url: str | None, body: str) -> None:
+    """Core force logic: cleanup existing entry then launch apply_agent.
+
+    Called from cmd_force (inline args) and from cmd_url (_force_waiting path).
+    """
+    if body and _looks_like_paste(body):
+        # Paste flow — no URL cleanup needed (paste mode creates a new entry)
+        await update.message.reply_text(
+            f"🔧 <b>Force + job text</b> — {len(body.strip())} chars.\n"
+            "Bypasses: tracker dedup, React-only. Starting…",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        logger.info("[Force] paste mode (%d chars)", len(body))
+        await _handle_paste(update, body, force=True)
+        return
+
+    if not url:
+        url = _extract_url(body) or (body.split()[0].strip() if body else None)
+
+    if not url or not url.startswith("http"):
+        await update.message.reply_text(
+            "⚠️ Provide an <b>http(s) URL</b> or full job posting text.\n"
+            "A single word without a URL is not valid.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Cleanup old entry
+    await update.message.reply_text(
+        f"🔍 <b>Force: checking for existing entry…</b>\n🔗 {url}",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    cleanup_summary = await _force_cleanup(url, update)
+
+    await update.message.reply_text(
+        f"<b>Cleanup done:</b>\n{cleanup_summary}\n\n"
+        f"⏳ Starting generation (<code>--force</code>)…",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    logger.info("[Force] Launching apply_agent --force for: %s", url)
+    asyncio.create_task(_run_apply_agent(url, force=True))
+
+
 async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Force-process: URL from tracker / React-only, or full pasted posting after /force."""
+    """Force-process a URL: two-step (bare /force → ask for URL) or inline (/force <url>)."""
     raw = (update.message.text or "").strip()
     m = re.match(r"/force(?:@\w+)?\s*(.*)\Z", raw, flags=re.DOTALL | re.IGNORECASE)
     body = (m.group(1) or "").strip() if m else ""
 
     if not body:
+        # Two-step: ask for URL/text and wait for next message
+        chat_id = update.effective_chat.id
+        _force_waiting.add(chat_id)
         await update.message.reply_text(
-            "<b>/force</b> — force generation (<code>--force</code>):\n\n"
-            "• <code>/force https://…</code> — by URL\n"
-            "• <code>/force</code> followed by full job posting text — "
-            "same as paste flow but bypasses dedup and React-only\n\n"
-            "Text must be long enough (like a full JD); otherwise send an http URL.",
+            "🔧 <b>Force mode</b>\n\n"
+            "Пришли ссылку на вакансию (или полный текст объявления).\n\n"
+            "<i>Если вакансия уже в трекере — старые файлы будут удалены "
+            "(Drive + сервер + строка в трекере) и сгенерированы заново.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    if _looks_like_paste(body):
-        await update.message.reply_text(
-            f"🔧 <b>Force + job text</b> — {len(body.strip())} chars. "
-            "Bypasses: tracker dedup, React-only. Starting…",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        logger.info(f"[Force] paste mode ({len(body)} chars)")
-        await _handle_paste(update, body, force=True)
-        return
-
-    if body.startswith("http"):
-        url = _extract_url(body) or body.split()[0].strip()
-        await update.message.reply_text(
-            f"⏳ <b>Force: starting generation</b> (<code>--force</code>)\n"
-            f"🔗 {url}\n\n"
-            "Bypasses: tracker dedup, React-only skip; for JobLeads — existing "
-            "<code>job_posting.txt</code> will be used on fetch.",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        logger.info(f"[Force] Launching apply_agent --force for: {url}")
-        asyncio.create_task(_run_apply_agent(url, force=True))
-        return
-
-    await update.message.reply_text(
-        "After <code>/force</code> provide an <b>http(s) URL</b> or full job posting text "
-        "(same as paste flow). A single word without a URL is not valid.",
-        parse_mode=ParseMode.HTML,
-    )
+    # Inline: /force <url> or /force <text>
+    url = _extract_url(body) if body.startswith("http") else None
+    await _force_run(update, url=url, body=body)
 
 
 async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1111,11 +1212,20 @@ async def cmd_about_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle plain text messages.
 
+    - If chat is in _force_waiting state → treat as force URL/text input
     - Long pasted job text (>= _PASTE_TEXT_MIN_LEN, with or without URL) → paste flow
     - Single job URL (JustJoin, NoFluffJobs, LinkedIn /jobs/view/...) → apply_agent
     - LinkedIn search / alert URL (/jobs/search?...) → extract job ids → batch apply
     """
     text = (update.message.text or "").strip()
+    chat_id = update.effective_chat.id
+
+    # Force two-step: user replied after bare /force
+    if chat_id in _force_waiting:
+        _force_waiting.discard(chat_id)
+        url = _extract_url(text) if text.startswith("http") else None
+        await _force_run(update, url=url, body=text)
+        return
 
     # Paste-mode branch: user forwarded/pasted the posting text itself.
     if _looks_like_paste(text):

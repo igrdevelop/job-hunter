@@ -240,7 +240,7 @@ Store final score in `"ats_score"` field in content.json.
 Rules for the JSON:
 - `resume_pl`: set to `null` by default. Only populate with full Polish-translated resume when `--full` flag was explicitly passed.
 - `cover_letter_pl` and `about_me_pl`: always populate (used in both modes)
-- Experience array must include ALL 6 jobs from Ihar's background, in reverse chronological order
+- Experience array must include ALL roles from the candidate profile in reverse chronological order (currently 7; the most recent role MUST appear first)
 - Use `\n` for paragraph breaks in cover letter text
 
 2. Run the generator (use the path to the content.json you just created):

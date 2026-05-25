@@ -465,6 +465,48 @@ def validate_startup() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Delete row by URL (used by /force cleanup)
+# ---------------------------------------------------------------------------
+
+async def delete_row_by_url(url: str) -> bool:
+    """Delete the Sheets row that corresponds to this URL (best-effort).
+
+    IMPORTANT: Must be called BEFORE cache.invalidate_url(url), because
+    this function reads sheet_row_index from the cache to locate the Sheets row.
+
+    Returns True if a row was deleted, False if not found or Sheets is disabled.
+    """
+    if not _ready():
+        return False
+
+    from hunter.gsheets_client import delete_sheet_row
+
+    # Look up row in cache — must happen before invalidation
+    row = await cache.get_row_by_url(url)
+    if row is None:
+        log.debug("gsheets delete_row_by_url: URL not in cache: %s", url)
+        return False
+
+    row_id = row.get("ID", "").strip()
+    if not row_id:
+        return False
+
+    # sheet_row_index is accessed directly (it's a plain dict, not async-protected)
+    sheet_row = cache.sheet_row_index.get(row_id)
+    if sheet_row is None:
+        log.debug("gsheets delete_row_by_url: no sheet_row_index for %s — row may never have been pushed", row_id[:8])
+        return False
+
+    try:
+        await asyncio.to_thread(delete_sheet_row, _get_service(), _sheet_id(), sheet_row)
+        log.info("gsheets delete_row_by_url: deleted sheet row %d for id=%s", sheet_row, row_id[:8])
+        return True
+    except Exception as e:
+        log.warning("gsheets delete_row_by_url: failed for id=%s: %s", row_id[:8], e)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Push missing rows (tracker.xlsx → Sheets, skipping rows already there)
 # ---------------------------------------------------------------------------
 

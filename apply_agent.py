@@ -940,6 +940,14 @@ def main_api(url: str, paste_text: str = "") -> None:
     print("[apply_agent] Step 4.7: Running independent ATS check...")
     content = _ats_check_loop(content, job_text)
 
+    # Step 4.8 — Sanitize resume: replace hallucinated companies, fill missing education/courses
+    print("[apply_agent] Step 4.8: Sanitizing resume content...")
+    try:
+        from hunter.resume_sanitizer import sanitize_content
+        content = sanitize_content(content)
+    except Exception as _san_err:
+        print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
+
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")
 
