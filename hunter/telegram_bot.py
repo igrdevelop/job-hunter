@@ -3,6 +3,13 @@ telegram_bot.py — Telegram bot: notifications, inline buttons, callback handle
 
 Pending jobs are stored in memory (dict job_id → Job) per session.
 If the bot restarts, old buttons become "expired" — that's acceptable.
+
+Refactoring in progress (Phase 1+):
+  Shared state   → hunter/bot/state.py
+  Keyboards      → hunter/bot/keyboards.py
+  Notifications  → hunter/bot/notifications.py
+  Paste helpers  → hunter/bot/paste.py
+  Formatters     → hunter/bot/formatters.py
 """
 
 import asyncio
@@ -45,56 +52,32 @@ from hunter.config import (
 from hunter.models import Job
 from hunter.tracker import (
     add_skipped,
-
     lookup_url,
     lookup_company,
     manual_jobleads_job_posting_path,
     normalize_url,
 )
 
+# ── Phase 1: bot/ infrastructure ─────────────────────────────────────────────
+from hunter.bot.state import (
+    _pending_jobs,
+    _active_apply_urls,
+    _force_waiting,
+    _APPLY_AGENT_TIMEOUT,
+)
+from hunter.bot.keyboards import _make_keyboard
+from hunter.bot.notifications import send_text, send_job_cards, _tg_notify
+from hunter.bot.paste import _PASTE_TEXT_MIN_LEN, _URL_RE, _looks_like_paste, _extract_url
+from hunter.bot.formatters import (
+    _build_schedule_text,
+    _format_check_responses_report,
+    _format_daily_summary,
+)
+
 logger = logging.getLogger(__name__)
 
-# In-memory store: job_id (10-char hash) → Job
-# Cleared on bot restart — acceptable trade-off vs complexity of persistence
-_pending_jobs: dict[str, Job] = {}
 
-# chat_ids waiting for a URL/text after bare /force
-_force_waiting: set[int] = set()
-
-
-# ── Keyboard factory ──────────────────────────────────────────────────────────
-
-def _make_keyboard(job_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Apply", callback_data=f"apply:{job_id}"),
-        InlineKeyboardButton("❌ Skip",  callback_data=f"skip:{job_id}"),
-    ]])
-
-
-# ── Public API (called from main.py) ─────────────────────────────────────────
-
-async def send_text(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
-    if len(text) > 4096:
-        text = text[:4090] + "\n…"
-    await context.bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=text,
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def send_job_cards(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
-    """Send one Telegram message per job with Apply/Skip buttons."""
-    for job in jobs:
-        jid = job.job_id()
-        _pending_jobs[jid] = job
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=job.telegram_text(),
-            parse_mode=ParseMode.HTML,
-            reply_markup=_make_keyboard(jid),
-            disable_web_page_preview=True,
-        )
+# ── Public API (called from main.py) — imported from hunter.bot.notifications ─
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -854,68 +837,8 @@ async def cmd_gsheets_push_sent(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-def _build_schedule_text() -> str:
-    from hunter.sources import ALL_SOURCES
-
-    lines = []
-    for idx, source in enumerate(ALL_SOURCES):
-        times = []
-        for base_time in SCHEDULE_TIMES:
-            h, m = map(int, base_time.split(":"))
-            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
-            total %= 24 * 60
-            times.append(f"{total // 60:02d}:{total % 60:02d}")
-        lines.append(f"  <b>{source.name}</b>: {' / '.join(times)}")
-
-    schedule_str = "\n".join(lines)
-    return (
-        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset {SCHEDULE_SOURCE_OFFSET_MIN} min):\n"
-        f"{schedule_str}"
-    )
-
-
 # ── Email response checker ───────────────────────────────────────────────────
-
-def _format_check_responses_report(results) -> str:
-    """Format run_confirmation_check() results into a Telegram HTML message."""
-    from hunter.email_response_checker import MatchResult
-
-    confirmed = [r for r in results if r.match_type in ("exact", "fuzzy") and r.row_num]
-    ambiguous = [r for r in results if r.match_type == "ambiguous"]
-    no_match  = [r for r in results if r.match_type == "no_match"]
-
-    if not results:
-        return "📭 <b>No confirmation emails found</b> in the last few days."
-
-    lines = []
-
-    if confirmed:
-        lines.append(f"✅ <b>Confirmed ({len(confirmed)}):</b>")
-        for r in confirmed:
-            c = r.candidates[0]
-            tag = f"[{r.email.platform}]"
-            lines.append(f"  • <b>{c['company']}</b> — {c['title']} <i>{tag}</i>")
-        lines.append("")
-
-    if ambiguous:
-        lines.append(f"❓ <b>Ambiguous — needs review ({len(ambiguous)}):</b>")
-        for r in ambiguous:
-            company = r.email.company or "?"
-            title   = r.email.title   or "(no title extracted)"
-            lines.append(f"  • {company} — {title}")
-            cands = ", ".join(c["title"] for c in r.candidates[:3])
-            lines.append(f"    <i>Candidates: {cands}</i>")
-        lines.append("")
-
-    if no_match:
-        lines.append(f"📭 <b>Not matched ({len(no_match)}):</b>")
-        for r in no_match:
-            company = r.email.company or "(no company)"
-            title   = r.email.title   or "(no title)"
-            lines.append(f"  • {company} — {title}")
-
-    return "\n".join(lines).strip()
-
+# _build_schedule_text, _format_check_responses_report → hunter.bot.formatters
 
 async def cmd_check_responses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check Gmail for application confirmation emails and update tracker.
@@ -1029,26 +952,8 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
     asyncio.create_task(_run_apply_agent(job.url))
 
 
-_APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
-
-# Active manual apply_agent URLs → start datetime, used by /status.
-_active_apply_urls: dict[str, "datetime"] = {}
-
-
-async def _tg_notify(text: str) -> None:
-    """Send a message to the configured chat via bot token (no context needed)."""
-    from telegram import Bot
-    try:
-        async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
-            await bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-    except Exception as e:
-        logger.error(f"[tg_notify] failed: {e}")
-
+# _APPLY_AGENT_TIMEOUT, _active_apply_urls → hunter.bot.state
+# _tg_notify → hunter.bot.notifications
 
 async def _run_apply_agent(
     url: str,
@@ -1132,30 +1037,7 @@ async def _run_apply_agent(
 # Typical job postings are 1-4 KB; short greetings / single URLs stay well below this.
 # 200 catches compact JD summaries users paste from recruiters (~250 chars) without
 # reacting to casual chat.
-_PASTE_TEXT_MIN_LEN = 200
-
-_URL_RE = re.compile(r"https?://\S+")
-
-
-def _looks_like_paste(text: str) -> bool:
-    """True when user likely pasted a job posting (with or without URL)."""
-    stripped = text.strip()
-    if len(stripped) < _PASTE_TEXT_MIN_LEN:
-        return False
-    # Text with a URL + lots of extra content → paste with URL hint
-    urls = _URL_RE.findall(stripped)
-    if urls:
-        non_url_len = len(_URL_RE.sub("", stripped).strip())
-        return non_url_len >= _PASTE_TEXT_MIN_LEN
-    # No URL at all but long message → pure paste
-    return True
-
-
-def _extract_url(text: str) -> str:
-    """Return the first http(s) URL found in text, or ''."""
-    m = _URL_RE.search(text)
-    return m.group(0).rstrip(").,;") if m else ""
-
+# _PASTE_TEXT_MIN_LEN, _URL_RE, _looks_like_paste, _extract_url → hunter.bot.paste
 
 async def cmd_about_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate (or regenerate) About Me for a job URL in the tracker.
@@ -1928,18 +1810,7 @@ async def _scheduled_check_email_responses(context: ContextTypes.DEFAULT_TYPE) -
 
 
 # ── Daily applications summary ────────────────────────────────────────────────
-
-def _format_daily_summary(apps: list[dict], date_str: str) -> str:
-    """Format yesterday's applications as an HTML list."""
-    if not apps:
-        return f"📋 No applications recorded on {date_str}."
-    lines = [f"📋 <b>Applications on {date_str} — {len(apps)} total:</b>"]
-    for a in apps:
-        ats = a.get("ats", "")
-        ats_label = f" ({ats})" if ats and ats not in ("-", "—", "") else ""
-        lines.append(f"  • <b>{a['company']}</b> — {a['title']}{ats_label}")
-    return "\n".join(lines)
-
+# _format_daily_summary → hunter.bot.formatters
 
 async def _scheduled_daily_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Daily job at 00:01: send a summary of how many applications were made yesterday."""
