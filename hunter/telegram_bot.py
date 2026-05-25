@@ -75,6 +75,13 @@ from hunter.bot.formatters import (
 )
 from hunter.bot.apply_runner import _run_apply_agent, _run_linkedin_batch, _handle_paste
 
+# ── Phase 3: simple command handlers ─────────────────────────────────────────
+from hunter.commands.start import cmd_start
+from hunter.commands.schedule import cmd_schedule
+from hunter.commands.unsent import cmd_unsent
+from hunter.commands.status import cmd_status
+from hunter.commands.sync_sent import cmd_sync_sent
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,27 +89,11 @@ logger = logging.getLogger(__name__)
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "🤖 <b>Job Hunter Bot</b>\n\n"
-        "Commands:\n"
-        "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
-        "/status - source schedule + bot status\n"
-        "/force — force generation: <code>/force URL</code> or <code>/force</code> "
-        "+ full job posting text (bypasses dedup and React-only; JobLeads: "
-        "<code>job_posting.txt</code>)\n"
-        "/process_manual - process MANUAL rows with filled job_posting.txt\n"
-        "/sync_sent - sync Sent column from Google Sheets → tracker.xlsx\n"
-        "/unsent - count unsent applications and how many have ANGULAR in stack\n"
-        "/check_expired - check tracker for expired vacancies\n"
-        "/gsheets_status - Google Sheets integration status\n"
-        "/gsheets_push_missing - push tracker.xlsx rows missing from Sheets\n"
-        "/gdrive_upload_missing - upload all tracker.xlsx folders to Google Drive\n\n"
-        "Or just send a job URL to generate docs.",
-        parse_mode=ParseMode.HTML,
-    )
-
+# cmd_start    → hunter.commands.start
+# cmd_schedule → hunter.commands.schedule
+# cmd_unsent   → hunter.commands.unsent
+# cmd_status   → hunter.commands.status
+# cmd_sync_sent → hunter.commands.sync_sent
 
 def _parse_hunt_source_args(args: list[str], valid_names: set[str]) -> tuple[list[str] | None, list[str]]:
     """Split /hunt arguments into source slugs. Returns (names or None for «all», unknown slugs)."""
@@ -375,68 +366,7 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from hunter.main import _hunt_lock
-    from hunter.config import AUTO_APPLY
-
-    mode = "AUTO" if AUTO_APPLY else "MANUAL"
-    hunting = "🔒 Hunt in progress" if _hunt_lock.locked() else "🔓 Idle"
-    pending = len(_pending_jobs)
-
-    lines = [
-        f"🔧 Mode: <b>{mode}</b>  |  {hunting}",
-        f"📋 Pending decisions: <b>{pending}</b>",
-    ]
-
-    if _active_apply_urls:
-        now = datetime.now(timezone.utc)
-        lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")
-        for url, started in _active_apply_urls.items():
-            elapsed = int((now - started).total_seconds())
-            mins, secs = divmod(elapsed, 60)
-            timeout_warn = " ⚠️ timeout soon" if elapsed > _APPLY_AGENT_TIMEOUT - 60 else ""
-            short_url = url[:80] + "…" if len(url) > 80 else url
-            lines.append(f"  • {mins}m{secs:02d}s — <code>{short_url}</code>{timeout_warn}")
-    else:
-        lines.append("\n💤 No active generation")
-
-    try:
-        from hunter.tracker import get_failed_jobs
-        failed_count = len(await asyncio.to_thread(get_failed_jobs))
-        if failed_count:
-            lines.append(f"\n🔁 FAIL queue: <b>{failed_count}</b> jobs (will retry on next hunt)")
-    except Exception:
-        pass
-
-    lines.append("\n<i>Use /schedule to see hunt timetable</i>")
-
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
-                                    disable_web_page_preview=True)
-
-
-async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(_build_schedule_text(), parse_mode=ParseMode.HTML)
-
-
-async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Count unsent applications in tracker and how many have ANGULAR in stack."""
-    try:
-        from hunter.tracker_cache import cache
-        if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
-        total = await cache.unsent_count()
-        angular_n = await cache.unsent_angular_count()
-        if total == 0:
-            msg = "📭 <b>No unsent applications.</b>"
-        else:
-            msg = (
-                f"📋 <b>Unsent applications:</b> {total}\n"
-                f"🔷 <b>With ANGULAR in stack:</b> {angular_n}"
-            )
-    except Exception as exc:
-        logger.exception("[unsent] Failed: %s", exc)
-        msg = f"❌ Failed to read tracker: <code>{exc}</code>"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+# cmd_status, cmd_schedule, cmd_unsent → hunter.commands.*
 
 
 async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -649,39 +579,7 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
-async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Pull Sent/To Learn/Re-application changes from Google Sheets → tracker.xlsx."""
-    from hunter import gsheets_sync
-    from hunter.config import GSHEETS_ENABLED
-
-    if not GSHEETS_ENABLED:
-        await update.message.reply_text(
-            "ℹ️ Google Sheets disabled (GSHEETS_ENABLED=false). /sync_sent unavailable.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    await update.message.reply_text("⏳ Syncing Sheets → tracker.xlsx…")
-    try:
-        result = await gsheets_sync.pull_full_snapshot()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Pull error: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    pulled = result["pulled"]
-    updated = result["updated"]
-    errors = result["errors"]
-
-    lines = [f"✅ <b>sync_sent done</b>"]
-    lines.append(f"  Rows from Sheets: {pulled}")
-    lines.append(f"  Updated in tracker.xlsx: {updated}")
-    if errors:
-        lines.append(f"⚠️ Errors: {'; '.join(errors[:2])}")
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-
+# cmd_sync_sent → hunter.commands.sync_sent
 
 async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show Google Sheets integration status."""
