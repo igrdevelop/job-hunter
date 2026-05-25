@@ -132,6 +132,11 @@ def _try_json_ld(html: str) -> str:
 
 
 def _format_job_posting_ld(jp: dict) -> str:
+    # Pracuj's JSON-LD sometimes omits description (just title/location/employment ~110 chars).
+    # Without description it is useless for resume generation — fall through to other strategies.
+    if not jp.get("description"):
+        return ""
+
     parts = []
 
     parts.append(f"Job Title: {jp.get('title', 'N/A')}")
