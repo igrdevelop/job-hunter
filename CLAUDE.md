@@ -175,18 +175,14 @@ hunter/
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
-  sources/                  17 scrapers (see table above)
-    base.py                 BaseSource ABC: search() -> list[Job]
-    __init__.py             ALL_SOURCES registry (conditional imports by ENABLED flags)
+  sources/                  17 scrapers (see table above) + per-site detail-page fetchers
+    base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
+    __init__.py             ALL_SOURCES registry + fetch_job_text() URL dispatcher
+    html_fallback.py        Generic HTML -> text fallback + clean_url() helper
   ats/                      ATS provider adapters
     base.py                 ATSProvider ABC: fetch(slug, company_name) -> list[Job]
     workable.py / greenhouse.py / lever.py / recruitee.py / ashby.py
   ats_companies.json        Company list for ATS aggregator
-
-job_fetch/                  Per-site detail text fetchers (22 files)
-  __init__.py               Dispatcher: domain -> fetcher
-  html_fallback.py          Generic HTML -> text (BeautifulSoup)
-  ats_workable.py / ats_greenhouse.py / ...  ATS detail fetchers
 
 prompts/
   system_prompt.md          LLM instructions for resume/CL generation
@@ -369,13 +365,13 @@ GSHEETS_ENABLED=true
 
 1. ~~**telegram_bot.py is a ~1380-line monolith.**~~ ✅ Resolved (Phase 1–7 refactor, 2026-05-26): split into `bot/` (6 modules), `commands/` (15 files), `schedules/` (9 files). `telegram_bot.py` is now a ~200-line import shim that re-exports everything for backward compat.
 
-2. **job_fetch/ is a separate parallel package (22 files, 2475 lines).** Every site has a file in both `hunter/sources/` (search/listing) and `job_fetch/` (detail text fetch). URLs, headers, and domain knowledge are duplicated across packages.
+2. ~~**job_fetch/ is a separate parallel package (22 files, 2475 lines).**~~ ✅ Resolved (Phase 3 refactor, 2026-05-26): each source now owns its detail-page extraction (`matches_url` + `fetch_text` on `BaseSource`). `hunter.sources.fetch_job_text(url)` dispatches to the matching source. `job_fetch/` deleted.
 
 3. **apply_agent.py is 1297 lines.** Contains two full pipelines (API + CLI mode), Telegram notification, folder management, LLM calling, cover letter review loop, paste flow, force mode, JobLeads MANUAL flow. Could be split.
 
 ### Infrastructure
 
-4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). LinkedIn job_fetch falls back to `html_fallback` without Playwright but gets lower-quality text.
+4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). Without Playwright, `LinkedInSource.fetch_text` falls back to `html_fallback` and gets lower-quality text.
 
 ### Code Quality
 
@@ -404,12 +400,12 @@ GSHEETS_ENABLED=true
 - [x] **2.2** `build_application()` + schedule setup remain in `telegram_bot.py` (schedule uses `schedules.register()`)
 - [x] **2.3** `telegram_bot.py` is now a ~200-line import shim with re-exports for backward compat
 
-### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk)
+### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk) ✅ COMPLETE (2026-05-26)
 
-- [ ] **3.1** Add `fetch_text(url) -> str` method to `BaseSource` ABC
-- [ ] **3.2** Move `job_fetch/*.py` logic into corresponding `hunter/sources/*.py`
-- [ ] **3.3** Update `apply_agent.py` to call `source.fetch_text(url)` instead of `job_fetch.fetch_job_text()`
-- [ ] **3.4** Delete `job_fetch/` package
+- [x] **3.1** Add `fetch_text(url) -> str` + `matches_url(url) -> bool` to `BaseSource` ABC; port `html_fallback` into `hunter/sources/`
+- [x] **3.2** Move `job_fetch/*.py` logic into the corresponding `hunter/sources/*.py` — 5 batches: trivial wrappers (3.2a), ATS aggregator (3.2b), JSON APIs (3.2c), NEXT_DATA/cloudscraper (3.2d), Playwright-heavy (3.2e)
+- [x] **3.3** Add `hunter.sources.fetch_job_text(url)` dispatcher + route every caller (`apply_agent`, `expired_marker`, `gmail_enricher`, `bot/apply_runner`, `commands/*`) through it. Fold `linkedin_parse.py` URL helpers into `hunter/sources/linkedin.py`.
+- [x] **3.4** Delete `job_fetch/` package
 
 ### Phase 4 — Split apply_agent.py (MEDIUM risk)
 
@@ -492,3 +488,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-22 | sonnet | Drive URL tracking: tracker col 12 (Drive URL), get_drive_url_by_url, set_drive_url, upload_application_folder writes URL after upload, upload_missing_folders skips already-uploaded rows (17 new tests, 458 total) |
 | 2026-05-26 | opus | Phase 2 complete: split telegram_bot.py (1967→200 lines) into bot/ (6), commands/ (15), schedules/ (9). All 748 tests pass. |
 | 2026-05-26 | sonnet | Fix hanging test: test_cmd_url_force_waiting_triggers_force_run patched bot._force_run but cmd_url calls url_message._force_run directly; changed patch target to hunter.commands.url_message._force_run. 748 tests in 4.55s. |
+| 2026-05-26 | opus | Phase 3 complete: merged job_fetch/ (23 files, ~2475 lines) into hunter/sources/. Each source now owns matches_url + fetch_text. hunter.sources.fetch_job_text() dispatches by URL. linkedin_parse helpers folded into linkedin source. Workable JSON-API extraction restored on AtsAggregator. job_fetch/ deleted. 94 new tests, 842 total in 4.84s. |

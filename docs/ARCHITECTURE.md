@@ -75,7 +75,9 @@ config, schema, source list, refactor plan).
                 ┌──────────────────────── APPLY PIPELINE (apply_agent.py) ─────────────────────┐
                 │                                                                              │
                 │   ┌── A. FETCH JOB TEXT ────────────────────────────────────────────────┐    │
-                │   │  job_fetch.fetch_job_text(url)  ← job_fetch/<site>.py               │    │
+                │   │  hunter.sources.fetch_job_text(url)                                 │    │
+                │   │     → pick source by matches_url → call source.fetch_text(url)      │    │
+                │   │     → fall back to html_fallback.fetch_html when nothing matches    │    │
                 │   │  HTTP / cloudscraper / Playwright / RSS / html_fallback             │    │
                 │   │  → job_posting.txt                                                  │    │
                 │   └──────────────────────────────────┬──────────────────────────────────┘    │
