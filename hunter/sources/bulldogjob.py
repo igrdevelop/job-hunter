@@ -17,6 +17,7 @@ import json
 import logging
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -46,8 +47,136 @@ HEADERS = {
 TIMEOUT = 20
 
 
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html)
+    text = re.sub(r"<li[^>]*>", "- ", text)
+    text = re.sub(r"</?(p|div|h[1-6]|ul|ol|section|strong|em)[^>]*>", " ", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _extract_job_id(url: str) -> str:
+    """Extract job ID slug from URL like /companies/jobs/{id}."""
+    m = re.search(r"/companies/jobs/([^/?#]+)", url)
+    if not m:
+        raise ValueError(f"Cannot extract Bulldogjob job ID from URL: {url}")
+    return m.group(1)
+
+
+def _build_detail_text(job: dict, apollo: dict) -> str:
+    parts: list[str] = []
+
+    title = (job.get("position") or "N/A").strip()
+    parts.append(f"Job Title: {title}")
+
+    company_ref = job.get("company", {})
+    if isinstance(company_ref, dict):
+        ref_key = company_ref.get("__ref", "")
+        company_data = apollo.get(ref_key, {})
+        company = (company_data.get("name") or "N/A").strip()
+    else:
+        company = "N/A"
+    parts.append(f"Company: {company}")
+
+    locations = job.get("locations", [])
+    loc_parts: list[str] = []
+    for loc in locations:
+        if isinstance(loc, dict):
+            loc_inner = loc.get("location", {})
+            city = (loc_inner.get("cityEn") or loc_inner.get("cityPl") or "").strip()
+            if city:
+                loc_parts.append(city)
+    is_remote = job.get("remote", False)
+    work_modes = job.get("workModes") or []
+    if is_remote or "full-remote" in work_modes:
+        loc_parts.append("Remote")
+    if loc_parts:
+        parts.append(f"Location: {', '.join(loc_parts)}")
+
+    level = (job.get("experienceLevel") or "").strip()
+    if level:
+        parts.append(f"Experience level: {level}")
+
+    main_tech = (job.get("mainTechnology") or "").strip()
+    tags = job.get("technologyTags") or []
+    if main_tech:
+        parts.append(f"Main technology: {main_tech}")
+    if tags:
+        parts.append(f"Technologies: {', '.join(tags)}")
+
+    for sal_key in ("b2bSalary", "employmentSalary"):
+        sal = job.get(sal_key) or {}
+        money = sal.get("money")
+        currency = (sal.get("currency") or "PLN").upper()
+        timeframe = sal.get("timeframe", "")
+        if money:
+            label = f"{sal_key.replace('Salary', '')} salary: {money} {currency}"
+            if timeframe:
+                label += f"/{timeframe}"
+            parts.append(label)
+            break
+
+    offer_html = (job.get("offer") or "").strip()
+    if offer_html:
+        parts.append(f"\n--- Offer / Description ---\n{_strip_html(offer_html)}")
+
+    req_html = (job.get("requirements") or "").strip()
+    if req_html:
+        parts.append(f"\n--- Requirements ---\n{_strip_html(req_html)}")
+
+    text = "\n".join(parts)
+    if len(text) < 50:
+        raise ValueError("Bulldogjob page returned almost no content for job")
+    return text
+
+
 class BulldogJobSource(BaseSource):
     name = "bulldogjob"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "bulldogjob.com" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Fetch a Bulldogjob posting and pull data out of __NEXT_DATA__/Apollo state."""
+        job_id = _extract_job_id(url)
+        job_url = f"{BASE}/companies/jobs/{job_id}"
+
+        resp = requests.get(job_url, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+
+        m = re.search(
+            r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
+            resp.text,
+            re.S,
+        )
+        if not m:
+            raise ValueError(f"No __NEXT_DATA__ on Bulldogjob page: {job_url}")
+
+        data = json.loads(m.group(1))
+        apollo = (
+            data.get("props", {})
+            .get("pageProps", {})
+            .get("__APOLLO_STATE__", {})
+        )
+
+        job_key = f"Job:{job_id}"
+        job_data = apollo.get(job_key)
+        if not job_data:
+            for key, val in apollo.items():
+                if key.startswith("Job:") and isinstance(val, dict):
+                    job_data = val
+                    break
+
+        if not job_data:
+            raise ValueError(f"No Job data in APOLLO_STATE for {job_id}")
+
+        return _build_detail_text(job_data, apollo)
 
     def search(self) -> list[Job]:
         seen_ids: set[str] = set()
