@@ -4,8 +4,8 @@ from hunter.sources.fourdayweek import (
     FourdayweekSource,
     _format_salary,
     _prefilter_context,
+    _slug_from_job_url,
 )
-from job_fetch.fourdayweek import _slug_from_job_url
 
 
 def _sample_job(**overrides: object) -> dict:

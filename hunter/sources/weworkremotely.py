@@ -13,6 +13,7 @@ import logging
 import re
 from html import unescape
 from typing import Optional
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import requests
@@ -37,6 +38,10 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 class WeworkremotelySource(BaseSource):
     name = "weworkremotely"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "weworkremotely.com" in host
 
     def search(self) -> list[Job]:
         raw_items = self._fetch_rss()

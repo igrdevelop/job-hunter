@@ -125,7 +125,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    from job_fetch.linkedin_parse import is_linkedin_search, parse_linkedin_job_ids, normalize_linkedin_url
+    from hunter.sources.linkedin import is_linkedin_search, parse_linkedin_job_ids, normalize_linkedin_url
 
     # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
     text = normalize_linkedin_url(text)
@@ -159,7 +159,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if entries:
         only_manual = all(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
         if only_manual:
-            from job_fetch.jobleads import try_load_manual_job_posting
+            from hunter.sources.jobleads import try_load_manual_job_posting
             manual_content = await asyncio.to_thread(try_load_manual_job_posting, text)
             if manual_content:
                 await update.message.reply_text(

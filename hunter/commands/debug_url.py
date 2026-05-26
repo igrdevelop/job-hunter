@@ -33,12 +33,13 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         from urllib.parse import urlparse
-        from job_fetch import _clean_url, fetch_job_text
+        from hunter.sources import fetch_job_text
+        from hunter.sources.html_fallback import clean_url
         from hunter.expired_check import is_job_expired, is_expired_by_html
         from hunter.expired_marker import _quick_html_expired, _is_cloudflare_challenge
 
         domain = urlparse(url).hostname or ""
-        clean = _clean_url(url)
+        clean = clean_url(url)
         lines.append(f"<b>Domain:</b> {domain}")
         lines.append(f"<b>Clean URL:</b> <code>{clean[:80]}</code>")
 

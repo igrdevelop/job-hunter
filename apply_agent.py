@@ -652,7 +652,7 @@ def _handle_jobleads_fetch_blocked(url: str, err: str) -> None:
         lookup_url,
         manual_jobleads_job_posting_path,
     )
-    from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
+    from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER
 
     if has_manual_pending(url):
         jp = manual_jobleads_job_posting_path(url)
@@ -768,7 +768,7 @@ def main_api(url: str, paste_text: str = "") -> None:
     else:
         print("[apply_agent] Step 1: Fetching job posting...")
         try:
-            from job_fetch import fetch_job_text
+            from hunter.sources import fetch_job_text
             job_text = fetch_job_text(url)
             print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
         except Exception as e:
@@ -1147,7 +1147,7 @@ def main_cli(url: str) -> None:
     apply_input = url
     job_text: str | None = None
     try:
-        from job_fetch import fetch_job_text
+        from hunter.sources import fetch_job_text
         job_text = fetch_job_text(url)
         if job_text and len(job_text) > 100:
             apply_input = f"URL: {url}\n\n{job_text}"

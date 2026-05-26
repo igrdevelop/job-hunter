@@ -1,6 +1,13 @@
-"""Generic HTML job page fetcher — works for any site as a fallback."""
+"""Generic HTML job-page fetcher — default fallback for BaseSource.fetch_text.
+
+Used both as the default implementation in BaseSource and as a last-resort
+fallback when no source matches a URL.
+"""
 
 import logging
+import re
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -15,6 +22,22 @@ HEADERS = {
 }
 TIMEOUT = 25
 MAX_TEXT_LEN = 15_000
+
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
+    "fbclid", "gclid", "campaignid", "adgroupid",
+    "ref", "refId", "trackingId", "trk",
+    "sendid", "send_date", "sug",
+    "originToLandingJobPostings", "origin",
+}
+
+
+def clean_url(url: str) -> str:
+    """Strip tracking/UTM params before fetching — prevents Cloudflare false positives."""
+    p = urlparse(url)
+    qs = parse_qs(p.query, keep_blank_values=False)
+    clean = {k: v for k, v in qs.items() if k not in _TRACKING_PARAMS}
+    return urlunparse(p._replace(query=urlencode(clean, doseq=True)))
 
 
 def fetch_html(url: str) -> str:
@@ -56,7 +79,6 @@ def _extract_with_bs4(html: str) -> str:
 
 def _extract_with_regex(html: str) -> str:
     """Minimal HTML-to-text when BS4 is not available."""
-    import re
     text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<br\s*/?>", "\n", text)

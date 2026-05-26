@@ -75,8 +75,8 @@ def _enrich_justjoin(job: Job) -> Job:
 
 
 def _enrich_via_text(job: Job) -> Job:
-    """Generic enricher: calls job_fetch, parses structured header lines."""
-    from job_fetch import fetch_job_text
+    """Generic enricher: calls the source dispatcher, parses structured header lines."""
+    from hunter.sources import fetch_job_text
 
     text = fetch_job_text(job.url)
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from hunter import tracker
-from job_fetch.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting
+from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting
 
 
 def test_try_load_manual_job_posting_returns_none_until_paste(tmp_path, monkeypatch) -> None:
