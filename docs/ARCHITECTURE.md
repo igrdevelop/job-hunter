@@ -72,7 +72,7 @@ config, schema, source list, refactor plan).
                        └────────────────────────────┬───────────────────────────────┘
                                                     │  (per job, subprocess)
                                                     ▼
-                ┌──────────────────────── APPLY PIPELINE (apply_agent.py) ─────────────────────┐
+                ┌───── APPLY PIPELINE (apply_agent.py → hunter/apply_api.py or apply_cli.py) ──┐
                 │                                                                              │
                 │   ┌── A. FETCH JOB TEXT ────────────────────────────────────────────────┐    │
                 │   │  hunter.sources.fetch_job_text(url)                                 │    │
@@ -143,8 +143,11 @@ config, schema, source list, refactor plan).
 ## Key facts for whole-picture understanding
 
 - **Two independent processes** joined by subprocess: `hunter.py` (long-running
-  async bot) and `apply_agent.py` (CLI tool per vacancy). Historical reason —
-  apply_agent was originally standalone; the bot now invokes it per job.
+  async bot) and `apply_agent.py` (CLI entry point per vacancy). After Phase 4,
+  business logic lives in `hunter/apply_api.py` (API pipeline),
+  `hunter/apply_cli.py` (Claude-CLI pipeline), and `hunter/apply_shared.py`
+  (shared helpers). `apply_agent.py` is now a 194-line thin dispatcher.
+  All pipeline functions are importable with clean parameters (no globals).
 - **tracker.xlsx is the single source of truth.** Sheets, Drive, RAM cache —
   all derive from it.
 - **Google Sheets is bidirectional.** Bot pushes new rows; user edits
