@@ -82,6 +82,12 @@ from hunter.commands.unsent import cmd_unsent
 from hunter.commands.status import cmd_status
 from hunter.commands.sync_sent import cmd_sync_sent
 
+# ── Phase 4: commands with state / sub-logic ──────────────────────────────────
+from hunter.commands.hunt import cmd_hunt, parse_hunt_source_args as _parse_hunt_source_args
+from hunter.commands.force import cmd_force, _force_run, _force_cleanup
+from hunter.commands.process_manual import cmd_process_manual
+from hunter.commands.about_me import cmd_about_me
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,284 +95,15 @@ logger = logging.getLogger(__name__)
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
-# cmd_start    → hunter.commands.start
-# cmd_schedule → hunter.commands.schedule
-# cmd_unsent   → hunter.commands.unsent
-# cmd_status   → hunter.commands.status
-# cmd_sync_sent → hunter.commands.sync_sent
-
-def _parse_hunt_source_args(args: list[str], valid_names: set[str]) -> tuple[list[str] | None, list[str]]:
-    """Split /hunt arguments into source slugs. Returns (names or None for «all», unknown slugs)."""
-    requested: list[str] = []
-    for a in args:
-        for part in a.split(","):
-            part = part.strip().lower()
-            if part:
-                requested.append(part)
-    if not requested:
-        return None, []
-    seen: set[str] = set()
-    unique: list[str] = []
-    for r in requested:
-        if r not in seen:
-            seen.add(r)
-            unique.append(r)
-    unknown = [r for r in unique if r not in valid_names]
-    if unknown:
-        return [], unknown
-    return unique, []
-
-
-async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manual trigger — full hunt or a subset of sources (same names as in /schedule)."""
-    from hunter.main import run_hunt
-    from hunter.sources import ALL_SOURCES
-
-    valid_names = {s.name for s in ALL_SOURCES}
-    source_names, unknown = _parse_hunt_source_args(context.args or [], valid_names)
-
-    if unknown:
-        avail = ", ".join(sorted(valid_names))
-        await update.message.reply_text(
-            f"❌ Unknown source(s): <b>{', '.join(unknown)}</b>\n\n"
-            f"Available: <code>{avail}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    if source_names:
-        label = ", ".join(source_names)
-        await update.message.reply_text(
-            f"🔍 Running hunt: <b>{label}</b>",
-            parse_mode=ParseMode.HTML,
-        )
-        await run_hunt(context, source_names=source_names)
-    else:
-        await update.message.reply_text("🔍 Running hunt (all sources)...")
-        await run_hunt(context)
-
-
-async def _force_cleanup(url: str, update: Update) -> str:
-    """Delete old Drive folder, server folder, and tracker rows for this URL.
-
-    Returns a human-readable summary of what was deleted (for Telegram message).
-    Best-effort: errors are logged, not raised.
-    """
-    from hunter.tracker import delete_all_by_url
-    from hunter.tracker_cache import cache
-    import shutil
-
-    lines: list[str] = []
-
-    # 1. Read folder + drive_url from tracker before deletion
-    tracker_result = await asyncio.to_thread(delete_all_by_url, url)
-    deleted_rows = tracker_result.get("deleted", 0)
-    folder_str = tracker_result.get("folder") or ""
-    drive_url = tracker_result.get("drive_url") or ""
-
-    if deleted_rows:
-        lines.append(f"🗑 Tracker: removed {deleted_rows} row(s)")
-    else:
-        lines.append("ℹ️ Tracker: no existing rows found")
-
-    # 2. Delete stale Sheets row BEFORE cache invalidation
-    #    (sheet_row_index lives in cache and is needed to locate the row)
-    if deleted_rows:
-        try:
-            from hunter import gsheets_sync
-            sheets_deleted = await gsheets_sync.delete_row_by_url(url)
-            if sheets_deleted:
-                lines.append("🗑 Sheets: old row deleted")
-            else:
-                lines.append("ℹ️ Sheets: row not in Sheets (or Sheets disabled)")
-        except Exception as e:
-            lines.append(f"⚠️ Sheets row delete failed: <code>{e}</code>")
-            logger.warning("[force_cleanup] gsheets delete_row_by_url failed: %s", e)
-
-    # 2b. Invalidate in-memory cache
-    try:
-        await cache.invalidate_url(url)
-    except Exception as e:
-        logger.warning("[force_cleanup] cache invalidate failed: %s", e)
-
-    # 3. Delete server folder
-    if folder_str:
-        folder_path = Path(folder_str)
-        if not folder_path.is_absolute():
-            folder_path = PROJECT_DIR / folder_str
-        if folder_path.exists() and folder_path.is_dir():
-            try:
-                shutil.rmtree(folder_path)
-                lines.append(f"🗑 Server: deleted <code>{folder_path.name}</code>")
-                logger.info("[force_cleanup] Deleted server folder: %s", folder_path)
-            except Exception as e:
-                lines.append(f"⚠️ Server folder delete failed: <code>{e}</code>")
-                logger.warning("[force_cleanup] rmtree failed for %s: %s", folder_path, e)
-        else:
-            lines.append(f"ℹ️ Server folder not found: <code>{folder_str}</code>")
-
-    # 4. Delete Google Drive folder
-    if drive_url and drive_url not in ("-", "—"):
-        try:
-            from hunter import gdrive_sync
-            deleted = await gdrive_sync.delete_application_folder(drive_url)
-            if deleted:
-                lines.append("🗑 Drive: folder deleted")
-            else:
-                lines.append("ℹ️ Drive: folder not found or GDRIVE disabled")
-        except Exception as e:
-            lines.append(f"⚠️ Drive delete failed: <code>{e}</code>")
-            logger.warning("[force_cleanup] gdrive delete failed: %s", e)
-    elif not drive_url or drive_url in ("-", "—"):
-        lines.append("ℹ️ Drive: no folder URL in tracker")
-
-    return "\n".join(lines)
-
-
-async def _force_run(update: Update, url: str | None, body: str) -> None:
-    """Core force logic: cleanup existing entry then launch apply_agent.
-
-    Called from cmd_force (inline args) and from cmd_url (_force_waiting path).
-    """
-    if body and _looks_like_paste(body):
-        # Paste flow — no URL cleanup needed (paste mode creates a new entry)
-        await update.message.reply_text(
-            f"🔧 <b>Force + job text</b> — {len(body.strip())} chars.\n"
-            "Bypasses: tracker dedup, React-only. Starting…",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        logger.info("[Force] paste mode (%d chars)", len(body))
-        await _handle_paste(update, body, force=True)
-        return
-
-    if not url:
-        url = _extract_url(body) or (body.split()[0].strip() if body else None)
-
-    if not url or not url.startswith("http"):
-        await update.message.reply_text(
-            "⚠️ Provide an <b>http(s) URL</b> or full job posting text.\n"
-            "A single word without a URL is not valid.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    # Cleanup old entry
-    await update.message.reply_text(
-        f"🔍 <b>Force: checking for existing entry…</b>\n🔗 {url}",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-    cleanup_summary = await _force_cleanup(url, update)
-
-    await update.message.reply_text(
-        f"<b>Cleanup done:</b>\n{cleanup_summary}\n\n"
-        f"⏳ Starting generation (<code>--force</code>)…",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-    logger.info("[Force] Launching apply_agent --force for: %s", url)
-    asyncio.create_task(_run_apply_agent(url, force=True))
-
-
-async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Force-process a URL: two-step (bare /force → ask for URL) or inline (/force <url>)."""
-    raw = (update.message.text or "").strip()
-    m = re.match(r"/force(?:@\w+)?\s*(.*)\Z", raw, flags=re.DOTALL | re.IGNORECASE)
-    body = (m.group(1) or "").strip() if m else ""
-
-    if not body:
-        # Two-step: ask for URL/text and wait for next message
-        chat_id = update.effective_chat.id
-        _force_waiting.add(chat_id)
-        await update.message.reply_text(
-            "🔧 <b>Force mode</b>\n\n"
-            "Пришли ссылку на вакансию (или полный текст объявления).\n\n"
-            "<i>Если вакансия уже в трекере — старые файлы будут удалены "
-            "(Drive + сервер + строка в трекере) и сгенерированы заново.</i>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    # Inline: /force <url> or /force <text>
-    url = _extract_url(body) if body.startswith("http") else None
-    await _force_run(update, url=url, body=body)
-
-
-async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process all MANUAL-pending tracker rows whose job_posting.txt is already filled."""
-    from hunter.tracker import get_all_manual_pending
-    from job_fetch.jobleads import try_load_manual_job_posting
-
-    rows = await asyncio.to_thread(get_all_manual_pending)
-    if not rows:
-        await update.message.reply_text("✅ No MANUAL vacancies to process.")
-        return
-
-    ready = []
-    for row in rows:
-        content = await asyncio.to_thread(try_load_manual_job_posting, row["url"])
-        if content:
-            ready.append(row)
-
-    if not ready:
-        lines = [
-            f"  Row {r['row']}: <b>{r['company']}</b> - {r['title']}"
-            + (f"\n    📁 <code>{r['folder']}</code>" if r.get("folder") else "")
-            for r in rows
-        ]
-        await update.message.reply_text(
-            f"📝 <b>Found {len(rows)} MANUAL vacancies, none ready.</b>\n\n"
-            + "\n".join(lines)
-            + "\n\nAdd the job text below the marker in <code>job_posting.txt</code> and retry.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    not_ready_count = len(rows) - len(ready)
-    note = f" ({not_ready_count} waiting for text)" if not_ready_count else ""
-    await update.message.reply_text(
-        f"🚀 <b>Processing {len(ready)} ready vacancies{note}…</b>",
-        parse_mode=ParseMode.HTML,
-    )
-    logger.info(f"[process_manual] Processing {len(ready)} ready MANUAL rows")
-
-    ok = failed = 0
-    total = len(ready)
-    for i, row in enumerate(ready, 1):
-        url = row["url"]
-        try:
-            await update.message.reply_text(
-                f"⏳ [{i}/{total}] <b>{row['company']}</b> — {row['title']}\n🔗 {url}",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-        except Exception:
-            pass
-
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_APPLY_AGENT_TIMEOUT)
-
-        if proc.returncode == 0:
-            ok += 1
-            logger.info(f"[process_manual] OK: {url}")
-        else:
-            failed += 1
-            logger.error(f"[process_manual] FAIL: {url}\n{stderr.decode(errors='replace')[-300:]}")
-
-    await update.message.reply_text(
-        f"🏁 <b>process_manual done</b>\n✅ {ok} / ❌ {failed} / Total: {total}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-# cmd_status, cmd_schedule, cmd_unsent → hunter.commands.*
+# cmd_start         → hunter.commands.start
+# cmd_schedule      → hunter.commands.schedule
+# cmd_unsent        → hunter.commands.unsent
+# cmd_status        → hunter.commands.status
+# cmd_sync_sent     → hunter.commands.sync_sent
+# cmd_hunt          → hunter.commands.hunt
+# cmd_force         → hunter.commands.force
+# cmd_process_manual → hunter.commands.process_manual
+# cmd_about_me      → hunter.commands.about_me
 
 
 async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -860,56 +597,7 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
 
 # ── URL message handler ───────────────────────────────────────────────────────
 
-async def cmd_about_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Generate (or regenerate) About Me for a job URL in the tracker.
-
-    Usage: /about_me <lang> <url>
-    lang: en | pl
-    """
-    args = context.args or []
-    if len(args) != 2:
-        await update.message.reply_text(
-            "Usage: /about_me <lang> <url>\nExample: /about_me pl https://justjoin.it/job-offer/..."
-        )
-        return
-
-    lang, url = args[0].lower(), args[1]
-    if lang not in ("en", "pl"):
-        await update.message.reply_text("lang must be 'en' or 'pl'")
-        return
-
-    from hunter.tracker import get_folder_by_url, normalize_url
-    from hunter.config import PROJECT_DIR
-
-    normalized = normalize_url(url)
-    folder_str = get_folder_by_url(normalized)
-    if not folder_str:
-        await update.message.reply_text(
-            "URL not found in tracker. Run /force to process it first."
-        )
-        return
-
-    folder_path = PROJECT_DIR / folder_str
-    if not (folder_path / "job_posting.txt").exists():
-        await update.message.reply_text(
-            "No job_posting.txt in folder - cannot generate."
-        )
-        return
-
-    await update.message.reply_text(f"⏳ Generating About Me ({lang.upper()})...")
-
-    import asyncio
-    from hunter.about_me_agent import generate_about_me
-
-    result = await asyncio.to_thread(generate_about_me, folder_path, lang)
-    if not result:
-        await update.message.reply_text("❌ Generation failed - check logs.")
-        return
-
-    await update.message.reply_text(result)
-    await update.message.reply_text(
-        f"✅ Saved to {folder_str}/About_Me_{lang.upper()}.txt"
-    )
+# cmd_about_me → hunter.commands.about_me
 
 
 async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
