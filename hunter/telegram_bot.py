@@ -1,13 +1,18 @@
 """
-telegram_bot.py — Thin dispatcher: imports + re-exports all handlers; owns _post_init + build_application.
+telegram_bot.py — Thin dispatcher: owns _post_init + build_application.
 
 After the Phase 1–7 refactor, logic lives in:
   hunter/bot/         — state, keyboards, notifications, paste, formatters, apply_runner
   hunter/commands/    — one file per Telegram command handler
   hunter/schedules/   — one file per JobQueue callback; register() wires them all
 
-This file is kept as a backward-compat shim: hunter.py and main.py import build_application,
-send_text, send_job_cards from here; tests import command handlers and formatters from here.
+Import strategy:
+  - Eager: only what main.py needs at startup (send_text, send_job_cards)
+    and what _post_init / build_application need directly.
+  - Lazy: all command handlers + schedules — imported inside build_application()
+    so tests that import hunter.telegram_bot don't pay the full 37-module cost.
+  - __getattr__: backward-compat re-exports for tests that do
+    `from hunter.telegram_bot import _parse_hunt_source_args` etc.
 """
 
 import logging
@@ -30,61 +35,78 @@ from hunter.config import (
     TRACKER_PATH,
 )
 
-# ── Phase 1: bot/ infrastructure ─────────────────────────────────────────────
-from hunter.bot.state import (
-    _pending_jobs,
-    _active_apply_urls,
-    _force_waiting,
-    _APPLY_AGENT_TIMEOUT,
-)
-from hunter.bot.keyboards import _make_keyboard
+# Always-needed by main.py and _post_init:
 from hunter.bot.notifications import send_text, send_job_cards, _tg_notify
-from hunter.bot.paste import _PASTE_TEXT_MIN_LEN, _URL_RE, _looks_like_paste, _extract_url
-from hunter.bot.formatters import (
-    _build_schedule_text,
-    _format_check_responses_report,
-    _format_daily_summary,
-)
-from hunter.bot.apply_runner import _run_apply_agent, _run_linkedin_batch, _handle_paste
-
-# ── Phase 3: simple command handlers ─────────────────────────────────────────
-from hunter.commands.start import cmd_start
-from hunter.commands.schedule import cmd_schedule
-from hunter.commands.unsent import cmd_unsent
-from hunter.commands.status import cmd_status
-from hunter.commands.sync_sent import cmd_sync_sent
-
-# ── Phase 4: commands with state / sub-logic ──────────────────────────────────
-from hunter.commands.hunt import cmd_hunt, parse_hunt_source_args as _parse_hunt_source_args
-from hunter.commands.force import cmd_force, _force_run, _force_cleanup
-from hunter.commands.process_manual import cmd_process_manual
-from hunter.commands.about_me import cmd_about_me
-
-# ── Phase 5: heavy / grouped command handlers ─────────────────────────────────
-from hunter.commands.check_expired import cmd_check_expired
-from hunter.commands.debug_url import cmd_debug_url
-from hunter.commands.gsheets import cmd_gsheets_status, cmd_gsheets_push_missing, cmd_gsheets_push_sent
-from hunter.commands.gdrive import cmd_gdrive_upload_missing
-from hunter.commands.check_responses import cmd_check_responses
-
-# ── Phase 6: URL handler + Apply/Skip button callbacks ───────────────────────
-from hunter.commands.url_message import cmd_url, button_callback, _handle_apply, _handle_skip
-
-# ── Phase 7: scheduled job callbacks ─────────────────────────────────────────
-from hunter.schedules import (
-    register as _register_schedules,
-    scheduled_hunt as _scheduled_hunt,
-    scheduled_check_expired as _scheduled_check_expired,
-    scheduled_tracker_backup as _scheduled_tracker_backup,
-    scheduled_gdrive_upload_missing as _scheduled_gdrive_upload_missing,
-    scheduled_gsheets_resync as _scheduled_gsheets_resync,
-    scheduled_gsheets_pull as _scheduled_gsheets_pull,
-    scheduled_pending_report as _scheduled_pending_report,
-    scheduled_check_email_responses as _scheduled_check_email_responses,
-    scheduled_daily_summary as _scheduled_daily_summary,
-)
+from hunter.bot.paste import _looks_like_paste, _extract_url
 
 logger = logging.getLogger(__name__)
+
+# ── Backward-compat lazy re-exports (used by tests) ──────────────────────────
+# Each entry: attribute_name → (module_path, real_attribute_name)
+_LAZY_ATTRS: dict[str, tuple[str, str]] = {
+    # bot infrastructure
+    "_pending_jobs":              ("hunter.bot.state",        "_pending_jobs"),
+    "_active_apply_urls":         ("hunter.bot.state",        "_active_apply_urls"),
+    "_force_waiting":             ("hunter.bot.state",        "_force_waiting"),
+    "_APPLY_AGENT_TIMEOUT":       ("hunter.bot.state",        "_APPLY_AGENT_TIMEOUT"),
+    "_make_keyboard":             ("hunter.bot.keyboards",    "_make_keyboard"),
+    "_PASTE_TEXT_MIN_LEN":        ("hunter.bot.paste",        "_PASTE_TEXT_MIN_LEN"),
+    "_URL_RE":                    ("hunter.bot.paste",        "_URL_RE"),
+    "_build_schedule_text":       ("hunter.bot.formatters",   "_build_schedule_text"),
+    "_format_check_responses_report": ("hunter.bot.formatters", "_format_check_responses_report"),
+    "_format_daily_summary":      ("hunter.bot.formatters",   "_format_daily_summary"),
+    "_run_apply_agent":           ("hunter.bot.apply_runner", "_run_apply_agent"),
+    "_run_linkedin_batch":        ("hunter.bot.apply_runner", "_run_linkedin_batch"),
+    "_handle_paste":              ("hunter.bot.apply_runner", "_handle_paste"),
+    # commands
+    "cmd_start":          ("hunter.commands.start",          "cmd_start"),
+    "cmd_schedule":       ("hunter.commands.schedule",       "cmd_schedule"),
+    "cmd_unsent":         ("hunter.commands.unsent",         "cmd_unsent"),
+    "cmd_status":         ("hunter.commands.status",         "cmd_status"),
+    "cmd_sync_sent":      ("hunter.commands.sync_sent",      "cmd_sync_sent"),
+    "cmd_hunt":           ("hunter.commands.hunt",           "cmd_hunt"),
+    "_parse_hunt_source_args": ("hunter.commands.hunt",      "parse_hunt_source_args"),
+    "cmd_force":          ("hunter.commands.force",          "cmd_force"),
+    "_force_run":         ("hunter.commands.force",          "_force_run"),
+    "_force_cleanup":     ("hunter.commands.force",          "_force_cleanup"),
+    "cmd_process_manual": ("hunter.commands.process_manual", "cmd_process_manual"),
+    "cmd_about_me":       ("hunter.commands.about_me",       "cmd_about_me"),
+    "cmd_check_expired":  ("hunter.commands.check_expired",  "cmd_check_expired"),
+    "cmd_debug_url":      ("hunter.commands.debug_url",      "cmd_debug_url"),
+    "cmd_gsheets_status":       ("hunter.commands.gsheets", "cmd_gsheets_status"),
+    "cmd_gsheets_push_missing": ("hunter.commands.gsheets", "cmd_gsheets_push_missing"),
+    "cmd_gsheets_push_sent":    ("hunter.commands.gsheets", "cmd_gsheets_push_sent"),
+    "cmd_gdrive_upload_missing": ("hunter.commands.gdrive", "cmd_gdrive_upload_missing"),
+    "cmd_check_responses":      ("hunter.commands.check_responses", "cmd_check_responses"),
+    "cmd_url":          ("hunter.commands.url_message", "cmd_url"),
+    "button_callback":  ("hunter.commands.url_message", "button_callback"),
+    "_handle_apply":    ("hunter.commands.url_message", "_handle_apply"),
+    "_handle_skip":     ("hunter.commands.url_message", "_handle_skip"),
+    # schedules
+    "_scheduled_hunt":                  ("hunter.schedules.hunt",            "scheduled_hunt"),
+    "_scheduled_check_expired":         ("hunter.schedules.check_expired",   "scheduled_check_expired"),
+    "_scheduled_tracker_backup":        ("hunter.schedules.tracker_backup",  "scheduled_tracker_backup"),
+    "_scheduled_gdrive_upload_missing": ("hunter.schedules.gdrive",          "scheduled_gdrive_upload_missing"),
+    "_scheduled_gsheets_resync":        ("hunter.schedules.gsheets",         "scheduled_gsheets_resync"),
+    "_scheduled_gsheets_pull":          ("hunter.schedules.gsheets",         "scheduled_gsheets_pull"),
+    "_scheduled_pending_report":        ("hunter.schedules.pending_report",  "scheduled_pending_report"),
+    "_scheduled_check_email_responses": ("hunter.schedules.email_responses", "scheduled_check_email_responses"),
+    "_scheduled_daily_summary":         ("hunter.schedules.daily_summary",   "scheduled_daily_summary"),
+}
+
+
+def __getattr__(name: str):
+    """Lazy re-export for backward compat with tests and external callers."""
+    if name in _LAZY_ATTRS:
+        import importlib
+        mod_path, attr = _LAZY_ATTRS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        # Cache in module globals so subsequent accesses don't re-import
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module 'hunter.telegram_bot' has no attribute {name!r}")
+
 
 # ── Application factory ───────────────────────────────────────────────────────
 
@@ -130,7 +152,7 @@ async def _post_init(app: Application) -> None:
                     pass
                 return  # don't try to bootstrap if creds are broken
 
-            async def _tg_notify(text: str) -> None:
+            async def _tg_notify_local(text: str) -> None:
                 try:
                     await app.bot.send_message(
                         chat_id=TELEGRAM_CHAT_ID,
@@ -141,7 +163,7 @@ async def _post_init(app: Application) -> None:
                 except Exception as _e:
                     logger.warning("[gsheets] notify failed: %s", _e)
 
-            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify)
+            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify_local)
             if result.get("error"):
                 logger.error("[gsheets] init failed: %s", result["error"])
             else:
@@ -169,6 +191,26 @@ def build_application() -> Application:
     """Build and configure the Telegram Application instance."""
     import pytz
 
+    # Import all handlers lazily — only when the bot actually starts.
+    from hunter.commands.start import cmd_start
+    from hunter.commands.schedule import cmd_schedule
+    from hunter.commands.unsent import cmd_unsent
+    from hunter.commands.status import cmd_status
+    from hunter.commands.sync_sent import cmd_sync_sent
+    from hunter.commands.hunt import cmd_hunt
+    from hunter.commands.force import cmd_force
+    from hunter.commands.process_manual import cmd_process_manual
+    from hunter.commands.about_me import cmd_about_me
+    from hunter.commands.check_expired import cmd_check_expired
+    from hunter.commands.debug_url import cmd_debug_url
+    from hunter.commands.gsheets import (
+        cmd_gsheets_status, cmd_gsheets_push_missing, cmd_gsheets_push_sent,
+    )
+    from hunter.commands.gdrive import cmd_gdrive_upload_missing
+    from hunter.commands.check_responses import cmd_check_responses
+    from hunter.commands.url_message import cmd_url, button_callback
+    from hunter.schedules import register as _register_schedules
+
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # Command handlers
@@ -183,11 +225,11 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
     app.add_handler(CommandHandler("debug_url",      cmd_debug_url))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
-    app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
-    app.add_handler(CommandHandler("gsheets_push_sent",    cmd_gsheets_push_sent))
+    app.add_handler(CommandHandler("gsheets_status",        cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_push_missing",  cmd_gsheets_push_missing))
+    app.add_handler(CommandHandler("gsheets_push_sent",     cmd_gsheets_push_sent))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
-    app.add_handler(CommandHandler("check_responses",      cmd_check_responses))
+    app.add_handler(CommandHandler("check_responses",       cmd_check_responses))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -200,5 +242,3 @@ def build_application() -> Application:
     _register_schedules(app, tz)
 
     return app
-
-
