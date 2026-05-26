@@ -127,7 +127,7 @@ hunter/
   models.py                 Job dataclass
   filters.py                Central filter: keywords, level, location, patterns, React-only, German
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
-  telegram_bot.py           Telegram bot: all handlers, schedule, callbacks (1266 lines)
+  telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
   tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (~980 lines)
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
@@ -139,6 +139,39 @@ hunter/
   gdrive_client.py          Low-level Drive API v3 wrapper
   gmail_client.py           Gmail API wrapper
   gmail_parsers.py          Parse job alert emails from various boards
+  bot/
+    state.py                Shared mutable state (_pending_jobs, _active_apply_urls, _force_waiting)
+    keyboards.py            _make_keyboard() — InlineKeyboardMarkup factory
+    notifications.py        send_text(), send_job_cards(), _tg_notify()
+    paste.py                _looks_like_paste(), _extract_url(), URL_RE
+    formatters.py           _build_schedule_text(), _format_check_responses_report(), _format_daily_summary()
+    apply_runner.py         _run_apply_agent(), _run_linkedin_batch(), _handle_paste()
+  commands/                 One file per Telegram command handler
+    start.py                /start
+    schedule.py             /schedule
+    unsent.py               /unsent
+    status.py               /status
+    sync_sent.py            /sync_sent
+    hunt.py                 /hunt + parse_hunt_source_args
+    force.py                /force + _force_cleanup + _force_run
+    process_manual.py       /process_manual
+    about_me.py             /about_me
+    check_expired.py        /check_expired
+    debug_url.py            /debug_url
+    gsheets.py              /gsheets_status + /gsheets_push_missing + /gsheets_push_sent
+    gdrive.py               /gdrive_upload_missing
+    check_responses.py      /check_responses
+    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
+  schedules/                One file per JobQueue callback
+    hunt.py                 scheduled_hunt
+    check_expired.py        scheduled_check_expired
+    tracker_backup.py       scheduled_tracker_backup
+    gdrive.py               scheduled_gdrive_upload_missing
+    gsheets.py              scheduled_gsheets_resync + scheduled_gsheets_pull
+    pending_report.py       scheduled_pending_report
+    email_responses.py      scheduled_check_email_responses
+    daily_summary.py        scheduled_daily_summary
+    __init__.py             register(app, tz) — wires all callbacks into the Application
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
@@ -334,7 +367,7 @@ GSHEETS_ENABLED=true
 
 ### Structural
 
-1. **telegram_bot.py is a ~1380-line monolith.** Contains 17+ handlers, build_application, schedule setup, LinkedIn batch, paste flow, expired check flow, force logic. Hard to navigate and test.
+1. ~~**telegram_bot.py is a ~1380-line monolith.**~~ ✅ Resolved (Phase 1–7 refactor, 2026-05-26): split into `bot/` (6 modules), `commands/` (15 files), `schedules/` (9 files). `telegram_bot.py` is now a ~200-line import shim that re-exports everything for backward compat.
 
 2. **job_fetch/ is a separate parallel package (22 files, 2475 lines).** Every site has a file in both `hunter/sources/` (search/listing) and `job_fetch/` (detail text fetch). URLs, headers, and domain knowledge are duplicated across packages.
 
@@ -363,11 +396,13 @@ GSHEETS_ENABLED=true
 - [x] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs (was already done)
 - [x] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
 
-### Phase 2 — Split telegram_bot.py (MEDIUM risk)
+### Phase 2 — Split telegram_bot.py (MEDIUM risk) ✅ COMPLETE (2026-05-26)
 
-- [ ] **2.1** Extract command handlers into `hunter/commands/` module (hunt, force, status, expired, etc.)
-- [ ] **2.2** Extract `build_application()` + schedule setup into `hunter/app.py`
-- [ ] **2.3** Keep `telegram_bot.py` as thin dispatcher + send_text/send_job_cards API
+- [x] **2.1** Extract command handlers into `hunter/commands/` module (15 files)
+- [x] **2.1b** Extract bot infrastructure into `hunter/bot/` (6 files: state, keyboards, notifications, paste, formatters, apply_runner)
+- [x] **2.1c** Extract scheduled callbacks into `hunter/schedules/` (9 files + register() helper)
+- [x] **2.2** `build_application()` + schedule setup remain in `telegram_bot.py` (schedule uses `schedules.register()`)
+- [x] **2.3** `telegram_bot.py` is now a ~200-line import shim with re-exports for backward compat
 
 ### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk)
 
@@ -455,3 +490,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-14 | sonnet | Google Sheets integration complete (GSHEETS_PLAN.md, phases 1-7): gsheets_client, tracker_cache, drop to_send.xlsx (15 files), gsheets_sync (mirror/pull/resync/bootstrap), /gsheets_status /gsheets_resync commands, 5-min resync + 30-min pull schedules, state file for Docker restart safety, 51 new tests (351 total) |
 | 2026-05-15 | sonnet | Google Drive upload (GDRIVE_PLAN.md): gdrive_client (Drive API v3 wrapper), gdrive_sync (lazy singleton, upload_application_folder), GDRIVE_* config, telegram_bot hook after apply (best-effort, 22 new tests, 373 total) |
 | 2026-05-22 | sonnet | Drive URL tracking: tracker col 12 (Drive URL), get_drive_url_by_url, set_drive_url, upload_application_folder writes URL after upload, upload_missing_folders skips already-uploaded rows (17 new tests, 458 total) |
+| 2026-05-26 | opus | Phase 2 complete: split telegram_bot.py (1967→200 lines) into bot/ (6), commands/ (15), schedules/ (9). All 748 tests pass. |
