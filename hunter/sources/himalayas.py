@@ -15,6 +15,7 @@ import re
 import time
 from html import unescape
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -46,6 +47,14 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 class HimalayasSource(BaseSource):
     name = "himalayas"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "himalayas.app" in host
+
+    # fetch_text uses BaseSource default — Himalayas had no dedicated entry in
+    # the legacy job_fetch dispatcher, so its URLs were routed through the
+    # generic HTML fallback. We preserve that behaviour explicitly.
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()

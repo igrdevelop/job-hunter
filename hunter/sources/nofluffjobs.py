@@ -13,7 +13,9 @@ Tested 2026-04: endpoint works without auth.
 """
 
 import logging
+import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -41,9 +43,96 @@ HEADERS = {
 TIMEOUT = 20
 JOB_BASE_URL = "https://nofluffjobs.com/pl/job"
 
+POSTING_API = "https://nofluffjobs.com/api/posting"
+POSTING_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://nofluffjobs.com/",
+}
+
+
+def _extract_posting_slug(url: str) -> str:
+    match = re.search(r"/job/([a-zA-Z0-9_-]+)", url)
+    if not match:
+        raise ValueError(f"Cannot extract NoFluffJobs slug from URL: {url}")
+    return match.group(1)
+
+
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html)
+    text = re.sub(r"<li[^>]*>", "- ", text)
+    text = re.sub(r"</?(p|div|h[1-6]|ul|ol|section)[^>]*>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _format_posting_text(data: dict) -> str:
+    parts: list[str] = [
+        f"Job Title: {data.get('title', 'N/A')}",
+        f"Company: {data.get('name', 'N/A')}",
+    ]
+
+    location = data.get("location", {})
+    places = location.get("places", [])
+    remote = data.get("fullyRemote", False)
+    loc_str = "Remote" if remote else ", ".join(p.get("city", "") for p in places)
+    parts.append(f"Location: {loc_str}")
+
+    seniority = data.get("seniority", [])
+    if seniority:
+        parts.append(f"Seniority: {', '.join(seniority)}")
+
+    musts = data.get("requirements", {}).get("musts", [])
+    nices = data.get("requirements", {}).get("nices", [])
+    if musts:
+        parts.append(f"Must-have: {', '.join(m.get('value', '') for m in musts)}")
+    if nices:
+        parts.append(f"Nice-to-have: {', '.join(n.get('value', '') for n in nices)}")
+
+    salary = data.get("essentials", {}).get("salary", {})
+    if salary:
+        low = salary.get("from")
+        high = salary.get("to")
+        cur = salary.get("currency", "PLN")
+        emp = salary.get("type", "")
+        if low or high:
+            parts.append(f"Salary: {low or '?'}–{high or '?'} {cur} {emp}")
+
+    sections = data.get("sections", {})
+    for key in ("requirements", "responsibilities", "description", "methodology", "environment"):
+        content = sections.get(key, "")
+        if content:
+            parts.append(f"\n--- {key.title()} ---\n{_strip_html(content)}")
+
+    text = "\n".join(parts)
+    if len(text) < 50:
+        raise ValueError("NoFluffJobs posting returned almost no content")
+    return text
+
 
 class NoFluffJobsSource(BaseSource):
     name = "nofluffjobs"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "nofluffjobs.com" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Try the posting detail API first, fall back to generic HTML extraction."""
+        slug = _extract_posting_slug(url)
+        try:
+            resp = requests.get(
+                f"{POSTING_API}/{slug}", headers=POSTING_HEADERS, timeout=TIMEOUT
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return _format_posting_text(data)
+        except Exception:
+            from hunter.sources.html_fallback import fetch_html
+            return fetch_html(url)
 
     def search(self) -> list[Job]:
         all_jobs: list[Job] = []

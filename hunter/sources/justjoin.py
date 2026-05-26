@@ -21,8 +21,10 @@ Rate: 3–6 API calls per run (1–2 pages × 3 workplace types).
 """
 
 import logging
+import re
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -53,8 +55,86 @@ PAGE_DELAY = 0.3                    # seconds between pages
 WORKPLACE_TYPES = ["remote", "hybrid", "office"]
 
 
+def _extract_detail_slug(url: str) -> str:
+    """Pull the slug from /job-offer/{slug} or /offers/{slug} (both legacy + new)."""
+    match = re.search(r"/(?:job-offer|offers)/([a-z0-9-]+)", url)
+    if not match:
+        raise ValueError(f"Cannot extract JustJoin slug from URL: {url}")
+    return match.group(1)
+
+
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html)
+    text = re.sub(r"<li[^>]*>", "- ", text)
+    text = re.sub(
+        r"</?(p|div|h[1-6]|ul|ol|tr|td|th|table|section)[^>]*>", "\n", text
+    )
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 class JustJoinSource(BaseSource):
     name = "justjoin"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "justjoin.it" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Fetch a single JustJoin offer via the candidate API and format as plain text."""
+        slug = _extract_detail_slug(url)
+        resp = requests.get(
+            f"{LISTING_API}/{slug}", headers=JSON_HEADERS, timeout=TIMEOUT
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        parts: list[str] = [
+            f"Job Title: {data.get('title', 'N/A')}",
+            f"Company: {data.get('companyName', 'N/A')}",
+        ]
+        if not data.get("isActive", True):
+            parts.append("Offer expired")
+
+        city = data.get("city", "")
+        workplace = data.get("workplaceType", "")
+        parts.append(
+            f"Location: {city} ({workplace})" if city else f"Location: {workplace}"
+        )
+
+        experience = data.get("experienceLevel", "")
+        if experience:
+            parts.append(f"Experience Level: {experience}")
+
+        skills = data.get("skills", [])
+        if skills:
+            skill_names = [
+                f"{s.get('name', '')} ({s.get('level', '')})" for s in skills
+            ]
+            parts.append(f"Required Skills: {', '.join(skill_names)}")
+
+        emp_types = data.get("employmentTypes", [])
+        for et in emp_types:
+            low, high = et.get("from"), et.get("to")
+            currency = (et.get("currency") or "PLN").upper()
+            emp_type = (et.get("type") or "").upper()
+            if low or high:
+                salary = f"{low or '?'}–{high or '?'} {currency} {emp_type}".strip()
+                parts.append(f"Salary: {salary}")
+
+        body = data.get("body", "")
+        if body:
+            parts.append(f"\n--- Job Description ---\n{_strip_html(body)}")
+
+        text = "\n".join(parts)
+        if len(text) < 50:
+            raise ValueError(f"JustJoin offer {slug} returned almost no content")
+        return text
 
     def search(self) -> list[Job]:
         seen_slugs: set[str] = set()
