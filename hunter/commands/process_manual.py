@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process all MANUAL-pending tracker rows whose job_posting.txt is already filled."""
     from hunter.tracker import get_all_manual_pending
-    from job_fetch.jobleads import try_load_manual_job_posting
+    from hunter.sources.jobleads import try_load_manual_job_posting
 
     rows = await asyncio.to_thread(get_all_manual_pending)
     if not rows:

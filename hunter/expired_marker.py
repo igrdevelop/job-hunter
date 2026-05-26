@@ -52,8 +52,8 @@ def _fetch_quick_html(url: str) -> tuple[str, int]:
     Returns (html, status_code). html is "" on non-200 or error.
     Tries cloudscraper first, falls back to plain requests.
     """
-    from job_fetch import _clean_url
-    fetch_url = _clean_url(url)
+    from hunter.sources.html_fallback import clean_url
+    fetch_url = clean_url(url)
 
     try:
         import cloudscraper
@@ -152,7 +152,7 @@ class _DomainLimiter:
         return self._sems[dom], self._delays[dom]
 
     async def fetch(self, url: str, global_sem: asyncio.Semaphore) -> str:
-        from job_fetch import fetch_job_text
+        from hunter.sources import fetch_job_text
         dom = _domain(url)
         dom_sem, dom_lock = self._get(dom)
         async with global_sem:
@@ -237,7 +237,7 @@ async def run_check(
         except Exception as e:
             is_jobleads_cf = False
             try:
-                from job_fetch.jobleads import JobLeadsCloudflareError
+                from hunter.sources.jobleads import JobLeadsCloudflareError
                 is_jobleads_cf = isinstance(e, JobLeadsCloudflareError)
             except ImportError:
                 pass

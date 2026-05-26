@@ -1,6 +1,6 @@
-"""Workable job_fetch text building (no network for API; path parsing only)."""
+"""Workable job-text building (no network for API; path parsing only)."""
 
-from job_fetch.ats_workable import _parse_workable_path, _workable_dict_to_text
+from hunter.sources.ats_aggregator import _parse_workable_path, _workable_dict_to_text
 
 
 def test_parse_path_short_form() -> None:

@@ -99,7 +99,7 @@ async def _run_apply_agent(
 
 async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
     """Run apply_agent sequentially for each LinkedIn job id."""
-    from job_fetch.linkedin_parse import job_view_url
+    from hunter.sources.linkedin import job_view_url
     from hunter.models import Job
     from hunter.tracker import add_failed
 
@@ -164,7 +164,7 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     ``force=True`` passes ``--force`` (bypasses tracker dedup and React-only skip).
     """
     from telegram.constants import ParseMode
-    from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
+    from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER
     from hunter.tracker import lookup_url, manual_jobleads_job_posting_path
 
     url = _extract_url(text)

@@ -13,7 +13,7 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -52,6 +52,67 @@ def _clean_detail_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
+
+
+# ── URL parsing helpers (ported from job_fetch/linkedin_parse.py) ───────────
+
+def is_linkedin_url(url: str) -> bool:
+    """True for any linkedin.com URL."""
+    return "linkedin.com" in (urlparse(url).hostname or "")
+
+
+def is_linkedin_search(url: str) -> bool:
+    """True if URL is a LinkedIn jobs search/alert page (not a single job view)."""
+    parsed = urlparse(url)
+    if "linkedin.com" not in (parsed.hostname or ""):
+        return False
+    return "/jobs/search" in parsed.path or "/jobs/search" in url
+
+
+def is_linkedin_view(url: str) -> bool:
+    """True if URL is already a single job view."""
+    return "linkedin.com" in (urlparse(url).hostname or "") and "/jobs/view/" in url
+
+
+def parse_linkedin_job_ids(url: str) -> list[str]:
+    """Extract deduplicated job ids from a LinkedIn search / alert URL."""
+    qs = parse_qs(urlparse(url).query, keep_blank_values=False)
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        for part in raw.replace("%2C", ",").split(","):
+            jid = part.strip()
+            if jid and jid not in seen:
+                seen.add(jid)
+                ids.append(jid)
+
+    for val in qs.get("currentJobId", []):
+        _add(val)
+    for val in qs.get("originToLandingJobPostings", []):
+        _add(val)
+    for val in qs.get("jobIds", []):
+        _add(val)
+    return ids
+
+
+def job_view_url(job_id: str) -> str:
+    """Canonical URL for a single LinkedIn job posting."""
+    return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+
+def normalize_linkedin_url(url: str) -> str:
+    """Strip tracking params from a LinkedIn job view URL.
+
+    Non-view URLs are returned unchanged.
+    """
+    parsed = urlparse(url)
+    if "linkedin.com" not in (parsed.hostname or "") or "/jobs/view/" not in parsed.path:
+        return url
+    m = re.search(r"/jobs/view/(\d+)", parsed.path)
+    if m:
+        return f"https://www.linkedin.com/jobs/view/{m.group(1)}/"
+    return parsed._replace(query="", fragment="").geturl()
 
 
 class LinkedInSource(BaseSource):
