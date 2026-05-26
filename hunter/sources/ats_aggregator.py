@@ -17,6 +17,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from hunter.ats.ashby import AshbyProvider
 from hunter.ats.base import ATSProvider
@@ -41,6 +42,29 @@ PROVIDERS: dict[str, ATSProvider] = {
 
 class AtsAggregatorSource(BaseSource):
     name = "ats_aggregator"
+
+    def matches_url(self, url: str) -> bool:
+        """Match URLs hosted on any of the supported ATS providers.
+
+        Mirror the substring/suffix checks from the legacy job_fetch dispatcher
+        so detail-page routing stays behaviour-preserving.
+        """
+        host = (urlparse(url).hostname or "").lower()
+        if "apply.workable.com" in host:
+            return True
+        if "greenhouse.io" in host:
+            return True
+        if "jobs.lever.co" in host:
+            return True
+        if host.endswith(".recruitee.com"):
+            return True
+        if "jobs.ashbyhq.com" in host:
+            return True
+        return False
+
+    # fetch_text uses BaseSource default — all five ATS providers serve a
+    # server-rendered HTML description, and the legacy job_fetch wrappers
+    # were all one-liners around fetch_html().
 
     def search(self) -> list[Job]:
         companies = load_companies(ATS_COMPANIES_PATH)
