@@ -166,7 +166,12 @@ def test_cmd_url_force_waiting_triggers_force_run():
         bot._force_waiting.add(12345)
         update = _make_update("https://justjoin.it/job-offer/some-company-dev")
 
-        with patch.object(bot, "_force_run", new_callable=AsyncMock) as mock_run:
+        # After the refactor, cmd_url lives in url_message.py and uses its own
+        # local import of _force_run from hunter.commands.force.  Patching
+        # bot._force_run only affects the telegram_bot re-export; it does NOT
+        # intercept the call inside url_message.  Patch the attribute where it
+        # is actually looked up at call time.
+        with patch("hunter.commands.url_message._force_run", new_callable=AsyncMock) as mock_run:
             context = MagicMock()
             await bot.cmd_url(update, context)
 
