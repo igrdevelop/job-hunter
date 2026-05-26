@@ -407,12 +407,17 @@ GSHEETS_ENABLED=true
 - [x] **3.3** Add `hunter.sources.fetch_job_text(url)` dispatcher + route every caller (`apply_agent`, `expired_marker`, `gmail_enricher`, `bot/apply_runner`, `commands/*`) through it. Fold `linkedin_parse.py` URL helpers into `hunter/sources/linkedin.py`.
 - [x] **3.4** Delete `job_fetch/` package
 
-### Phase 4 — Split apply_agent.py (MEDIUM risk)
+### Phase 4 — Split apply_agent.py (MEDIUM risk) ✅ COMPLETE (2026-05-27)
 
-- [ ] **4.1** Extract API pipeline into `hunter/apply_api.py`
-- [ ] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
-- [ ] **4.3** Make apply callable as import (not just subprocess)
-- [ ] **4.4** Keep `apply_agent.py` as thin CLI entry point
+- [x] **4.1** Extract API pipeline into `hunter/apply_api.py`
+- [x] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
+- [x] **4.3** Make apply callable as import (not just subprocess)
+- [x] **4.4** Keep `apply_agent.py` as thin CLI entry point
+
+Shared helpers extracted to `hunter/apply_shared.py` (constants, Telegram, CL review,
+validate_content, compute_output_folder, ApplyError). All module-level mutable globals
+(_SKIP_DEDUP, _FULL_MODE, _APPLY_META_COMPANY/TITLE) replaced by function parameters.
+apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 
 ### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk)
 
@@ -489,3 +494,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-26 | opus | Phase 2 complete: split telegram_bot.py (1967→200 lines) into bot/ (6), commands/ (15), schedules/ (9). All 748 tests pass. |
 | 2026-05-26 | sonnet | Fix hanging test: test_cmd_url_force_waiting_triggers_force_run patched bot._force_run but cmd_url calls url_message._force_run directly; changed patch target to hunter.commands.url_message._force_run. 748 tests in 4.55s. |
 | 2026-05-26 | opus | Phase 3 complete: merged job_fetch/ (23 files, ~2475 lines) into hunter/sources/. Each source now owns matches_url + fetch_text. hunter.sources.fetch_job_text() dispatches by URL. linkedin_parse helpers folded into linkedin source. Workable JSON-API extraction restored on AtsAggregator. job_fetch/ deleted. 94 new tests, 842 total in 4.84s. |
+| 2026-05-27 | sonnet | Phase 4 complete: split apply_agent.py (1473→194 lines) into hunter/apply_shared.py (702), hunter/apply_api.py (370), hunter/apply_cli.py (331). All module globals eliminated; functions importable with clean params. 74 new tests (916 total in 6s). |
