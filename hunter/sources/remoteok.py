@@ -13,6 +13,7 @@ import logging
 import re
 from html import unescape
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -50,6 +51,10 @@ def _extract_job_rows(data: list[Any]) -> list[dict[str, Any]]:
 
 class RemoteOkSource(BaseSource):
     name = "remoteok"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "remoteok.com" in host
 
     def search(self) -> list[Job]:
         try:

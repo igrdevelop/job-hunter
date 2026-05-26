@@ -14,6 +14,7 @@ import logging
 import re
 from html import unescape
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -44,6 +45,10 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 class RemotiveSource(BaseSource):
     name = "remotive"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "remotive.com" in host
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()

@@ -14,6 +14,7 @@ import re
 import time
 from html import unescape
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -40,6 +41,13 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 class ArbeitnowSource(BaseSource):
     name = "arbeitnow"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "arbeitnow.com" in host
+
+    # fetch_text uses BaseSource default (html_fallback) — Arbeitnow's detail
+    # pages render server-side and contain the full job description in HTML.
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()
