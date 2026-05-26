@@ -11,7 +11,9 @@ via job_fetch/linkedin.py — but the search itself works without login.
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -32,9 +34,114 @@ HEADERS = {
 }
 RESULTS_PER_PAGE = 25
 
+# ── Detail-page fetch settings (ported from job_fetch/linkedin.py) ──────────
+_STORAGE_STATE_ENV = "LINKEDIN_STORAGE_STATE"
+_DETAIL_TIMEOUT_MS = 20_000
+_DETAIL_MAX_TEXT_LEN = 15_000
+
+
+def _storage_state_path() -> Optional[Path]:
+    val = os.environ.get(_STORAGE_STATE_ENV, "").strip()
+    if not val:
+        return None
+    p = Path(val)
+    return p if p.exists() else None
+
+
+def _clean_detail_text(text: str) -> str:
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
 
 class LinkedInSource(BaseSource):
     name = "linkedin"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "linkedin.com" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Fetch a LinkedIn job posting via Playwright + saved session.
+
+        Falls back to generic html_fallback when:
+          * playwright is not installed
+          * LINKEDIN_STORAGE_STATE is not configured
+
+        Raises RuntimeError when LinkedIn redirects to login (session expired)
+        or when the page times out / returns near-empty text.
+        """
+        from hunter.sources.html_fallback import fetch_html
+
+        try:
+            from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        except ImportError:
+            logger.warning(
+                "[linkedin] playwright not installed — falling back to HTML fetch. "
+                "Install with: pip install playwright && playwright install chromium"
+            )
+            return fetch_html(url)
+
+        storage_state = _storage_state_path()
+        if not storage_state:
+            logger.warning(
+                f"[linkedin] {_STORAGE_STATE_ENV} not set — falling back to HTML fetch. "
+                f"Run python tools/linkedin_login.py to enable full session fetch."
+            )
+            return fetch_html(url)
+
+        logger.info(f"[linkedin] Fetching {url} with session from {storage_state}")
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                storage_state=str(storage_state),
+                user_agent=HEADERS["User-Agent"],
+            )
+            page = ctx.new_page()
+
+            try:
+                page.goto(url, timeout=_DETAIL_TIMEOUT_MS, wait_until="domcontentloaded")
+            except PWTimeout:
+                browser.close()
+                raise RuntimeError(f"LinkedIn page timed out: {url}")
+
+            current = page.url
+            if "linkedin.com/login" in current or "linkedin.com/checkpoint" in current:
+                browser.close()
+                raise RuntimeError(
+                    "LinkedIn redirected to login page — session expired.\n"
+                    "Re-run: python tools/linkedin_login.py  to refresh storage_state."
+                )
+
+            try:
+                page.wait_for_selector(
+                    ".jobs-description, .job-view-layout, .description__text",
+                    timeout=10_000,
+                )
+            except PWTimeout:
+                pass
+
+            text = page.evaluate(
+                """() => {
+                    const remove = ['script','style','nav','footer','header','noscript'];
+                    remove.forEach(t => document.querySelectorAll(t).forEach(e => e.remove()));
+                    return document.body ? document.body.innerText : '';
+                }"""
+            )
+
+            browser.close()
+
+        text = _clean_detail_text(text)
+        if len(text) < 100:
+            raise RuntimeError(
+                f"LinkedIn page returned too little text ({len(text)} chars) for {url}"
+            )
+        if len(text) > _DETAIL_MAX_TEXT_LEN:
+            text = text[:_DETAIL_MAX_TEXT_LEN] + "\n\n[... truncated ...]"
+
+        logger.info(f"[linkedin] Got {len(text)} chars")
+        return text
 
     def search(self) -> list[Job]:
         keywords_raw = os.environ.get("LINKEDIN_KEYWORDS", "angular,angular developer,frontend angular")
