@@ -1,8 +1,8 @@
+"""Tests for tracker.add_applied, add_manual_jobleads_pending, apply_pull_updates."""
 from pathlib import Path
 
-import openpyxl
-
 from hunter import tracker
+from hunter.tracker import add_applied, apply_pull_updates, lookup_url
 
 
 def _build_content(url: str, output_folder: Path) -> dict:
@@ -17,196 +17,144 @@ def _build_content(url: str, output_folder: Path) -> dict:
     }
 
 
-def test_add_applied_writes_success_row(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_add_applied_writes_success_row(tracker_db) -> None:
     content = _build_content(
         "https://example.com/jobs/1?utm_source=mail",
-        tmp_path / "Applications" / "2026-04-16" / "Acme",
+        Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
     )
     written = tracker.add_applied(content, force=False)
 
     assert written is True
     assert tracker.has_successful_entry("https://example.com/jobs/1")
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
+    rows = lookup_url("https://example.com/jobs/1")
     assert len(rows) == 1
-    assert rows[0][1] == "Acme"
-    assert rows[0][2] == "Senior Frontend Developer"
-    assert rows[0][4] == "85%"
+    assert rows[0]["company"] == "Acme"
+    assert rows[0]["title"] == "Senior Frontend Developer"
+    assert rows[0]["ats"] == "85%"
 
 
-def test_add_applied_skips_duplicate_success_when_not_forced(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_add_applied_skips_duplicate_success_when_not_forced(tracker_db) -> None:
     content = _build_content(
         "https://example.com/jobs/2?utm_source=mail",
-        tmp_path / "Applications" / "2026-04-16" / "Acme",
+        Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
     )
     assert tracker.add_applied(content, force=False) is True
     assert tracker.add_applied(content, force=False) is False
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
+    rows = lookup_url("https://example.com/jobs/2")
     assert len(rows) == 1
 
 
-def test_add_applied_marks_reapplication_when_forced(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_add_applied_marks_reapplication_when_forced(tracker_db) -> None:
     content = _build_content(
         "https://example.com/jobs/3",
-        tmp_path / "Applications" / "2026-04-16" / "Acme",
+        Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
     )
     assert tracker.add_applied(content, force=False) is True
     assert tracker.add_applied(content, force=True) is True
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
-
+    from hunter.db import get_db, TRACKER_DB_PATH
+    with get_db(tracker_db) as conn:
+        rows = conn.execute(
+            "SELECT reapplication FROM applications WHERE url_norm LIKE '%example.com/jobs/3%'"
+        ).fetchall()
     assert len(rows) == 2
-    # Re-application column should be marked on the second row.
-    assert rows[1][8] == "+"
+    assert rows[1]["reapplication"] == "+"
 
 
-def test_add_applied_accepts_non_numeric_ats_score(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_add_applied_accepts_non_numeric_ats_score(tracker_db) -> None:
     content = _build_content(
         "https://example.com/jobs/4",
-        tmp_path / "Applications" / "2026-04-16" / "Acme",
+        Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
     )
     content["ats_score"] = "N/A"
 
     assert tracker.add_applied(content, force=False) is True
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
-
-    assert len(rows) == 1
-    assert rows[0][4] == "N/A"
+    rows = lookup_url("https://example.com/jobs/4")
+    assert rows[0]["ats"] == "N/A"
 
 
-def test_add_applied_removes_manual_pending_row_first(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
-    folder = tmp_path / "Applications" / "2026-04-21" / "GammaInc"
-    folder.mkdir(parents=True)
+def test_add_applied_removes_manual_pending_row_first(tracker_db) -> None:
     url = "https://www.jobleads.com/pl/job/x--poland--aaa111deadbeef0000000000000000"
     assert tracker.add_manual_jobleads_pending(
-        url=url, company="GammaInc", title="Dev", folder_abs=folder,
+        url=url, company="GammaInc", title="Dev", folder_abs=Path("/tmp/folder"),
     ) is True
 
-    content = _build_content(url, folder)
+    content = _build_content(url, Path("/tmp/folder"))
     assert tracker.add_applied(content, force=False) is True
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = [tuple(r) for r in ws.iter_rows(min_row=2, values_only=True)]
-    wb.close()
+    rows = lookup_url(url)
+    # MANUAL row must be gone, only the applied row remains
     assert len(rows) == 1
-    assert rows[0][4] == "85%"
-    assert rows[0][5] == url
+    assert rows[0]["ats"] == "85%"
 
 
-def test_add_applied_converts_10_point_scale_to_percent(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_add_applied_converts_10_point_scale_to_percent(tracker_db) -> None:
     content = _build_content(
         "https://example.com/jobs/5",
-        tmp_path / "Applications" / "2026-04-16" / "Acme",
+        Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
     )
     content["ats_score"] = "8/10"
 
     assert tracker.add_applied(content, force=False) is True
 
-    wb = openpyxl.load_workbook(tracker_path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
-
-    assert len(rows) == 1
-    assert rows[0][4] == "80%"
+    rows = lookup_url("https://example.com/jobs/5")
+    assert rows[0]["ats"] == "80%"
 
 
-def test_apply_pull_updates_updates_fields(tmp_path, monkeypatch) -> None:
+def test_apply_pull_updates_updates_fields(tracker_db) -> None:
     """apply_pull_updates writes Sent, Re-application, To Learn by ID."""
-    from hunter import tracker
-    from hunter.tracker import apply_pull_updates, add_applied
-
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-
-    # Write an applied row so we have something to update
     content = {
         "company_name": "PullCo",
         "job_title": "Frontend Dev",
         "stack": "Angular",
         "ats_score": "90",
         "apply_url": "https://example.com/pull/1",
-        "output_folder": str(tmp_path / "PullCo"),
+        "output_folder": "/tmp/PullCo",
         "to_learn": "",
     }
     assert add_applied(content)
 
-    # Find the row ID from tracker
-    import openpyxl
-    wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
-    ws = wb.active
-    row_id = str(ws.cell(row=2, column=11).value or "").strip()
-    wb.close()
-    assert row_id
+    rows = lookup_url("https://example.com/pull/1")
+    assert rows
+    row_id = rows[0]["id"]
 
-    # Now pull update with new Sent date and To Learn value
-    updated_row = {
+    count = apply_pull_updates([{
         "ID": row_id,
         "Sent": "2026-05-14",
         "Re-application": "+",
         "To Learn": "RxJS",
-    }
-    count = apply_pull_updates([updated_row])
+    }])
     assert count == 1
 
-    # Verify the change was written
-    wb2 = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
-    ws2 = wb2.active
-    row = list(ws2.iter_rows(min_row=2, max_row=2, values_only=True))[0]
-    wb2.close()
-    assert row[7] == "2026-05-14"   # Sent (col 8, idx 7)
-    assert row[8] == "+"            # Re-application (col 9, idx 8)
-    assert row[9] == "RxJS"         # To Learn (col 10, idx 9)
+    from hunter.db import get_db
+    with get_db(tracker_db) as conn:
+        row = conn.execute(
+            "SELECT sent, reapplication, to_learn FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    assert row["sent"] == "2026-05-14"
+    assert row["reapplication"] == "+"
+    assert row["to_learn"] == "RxJS"
 
 
-def test_apply_pull_updates_noop_for_unknown_id(tmp_path, monkeypatch) -> None:
-    from hunter import tracker
-    from hunter.tracker import apply_pull_updates, add_applied
-
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-
+def test_apply_pull_updates_noop_for_unknown_id(tracker_db) -> None:
     content = {
         "company_name": "Ghost",
         "job_title": "Dev",
         "stack": "React",
         "ats_score": "70",
         "apply_url": "https://example.com/ghost/1",
-        "output_folder": str(tmp_path / "Ghost"),
+        "output_folder": "/tmp/Ghost",
         "to_learn": "",
     }
     assert add_applied(content)
 
-    count = apply_pull_updates([{"ID": "nonexistent", "Sent": "2026-05-14", "Re-application": "", "To Learn": ""}])
+    count = apply_pull_updates([{
+        "ID": "nonexistent",
+        "Sent": "2026-05-14",
+        "Re-application": "",
+        "To Learn": "",
+    }])
     assert count == 0

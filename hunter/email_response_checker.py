@@ -128,7 +128,7 @@ class MatchResult:
     email: ConfirmationEmail
     match_type: str                       # "exact" | "fuzzy" | "ambiguous" | "no_match"
     candidates: list[dict] = field(default_factory=list)
-    row_num: int | None = None            # set for exact/fuzzy matches
+    row_id: str | None = None             # set for exact/fuzzy matches (8-char hex ID)
 
 
 # ── Per-platform parsers ──────────────────────────────────────────────────────
@@ -517,7 +517,7 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
         if len(candidates) == 1:
             return MatchResult(
                 email=email, match_type="fuzzy",
-                candidates=candidates, row_num=candidates[0]["row"],
+                candidates=candidates, row_id=candidates[0]["id"],
             )
         return MatchResult(email=email, match_type="ambiguous", candidates=candidates)
 
@@ -528,7 +528,7 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
     match_type = "exact" if top["title_score"] == 1.0 else "fuzzy"
     return MatchResult(
         email=email, match_type=match_type,
-        candidates=candidates, row_num=top["row"],
+        candidates=candidates, row_id=top["id"],
     )
 
 
@@ -551,12 +551,12 @@ def run_confirmation_check(lookback_days: int | None = None) -> list[MatchResult
     results: list[MatchResult] = []
     for email in emails:
         result = match_email(email)
-        if result.match_type in ("exact", "fuzzy") and result.row_num is not None:
+        if result.match_type in ("exact", "fuzzy") and result.row_id is not None:
             existing = result.candidates[0].get("confirmation", "")
             if not existing:
-                set_confirmation(result.row_num, email.date)
+                set_confirmation(result.row_id, email.date)
                 logger.info(
-                    f"[email_response] confirmed row {result.row_num}: "
+                    f"[email_response] confirmed row {result.row_id}: "
                     f"{result.candidates[0]['company']} — {result.candidates[0]['title']}"
                 )
         results.append(result)

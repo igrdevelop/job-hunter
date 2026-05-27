@@ -34,7 +34,7 @@ def _format_check_responses_report(results) -> str:
     """Format run_confirmation_check() results into a Telegram HTML message."""
     from hunter.email_response_checker import MatchResult  # noqa: F401 (type hint)
 
-    confirmed = [r for r in results if r.match_type in ("exact", "fuzzy") and r.row_num]
+    confirmed = [r for r in results if r.match_type in ("exact", "fuzzy") and r.row_id]
     ambiguous = [r for r in results if r.match_type == "ambiguous"]
     no_match  = [r for r in results if r.match_type == "no_match"]
 

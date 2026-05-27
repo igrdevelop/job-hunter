@@ -8,46 +8,49 @@ Verifies:
 """
 
 import asyncio
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
 
 from hunter import tracker
+from hunter.db import get_db
+from hunter.tracker import normalize_url
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def _make_tracker_row(tmp_path, url: str, folder_rel: str, drive_url: str = "", row_id: str = "abc12345"):
-    """Create a minimal tracker.xlsx with one row."""
-    import openpyxl
-    tracker_path = tmp_path / "tracker.xlsx"
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-               "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL"])
-    ws.append(["2026-05-22", "Acme", "Dev", "Angular", "85%",
-               url, folder_rel, "", "", "", row_id, drive_url])
-    wb.save(tracker_path)
-    return tracker_path
+def _insert_row(tracker_db, *, url: str, folder_rel: str,
+                drive_url: str = "", row_id: str = "") -> None:
+    """Insert a minimal application row directly into the test SQLite DB."""
+    rid = row_id or uuid.uuid4().hex[:8]
+    norm = normalize_url(url)
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, folder, drive_url)
+            VALUES (?, '2026-05-22', 'Acme', 'Dev', '85%', ?, ?, ?, ?)
+            """,
+            (rid, url, norm, folder_rel, drive_url),
+        )
 
 
 # ---------------------------------------------------------------------------
 # upload_application_folder: writes Drive URL to tracker when job_url given
 # ---------------------------------------------------------------------------
 
-def test_upload_application_folder_writes_drive_url(tmp_path, monkeypatch):
+def test_upload_application_folder_writes_drive_url(tmp_path, tracker_db):
     folder = tmp_path / "2026-05-22" / "Acme"
     folder.mkdir(parents=True)
     (folder / "cv.pdf").write_bytes(b"x")
 
     job_url = "https://example.com/jobs/1"
     drive_url = "https://drive.google.com/drive/folders/abc"
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-    _make_tracker_row(tmp_path, job_url, str(folder))
+    _insert_row(tracker_db, url=job_url, folder_rel=str(folder))
 
     with (
         patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
@@ -64,7 +67,7 @@ def test_upload_application_folder_writes_drive_url(tmp_path, monkeypatch):
     assert tracker.get_drive_url_by_url(job_url) == drive_url
 
 
-def test_upload_application_folder_no_tracker_write_when_no_job_url(tmp_path, monkeypatch):
+def test_upload_application_folder_no_tracker_write_when_no_job_url(tmp_path, tracker_db):
     folder = tmp_path / "2026-05-22" / "Acme"
     folder.mkdir(parents=True)
     (folder / "cv.pdf").write_bytes(b"x")
@@ -91,16 +94,14 @@ def test_upload_application_folder_no_tracker_write_when_no_job_url(tmp_path, mo
 # upload_missing_folders: skip rows with existing Drive URL
 # ---------------------------------------------------------------------------
 
-def test_upload_missing_skips_already_uploaded_rows(tmp_path, monkeypatch):
+def test_upload_missing_skips_already_uploaded_rows(tmp_path, tracker_db):
     job_url = "https://example.com/jobs/1"
     drive_url = "https://drive.google.com/drive/folders/existing"
     folder = tmp_path / "Applications" / "2026-05-22" / "Acme"
     folder.mkdir(parents=True)
     (folder / "cv.pdf").write_bytes(b"x")
 
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-    _make_tracker_row(tmp_path, job_url, str(folder), drive_url=drive_url)
+    _insert_row(tracker_db, url=job_url, folder_rel=str(folder), drive_url=drive_url)
 
     with (
         patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
@@ -116,16 +117,13 @@ def test_upload_missing_skips_already_uploaded_rows(tmp_path, monkeypatch):
     assert result["skipped_missing"] == 0
 
 
-def test_upload_missing_uploads_and_writes_drive_url(tmp_path, monkeypatch):
+def test_upload_missing_uploads_and_writes_drive_url(tmp_path, tracker_db):
     job_url = "https://example.com/jobs/2"
     folder = tmp_path / "Applications" / "2026-05-22" / "Corp"
     folder.mkdir(parents=True)
     (folder / "cv.pdf").write_bytes(b"x")
 
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-    # Folder path relative to tmp_path
-    _make_tracker_row(tmp_path, job_url, str(folder), drive_url="")
+    _insert_row(tracker_db, url=job_url, folder_rel=str(folder), drive_url="")
 
     new_drive_url = "https://drive.google.com/drive/folders/newone"
 
@@ -146,8 +144,7 @@ def test_upload_missing_uploads_and_writes_drive_url(tmp_path, monkeypatch):
     assert tracker.get_drive_url_by_url(job_url) == new_drive_url
 
 
-def test_upload_missing_counts_already_and_new_separately(tmp_path, monkeypatch):
-    import openpyxl
+def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
     folder_done = tmp_path / "Applications" / "2026-05-22" / "DoneCorpX"
     folder_done.mkdir(parents=True)
     (folder_done / "cv.pdf").write_bytes(b"x")
@@ -155,20 +152,27 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, monkeypatch)
     folder_new.mkdir(parents=True)
     (folder_new / "cv.pdf").write_bytes(b"y")
 
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
+    url_done = "https://example.com/jobs/done"
+    url_new  = "https://example.com/jobs/new"
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-               "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL"])
-    ws.append(["2026-05-22", "DoneCorpX", "Dev", "", "85%",
-               "https://example.com/jobs/done", str(folder_done),
-               "", "", "", "id111111", "https://drive.google.com/drive/folders/done"])
-    ws.append(["2026-05-22", "NewCorpY", "Dev", "", "80%",
-               "https://example.com/jobs/new", str(folder_new),
-               "", "", "", "id222222", ""])
-    wb.save(tracker_path)
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, folder, drive_url)
+            VALUES ('id111111', '2026-05-22', 'DoneCorpX', 'Dev', '85%', ?, ?, ?, ?)
+            """,
+            (url_done, normalize_url(url_done), str(folder_done),
+             "https://drive.google.com/drive/folders/done"),
+        )
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, folder, drive_url)
+            VALUES ('id222222', '2026-05-22', 'NewCorpY', 'Dev', '80%', ?, ?, ?, '')
+            """,
+            (url_new, normalize_url(url_new), str(folder_new)),
+        )
 
     new_url = "https://drive.google.com/drive/folders/fresh"
     with (
@@ -185,6 +189,6 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, monkeypatch)
     assert result["uploaded"] == 1
     assert result["already_uploaded"] == 1
     assert result["skipped_missing"] == 0
-    assert tracker.get_drive_url_by_url("https://example.com/jobs/new") == new_url
+    assert tracker.get_drive_url_by_url(url_new) == new_url
     # Already-uploaded row must remain unchanged
-    assert tracker.get_drive_url_by_url("https://example.com/jobs/done") == "https://drive.google.com/drive/folders/done"
+    assert tracker.get_drive_url_by_url(url_done) == "https://drive.google.com/drive/folders/done"

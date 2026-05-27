@@ -176,7 +176,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 folder_info = f'\n📁 <code>{e["folder"]}</code>' if e.get("folder") else ""
                 await update.message.reply_text(
                     f"📝 <b>Vacancy waiting for text (MANUAL)</b>\n\n"
-                    f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
+                    f"  ID {e['id']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
                     f"Paste the full job text below the marker in <code>job_posting.txt</code> and send this URL again.\n"
                     f"Or send the job text here (with or without the URL) — it will be processed immediately.",
                     parse_mode=ParseMode.HTML,
@@ -189,7 +189,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             sent_info = f' | Sent: {e["sent"]}' if e["sent"] else ""
             folder_info = f'\n    Folder: <code>{e["folder"]}</code>' if e["folder"] else ""
             lines.append(
-                f'  Row {e["row"]}: <b>{e["company"]}</b> - {e["title"]}\n'
+                f'  ID {e["id"]}: <b>{e["company"]}</b> - {e["title"]}\n'
                 f'    ATS: {e["ats"]}{sent_info}{folder_info}'
             )
         detail = "\n".join(lines)

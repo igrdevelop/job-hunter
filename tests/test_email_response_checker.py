@@ -11,7 +11,7 @@ Test data based on real observed confirmation emails:
 """
 
 import base64
-import openpyxl
+import uuid
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -32,6 +32,8 @@ from hunter.email_response_checker import (
     fetch_confirmation_emails,
     match_email,
 )
+from hunter.db import get_db
+from hunter.tracker import normalize_url, lookup_by_company_and_title
 
 
 # ---------------------------------------------------------------------------
@@ -68,20 +70,25 @@ def _make_msg(
     }
 
 
-def _make_tracker(tmp_path, rows: list[dict]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append([
-        "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-        "Folder", "Sent", "Re-application", "To Learn", "ID", "Drive URL", "Confirmation", "Answer",
-    ])
-    for i, r in enumerate(rows):
-        ws.append([
-            "2026-05-22", r.get("company", "Acme"), r.get("title", "Dev"),
-            "Angular", r.get("ats", "85%"), r.get("url", f"https://example.com/{i}"),
-            "", "", "", "", r.get("id", f"id{i}"), "", r.get("confirmation", ""), "",
-        ])
-    wb.save(tmp_path / "tracker.xlsx")
+def _insert_tracker_row(tracker_db, *, company: str = "Acme", title: str = "Dev",
+                         ats: str = "85%", url: str = "", row_id: str = "",
+                         confirmation: str = "") -> str:
+    """Insert a row into the test DB. Returns the row ID used."""
+    if not url:
+        url = f"https://example.com/{uuid.uuid4().hex[:6]}"
+    if not row_id:
+        row_id = uuid.uuid4().hex[:8]
+    norm = normalize_url(url)
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, confirmation)
+            VALUES (?, '2026-05-22', ?, ?, ?, ?, ?, ?)
+            """,
+            (row_id, company, title, ats, url, norm, confirmation),
+        )
+    return row_id
 
 
 # ---------------------------------------------------------------------------
@@ -515,79 +522,66 @@ def test_parse_message_skips_non_confirmation():
 # match_email
 # ---------------------------------------------------------------------------
 
-def test_match_email_no_company(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
+def test_match_email_no_company(tracker_db):
     email = ConfirmationEmail(company="", title="Angular Dev", date="2026-05-20",
                               subject="...", platform="erecruiter")
     assert match_email(email).match_type == "no_match"
 
 
-def test_match_email_exact(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "NASK", "title": "Senior Frontend Developer"}])
+def test_match_email_exact(tracker_db):
+    _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
     email = ConfirmationEmail(company="NASK", title="Senior Frontend Developer",
                               date="2026-05-20", subject="...", platform="erecruiter")
     result = match_email(email)
     assert result.match_type == "exact"
-    assert result.row_num == 2
+    assert result.row_id is not None
 
 
-def test_match_email_fuzzy_partial_title(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "NASK", "title": "Senior Frontend Developer"}])
+def test_match_email_fuzzy_partial_title(tracker_db):
+    _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
     # "Frontend Developer" vs "Senior Frontend Developer" — "senior" is stop word → exact
     email = ConfirmationEmail(company="NASK", title="Frontend Developer",
                               date="2026-05-20", subject="...", platform="erecruiter")
     result = match_email(email)
     assert result.match_type in ("exact", "fuzzy")
-    assert result.row_num == 2
+    assert result.row_id is not None
 
 
-def test_match_email_no_match_wrong_company(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "Other Corp", "title": "Angular Developer"}])
+def test_match_email_no_match_wrong_company(tracker_db):
+    _insert_tracker_row(tracker_db, company="Other Corp", title="Angular Developer")
     email = ConfirmationEmail(company="NASK", title="Angular Developer",
                               date="2026-05-20", subject="...", platform="erecruiter")
     assert match_email(email).match_type == "no_match"
 
 
-def test_match_email_ambiguous(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [
-        {"company": "Acme", "title": "Angular Developer", "id": "id0"},
-        {"company": "Acme", "title": "Angular Engineer", "id": "id1"},
-    ])
+def test_match_email_ambiguous(tracker_db):
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer",
+                        row_id="id0id0id")
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Engineer",
+                        row_id="id1id1id")
     email = ConfirmationEmail(company="Acme", title="Angular Dev",
                               date="2026-05-20", subject="...", platform="erecruiter")
     result = match_email(email)
     assert result.match_type == "ambiguous"
-    assert result.row_num is None
+    assert result.row_id is None
 
 
-def test_match_email_no_title_single_row(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "Sigma Software", "title": "Middle Front-End Developer"}])
+def test_match_email_no_title_single_row(tracker_db):
+    _insert_tracker_row(tracker_db, company="Sigma Software",
+                        title="Middle Front-End Developer")
     # SmartRecruiters email where title couldn't be extracted
     email = ConfirmationEmail(company="Sigma Software", title="",
                               date="2026-05-20", subject="...", platform="smartrecruiters")
     result = match_email(email)
     assert result.match_type == "fuzzy"
-    assert result.row_num == 2
+    assert result.row_id is not None
 
 
-def test_match_email_no_title_multiple_rows_ambiguous(tmp_path, monkeypatch):
-    import hunter.tracker as t
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [
-        {"company": "Acme", "title": "Angular Developer", "id": "id0"},
-        {"company": "Acme", "title": "React Developer", "id": "id1"},
-    ])
+def test_match_email_no_title_multiple_rows_ambiguous(tracker_db):
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer",
+                        row_id="id0id0id")
+    _insert_tracker_row(tracker_db, company="Acme", title="React Developer",
+                        row_id="id1id1id")
     email = ConfirmationEmail(company="Acme", title="",
                               date="2026-05-20", subject="...", platform="direct")
     assert match_email(email).match_type == "ambiguous"
@@ -648,50 +642,44 @@ def test_fetch_parses_smartrecruiters_confirmation():
 # run_confirmation_check — writes CONFIRMED to tracker
 # ---------------------------------------------------------------------------
 
-def test_run_writes_confirmed(tmp_path, monkeypatch):
-    import hunter.tracker as t
+def test_run_writes_confirmed(tracker_db, monkeypatch):
     import hunter.email_response_checker as checker
 
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [{"company": "NASK", "title": "Senior Frontend Developer"}])
+    _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
 
     confirmed_email = ConfirmationEmail(
         company="NASK", title="Senior Frontend Developer",
         date="2026-05-20", subject="NASK - Dziękujemy...", platform="erecruiter",
     )
-    monkeypatch.setattr(checker, "fetch_confirmation_emails", lambda svc, days: [confirmed_email])
+    monkeypatch.setattr(checker, "fetch_confirmation_emails",
+                        lambda svc, days: [confirmed_email])
 
-    with patch("hunter.email_response_checker.get_gmail_service", return_value=MagicMock()):
+    with patch("hunter.email_response_checker.get_gmail_service",
+               return_value=MagicMock()):
         results = checker.run_confirmation_check(lookback_days=7)
 
     assert results[0].match_type in ("exact", "fuzzy")
-    wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
-    ws = wb.active
-    from hunter.tracker import COL_CONFIRMATION
-    assert ws.cell(row=2, column=COL_CONFIRMATION).value == "2026-05-20"
-    wb.close()
+    rows = lookup_by_company_and_title("NASK", "Senior Frontend Developer")
+    assert len(rows) == 1
+    assert rows[0]["confirmation"] == "2026-05-20"
 
 
-def test_run_does_not_overwrite_existing_confirmation(tmp_path, monkeypatch):
-    import hunter.tracker as t
+def test_run_does_not_overwrite_existing_confirmation(tracker_db, monkeypatch):
     import hunter.email_response_checker as checker
 
-    monkeypatch.setattr(t, "TRACKER_PATH", tmp_path / "tracker.xlsx")
-    _make_tracker(tmp_path, [
-        {"company": "NASK", "title": "Senior Frontend Developer", "confirmation": "2026-04-01"}
-    ])
+    _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer",
+                        confirmation="2026-04-01")
 
     confirmed_email = ConfirmationEmail(
         company="NASK", title="Senior Frontend Developer",
         date="2026-05-20", subject="...", platform="erecruiter",
     )
-    monkeypatch.setattr(checker, "fetch_confirmation_emails", lambda svc, days: [confirmed_email])
+    monkeypatch.setattr(checker, "fetch_confirmation_emails",
+                        lambda svc, days: [confirmed_email])
 
-    with patch("hunter.email_response_checker.get_gmail_service", return_value=MagicMock()):
+    with patch("hunter.email_response_checker.get_gmail_service",
+               return_value=MagicMock()):
         checker.run_confirmation_check(lookback_days=7)
 
-    wb = openpyxl.load_workbook(tmp_path / "tracker.xlsx", read_only=True, data_only=True)
-    ws = wb.active
-    from hunter.tracker import COL_CONFIRMATION
-    assert ws.cell(row=2, column=COL_CONFIRMATION).value == "2026-04-01"  # untouched
-    wb.close()
+    rows = lookup_by_company_and_title("NASK", "Senior Frontend Developer")
+    assert rows[0]["confirmation"] == "2026-04-01"  # untouched

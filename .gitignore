@@ -38,6 +38,9 @@ backups/
 
 # Tracker (per-user data)
 tracker.xlsx
+tracker.db
+tracker.db-wal
+tracker.db-shm
 tracker.backup.*.xlsx
 to_send.xlsx
 to_send.backup.*.xlsx
