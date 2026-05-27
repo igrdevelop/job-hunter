@@ -19,10 +19,10 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ## Experience
 
 ### Role 1 — Alten Poland (Apr 2026 - May 2026)
-**title**: Frontend Developer (Angular)
-**company**: Alten Poland (Intel client)
+**title**: Frontend Developer, Angular (part-time contract)
+**company**: Alten Poland
 **period**: Apr 2026 - May 2026
-**subtitle**: LLM Evaluation Tooling for Intel OpenVINO | Wroclaw, Poland
+**subtitle**: Intel (client) | LLM Evaluation Tooling for OpenVINO | Wroclaw, Poland
 
 **bullets**:
 - Refactored 20+ heterogeneous LLM evaluation report pages into 2 reusable Angular templates with configurable RxJS data pipelines — enabled ~10 new composable reports without per-report frontend rework.
