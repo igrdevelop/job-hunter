@@ -17,7 +17,7 @@ from typing import Optional
 
 from telegram import Update
 
-from hunter.config import APPLY_AGENT_PATH, TRACKER_PATH
+from hunter.config import APPLY_AGENT_PATH
 from hunter.bot.state import _active_apply_urls, _APPLY_AGENT_TIMEOUT
 from hunter.bot.notifications import _tg_notify
 from hunter.bot.paste import _extract_url
@@ -58,7 +58,7 @@ async def _run_apply_agent(
             if url:
                 try:
                     from hunter.tracker_cache import cache
-                    await cache.load_from_excel(TRACKER_PATH)
+                    await cache.load_from_db()
                     row = await cache.get_row_by_url(url)
                     if row:
                         from hunter import gsheets_sync

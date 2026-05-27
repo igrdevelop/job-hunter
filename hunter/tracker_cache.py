@@ -1,5 +1,5 @@
 """
-In-memory cache of tracker.xlsx contents.
+In-memory cache of the SQLite tracker DB.
 
 Speeds up per-job dedup from O(disk read) to O(1), and provides the row-index
 mapping needed for O(1) Google Sheets writes.
@@ -9,7 +9,7 @@ race conditions between the hunt loop and the apply pipeline, which run as
 concurrent asyncio tasks.
 
 Lifecycle:
-  1. At bot startup: cache.load_from_excel()
+  1. At bot startup: cache.load_from_db()
   2. Every hunt/apply write goes through cache.add() or cache.update_*()
   3. Every 30 min gsheets pull calls cache.apply_pull_delta() to reflect user edits
 """
@@ -18,22 +18,13 @@ import asyncio
 import logging
 from pathlib import Path
 
-import openpyxl
-
 from hunter.tracker import (
-    TRACKER_PATH,
     TRACKER_HEADERS,
     normalize_url,
     normalize_company,
     dedup_key,
     _strip_marketing_tail,
     _title_similarity,
-    URL_COL_INDEX,
-    COMPANY_COL_INDEX,
-    TITLE_COL_INDEX,
-    ATS_COL_INDEX,
-    SENT_COL_INDEX,
-    ID_COL_INDEX,
 )
 
 log = logging.getLogger(__name__)
@@ -58,46 +49,34 @@ class TrackerCache:
     # Load
     # ------------------------------------------------------------------
 
-    async def load_from_excel(self, path: Path = TRACKER_PATH) -> None:
-        """Populate cache from tracker.xlsx. Safe to call again to reload."""
+    async def load_from_db(self) -> None:
+        """Populate cache from the SQLite tracker DB.  Safe to call again to reload."""
+        from hunter.tracker import read_all_tracker_rows
+        rows = await asyncio.to_thread(read_all_tracker_rows)
         async with self._lock:
-            self._load_locked(path)
+            self._load_rows_locked(rows)
 
-    def _load_locked(self, path: Path) -> None:
-        """Must be called while holding _lock."""
+    async def load_from_excel(self, path: Path | None = None) -> None:
+        """Deprecated wrapper — calls load_from_db() and ignores *path*.
+
+        Kept for backward compatibility; prefer load_from_db() for new code.
+        """
+        await self.load_from_db()
+
+    def _load_rows_locked(self, rows: list[dict]) -> None:
+        """Rebuild all indexes from a fresh list of row dicts.  Must hold _lock."""
         self.rows.clear()
         self.by_url.clear()
         self.by_ctkey.clear()
-        # sheet_row_index and dirty_ids are Sheets-only state not stored in Excel —
-        # preserve them across hot reloads so mirror_cell_update keeps working.
-
-        if not path.exists():
-            log.warning("tracker_cache: %s not found, starting empty", path)
-            self._loaded = True
-            return
-
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
-        for sheet_row, row_values in enumerate(
-            ws.iter_rows(min_row=2, values_only=True), start=2
-        ):
-            if not row_values or not any(row_values):
-                continue
-            row_dict = self._values_to_dict(row_values)
+        # sheet_row_index and dirty_ids are Sheets-only state — preserve them
+        # across hot reloads so mirror_cell_update keeps working.
+        for row_dict in rows:
             row_id = row_dict.get("ID", "").strip()
             if not row_id:
                 continue
-            self._index_row(row_id, row_dict, sheet_row)
-        wb.close()
+            self._index_row(row_id, row_dict)
         self._loaded = True
-        log.info("tracker_cache: loaded %d rows", len(self.rows))
-
-    def _values_to_dict(self, values: tuple) -> dict:
-        padded = list(values) + [""] * (len(TRACKER_HEADERS) - len(values))
-        return {
-            col: (str(padded[i]) if padded[i] is not None else "")
-            for i, col in enumerate(TRACKER_HEADERS)
-        }
+        log.info("tracker_cache: loaded %d rows from DB", len(self.rows))
 
     def _index_row(self, row_id: str, row_dict: dict, sheet_row: int | None = None) -> None:
         """Insert/overwrite row in all indexes. Caller must hold lock."""

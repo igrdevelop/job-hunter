@@ -5,7 +5,7 @@ import logging
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from hunter.config import TELEGRAM_CHAT_ID, TRACKER_PATH
+from hunter.config import TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ async def scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from hunter.tracker_cache import cache
         if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
+            await cache.load_from_db()
         total = await cache.unsent_count()
         if total == 0:
             msg = "📭 <b>No unsent applications.</b>"

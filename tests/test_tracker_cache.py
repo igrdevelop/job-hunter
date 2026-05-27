@@ -8,13 +8,14 @@ All async methods are driven via asyncio.run() in sync test functions.
 """
 
 import asyncio
+import uuid
 from pathlib import Path
 
-import openpyxl
 import pytest
 
 from hunter.tracker_cache import TrackerCache
 from hunter.tracker import TRACKER_HEADERS, normalize_url, dedup_key
+from hunter.db import get_db
 
 
 # ---------------------------------------------------------------------------
@@ -62,59 +63,84 @@ ROW_C = make_row(
 )
 
 
-def _make_xlsx(path: Path, rows: list[dict]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(TRACKER_HEADERS)
-    for r in rows:
-        ws.append([r.get(h, "") for h in TRACKER_HEADERS])
-    wb.save(path)
+def _insert_row(tracker_db: Path, row: dict) -> None:
+    """Insert a tracker row dict directly into the test SQLite DB."""
+    from hunter.tracker import normalize_url
+    row_id = row.get("ID") or uuid.uuid4().hex[:8]
+    url = row.get("URL", "")
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, stack, ats_status, url, url_norm,
+             folder, sent, reapplication, to_learn, drive_url, confirmation, answer)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row_id,
+                row.get("Date", ""),
+                row.get("Company", ""),
+                row.get("Job Title", ""),
+                row.get("Stack", ""),
+                row.get("ATS %", ""),
+                url,
+                normalize_url(url),
+                row.get("Folder", ""),
+                row.get("Sent", ""),
+                row.get("Re-application", ""),
+                row.get("To Learn", ""),
+                row.get("Drive URL", ""),
+                row.get("Confirmation", ""),
+                row.get("Answer", ""),
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Load from Excel
+# Load from DB
 # ---------------------------------------------------------------------------
 
-class TestLoadFromExcel:
-    def test_empty_when_file_missing(self, tmp_path):
+class TestLoadFromDB:
+    def test_empty_when_db_empty(self, tracker_db):
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "nonexistent.xlsx"))
+        run(c.load_from_db())
         assert c.size == 0
         assert c.loaded
 
-    def test_loads_rows(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A, ROW_B])
+    def test_loads_rows(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
+        _insert_row(tracker_db, ROW_B)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert c.size == 2
         assert "aaaaaaaa" in c.rows
         assert "bbbbbbbb" in c.rows
 
-    def test_indexes_url(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
+    def test_indexes_url(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert run(c.is_known_url(ROW_A["URL"]))
 
-    def test_indexes_company_title(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
+    def test_indexes_company_title(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert run(c.is_known_ct(ROW_A["Company"], ROW_A["Job Title"]))
 
-    def test_skips_rows_without_id(self, tmp_path):
-        row_no_id = make_row(Company="X")  # ID=""
-        _make_xlsx(tmp_path / "t.xlsx", [row_no_id])
+    def test_sheet_row_index_empty_after_load(self, tracker_db):
+        """sheet_row_index is NOT populated at load time; only by set_sheet_row_index()."""
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
-        assert c.size == 0
+        run(c.load_from_db())
+        assert "aaaaaaaa" not in c.sheet_row_index
 
-    def test_records_sheet_row_index(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
+    def test_load_from_excel_deprecated_wrapper(self, tracker_db):
+        """load_from_excel() still works (deprecated alias for load_from_db())."""
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
-        # Header is row 1, first data row is row 2
-        assert c.sheet_row_index.get("aaaaaaaa") == 2
+        run(c.load_from_excel())   # no path needed — reads from DB
+        assert c.size == 1
 
 
 # ---------------------------------------------------------------------------

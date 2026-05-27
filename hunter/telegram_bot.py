@@ -32,7 +32,6 @@ from hunter.config import (
     TELEGRAM_CHAT_ID,
     TIMEZONE,
     GSHEETS_ENABLED,
-    TRACKER_PATH,
 )
 
 # Always-needed by main.py and _post_init:
@@ -183,7 +182,7 @@ async def _post_init(app: Application) -> None:
     # correct immediately after startup (not only after the first /hunt).
     try:
         from hunter.tracker_cache import cache
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         logger.info("[startup] tracker_cache loaded")
     except Exception as e:
         logger.warning("[startup] tracker_cache load failed: %s", e)
