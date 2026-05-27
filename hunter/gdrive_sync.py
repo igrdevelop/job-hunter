@@ -16,6 +16,9 @@ Public API:
 
 import asyncio
 import logging
+import re
+import tempfile
+from datetime import date as _date
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,10 @@ from hunter.config import (
 )
 
 log = logging.getLogger(__name__)
+
+# Matches the start of a log entry: "2026-05-27 21:40:05 [LEVEL] ..."
+# Lines that don't match are continuation lines (tracebacks, indented text).
+_LOG_HEADER_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
 # ---------------------------------------------------------------------------
 # Lazy service singleton
@@ -137,14 +144,36 @@ async def delete_application_folder(drive_url: str) -> bool:
         return False
 
 
-async def upload_log_file(log_path: Path) -> str | None:
-    """Upload a log file to ``Job Hunter/Logs/{filename}`` on Google Drive.
+async def upload_log_file(
+    log_path: Path,
+    *,
+    date_str: str | None = None,
+) -> str | None:
+    """Upload today's log entries to Drive as ``Logs/YYYY-MM-DD.log``.
 
-    Creates a ``Logs`` subfolder inside the root Drive folder if it does not
-    exist yet.  If the file was uploaded before it is overwritten in-place so
-    the Drive folder stays tidy (one file, always current).
+    Filters the log file to lines belonging to *today* so each Drive file
+    covers exactly one calendar day.  Same-day calls overwrite the same
+    Drive file — it accumulates throughout the day.
 
-    Best-effort: returns None when Drive is disabled or on any API error.
+    Multi-line entries (tracebacks) are preserved: a line without a timestamp
+    header is treated as a continuation of the previous entry and included
+    whenever that entry belonged to today.
+
+    Drive structure::
+
+        Job Hunter/
+          Logs/
+            2026-05-27.log   ← overwritten on each upload, grows through the day
+            2026-05-28.log   ← created automatically the next day
+            …
+
+    Args:
+        log_path: Path to the local log file (``logs/hunter_errors.log``).
+        date_str: ISO date to filter by, e.g. ``"2026-05-27"``.
+                  Defaults to today.  Pass explicitly in tests.
+
+    Returns:
+        Drive file URL or ``None`` if disabled / nothing to upload / error.
     """
     if not _ready():
         return None
@@ -152,7 +181,36 @@ async def upload_log_file(log_path: Path) -> str | None:
         log.debug("gdrive_sync.upload_log_file: %s not found, skipping", log_path)
         return None
 
+    today = date_str or _date.today().isoformat()
+
+    # ── Extract today's lines (keep traceback continuations) ─────────────────
     try:
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        log.warning("gdrive_sync.upload_log_file: cannot read %s: %s", log_path, e)
+        return None
+
+    today_lines: list[str] = []
+    in_today = False
+    for line in content.splitlines(keepends=True):
+        if _LOG_HEADER_RE.match(line):          # new log entry
+            in_today = line.startswith(today)
+        if in_today:
+            today_lines.append(line)
+
+    if not today_lines:
+        log.debug(
+            "gdrive_sync.upload_log_file: no entries for %s in %s — skipping",
+            today, log_path.name,
+        )
+        return None
+
+    # ── Write filtered content to a temp file named YYYY-MM-DD.log ───────────
+    tmp_dir = Path(tempfile.mkdtemp(prefix="hunter_log_"))
+    dated_file = tmp_dir / f"{today}.log"
+    try:
+        dated_file.write_text("".join(today_lines), encoding="utf-8")
+
         from hunter.gdrive_client import get_or_create_folder, upload_file
 
         svc = _get_service()
@@ -167,13 +225,26 @@ async def upload_log_file(log_path: Path) -> str | None:
         logs_folder_id = await asyncio.to_thread(
             get_or_create_folder, svc, "Logs", root_id
         )
-        file_id = await asyncio.to_thread(upload_file, svc, log_path, logs_folder_id)
+        file_id = await asyncio.to_thread(upload_file, svc, dated_file, logs_folder_id)
         url = f"https://drive.google.com/file/d/{file_id}/view"
-        log.info("gdrive_sync: uploaded log %s → %s", log_path.name, url)
+        log.info(
+            "gdrive_sync: uploaded %s (%d lines) → %s",
+            dated_file.name, len(today_lines), url,
+        )
         return url
     except Exception as e:
-        log.warning("gdrive_sync.upload_log_file: failed for %s: %s", log_path.name, e)
+        log.warning("gdrive_sync.upload_log_file: failed for %s: %s", today, e)
         return None
+    finally:
+        # Always clean up temp file + dir
+        try:
+            dated_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            tmp_dir.rmdir()
+        except Exception:
+            pass
 
 
 _UPLOAD_TIMEOUT = 120  # seconds per folder

@@ -25,7 +25,7 @@ _console = logging.StreamHandler(sys.stdout)
 _console.setLevel(logging.INFO)
 _console.setFormatter(_fmt)
 
-# ── File handler (WARNING+ with full tracebacks) ──────────────────────────────
+# ── File handler (INFO+ so gmail pipeline trace lands in the log file) ────────
 _log_dir = PROJECT_DIR / "logs"
 _log_dir.mkdir(exist_ok=True)
 _file_handler = RotatingFileHandler(
@@ -34,7 +34,7 @@ _file_handler = RotatingFileHandler(
     backupCount=10,              # keep 10 rotated files → up to 50 MB history
     encoding="utf-8",
 )
-_file_handler.setLevel(logging.WARNING)
+_file_handler.setLevel(logging.INFO)
 _file_handler.setFormatter(_fmt)
 
 logging.root.setLevel(logging.DEBUG)

@@ -157,15 +157,35 @@ def test_upload_returns_none_on_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# upload_log_file
+# upload_log_file — per-day files (YYYY-MM-DD.log)
 # ---------------------------------------------------------------------------
 
-def test_upload_log_file_noop_when_disabled(tmp_path):
+_TEST_DATE = "2026-05-27"  # fixed date used across all upload_log_file tests
+
+
+def _make_log(tmp_path, *extra_lines):
+    """Write a log file with some entries for _TEST_DATE and one old entry."""
     log_file = tmp_path / "hunter_errors.log"
-    log_file.write_text("some errors")
+    lines = [
+        f"{_TEST_DATE} 10:00:00 [INFO] hunter.sources.gmail: ✉ from='jobs@linkedin.com'\n",
+        f"{_TEST_DATE} 10:00:01 [WARNING] hunter.gmail_enricher: FAILED for https://x.com — timeout\n",
+        # Traceback continuation (no timestamp) — must be kept with the WARNING above
+        "Traceback (most recent call last):\n",
+        '  File "enricher.py", line 42, in _enrich_one\n',
+        "TimeoutError\n",
+        # Old entry from a different day — must be excluded
+        "2020-01-01 00:00:00 [INFO] old day entry — must NOT appear\n",
+        *extra_lines,
+    ]
+    log_file.write_text("".join(lines), encoding="utf-8")
+    return log_file
+
+
+def test_upload_log_file_noop_when_disabled(tmp_path):
+    log_file = _make_log(tmp_path)
     with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_log_file(log_file))
+        result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
     assert result is None
 
 
@@ -176,13 +196,25 @@ def test_upload_log_file_noop_when_missing(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_log_file(missing))
+        result = run(gdrive_sync.upload_log_file(missing, date_str=_TEST_DATE))
+    assert result is None
+
+
+def test_upload_log_file_noop_when_no_entries_for_date(tmp_path):
+    """If the log has no lines for the requested date, return None without uploading."""
+    log_file = tmp_path / "hunter_errors.log"
+    log_file.write_text("2020-01-01 00:00:00 [INFO] old stuff\n")
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+    ):
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
     assert result is None
 
 
 def test_upload_log_file_happy_path(tmp_path):
-    log_file = tmp_path / "hunter_errors.log"
-    log_file.write_text("2026-05-27 [ERROR] something bad")
+    log_file = _make_log(tmp_path)
 
     mock_svc = MagicMock()
     with (
@@ -195,22 +227,49 @@ def test_upload_log_file_happy_path(tmp_path):
     ):
         mock_goc.side_effect = ["root_id", "logs_folder_id"]
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_log_file(log_file))
+        result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
-    # Creates root → Logs subfolder → uploads the file
+    # Creates root → Logs subfolder → uploads dated file
     assert mock_goc.call_count == 2
     assert mock_goc.call_args_list[0].args[1] == "Job Hunter"
-    assert mock_goc.call_args_list[0].args[2] is None   # root has no parent
+    assert mock_goc.call_args_list[0].args[2] is None      # root has no parent
     assert mock_goc.call_args_list[1].args[1] == "Logs"
-    assert mock_goc.call_args_list[1].args[2] == "root_id"  # Logs is inside root
-    mock_uf.assert_called_once_with(mock_svc, log_file, "logs_folder_id")
-    # Returns a file view URL (not a folder URL)
+    assert mock_goc.call_args_list[1].args[2] == "root_id" # Logs is inside root
+    # The file uploaded must be named YYYY-MM-DD.log (not the original filename)
+    uploaded_path = mock_uf.call_args.args[1]
+    assert uploaded_path.name == f"{_TEST_DATE}.log"
     assert result == "https://drive.google.com/file/d/file123/view"
 
 
+def test_upload_log_file_dated_content_excludes_old_entries(tmp_path):
+    """Only lines for _TEST_DATE (plus traceback continuations) must be uploaded."""
+    log_file = _make_log(tmp_path)
+    captured: list[str] = []
+
+    def fake_upload(svc, path, parent_id):
+        captured.append(path.read_text(encoding="utf-8"))
+        return "fid"
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", "root"),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gdrive_client.get_or_create_folder", return_value="logs_id"),
+        patch("hunter.gdrive_client.upload_file", side_effect=fake_upload),
+    ):
+        from hunter import gdrive_sync
+        run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
+
+    assert captured, "upload_file was not called"
+    content = captured[0]
+    assert _TEST_DATE in content                     # today's entries present
+    assert "old day entry" not in content            # old day excluded
+    assert "TimeoutError" in content                 # traceback continuation kept
+    assert "Traceback (most recent call last)" in content
+
+
 def test_upload_log_file_uses_existing_root_id(tmp_path):
-    log_file = tmp_path / "hunter_errors.log"
-    log_file.write_text("errors")
+    log_file = _make_log(tmp_path)
 
     with (
         patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
@@ -220,9 +279,9 @@ def test_upload_log_file_uses_existing_root_id(tmp_path):
         patch("hunter.gdrive_client.upload_file", return_value="fid"),
     ):
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_log_file(log_file))
+        result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
-    # Only one get_or_create_folder call (for Logs/ subfolder — root is preset)
+    # Only one get_or_create_folder call: Logs/ under the preset root (no root lookup)
     assert mock_goc.call_count == 1
     assert mock_goc.call_args_list[0].args[1] == "Logs"
     assert mock_goc.call_args_list[0].args[2] == "preset_root_id"
@@ -230,8 +289,7 @@ def test_upload_log_file_uses_existing_root_id(tmp_path):
 
 
 def test_upload_log_file_returns_none_on_error(tmp_path):
-    log_file = tmp_path / "hunter_errors.log"
-    log_file.write_text("errors")
+    log_file = _make_log(tmp_path)
 
     with (
         patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
@@ -240,7 +298,6 @@ def test_upload_log_file_returns_none_on_error(tmp_path):
         patch("hunter.gdrive_client.get_or_create_folder", side_effect=RuntimeError("API down")),
     ):
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_log_file(log_file))
+        result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
-    # Best-effort — error swallowed
-    assert result is None
+    assert result is None  # best-effort — error swallowed
