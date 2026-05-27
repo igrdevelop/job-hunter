@@ -139,16 +139,12 @@ async def _run_hunt_impl(
         known_urls = await asyncio.to_thread(get_known_urls)
         known_ct = await asyncio.to_thread(get_known_company_titles)
     except Exception as e:
-        logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
+        logger.exception("[Hunt] Failed to read tracker DB for dedup")
         hint = str(e)[:400]
         await send_text(
             context,
-            "❌ <b>Failed to read tracker.xlsx</b> (dedup before hunt).\n\n"
-            f"<pre>{hint}</pre>\n\n"
-            "Common cause of <code>[Content_Types].xml</code> errors — the file is not a real "
-            "Excel workbook (truncated, 0 bytes, renamed HTML/CSV, corrupt archive). "
-            f"Check: <code>{TRACKER_PATH}</code>\n"
-            "Open in Excel or restore from backup.",
+            "❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n"
+            f"<pre>{hint}</pre>",
         )
         return
 
@@ -336,7 +332,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 context,
                 f"📋 [{i}/{total}] <b>JobLeads — MANUAL</b>: {job.company} — {job.title}\n"
                 "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
-                "<i>tracker.xlsx updated, URL dedup active.</i>",
+                "<i>Tracker updated, URL dedup active.</i>",
             )
         else:
             failed += 1
