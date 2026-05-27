@@ -27,7 +27,7 @@ async def scheduled_check_email_responses(context: ContextTypes.DEFAULT_TYPE) ->
     newly_confirmed = [
         r for r in results
         if r.match_type in ("exact", "fuzzy")
-        and r.row_num is not None
+        and r.row_id is not None
         and not r.candidates[0].get("confirmation", "")
     ]
     if not newly_confirmed:

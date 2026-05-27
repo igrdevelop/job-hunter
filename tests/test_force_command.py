@@ -14,61 +14,69 @@ def run(coro):
 # tracker.delete_all_by_url
 # ---------------------------------------------------------------------------
 
-def _make_wb(rows):
-    """Build a minimal openpyxl workbook for testing."""
-    import openpyxl
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    # headers row
-    ws.append(["Date", "Company", "Job Title", "Stack", "ATS %", "URL", "Folder",
-               "Sent", "Re-app", "To Learn", "ID", "Drive URL"])
-    for row in rows:
-        ws.append(row)
-    return wb
-
-
-def test_delete_all_by_url_removes_all_statuses(tmp_path):
+def test_delete_all_by_url_removes_all_statuses(tracker_db):
     """delete_all_by_url should delete FAIL, SKIP, MANUAL, and success rows."""
-    import openpyxl
-    tracker = tmp_path / "tracker.xlsx"
+    from hunter.tracker import delete_all_by_url, normalize_url
+    from hunter.db import get_db
 
-    wb = _make_wb([
-        ["2026-05-10", "AcmeCorp", "Dev", "Angular", "95", "https://example.com/job/1",
-         "Applications/2026-05-10/AcmeCorp", "", "", "", "aaa111", "https://drive.google.com/drive/folders/FOLDER1"],
-        ["2026-05-11", "OtherCo",  "Dev", "React",   "87", "https://other.com/job/2",
-         "Applications/2026-05-11/OtherCo", "", "", "", "bbb222", ""],
-        ["2026-05-12", "AcmeCorp", "Dev", "Angular", "FAIL", "https://example.com/job/1",
-         "", "", "", "", "ccc333", ""],
-    ])
-    wb.save(tracker)
+    url1 = "https://example.com/job/1"
+    url2 = "https://other.com/job/2"
+    norm1 = normalize_url(url1)
+    norm2 = normalize_url(url2)
 
-    with patch("hunter.tracker.TRACKER_PATH", tracker):
-        from hunter.tracker import delete_all_by_url
-        result = delete_all_by_url("https://example.com/job/1")
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, stack, ats_status, url, url_norm, folder, drive_url) "
+            "VALUES ('aaa11111', '2026-05-10', 'AcmeCorp', 'Dev', 'Angular', '95', ?, ?, ?, ?)",
+            (url1, norm1,
+             "Applications/2026-05-10/AcmeCorp",
+             "https://drive.google.com/drive/folders/FOLDER1"),
+        )
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, stack, ats_status, url, url_norm, folder, drive_url) "
+            "VALUES ('bbb22222', '2026-05-11', 'OtherCo', 'Dev', 'React', '87', ?, ?, ?, '')",
+            (url2, norm2, "Applications/2026-05-11/OtherCo"),
+        )
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, stack, ats_status, url, url_norm, folder) "
+            "VALUES ('ccc33333', '2026-05-12', 'AcmeCorp', 'Dev', 'Angular', 'FAIL', ?, ?, '')",
+            (url1, norm1),
+        )
+
+    result = delete_all_by_url(url1)
 
     assert result["deleted"] == 2
     assert result["folder"] == "Applications/2026-05-10/AcmeCorp"
     assert result["drive_url"] == "https://drive.google.com/drive/folders/FOLDER1"
 
     # Only OtherCo row should remain
-    wb2 = openpyxl.load_workbook(tracker)
-    rows = list(wb2.active.iter_rows(min_row=2, values_only=True))
-    companies = [r[1] for r in rows if any(r)]
-    assert companies == ["OtherCo"]
+    with get_db(tracker_db) as conn:
+        rows = conn.execute(
+            "SELECT company FROM applications ORDER BY rowid"
+        ).fetchall()
+    assert [r["company"] for r in rows] == ["OtherCo"]
 
 
-def test_delete_all_by_url_unknown_url(tmp_path):
+def test_delete_all_by_url_unknown_url(tracker_db):
     """Returns zero deleted when URL not found."""
-    tracker = tmp_path / "tracker.xlsx"
-    wb = _make_wb([
-        ["2026-05-10", "AcmeCorp", "Dev", "Angular", "95", "https://example.com/job/1",
-         "Applications/AcmeCorp", "", "", "", "aaa111", ""],
-    ])
-    wb.save(tracker)
+    from hunter.tracker import delete_all_by_url, normalize_url
+    from hunter.db import get_db
 
-    with patch("hunter.tracker.TRACKER_PATH", tracker):
-        from hunter.tracker import delete_all_by_url
-        result = delete_all_by_url("https://other.com/job/999")
+    url1 = "https://example.com/job/1"
+    norm1 = normalize_url(url1)
+
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, stack, ats_status, url, url_norm, folder) "
+            "VALUES ('aaa11111', '2026-05-10', 'AcmeCorp', 'Dev', 'Angular', '95', ?, ?, 'Applications/AcmeCorp')",
+            (url1, norm1),
+        )
+
+    result = delete_all_by_url("https://other.com/job/999")
 
     assert result["deleted"] == 0
     assert result["folder"] is None
@@ -91,12 +99,11 @@ def test_cache_invalidate_url_removes_from_all_indexes():
             "Folder": "Applications/AcmeCorp", "Re-application": "",
             "To Learn": "", "Drive URL": "",
         }
-        await c.add(row, sheet_row=2)
+        await c.add(row)
         assert await c.is_known_url("https://example.com/job/1")
         await c.invalidate_url("https://example.com/job/1")
         assert not await c.is_known_url("https://example.com/job/1")
         assert "abc123" not in c.rows
-        assert "abc123" not in c.sheet_row_index
 
     run(_run())
 
@@ -300,26 +307,15 @@ def test_delete_sheet_row_calls_batch_update():
 # ---------------------------------------------------------------------------
 
 def test_delete_row_by_url_success():
-    """delete_row_by_url returns True and calls delete_sheet_row when URL is cached."""
-    from hunter.tracker_cache import TrackerCache
+    """delete_row_by_url returns True and calls delete_sheet_row when URL is in DB."""
+    import hunter.gsheets_sync as gsync
 
     async def _run():
-        c = TrackerCache()
-        row = {
-            "ID": "abc123", "URL": "https://example.com/job/1",
-            "Company": "AcmeCorp", "Job Title": "Dev",
-            "ATS %": "95", "Sent": "", "Stack": "Angular",
-            "Folder": "Applications/AcmeCorp", "Re-application": "",
-            "To Learn": "", "Drive URL": "",
-        }
-        await c.add(row, sheet_row=5)
-
-        import hunter.gsheets_sync as gsync
-
         with patch.object(gsync, "_ready", return_value=True), \
              patch.object(gsync, "_get_service", return_value=MagicMock()), \
              patch.object(gsync, "_sheet_id", return_value="sheet-id-abc"), \
-             patch.object(gsync, "cache", c), \
+             patch.object(gsync, "lookup_url", return_value=[{"id": "abc123"}]), \
+             patch.object(gsync, "get_sheets_row", return_value=5), \
              patch("hunter.gsheets_client.delete_sheet_row") as mock_del:
             result = await gsync.delete_row_by_url("https://example.com/job/1")
 
@@ -332,42 +328,28 @@ def test_delete_row_by_url_success():
     run(_run())
 
 
-def test_delete_row_by_url_not_in_cache():
-    """delete_row_by_url returns False when URL is not cached."""
+def test_delete_row_by_url_not_in_db():
+    """delete_row_by_url returns False when URL is not in tracker DB."""
+    import hunter.gsheets_sync as gsync
 
     async def _run():
-        from hunter.tracker_cache import TrackerCache
-        c = TrackerCache()  # empty
-
-        with patch("hunter.gsheets_sync.cache", c):
-            with patch("hunter.gsheets_sync._ready", return_value=True):
-                from hunter import gsheets_sync
-                result = await gsheets_sync.delete_row_by_url("https://notfound.com/job/1")
-
+        with patch.object(gsync, "_ready", return_value=True), \
+             patch.object(gsync, "lookup_url", return_value=[]):
+            result = await gsync.delete_row_by_url("https://notfound.com/job/1")
         assert result is False
 
     run(_run())
 
 
 def test_delete_row_by_url_no_sheet_index():
-    """delete_row_by_url returns False when row has no sheet_row_index."""
-    from hunter.tracker_cache import TrackerCache
+    """delete_row_by_url returns False when row has no sheets_row recorded in DB."""
+    import hunter.gsheets_sync as gsync
 
     async def _run():
-        c = TrackerCache()
-        row = {
-            "ID": "xyz999", "URL": "https://example.com/job/no-index",
-            "Company": "Corp", "Job Title": "Dev",
-            "ATS %": "80", "Sent": "", "Stack": "React",
-            "Folder": "", "Re-application": "", "To Learn": "", "Drive URL": "",
-        }
-        await c.add(row, sheet_row=None)  # no sheet_row → not in sheet_row_index
-
-        with patch("hunter.gsheets_sync.cache", c):
-            with patch("hunter.gsheets_sync._ready", return_value=True):
-                from hunter import gsheets_sync
-                result = await gsheets_sync.delete_row_by_url("https://example.com/job/no-index")
-
+        with patch.object(gsync, "_ready", return_value=True), \
+             patch.object(gsync, "lookup_url", return_value=[{"id": "xyz999"}]), \
+             patch.object(gsync, "get_sheets_row", return_value=None):
+            result = await gsync.delete_row_by_url("https://example.com/job/no-index")
         assert result is False
 
     run(_run())

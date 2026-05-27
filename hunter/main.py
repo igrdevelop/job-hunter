@@ -284,7 +284,7 @@ async def _sync_to_sheets(url: str) -> None:
     try:
         from hunter.tracker_cache import cache
         from hunter import gsheets_sync
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         row = await cache.get_row_by_url(url)
         if row:
             await gsheets_sync.mirror_new_row(row)

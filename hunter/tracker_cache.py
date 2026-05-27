@@ -1,39 +1,30 @@
 """
-In-memory cache of tracker.xlsx contents.
+In-memory cache of the SQLite tracker DB.
 
-Speeds up per-job dedup from O(disk read) to O(1), and provides the row-index
-mapping needed for O(1) Google Sheets writes.
+Speeds up per-job dedup from O(disk read) to O(1).
 
 All mutations and is_known_* reads are protected by asyncio.Lock to prevent
 race conditions between the hunt loop and the apply pipeline, which run as
 concurrent asyncio tasks.
 
 Lifecycle:
-  1. At bot startup: cache.load_from_excel()
+  1. At bot startup: cache.load_from_db()
   2. Every hunt/apply write goes through cache.add() or cache.update_*()
-  3. Every 30 min gsheets pull calls cache.apply_pull_delta() to reflect user edits
+  3. Sheets metadata (sheets_row, sheets_dirty) is stored directly in DB —
+     see hunter.tracker.set_sheets_row / mark_sheets_dirty / mark_sheets_clean.
 """
 
 import asyncio
 import logging
 from pathlib import Path
 
-import openpyxl
-
 from hunter.tracker import (
-    TRACKER_PATH,
     TRACKER_HEADERS,
     normalize_url,
     normalize_company,
     dedup_key,
     _strip_marketing_tail,
     _title_similarity,
-    URL_COL_INDEX,
-    COMPANY_COL_INDEX,
-    TITLE_COL_INDEX,
-    ATS_COL_INDEX,
-    SENT_COL_INDEX,
-    ID_COL_INDEX,
 )
 
 log = logging.getLogger(__name__)
@@ -43,14 +34,12 @@ _ANGULAR_KEYWORDS = ("angular", "ng ")
 
 
 class TrackerCache:
-    """Thread-safe (asyncio) in-memory view of tracker.xlsx."""
+    """Thread-safe (asyncio) in-memory view of the tracker SQLite DB."""
 
     def __init__(self) -> None:
-        self.rows: dict[str, dict] = {}           # ID -> row dict
-        self.by_url: dict[str, str] = {}          # normalized_url -> ID (latest)
-        self.by_ctkey: dict[str, str] = {}        # dedup_key -> ID (latest)
-        self.sheet_row_index: dict[str, int] = {} # ID -> Sheets 1-based row index
-        self.dirty_ids: set[str] = set()          # IDs that failed Sheets push
+        self.rows: dict[str, dict] = {}    # ID -> row dict
+        self.by_url: dict[str, str] = {}   # normalized_url -> ID (latest)
+        self.by_ctkey: dict[str, str] = {} # dedup_key -> ID (latest)
         self._lock = asyncio.Lock()
         self._loaded = False
 
@@ -58,48 +47,34 @@ class TrackerCache:
     # Load
     # ------------------------------------------------------------------
 
-    async def load_from_excel(self, path: Path = TRACKER_PATH) -> None:
-        """Populate cache from tracker.xlsx. Safe to call again to reload."""
+    async def load_from_db(self) -> None:
+        """Populate cache from the SQLite tracker DB.  Safe to call again to reload."""
+        from hunter.tracker import read_all_tracker_rows
+        rows = await asyncio.to_thread(read_all_tracker_rows)
         async with self._lock:
-            self._load_locked(path)
+            self._load_rows_locked(rows)
 
-    def _load_locked(self, path: Path) -> None:
-        """Must be called while holding _lock."""
+    async def load_from_excel(self, path: Path | None = None) -> None:
+        """Deprecated wrapper — calls load_from_db() and ignores *path*.
+
+        Kept for backward compatibility; prefer load_from_db() for new code.
+        """
+        await self.load_from_db()
+
+    def _load_rows_locked(self, rows: list[dict]) -> None:
+        """Rebuild all indexes from a fresh list of row dicts.  Must hold _lock."""
         self.rows.clear()
         self.by_url.clear()
         self.by_ctkey.clear()
-        # sheet_row_index and dirty_ids are Sheets-only state not stored in Excel —
-        # preserve them across hot reloads so mirror_cell_update keeps working.
-
-        if not path.exists():
-            log.warning("tracker_cache: %s not found, starting empty", path)
-            self._loaded = True
-            return
-
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
-        for sheet_row, row_values in enumerate(
-            ws.iter_rows(min_row=2, values_only=True), start=2
-        ):
-            if not row_values or not any(row_values):
-                continue
-            row_dict = self._values_to_dict(row_values)
+        for row_dict in rows:
             row_id = row_dict.get("ID", "").strip()
             if not row_id:
                 continue
-            self._index_row(row_id, row_dict, sheet_row)
-        wb.close()
+            self._index_row(row_id, row_dict)
         self._loaded = True
-        log.info("tracker_cache: loaded %d rows", len(self.rows))
+        log.info("tracker_cache: loaded %d rows from DB", len(self.rows))
 
-    def _values_to_dict(self, values: tuple) -> dict:
-        padded = list(values) + [""] * (len(TRACKER_HEADERS) - len(values))
-        return {
-            col: (str(padded[i]) if padded[i] is not None else "")
-            for i, col in enumerate(TRACKER_HEADERS)
-        }
-
-    def _index_row(self, row_id: str, row_dict: dict, sheet_row: int | None = None) -> None:
+    def _index_row(self, row_id: str, row_dict: dict) -> None:
         """Insert/overwrite row in all indexes. Caller must hold lock."""
         self.rows[row_id] = row_dict
         url = row_dict.get("URL", "")
@@ -109,21 +84,19 @@ class TrackerCache:
         title = row_dict.get("Job Title", "")
         if company and title:
             self.by_ctkey[dedup_key(company, title)] = row_id
-        if sheet_row is not None:
-            self.sheet_row_index[row_id] = sheet_row
 
     # ------------------------------------------------------------------
     # Mutations
     # ------------------------------------------------------------------
 
-    async def add(self, row: dict, sheet_row: int | None = None) -> None:
-        """Add a new row. row must contain 'ID'. sheet_row is optional Sheets index."""
+    async def add(self, row: dict) -> None:
+        """Add a new row. row must contain 'ID'."""
         async with self._lock:
             row_id = row.get("ID", "").strip()
             if not row_id:
                 log.warning("tracker_cache.add: row missing ID, skipping")
                 return
-            self._index_row(row_id, dict(row), sheet_row)
+            self._index_row(row_id, dict(row))
 
     async def update_status(self, row_id: str, ats_value: str) -> None:
         """Update ATS % / status field (SKIP, FAIL, EXPIRED, score…)."""
@@ -167,23 +140,6 @@ class TrackerCache:
                 title = row.get("Job Title", "")
                 if company and title:
                     self.by_ctkey.pop(dedup_key(company, title), None)
-            self.sheet_row_index.pop(row_id, None)
-            self.dirty_ids.discard(row_id)
-
-    async def mark_dirty(self, row_id: str) -> None:
-        """Flag row for Sheets resync retry."""
-        async with self._lock:
-            self.dirty_ids.add(row_id)
-
-    async def mark_clean(self, row_id: str) -> None:
-        """Clear dirty flag after successful Sheets write."""
-        async with self._lock:
-            self.dirty_ids.discard(row_id)
-
-    async def set_sheet_row_index(self, row_id: str, sheet_row: int) -> None:
-        """Store the Sheets row index after a successful append."""
-        async with self._lock:
-            self.sheet_row_index[row_id] = sheet_row
 
     # ------------------------------------------------------------------
     # Dedup reads
@@ -271,73 +227,6 @@ class TrackerCache:
                 if not r.get("Sent", "").strip()
             ]
 
-    async def dirty_rows(self) -> list[tuple[str, dict, int | None]]:
-        """Return (id, row, sheet_row_index) for all dirty rows."""
-        async with self._lock:
-            result = []
-            for row_id in list(self.dirty_ids):
-                if row_id in self.rows:
-                    result.append((
-                        row_id,
-                        dict(self.rows[row_id]),
-                        self.sheet_row_index.get(row_id),
-                    ))
-            return result
-
-    # ------------------------------------------------------------------
-    # Pull delta (Sheets → cache)
-    # ------------------------------------------------------------------
-
-    async def apply_pull_delta(self, sheets_rows: list[tuple[int, dict]]) -> list[dict]:
-        """
-        Merge a fresh Sheets snapshot into the cache.
-
-        For each Sheets row matched by ID:
-        - Update user-editable fields (Sent, To Learn, Re-application) per conflict matrix.
-        - Update sheet_row_index.
-
-        Returns list of row dicts that need to be written back to Excel
-        (i.e., rows where Sheets had a newer value).
-        """
-        to_write_excel: list[dict] = []
-
-        async with self._lock:
-            sheets_by_id = {r.get("ID", ""): (idx, r) for idx, r in sheets_rows if r.get("ID")}
-
-            for row_id, cached in list(self.rows.items()):
-                if row_id not in sheets_by_id:
-                    # Row missing from Sheets — will be restored by gsheets_sync
-                    continue
-
-                sheet_idx, sheet_row = sheets_by_id[row_id]
-                self.sheet_row_index[row_id] = sheet_idx
-
-                changed = False
-                excel_sent = cached.get("Sent", "").strip()
-                sheet_sent = sheet_row.get("Sent", "").strip()
-
-                # Conflict matrix for Sent (§9)
-                if excel_sent != sheet_sent:
-                    if excel_sent == "EXPIRED" and not sheet_sent:
-                        # Bot's EXPIRED wins — Sheets will be fixed by resync
-                        pass
-                    else:
-                        # Trust Sheets (user's date, user erased, different date)
-                        cached["Sent"] = sheet_sent
-                        changed = True
-
-                # User-editable columns: always trust Sheets if different
-                for field in ("To Learn", "Re-application"):
-                    sheet_val = sheet_row.get(field, "").strip()
-                    if cached.get(field, "").strip() != sheet_val:
-                        cached[field] = sheet_val
-                        changed = True
-
-                if changed:
-                    to_write_excel.append(dict(cached))
-
-        return to_write_excel
-
     # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------
@@ -351,10 +240,7 @@ class TrackerCache:
         return self._loaded
 
     def __repr__(self) -> str:
-        return (
-            f"<TrackerCache rows={len(self.rows)} "
-            f"dirty={len(self.dirty_ids)} loaded={self._loaded}>"
-        )
+        return f"<TrackerCache rows={len(self.rows)} loaded={self._loaded}>"
 
 
 # Singleton — one cache per process

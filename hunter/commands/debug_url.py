@@ -44,13 +44,9 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         lines.append(f"<b>Clean URL:</b> <code>{clean[:80]}</code>")
 
         # 1. Is it in unsent rows?
-        from hunter.tracker import (
-            iter_unsent_rows,
-            ATS_COL_INDEX, SENT_COL_INDEX, ID_COL_INDEX,
-            URL_COL_INDEX, COMPANY_COL_INDEX, TITLE_COL_INDEX,
-        )
-        from hunter.config import TRACKER_PATH
-        import openpyxl as _openpyxl
+        from hunter.tracker import iter_unsent_rows, lookup_url
+        from hunter.db import get_db
+        import hunter.tracker as _tracker
 
         offer_id = url.split(",oferta,")[-1].split("?")[0] if ",oferta," in url else ""
 
@@ -68,28 +64,39 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         else:
             lines.append("\n⚠️ <b>NOT in unsent tracker rows</b>")
 
-            # Scan ALL rows (including excluded ones) to explain why
+            # Scan ALL rows (including non-unsent) via SQLite to explain why
             def _find_row_in_tracker():
-                if not TRACKER_PATH.exists():
-                    return None
-                wb = _openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-                ws = wb.active
-                try:
-                    for row in ws.iter_rows(min_row=2, values_only=True):
-                        if not row:
-                            continue
-                        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-                        if _url_matches(row_url):
-                            return {
-                                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
-                                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
-                                "sent": str(row[SENT_COL_INDEX - 1] or "").strip(),
-                                "id": str(row[ID_COL_INDEX - 1] or "").strip(),
-                                "url": row_url,
-                            }
-                finally:
-                    wb.close()
+                # Exact normalised URL match
+                candidates = lookup_url(url)
+                if not candidates and clean != url:
+                    candidates = lookup_url(clean)
+                if candidates:
+                    r = candidates[0]
+                    return {
+                        "company": r["company"],
+                        "title":   r["title"],
+                        "ats":     r["ats"],
+                        "sent":    r["sent"],
+                        "id":      r["id"],
+                        "url":     url,
+                    }
+                # offer_id fallback for pracuj.pl-style URLs
+                if offer_id:
+                    with get_db(_tracker.DB_PATH) as conn:
+                        row = conn.execute(
+                            "SELECT id, company, title, ats_status, sent, url "
+                            "FROM applications WHERE url LIKE ? OR url_norm LIKE ?",
+                            (f"%{offer_id}%", f"%{offer_id}%"),
+                        ).fetchone()
+                    if row:
+                        return {
+                            "company": row["company"],
+                            "title":   row["title"],
+                            "ats":     row["ats_status"],
+                            "sent":    row["sent"],
+                            "id":      row["id"],
+                            "url":     row["url"],
+                        }
                 return None
 
             found_row = await asyncio.to_thread(_find_row_in_tracker)

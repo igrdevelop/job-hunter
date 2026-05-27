@@ -1,48 +1,67 @@
 """
-tracker.py — read/write tracker.xlsx for the hunter.
+tracker.py — SQLite-backed job tracker.
+
+All persistent state lives in tracker.db (SQLite, WAL mode).
+Public API is identical to the previous openpyxl implementation;
+callers need no changes except where row_num (xlsx row) was replaced
+by row_id (the 8-char hex PRIMARY KEY from the applications table).
 
 Responsibilities:
-  - get_known_urls()     → set of URLs already in tracker (for dedup)
-  - add_skipped(job)     → append a row with status "SKIP"
+  - get_known_urls()     → set of normalised URLs for dedup
+  - add_skipped(job)     → append a SKIP row
   - add_applied(...)     → append a successful generated-docs row
-  - add_manual_jobleads_pending(...) → MANUAL row when JobLeads text cannot be fetched
+  - add_manual_jobleads_pending(...) → MANUAL row for JobLeads paste flow
+  - lookup_url(url)      → list of matching rows (by normalised URL)
+  - read_all_tracker_rows() → all rows for Google Sheets / Drive sync
+  - set_confirmation(row_id, date_str) → write confirmation date
+  … (see individual docstrings)
+
+DB path: hunter.config.TRACKER_DB_PATH  (default: project root/tracker.db)
+Testable: monkeypatch hunter.tracker.DB_PATH to an isolated tmp path.
 """
 
 import re
-import time
 import uuid
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill
-from openpyxl.utils import get_column_letter
-
-from hunter.config import TRACKER_PATH
+from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
+from hunter.db import get_db
 from hunter.models import Job
 
+# ── Module-level DB path — override in tests via monkeypatch ──────────────────
+DB_PATH: Path = TRACKER_DB_PATH
+
+# ── Schema / header constants (kept for backward compat with tracker_cache, db) ─
 TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
     "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
     "Drive URL", "Confirmation", "Answer",
 ]
-# Columns: 1 Date, 2 Company, 3 Job Title, 4 Stack, 5 ATS %, 6 URL, 7 Folder, 8 Sent, 9 Re-app, 10 To Learn, 11 ID, 12 Drive URL, 13 Confirmation, 14 Answer
-URL_COL_INDEX = 6       # "URL" (was wrongly 5 — that is ATS %, broke URL dedup)
-COMPANY_COL_INDEX = 2   # "Company"
-TITLE_COL_INDEX = 3     # "Job Title"
-ATS_COL_INDEX = 5       # "ATS %" - also used for status (FAIL, SKIP)
-SENT_COL_INDEX = 8      # "Sent"
-ID_COL_INDEX = 11       # "ID" — short uuid4 hex, used as sync key (Google Sheets ↔ tracker)
-COL_DRIVE_URL = 12      # "Drive URL" — Google Drive folder URL after upload
-COL_CONFIRMATION = 13   # "Confirmation" — date ATS acknowledged application (green when filled)
-COL_ANSWER = 14         # "Answer" — future: company reply (rejection / interview / offer)
+# 1-based column indices (mirror xlsx schema; kept for tracker_cache / db imports)
+URL_COL_INDEX = 6
+COMPANY_COL_INDEX = 2
+TITLE_COL_INDEX = 3
+ATS_COL_INDEX = 5
+SENT_COL_INDEX = 8
+ID_COL_INDEX = 11
+COL_DRIVE_URL = 12
+COL_CONFIRMATION = 13
+COL_ANSWER = 14
+
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
-
-# ATS column: JobLeads detail pages are Cloudflare-blocked — user pastes description
-# into Applications/.../job_posting.txt then re-runs apply on the same URL.
 MANUAL_PENDING_ATS = "MANUAL"
+_COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
 
+# ── gsheets column map (used by read_all_tracker_rows + gsheets_sync) ─────────
+_GSHEETS_COLS = [
+    "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
+    "Folder", "Sent", "Re-application", "To Learn", "ID",
+]
+
+
+# ── Pure helpers ──────────────────────────────────────────────────────────────
 
 def normalize_url(url: str) -> str:
     """Canonical form: lowercase host, strip trailing slash, drop tracking params."""
@@ -52,18 +71,13 @@ def normalize_url(url: str) -> str:
     p = urlparse(url)
     host = (p.hostname or "").lower()
     path = p.path.rstrip("/") or "/"
-    # Drop common tracking query params
     drop_params = {
         "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
-        "utm_id", "utm_term",
-        "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
+        "utm_id", "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
         "campaignid", "adgroupid",
         "originToLandingJobPostings", "origin",
-        # Pracuj.pl tracking params (email alerts, suggested jobs)
         "sendid", "send_date", "sug",
     }
-    # For job boards where the job identity is fully in the path, drop ALL query params.
-    # This makes dedup robust against any unknown tracking/session params.
     _path_id_domains = {"www.pracuj.pl", "justjoin.it", "nofluffjobs.com"}
     if host in _path_id_domains:
         query = ""
@@ -71,109 +85,56 @@ def normalize_url(url: str) -> str:
         qs = parse_qs(p.query, keep_blank_values=False)
         clean_qs = {k: v for k, v in qs.items() if k not in drop_params}
         query = urlencode(clean_qs, doseq=True) if clean_qs else ""
-    # For LinkedIn /jobs/view/{id}/ — keep only path
     if "linkedin.com" in host and "/jobs/view/" in path:
         m = re.search(r"/jobs/view/(\d+)", path)
         if m:
             path = f"/jobs/view/{m.group(1)}"
             query = ""
-    # Strip /rss suffix (solid.jobs RSS feed vs regular URL are the same job)
     if path.endswith("/rss"):
         path = path[:-4] or "/"
-    # Normalize JustJoin URL format: /offers/{slug} → /job-offer/{slug}
-    # JustJoin changed their URL scheme; both point to the same offer.
     if "justjoin.it" in host:
         path = re.sub(r"^/offers/", "/job-offer/", path)
     return urlunparse((p.scheme, host, path, "", query, ""))
 
 
 def _strip_diacritics(s: str) -> str:
-    """Transliterate Polish/accented chars to ASCII equivalents.
-
-    Note: ł/Ł (U+0142/U+0141) are NOT NFKD-decomposable, so they must be
-    replaced explicitly before the standard normalization step.
-    """
     import unicodedata
-    s = s.replace('\u0142', 'l').replace('\u0141', 'L')   # ł → l, Ł → L
+    s = s.replace('ł', 'l').replace('Ł', 'L')
     return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
 
 
 def _strip_legal_suffixes(s: str) -> str:
-    """Remove Polish/international legal-form suffixes in all common representations.
-
-    Must be called AFTER lowercasing and diacritic-stripping (so 'ł' is already 'l').
-
-    Handles both properly formatted ("Sp. z o.o.", "S.A.") and squished/CamelCase
-    variants that appear in LLM-generated folder names:
-      MindboxSpZOo  → mindbox
-      UpvantaSpólkaZOgraniczonąOdpowiedzialnoś → upvanta  (after diacritics → spolka...)
-    """
-    # "sp. z o.o." and variants (spaces/dots optional) — no \b needed, dots are specific enough
     s = re.sub(r'sp\.?\s*z\.?\s*o\.?\s*o\.?', '', s)
-    # "S.A." — trailing \b doesn't work after a dot, use (?![a-z]) lookahead
     s = re.sub(r's\.a\.(?![a-z])', '', s)
-    # Other international forms — use \b where safe (all-alpha, no trailing dots)
     s = re.sub(r'\b(ltd|gmbh|inc|llc)\b\.?', '', s)
-    # "Spółka..." / "Spolka..." — remove from this word to end of string
-    # After diacritic-strip: ł→l, ó→o, so "Spółka" → "Spolka"
     s = re.sub(r'spol?ka.*', '', s)
-    # Squished forms: SpZOo, SpZoo, spzoo (sp + z + oo)
     s = re.sub(r'spzo+', '', s)
     return s
 
 
 def normalize_company(company: str) -> str:
-    """Normalized company name for dedup.
-
-    Produces the same key for all of these:
-      - "Mindbox Sp. z o.o."
-      - "MindboxSpZOo"   (LLM folder-safe form)
-      - "Upvanta Spółka z o.o."
-      - "UpvantaSpółkaZOgraniczonąOdpowiedzialnoś"
-    """
     s = company.lower()
-    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)  # date suffixes: _2026-04-11, _2026-04-11_2
-    s = re.sub(r'_\d+$', '', s)                          # numeric folder suffixes: _2, _3, _10
+    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
+    s = re.sub(r'_\d+$', '', s)
     s = _strip_diacritics(s)
     s = _strip_legal_suffixes(s)
     s = re.sub(r'[^a-z0-9]', '', s)
     return s
 
 
-# Marketing verb patterns that signal the start of Gmail-enricher copy.
-# Used in _MARKETING_TAIL_RE to avoid stripping tech-stack separators like
-# "Angular – React Developer" (where – is a role separator, not enricher copy).
 _MARKETING_VERBS = (
     r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
     r'transform|craft|deliver|grow|work|define|change|redefine'
 )
-
-# Separators injected by Gmail job-alert enrichers to append marketing copy.
-# Examples:
-#   "Angular Developer — Build High-Performance Frontends at Acme"
-#   "Senior Frontend Engineer | Help us shape the future of fintech"
-#   "Frontend Dev - Join a team that ships"
-# The regex matches:
-#   • em-dash or en-dash with spaces, ONLY when followed by a marketing verb
-#     (avoids false-positive on "Angular – React Developer" tech separators)
-#   • pipe with surrounding spaces  (|)
-#   • plain hyphen with spaces followed by a marketing verb
 _MARKETING_TAIL_RE = re.compile(
-    r'\s+[—–]\s+(?=' + _MARKETING_VERBS + r')'     # em/en-dash + marketing verb
-    r'|\s+\|\s+'                                    # pipe separator
-    r'|\s+-\s+(?=' + _MARKETING_VERBS + r')',       # hyphen + marketing verb
+    r'\s+[—–]\s+(?=' + _MARKETING_VERBS + r')'
+    r'|\s+\|\s+'
+    r'|\s+-\s+(?=' + _MARKETING_VERBS + r')',
     re.IGNORECASE,
 )
 
 
 def _strip_marketing_tail(title: str) -> str:
-    """Remove Gmail-enricher marketing suffix from a job title.
-
-    Gmail job alerts often append marketing copy after the real title:
-      "Angular Developer — Build High-Performance Frontends"
-      "Senior Frontend Engineer | Help us shape the future"
-    Only the leading role description is meaningful for dedup.
-    """
     m = _MARKETING_TAIL_RE.search(title)
     if m:
         return title[:m.start()].strip()
@@ -181,12 +142,6 @@ def _strip_marketing_tail(title: str) -> str:
 
 
 def dedup_key(company: str, title: str) -> str:
-    """Normalized key for company+title dedup (cross-source, cross-URL).
-
-    Strips Gmail-enricher marketing tails from titles before normalization
-    so "Angular Developer" and "Angular Developer — Build great UIs" map to
-    the same key.
-    """
     def _norm(s: str) -> str:
         s = s.lower()
         s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
@@ -198,169 +153,94 @@ def dedup_key(company: str, title: str) -> str:
     return _norm(company) + "|" + _norm(_strip_marketing_tail(title))
 
 
-# ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _save_with_retry(wb: openpyxl.Workbook, retries: int = 5, delay: float = 3.0) -> None:
-    """Save workbook, retrying on PermissionError (file open in Excel)."""
-    for attempt in range(1, retries + 1):
-        try:
-            wb.save(TRACKER_PATH)
-            return
-        except PermissionError:
-            if attempt == retries:
-                raise
-            print(
-                f"[tracker] tracker.xlsx is locked (Excel open?). "
-                f"Retry {attempt}/{retries} in {delay}s..."
-            )
-            time.sleep(delay)
-
-
 def _new_row_id() -> str:
-    """Generate a short unique ID for a tracker row (8-char hex)."""
     return uuid.uuid4().hex[:8]
 
 
-def _ensure_ids(ws: openpyxl.worksheet.worksheet.Worksheet) -> bool:
-    """Assign IDs to any existing rows that lack one. Returns True if any were added."""
-    changed = False
-    for row_num in range(2, ws.max_row + 1):
-        cell = ws.cell(row=row_num, column=ID_COL_INDEX)
-        if not cell.value:
-            cell.value = _new_row_id()
-            changed = True
-    return changed
+def _parse_ats_score(raw: str) -> tuple[str, int | None]:
+    value = (raw or "").strip()
+    if not value:
+        return "", None
+    m10 = re.search(r"(\d{1,2}(?:[.,]\d+)?)\s*/\s*10\b", value)
+    if m10:
+        base = float(m10.group(1).replace(",", "."))
+        score = max(0, min(int(round(base * 10)), 100))
+        return f"{score}%", score
+    m = re.search(r"\d{1,3}", value)
+    if not m:
+        return value, None
+    score = max(0, min(int(m.group(0)), 100))
+    return f"{score}%", score
 
 
-def _load_or_create() -> tuple[openpyxl.Workbook, openpyxl.worksheet.worksheet.Worksheet]:
-    if TRACKER_PATH.exists():
-        wb = openpyxl.load_workbook(TRACKER_PATH)
-        ws = wb.active
-        # Ensure header row has ID column (migration for existing files)
-        _hdr_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-        _hdr_fill = PatternFill("solid", fgColor="2B579A")
-        _changed = False
-        if ws.max_column < ID_COL_INDEX:
-            cell = ws.cell(row=1, column=ID_COL_INDEX, value="ID")
-            cell.font = _hdr_font
-            cell.fill = _hdr_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            ws.column_dimensions[get_column_letter(ID_COL_INDEX)].width = 12
-            _changed = True
-        if ws.max_column < COL_DRIVE_URL:
-            cell = ws.cell(row=1, column=COL_DRIVE_URL, value="Drive URL")
-            cell.font = _hdr_font
-            cell.fill = _hdr_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            ws.column_dimensions[get_column_letter(COL_DRIVE_URL)].width = 55
-            _changed = True
-        if ws.max_column < COL_CONFIRMATION:
-            cell = ws.cell(row=1, column=COL_CONFIRMATION, value="Confirmation")
-            cell.font = _hdr_font
-            cell.fill = _hdr_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            ws.column_dimensions[get_column_letter(COL_CONFIRMATION)].width = 15
-            _changed = True
-        elif ws.cell(row=1, column=COL_CONFIRMATION).value == "Response":
-            ws.cell(row=1, column=COL_CONFIRMATION).value = "Confirmation"
-            _changed = True
-        if ws.max_column < COL_ANSWER:
-            cell = ws.cell(row=1, column=COL_ANSWER, value="Answer")
-            cell.font = _hdr_font
-            cell.fill = _hdr_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            ws.column_dimensions[get_column_letter(COL_ANSWER)].width = 15
-            _changed = True
-        if _ensure_ids(ws):
-            _changed = True
-        if _changed:
-            _save_with_retry(wb)
-        return wb, ws
-
-    # Create fresh tracker with header row
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Applications"
-
-    header_fill = PatternFill("solid", fgColor="2B579A")
-    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-    widths = [12, 20, 30, 12, 8, 50, 40, 8, 16, 35, 12, 55, 15, 15]
-
-    for col, (header, width) in enumerate(zip(TRACKER_HEADERS, widths), 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        ws.column_dimensions[get_column_letter(col)].width = width
-
-    ws.row_dimensions[1].height = 20
-    ws.freeze_panes = "A2"
-    _save_with_retry(wb)
-    return wb, ws
+def _company_from_content(content: dict) -> str:
+    cn = (content.get("company_name") or "").strip()
+    if cn:
+        return cn
+    folder_name = Path(str(content.get("output_folder") or "")).name
+    s = re.sub(r"_(\d+)$", "", folder_name)
+    m = re.search(r"^(.+)_[0-9]{4}-[0-9]{2}-[0-9]{2}$", s)
+    return (m.group(1) if m else s) or "Unknown"
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+def _is_unsent(sent: str) -> bool:
+    return not sent or sent in REACT_SKIP_SENT_MARKERS
+
+
+# ── Row → dict helpers ────────────────────────────────────────────────────────
+
+def _db_row_to_tracker_dict(row) -> dict:
+    """Map sqlite3.Row / dict with DB column names to TRACKER_HEADERS keyed dict."""
+    return {
+        "Date":           str(row["date"] or ""),
+        "Company":        str(row["company"] or ""),
+        "Job Title":      str(row["title"] or ""),
+        "Stack":          str(row["stack"] or ""),
+        "ATS %":          str(row["ats_status"] or ""),
+        "URL":            str(row["url"] or ""),
+        "Folder":         str(row["folder"] or ""),
+        "Sent":           str(row["sent"] or ""),
+        "Re-application": str(row["reapplication"] or ""),
+        "To Learn":       str(row["to_learn"] or ""),
+        "ID":             str(row["id"] or ""),
+        "Drive URL":      str(row["drive_url"] or ""),
+        "Confirmation":   str(row["confirmation"] or ""),
+        "Answer":         str(row["answer"] or ""),
+    }
+
+
+# ── Dedup reads ───────────────────────────────────────────────────────────────
 
 def get_known_urls() -> set[str]:
-    """Return all normalized URLs stored in tracker — used for deduplication."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    urls = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row and len(row) >= URL_COL_INDEX:
-            val = row[URL_COL_INDEX - 1]  # 0-based
-            if val:
-                urls.add(normalize_url(str(val)))
-    wb.close()
-    return urls
+    """Return all normalised URLs stored in tracker — used for deduplication."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT url_norm FROM applications WHERE url_norm != ''"
+        ).fetchall()
+        return {r["url_norm"] for r in rows}
 
 
 def get_known_company_titles() -> set[str]:
     """Return dedup_key(company, title) for all rows in tracker."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    keys = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row and len(row) >= TITLE_COL_INDEX:
-            company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-            title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-            if company and title:
-                keys.add(dedup_key(company, title))
-    wb.close()
-    return keys
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT company, title FROM applications "
+            "WHERE company != '' AND title != ''"
+        ).fetchall()
+        return {dedup_key(r["company"], r["title"]) for r in rows}
 
 
 def get_sent_companies() -> set[str]:
-    """Return normalized company names for rows that have Sent info."""
-    if not TRACKER_PATH.exists():
-        return set()
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    companies = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < SENT_COL_INDEX:
-            continue
-        sent = str(row[SENT_COL_INDEX - 1] or "").strip()
-        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        if sent and company:
-            companies.add(normalize_company(company))
-    wb.close()
-    return companies
+    """Return normalised company names for rows that have Sent info."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT company FROM applications WHERE sent != '' AND company != ''"
+        ).fetchall()
+        return {normalize_company(r["company"]) for r in rows}
 
 
 def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
-    """Fuzzy company match: 'scalo' matches 'scalowroclaw' and vice versa.
-
-    True if comp_key is a substring of any sent company, or any sent company
-    is a substring of comp_key. Minimum 3 chars to avoid false positives.
-    """
+    """Fuzzy company match: 'scalo' matches 'scalowroclaw' and vice versa."""
     if not comp_key or len(comp_key) < 3:
         return False
     if comp_key in sent_companies:
@@ -373,361 +253,253 @@ def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
     return False
 
 
-def get_failed_jobs() -> list[Job]:
-    """Return Job objects for all rows with ATS status 'FAIL'."""
-    if not TRACKER_PATH.exists():
-        return []
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    jobs = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip()
-        if ats != "FAIL":
-            continue
-        company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-        url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if url:
-            jobs.append(Job(
-                title=title,
-                company=company,
-                location="",
-                salary=None,
-                url=url,
-                source="retry",
-            ))
-    wb.close()
-    return jobs
-
-
-def remove_failed(url: str) -> None:
-    """Remove a FAIL row from tracker (so it can be re-added as a proper entry)."""
-    if not TRACKER_PATH.exists():
-        return
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-
+def is_known(url: str, company: str = "", title: str = "") -> bool:
+    """Check if a job is already in tracker (by URL or company+title)."""
     norm = normalize_url(url)
-    rows_to_delete = []
-    for row_num in range(2, ws.max_row + 1):
-        ats = str(ws.cell(row=row_num, column=ATS_COL_INDEX).value or "").strip()
-        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
-        if ats == "FAIL" and normalize_url(row_url) == norm:
-            rows_to_delete.append(row_num)
+    with get_db(DB_PATH) as conn:
+        if norm and conn.execute(
+            "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+        ).fetchone():
+            return True
+        if company and title:
+            key = dedup_key(company, title)
+            rows = conn.execute(
+                "SELECT company, title FROM applications WHERE company != '' AND title != ''"
+            ).fetchall()
+            for r in rows:
+                if dedup_key(r["company"], r["title"]) == key:
+                    return True
+    return False
 
-    for row_num in reversed(rows_to_delete):
-        ws.delete_rows(row_num)
 
-    if rows_to_delete:
-        _save_with_retry(wb)
-    else:
-        wb.close()
-
-
-def delete_all_by_url(url: str) -> dict:
-    """Delete ALL tracker rows matching this URL (any status: success, FAIL, SKIP, MANUAL…).
-
-    Returns a dict with:
-      {
-        "deleted": int,          # number of rows removed
-        "folder": str | None,    # Folder value from the first matched row (col 7)
-        "drive_url": str | None, # Drive URL from the first matched row (col 12)
-      }
-
-    Use before /force re-processing so the new run gets a clean slate.
-    """
-    result = {"deleted": 0, "folder": None, "drive_url": None}
-    if not TRACKER_PATH.exists():
-        return result
-
-    norm = normalize_url(url)
-    if not norm:
-        return result
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-
-    rows_to_delete: list[int] = []
-    for row_num in range(2, ws.max_row + 1):
-        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
-        if normalize_url(row_url) != norm:
-            continue
-        # Capture folder + drive_url from the first matched row
-        if result["folder"] is None:
-            folder_val = ws.cell(row=row_num, column=7).value
-            result["folder"] = str(folder_val).strip() if folder_val else None
-        if result["drive_url"] is None:
-            drive_val = ws.cell(row=row_num, column=COL_DRIVE_URL).value
-            result["drive_url"] = str(drive_val).strip() if drive_val else None
-        rows_to_delete.append(row_num)
-
-    for row_num in reversed(rows_to_delete):
-        ws.delete_rows(row_num)
-
-    result["deleted"] = len(rows_to_delete)
-    if rows_to_delete:
-        _save_with_retry(wb)
-    else:
-        wb.close()
-
-    return result
-
+# ── Status queries ────────────────────────────────────────────────────────────
 
 def has_successful_entry(url: str) -> bool:
-    """True if tracker has a non-FAIL, non-SKIP entry for this URL (= docs were generated)."""
+    """True if tracker has a non-FAIL, non-SKIP entry for this URL."""
     return get_url_status_flags(url)["has_success"]
 
 
 def get_url_status_flags(url: str) -> dict[str, bool]:
     """Return status flags for URL: successful entry and React-only skip marker."""
-    if not TRACKER_PATH.exists():
-        return {"has_success": False, "is_react_skip": False}
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
+    if not norm:
+        return {"has_success": False, "is_react_skip": False}
+
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status, sent FROM applications WHERE url_norm=?", (norm,)
+        ).fetchall()
 
     has_success = False
     is_react_skip = False
-
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if not row_url or normalize_url(row_url) != norm:
-            continue
-
-        ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-        sent = str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else ""
-
-        if ats.upper() not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
+    for row in rows:
+        ats = (row["ats_status"] or "").strip().upper()
+        sent = (row["sent"] or "").strip()
+        if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
             has_success = True
         elif ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
             is_react_skip = True
-
         if has_success and is_react_skip:
             break
-
-    wb.close()
     return {"has_success": has_success, "is_react_skip": is_react_skip}
 
 
+def is_react_skipped(url: str) -> bool:
+    """True if tracker already has a React-skip row (SKIP + Sent='—') for this URL."""
+    return get_url_status_flags(url)["is_react_skip"]
+
+
+# ── Lookup ────────────────────────────────────────────────────────────────────
+
 def lookup_url(url: str) -> list[dict]:
-    """Find all tracker entries matching this URL (normalized). Returns row details."""
-    if not TRACKER_PATH.exists():
-        return []
+    """Find all tracker entries matching this URL (normalised).
+
+    Returns list of dicts with keys: id, company, title, ats, folder, sent.
+    (``id`` replaces the former xlsx-row-number ``row`` key.)
+    """
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-        if row_url and normalize_url(row_url) == norm:
-            results.append({
-                "row": row_num,
-                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
-                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
-            })
-    wb.close()
-    return results
+    if not norm:
+        return []
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, company, title, ats_status, folder, sent "
+            "FROM applications WHERE url_norm=?",
+            (norm,),
+        ).fetchall()
+    return [
+        {
+            "id":      r["id"],
+            "company": r["company"],
+            "title":   r["title"],
+            "ats":     r["ats_status"],
+            "folder":  r["folder"],
+            "sent":    r["sent"],
+        }
+        for r in rows
+    ]
 
 
 def lookup_company(company: str) -> list[dict]:
-    """Find all tracker entries matching this company (normalized). Returns row details."""
-    if not TRACKER_PATH.exists():
-        return []
+    """Find all tracker entries matching this company (normalised)."""
     norm = normalize_company(company)
     if not norm:
         return []
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or len(row) < URL_COL_INDEX:
-            continue
-        row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-        if row_company and normalize_company(row_company) == norm:
-            results.append({
-                "row": row_num,
-                "company": row_company,
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else "",
-                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
-            })
-    wb.close()
-    return results
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, company, title, ats_status, folder, sent FROM applications",
+        ).fetchall()
+    return [
+        {
+            "id":      r["id"],
+            "company": r["company"],
+            "title":   r["title"],
+            "ats":     r["ats_status"],
+            "folder":  r["folder"],
+            "sent":    r["sent"],
+        }
+        for r in rows
+        if r["company"] and normalize_company(r["company"]) == norm
+    ]
 
 
-def is_known(url: str, company: str = "", title: str = "") -> bool:
-    """Check if a job is already in tracker (by URL or company+title)."""
-    known_urls = get_known_urls()
-    if normalize_url(url) in known_urls:
-        return True
-    if company and title:
-        known_ct = get_known_company_titles()
-        if dedup_key(company, title) in known_ct:
-            return True
-    return False
+# ── FAIL-row management ───────────────────────────────────────────────────────
+
+def get_failed_jobs() -> list[Job]:
+    """Return Job objects for all rows with ATS status 'FAIL'."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT title, company, url FROM applications WHERE ats_status='FAIL'"
+        ).fetchall()
+    return [
+        Job(
+            title=r["title"],
+            company=r["company"],
+            location="",
+            salary=None,
+            url=r["url"],
+            source="retry",
+        )
+        for r in rows
+        if r["url"]
+    ]
 
 
-def _company_from_content(content: dict) -> str:
-    """Prefer explicit company_name; fall back to output folder name."""
-    cn = (content.get("company_name") or "").strip()
-    if cn:
-        return cn
-    folder_name = Path(str(content.get("output_folder") or "")).name
-    # Remove collision suffixes: Company_2, Company_3...
-    s = re.sub(r"_(\d+)$", "", folder_name)
-    # Legacy flat structure: Company_YYYY-MM-DD
-    m = re.search(r"^(.+)_[0-9]{4}-[0-9]{2}-[0-9]{2}$", s)
-    return (m.group(1) if m else s) or "Unknown"
+def remove_failed(url: str) -> None:
+    """Remove a FAIL row from tracker (so it can be re-added as a proper entry)."""
+    norm = normalize_url(url)
+    if not norm:
+        return
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM applications WHERE ats_status='FAIL' AND url_norm=?", (norm,)
+        )
 
 
-def _parse_ats_score(raw: str) -> tuple[str, int | None]:
-    """Normalize ATS score for tracker display and optional color coding."""
-    value = (raw or "").strip()
-    if not value:
-        return "", None
+def delete_all_by_url(url: str) -> dict:
+    """Delete ALL tracker rows matching this URL (any status).
 
-    # Support 10-point scales from LLM output: "8/10", "8.5 / 10".
-    m10 = re.search(r"(\d{1,2}(?:[.,]\d+)?)\s*/\s*10\b", value)
-    if m10:
-        base = float(m10.group(1).replace(",", "."))
-        score = max(0, min(int(round(base * 10)), 100))
-        return f"{score}%", score
+    Returns: {"deleted": int, "folder": str | None, "drive_url": str | None}
+    """
+    result: dict = {"deleted": 0, "folder": None, "drive_url": None}
+    norm = normalize_url(url)
+    if not norm:
+        return result
 
-    # Support common LLM variants: "85", "85%", "score: 85/100"
-    m = re.search(r"\d{1,3}", value)
-    if not m:
-        return value, None
+    with get_db(DB_PATH) as conn:
+        first = conn.execute(
+            "SELECT folder, drive_url FROM applications WHERE url_norm=? LIMIT 1",
+            (norm,),
+        ).fetchone()
+        if first:
+            result["folder"] = first["folder"] or None
+            result["drive_url"] = first["drive_url"] or None
+        cur = conn.execute(
+            "DELETE FROM applications WHERE url_norm=?", (norm,)
+        )
+        result["deleted"] = cur.rowcount
+    return result
 
-    score = max(0, min(int(m.group(0)), 100))
-    return f"{score}%", score
+
+# ── MANUAL row management ─────────────────────────────────────────────────────
+
+def has_manual_pending(url: str) -> bool:
+    """True if tracker already has a MANUAL row for this URL."""
+    norm = normalize_url(url)
+    if not norm:
+        return False
+    with get_db(DB_PATH) as conn:
+        return bool(conn.execute(
+            "SELECT 1 FROM applications WHERE url_norm=? AND ats_status=? LIMIT 1",
+            (norm, MANUAL_PENDING_ATS),
+        ).fetchone())
 
 
 def remove_manual_pending_rows(url: str) -> int:
-    """Delete tracker rows for this URL where ATS is MANUAL (successful apply supersedes)."""
-    if not TRACKER_PATH.exists():
-        return 0
+    """Delete tracker rows for this URL where ATS is MANUAL."""
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-    deleted = 0
-    for row_num in range(ws.max_row, 1, -1):
-        row_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
-        if not row_url or normalize_url(row_url) != norm:
-            continue
-        ats = str(ws.cell(row=row_num, column=ATS_COL_INDEX).value or "").strip().upper()
-        if ats == MANUAL_PENDING_ATS:
-            ws.delete_rows(row_num)
-            deleted += 1
-    if deleted:
-        _save_with_retry(wb)
-    else:
-        wb.close()
-    return deleted
+    if not norm:
+        return 0
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            "DELETE FROM applications WHERE url_norm=? AND ats_status=?",
+            (norm, MANUAL_PENDING_ATS),
+        )
+        return cur.rowcount
 
 
 def manual_jobleads_job_posting_path(url: str) -> Path | None:
     """Return path to job_posting.txt for a MANUAL JobLeads row, or None."""
-    if not TRACKER_PATH.exists():
-        return None
     norm = normalize_url(url)
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < URL_COL_INDEX:
-                continue
-            row_url = str(row[URL_COL_INDEX - 1] or "").strip()
-            if not row_url or normalize_url(row_url) != norm:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            if len(row) <= URL_COL_INDEX:
-                return None
-            folder_raw = str(row[URL_COL_INDEX] or "").strip()
-            if not folder_raw:
-                return None
-            p = Path(folder_raw)
-            if not p.is_absolute():
-                p = Path(TRACKER_PATH).parent / folder_raw
-            return p / "job_posting.txt"
-    finally:
-        wb.close()
-    return None
-
-
-def has_manual_pending(url: str) -> bool:
-    """True if tracker already has a MANUAL row for this URL."""
-    return any(
-        (r.get("ats") or "").strip().upper() == MANUAL_PENDING_ATS
-        for r in lookup_url(url)
-    )
+    if not norm:
+        return None
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT folder FROM applications "
+            "WHERE url_norm=? AND ats_status=? LIMIT 1",
+            (norm, MANUAL_PENDING_ATS),
+        ).fetchone()
+    if not row or not row["folder"]:
+        return None
+    p = Path(row["folder"])
+    if not p.is_absolute():
+        p = Path(TRACKER_PATH).parent / row["folder"]
+    return p / "job_posting.txt"
 
 
 def get_all_manual_pending() -> list[dict]:
-    """Return all MANUAL-pending rows as dicts with keys: url, folder, company, title, row."""
-    if not TRACKER_PATH.exists():
-        return []
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results: list[dict] = []
-    try:
-        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
-            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
-            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
-            title = str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else ""
-            if not url:
-                continue
-            results.append({"url": url, "folder": folder, "company": company, "title": title, "row": i})
-    finally:
-        wb.close()
-    return results
+    """Return all MANUAL-pending rows as dicts: url, folder, company, title, id."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, url, folder, company, title FROM applications "
+            "WHERE ats_status=? AND url != ''",
+            (MANUAL_PENDING_ATS,),
+        ).fetchall()
+    return [
+        {
+            "id":      r["id"],
+            "url":     r["url"],
+            "folder":  r["folder"],
+            "company": r["company"],
+            "title":   r["title"],
+        }
+        for r in rows
+    ]
 
 
 def latest_manual_pending() -> dict[str, str] | None:
-    """Return latest MANUAL row info (url, folder) or None.
-
-    Used by Telegram paste flow when the user pastes a posting without URL.
-    """
-    if not TRACKER_PATH.exists():
+    """Return latest MANUAL row info (url, folder) or None."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT url, folder FROM applications "
+            "WHERE ats_status=? AND url != '' ORDER BY rowid DESC LIMIT 1",
+            (MANUAL_PENDING_ATS,),
+        ).fetchone()
+    if not row:
         return None
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    latest: dict[str, str] | None = None
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats != MANUAL_PENDING_ATS:
-                continue
-            url = str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else ""
-            folder = str(row[URL_COL_INDEX] or "").strip() if len(row) > URL_COL_INDEX else ""
-            if not url:
-                continue
-            latest = {"url": url, "folder": folder}
-    finally:
-        wb.close()
-    return latest
+    return {"url": row["url"], "folder": row["folder"]}
 
+
+# ── Write operations ──────────────────────────────────────────────────────────
 
 def add_manual_jobleads_pending(
     *,
@@ -738,39 +510,35 @@ def add_manual_jobleads_pending(
 ) -> bool:
     """Append MANUAL row for JobLeads when description cannot be fetched.
 
-    Skips when URL already has a success row or any tracker row (dedup / FAIL / MANUAL).
+    Returns False when URL already has any tracker row (dedup / FAIL / MANUAL / success).
     """
     if has_successful_entry(url) or lookup_url(url):
         return False
-    wb, ws = _load_or_create()
+
+    row_id = _new_row_id()
+    norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
-    next_row = ws.max_row + 1
     folder_str = str(folder_abs).replace("\\", "/")
-    values = [
-        today,
-        company.strip() or "Unknown",
-        title.strip() or "Unknown",
-        "",
-        MANUAL_PENDING_ATS,
-        normalize_url(url) if url else "",
-        folder_str,
-        "",
-        "",
-        "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
-        _new_row_id(),
-    ]
-    row_font = Font(name="Calibri", size=11)
-    manual_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
 
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        cell.fill = manual_fill
-        if col == URL_COL_INDEX and val:
-            cell.hyperlink = str(val)
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, folder, to_learn)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row_id, today,
+                company.strip() or "Unknown",
+                title.strip() or "Unknown",
+                MANUAL_PENDING_ATS,
+                url, norm,
+                folder_str,
+                "Paste job text into job_posting.txt in Folder, "
+                "then re-run apply (same URL).",
+            ),
+        )
 
-    _save_with_retry(wb)
     return True
 
 
@@ -785,66 +553,35 @@ def add_applied(content: dict, force: bool = False) -> bool:
     folder = str(content.get("output_folder", "") or "")
     to_learn = str(content.get("to_learn", "") or "")
     ats_raw = str(content.get("ats_score", "") or "")
-    ats_display, ats_numeric = _parse_ats_score(ats_raw)
+    ats_display, _ = _parse_ats_score(ats_raw)
     today = date.today().strftime("%Y-%m-%d")
     norm_url = normalize_url(apply_url) if apply_url else ""
 
-    # Keep historical behavior: do not duplicate successful rows unless force mode.
     if norm_url and has_successful_entry(apply_url) and not force:
         return False
 
-    wb, ws = _load_or_create()
-
-    is_reapply = any(
-        normalize_url(str(row[URL_COL_INDEX - 1] or "")) == norm_url
-        for row in ws.iter_rows(min_row=2, values_only=True)
-        if norm_url and row and len(row) >= URL_COL_INDEX and row[URL_COL_INDEX - 1]
-    )
-
-    next_row = ws.max_row + 1
-    row_font = Font(name="Calibri", size=11)
-    values = [
-        today,
-        company,
-        job_title,
-        stack,
-        ats_display,
-        norm_url or apply_url,
-        folder,
-        "",
-        "+" if is_reapply else "",
-        to_learn,
-        _new_row_id(),
-    ]
-
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        if col == URL_COL_INDEX and val:
-            cell.hyperlink = str(val)
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-        if col == ATS_COL_INDEX and ats_display:
-            cell.alignment = Alignment(horizontal="center")
-            if ats_numeric is not None:
-                if ats_numeric >= 80:
-                    cell.fill = PatternFill("solid", fgColor="C6EFCE")
-                    cell.font = Font(name="Calibri", size=11, color="276221", bold=True)
-                elif ats_numeric >= 60:
-                    cell.fill = PatternFill("solid", fgColor="FFEB9C")
-                    cell.font = Font(name="Calibri", size=11, color="9C6500", bold=True)
-                else:
-                    cell.fill = PatternFill("solid", fgColor="FFC7CE")
-                    cell.font = Font(name="Calibri", size=11, color="9C0006", bold=True)
-        if col in (SENT_COL_INDEX, 9):
-            cell.alignment = Alignment(horizontal="center")
-
-    # Alternate row color for readability.
-    if next_row % 2 == 0:
-        fill = PatternFill("solid", fgColor="EEF2FA")
-        for col in range(1, len(TRACKER_HEADERS) + 1):
-            ws.cell(row=next_row, column=col).fill = fill
-
-    _save_with_retry(wb)
+    with get_db(DB_PATH) as conn:
+        # Is this a re-application (same URL exists with any status)?
+        is_reapply = bool(
+            norm_url and conn.execute(
+                "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm_url,)
+            ).fetchone()
+        )
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, stack, ats_status, url, url_norm,
+             folder, sent, reapplication, to_learn)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+            """,
+            (
+                _new_row_id(), today, company, job_title, stack, ats_display,
+                norm_url or apply_url, norm_url,
+                folder,
+                "+" if is_reapply else "",
+                to_learn,
+            ),
+        )
     return True
 
 
@@ -852,446 +589,292 @@ def add_skipped(job: Job) -> dict | None:
     """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
     if is_known(job.url, job.company, job.title):
         return None
-    wb, ws = _load_or_create()
-    today = date.today().strftime("%Y-%m-%d")
-    next_row = ws.max_row + 1
+
     row_id = _new_row_id()
+    norm = normalize_url(job.url)
+    today = date.today().strftime("%Y-%m-%d")
 
-    values = [
-        today,           # Date
-        job.company,     # Company
-        job.title,       # Job Title
-        "",              # Stack  (unknown at this point)
-        "SKIP",                          # ATS %  (repurposed for status)
-        normalize_url(job.url),          # URL
-        "",              # Folder
-        "",              # Sent
-        "",              # Re-application
-        "",              # To Learn
-        row_id,          # ID
-    ]
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, 'SKIP', ?, ?)
+            """,
+            (row_id, today, job.company, job.title, norm, norm),
+        )
 
-    row_font = Font(name="Calibri", size=11)
-    skip_fill = PatternFill("solid", fgColor="D9D9D9")
-
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        cell.fill = skip_fill
-        if col == URL_COL_INDEX:
-            cell.hyperlink = job.url
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-
-    _save_with_retry(wb)
-    return dict(zip(TRACKER_HEADERS, values))
-
-
-def is_react_skipped(url: str) -> bool:
-    """True if tracker already has a React-skip row (SKIP + Sent='—') for this URL."""
-    return get_url_status_flags(url)["is_react_skip"]
+    return {
+        "Date": today, "Company": job.company, "Job Title": job.title,
+        "Stack": "", "ATS %": "SKIP", "URL": norm,
+        "Folder": "", "Sent": "", "Re-application": "", "To Learn": "",
+        "ID": row_id,
+        "Drive URL": "", "Confirmation": "", "Answer": "",
+    }
 
 
 def add_react_skipped(content: dict, url: str) -> None:
-    """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered.
-
-    Light yellow fill distinguishes these rows from geo/tech SKIP rows (grey).
-    The URL is recorded so the job is never re-surfaced by the hunter or apply_agent.
-    """
+    """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered."""
     company = (content.get("company_name") or "").strip()
     title   = (content.get("job_title")    or "").strip()
     if is_known(url, company, title):
         return
-    wb, ws = _load_or_create()
+
+    norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
-    next_row = ws.max_row + 1
 
-    values = [
-        today,                          # Date
-        company,                        # Company
-        title,                          # Job Title
-        content.get("stack", ""),       # Stack
-        "SKIP",                         # ATS %
-        normalize_url(url) if url else "",  # URL
-        "",                             # Folder
-        "—",                            # Sent  ← marks React-skip
-        "",                             # Re-application
-        "",                             # To Learn
-        _new_row_id(),                  # ID
-    ]
-
-    row_font = Font(name="Calibri", size=11)
-    row_fill = PatternFill("solid", fgColor="FFF2CC")  # light yellow
-
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        cell.fill = row_fill
-        if col == URL_COL_INDEX:
-            cell.hyperlink = url
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-
-    _save_with_retry(wb)
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, stack, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
+            """,
+            (
+                _new_row_id(), today,
+                company, title,
+                content.get("stack", ""),
+                norm, norm,
+            ),
+        )
 
 
 def add_expired(url: str, company: str = "", title: str = "") -> None:
-    """Write an EXPIRED row — offer was no longer active when fetched.
-
-    Orange fill distinguishes these from SKIP (grey) and React-skip (yellow).
-    URL is recorded so the job is never re-fetched.
-    """
+    """Write an EXPIRED row — offer was no longer active when fetched."""
     if is_known(url, company, title):
         return
-    wb, ws = _load_or_create()
+
+    norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
-    next_row = ws.max_row + 1
 
-    values = [
-        today,           # Date
-        company,         # Company
-        title,           # Job Title
-        "",              # Stack
-        "EXPIRED",                       # ATS %
-        normalize_url(url) if url else "",  # URL
-        "",              # Folder
-        "",              # Sent
-        "",              # Re-application
-        "",              # To Learn
-        _new_row_id(),   # ID
-    ]
-
-    row_font = Font(name="Calibri", size=11)
-    row_fill = PatternFill("solid", fgColor="FCE4D6")  # light orange
-
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        cell.fill = row_fill
-        if col == URL_COL_INDEX:
-            cell.hyperlink = url
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-
-    _save_with_retry(wb)
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, 'EXPIRED', ?, ?)
+            """,
+            (_new_row_id(), today, company, title, norm, norm),
+        )
 
 
 def add_failed(job: Job) -> None:
-    """Append a FAIL row so the job is not retried on next hunt.
-    User can delete the row from Excel to retry manually."""
+    """Append a FAIL row so the job is not retried on next hunt."""
     if is_known(job.url, job.company, job.title):
         return
-    wb, ws = _load_or_create()
+
+    norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
-    next_row = ws.max_row + 1
 
-    values = [
-        today,           # Date
-        job.company,     # Company
-        job.title,       # Job Title
-        "",              # Stack
-        "FAIL",                          # ATS %  (repurposed for status)
-        normalize_url(job.url),          # URL
-        "",              # Folder
-        "",              # Sent
-        "",              # Re-application
-        "",              # To Learn
-        _new_row_id(),   # ID
-    ]
-
-    row_font = Font(name="Calibri", size=11)
-    fail_fill = PatternFill("solid", fgColor="F4CCCC")  # light red
-
-    for col, val in enumerate(values, 1):
-        cell = ws.cell(row=next_row, column=col, value=val)
-        cell.font = row_font
-        cell.fill = fail_fill
-        if col == URL_COL_INDEX:
-            cell.hyperlink = job.url
-            cell.font = Font(name="Calibri", size=11, color="0563C1", underline="single")
-
-    _save_with_retry(wb)
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, 'FAIL', ?, ?)
+            """,
+            (_new_row_id(), today, job.company, job.title, norm, norm),
+        )
 
 
-def _is_unsent(sent: str) -> bool:
-    """Return True if the Sent cell value represents "not sent yet".
-
-    Empty string and dash markers (—, –, -) are treated as unsent.
-    A real date string or "EXPIRED" means the row has been processed.
-    """
-    return not sent or sent in REACT_SKIP_SENT_MARKERS
-
+# ── Unsent rows ───────────────────────────────────────────────────────────────
 
 def iter_unsent_rows() -> list[dict]:
     """Return unsent tracker rows (no Sent value, excluding SKIP).
 
-    Includes rows where Sent is empty OR a dash marker (—, –, -).
-    Dash markers are written by the /skip workflow as visual placeholders
-    but do not represent a real sent date — they must be expired-checked
-    like any other unsent row.
-
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
-    sent, reapp, to_learn, row_num.
+    sent, reapp, to_learn.
     """
-    if not TRACKER_PATH.exists():
-        return []
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, date, company, title, stack, ats_status, url, folder,
+                   sent, reapplication, to_learn
+            FROM applications
+            WHERE ats_status != 'SKIP'
+              AND id != ''
+              AND (sent = '' OR sent IN ('—', '–', '-'))
+            """
+        ).fetchall()
 
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results = []
-    try:
-        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-            if not row:
-                continue
-            row = tuple(row) + ("",) * max(0, ID_COL_INDEX - len(row))
+    return [
+        {
+            "id":       r["id"],
+            "date":     r["date"],
+            "company":  r["company"],
+            "title":    r["title"],
+            "stack":    r["stack"],
+            "ats":      r["ats_status"],
+            "url":      r["url"],
+            "folder":   r["folder"],
+            "sent":     r["sent"],
+            "reapp":    r["reapplication"],
+            "to_learn": r["to_learn"],
+        }
+        for r in rows
+    ]
 
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip()
-            sent = str(row[SENT_COL_INDEX - 1] or "").strip()
-            row_id = str(row[ID_COL_INDEX - 1] or "").strip()
 
-            if ats == "SKIP":
-                continue
-            if not _is_unsent(sent):
-                continue
-            if not row_id:
-                continue
-
-            results.append({
-                "id": row_id,
-                "row_num": row_num,
-                "date": str(row[0] or "").strip(),
-                "company": str(row[COMPANY_COL_INDEX - 1] or "").strip(),
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip(),
-                "stack": str(row[3] or "").strip(),
-                "ats": ats,
-                "url": str(row[URL_COL_INDEX - 1] or "").strip(),
-                "folder": str(row[6] or "").strip(),
-                "sent": sent,
-                "reapp": str(row[8] or "").strip(),
-                "to_learn": str(row[9] or "").strip(),
-            })
-    finally:
-        wb.close()
-    return results
-
+# ── Pull-sync updates ─────────────────────────────────────────────────────────
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
-    """Write Sent values (e.g. EXPIRED) back into tracker.xlsx.
+    """Write Sent values (e.g. EXPIRED) back into tracker.
 
     updates: {row_id: sent_value} — only non-empty sent_value entries.
     Returns number of rows updated.
     """
-    if not updates or not TRACKER_PATH.exists():
+    if not updates:
         return 0
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
     updated = 0
-
-    for row_num in range(2, ws.max_row + 1):
-        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
-        if row_id and row_id in updates:
-            sent_val = updates[row_id]
+    with get_db(DB_PATH) as conn:
+        for row_id, sent_val in updates.items():
             if sent_val:
-                ws.cell(row=row_num, column=SENT_COL_INDEX).value = sent_val
-                updated += 1
-
-    if updated:
-        _save_with_retry(wb)
-    else:
-        wb.close()
+                cur = conn.execute(
+                    "UPDATE applications SET sent=? WHERE id=?", (sent_val, row_id)
+                )
+                updated += cur.rowcount
     return updated
-
-
-_REAPP_COL_INDEX = 9    # "Re-application"
-_TO_LEARN_COL_INDEX = 10  # "To Learn"
 
 
 def apply_pull_updates(rows: list[dict]) -> int:
-    """Write Sheets-sourced field changes back to tracker.xlsx (pull sync).
+    """Write Sheets-sourced field changes back to tracker (pull sync).
 
-    rows: list of full row dicts (with 'ID') where Sheets had a newer value.
-    Updates Sent, Re-application, To Learn columns. Returns count of rows updated.
+    rows: list of row dicts (with 'ID') where Sheets had a newer value.
+    Updates Sent, Re-application, To Learn columns. Returns count updated.
     """
-    if not rows or not TRACKER_PATH.exists():
+    if not rows:
         return 0
-
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
     updated = 0
-
-    for row_num in range(2, ws.max_row + 1):
-        row_id = str(ws.cell(row=row_num, column=ID_COL_INDEX).value or "").strip()
-        if not row_id:
-            continue
+    with get_db(DB_PATH) as conn:
         for row_dict in rows:
-            if row_dict.get("ID", "").strip() != row_id:
+            row_id = row_dict.get("ID", "").strip()
+            if not row_id:
                 continue
-            ws.cell(row=row_num, column=SENT_COL_INDEX).value = row_dict.get("Sent", "")
-            ws.cell(row=row_num, column=_REAPP_COL_INDEX).value = row_dict.get("Re-application", "")
-            ws.cell(row=row_num, column=_TO_LEARN_COL_INDEX).value = row_dict.get("To Learn", "")
-            updated += 1
-            break
-
-    if updated:
-        _save_with_retry(wb)
-    else:
-        wb.close()
+            cur = conn.execute(
+                "UPDATE applications SET sent=?, reapplication=?, to_learn=? WHERE id=?",
+                (
+                    row_dict.get("Sent", ""),
+                    row_dict.get("Re-application", ""),
+                    row_dict.get("To Learn", ""),
+                    row_id,
+                ),
+            )
+            updated += cur.rowcount
     return updated
 
 
+# ── Folder / Drive URL ────────────────────────────────────────────────────────
+
 def get_folder_by_url(url: str) -> str | None:
-    """Return the Folder value for a given job URL, or None if not found.
-
-    Normalizes the URL before comparing (strip trailing slash, lowercase scheme).
-    Returns the raw string from the Folder column (e.g. 'Applications/2026-05-11/PeopleMore_3').
-    """
-    if not TRACKER_PATH.exists():
+    """Return the Folder value for a given job URL, or None if not found."""
+    norm = normalize_url(url)
+    if not norm:
         return None
-
-    target = normalize_url(url)
-    if not target:
-        return None
-
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            cell_url = str(row[URL_COL_INDEX - 1] or "").strip()
-            if normalize_url(cell_url) == target:
-                folder_val = row[URL_COL_INDEX]  # column 7 = index 6 = URL_COL_INDEX
-                return str(folder_val).strip() if folder_val else None
-    finally:
-        wb.close()
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT folder FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+        ).fetchone()
+    if row and row["folder"]:
+        return row["folder"]
     return None
 
 
 def get_drive_url_by_url(url: str) -> str | None:
-    """Return the Drive URL stored in col 12 for this job URL, or None."""
-    if not TRACKER_PATH.exists():
+    """Return the Drive URL stored for this job URL, or None."""
+    norm = normalize_url(url)
+    if not norm:
         return None
-    target = normalize_url(url)
-    if not target:
-        return None
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < URL_COL_INDEX:
-                continue
-            cell_url = str(row[URL_COL_INDEX - 1] or "").strip()
-            if normalize_url(cell_url) != target:
-                continue
-            val = row[COL_DRIVE_URL - 1] if len(row) >= COL_DRIVE_URL else None
-            return str(val).strip() if val else None
-    finally:
-        wb.close()
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT drive_url FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+        ).fetchone()
+    if row and row["drive_url"]:
+        return row["drive_url"]
     return None
 
 
 def set_drive_url(url: str, drive_url: str) -> None:
-    """Write drive_url into col 12 for the first tracker row matching this job URL."""
-    if not TRACKER_PATH.exists() or not url or not drive_url:
+    """Write drive_url for the first tracker row matching this job URL."""
+    if not url or not drive_url:
         return
-    target = normalize_url(url)
-    if not target:
+    norm = normalize_url(url)
+    if not norm:
         return
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-    for row_num in range(2, ws.max_row + 1):
-        cell_url = str(ws.cell(row=row_num, column=URL_COL_INDEX).value or "").strip()
-        if normalize_url(cell_url) != target:
-            continue
-        ws.cell(row=row_num, column=COL_DRIVE_URL).value = drive_url
-        _save_with_retry(wb)
-        return
-    wb.close()
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET drive_url=? WHERE url_norm=?", (drive_url, norm)
+        )
 
 
-# gsheets COLUMNS order: Date, Company, Job Title, Stack, ATS %, URL,
-#                        Folder, Sent, Re-application, To Learn, ID
-# Drive URL (col 12) is local-only — not pushed to Sheets.
-_GSHEETS_COLS = [
-    "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-    "Folder", "Sent", "Re-application", "To Learn", "ID",
-]
+# ── Google Sheets sync helpers ────────────────────────────────────────────────
 
 def read_all_tracker_rows() -> list[dict]:
-    """Read every data row from tracker.xlsx as a dict keyed by column names.
+    """Read every data row as a dict keyed by column names.
 
-    Rows with no ID are skipped (they can't be synced). Empty cells become "".
-    Returns dicts with keys from _GSHEETS_COLS plus "Drive URL" (col 12).
-    Used by gsheets_sync and gdrive_sync.
+    Keys: all _GSHEETS_COLS names + "Drive URL", "Confirmation", "Answer".
+    Rows with no ID are skipped. Used by gsheets_sync and gdrive_sync.
     """
-    if not TRACKER_PATH.exists():
-        return []
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, date, company, title, stack, ats_status, url, folder,
+                   sent, reapplication, to_learn, drive_url, confirmation, answer
+            FROM applications
+            WHERE id != ''
+            """
+        ).fetchall()
 
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
-    results: list[dict] = []
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            # Pad to at least COL_DRIVE_URL columns
-            padded = tuple(row) + ("",) * max(0, COL_DRIVE_URL - len(row))
-            row_id = str(padded[ID_COL_INDEX - 1] or "").strip()
-            if not row_id:
-                continue
-            d = {
-                col: str(padded[i] or "").strip()
-                for i, col in enumerate(_GSHEETS_COLS)
-            }
-            d["Drive URL"] = str(padded[COL_DRIVE_URL - 1] or "").strip()
-            results.append(d)
-    finally:
-        wb.close()
-    return results
+    result = []
+    for r in rows:
+        d = {
+            "Date":           r["date"],
+            "Company":        r["company"],
+            "Job Title":      r["title"],
+            "Stack":          r["stack"],
+            "ATS %":          r["ats_status"],
+            "URL":            r["url"],
+            "Folder":         r["folder"],
+            "Sent":           r["sent"],
+            "Re-application": r["reapplication"],
+            "To Learn":       r["to_learn"],
+            "ID":             r["id"],
+            "Drive URL":      r["drive_url"],
+            "Confirmation":   r["confirmation"],
+            "Answer":         r["answer"],
+        }
+        result.append(d)
+    return result
 
 
-# ── Cooldown (B5) ─────────────────────────────────────────────────────────────
-
-_COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
-
+# ── Cooldown ──────────────────────────────────────────────────────────────────
 
 def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
-    """Return True if company+title was applied to within the last cooldown_days.
-
-    12-day default: short enough to see re-posted listings quickly, long
-    enough to avoid sending the same application twice in one hiring cycle.
-    Only counts rows where ATS % is a real percentage (genuine application),
-    not SKIP/FAIL/MANUAL/EXPIRED rows.
-    """
+    """Return True if company+title was applied to within the last cooldown_days."""
     import datetime as _dt
-
-    if not TRACKER_PATH.exists():
-        return False
 
     target_key = dedup_key(company, title)
     today = date.today()
 
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT date, company, title FROM applications "
+            "WHERE ats_status NOT IN ('SKIP','FAIL','MANUAL','EXPIRED') "
+            "AND ats_status != ''",
+        ).fetchall()
+
     most_recent: date | None = None
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-            row_title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-            if not row_company and not row_title:
-                continue
-            if dedup_key(row_company, row_title) != target_key:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats in _COOLDOWN_SKIP_STATUSES or not ats:
-                continue
-            row_date = row[0]
-            if isinstance(row_date, _dt.datetime):
-                row_date = row_date.date()
-            if not isinstance(row_date, _dt.date):
-                continue
-            if most_recent is None or row_date > most_recent:
-                most_recent = row_date
-    finally:
-        wb.close()
+    for row in rows:
+        if not row["company"] and not row["title"]:
+            continue
+        if dedup_key(row["company"], row["title"]) != target_key:
+            continue
+        row_date_str = str(row["date"] or "").strip()
+        try:
+            row_date = _dt.date.fromisoformat(row_date_str)
+        except ValueError:
+            continue
+        if most_recent is None or row_date > most_recent:
+            most_recent = row_date
 
     if most_recent is None:
         return False
@@ -1299,57 +882,40 @@ def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
 
 
 def company_cooldown_active(company: str, days: int = 180) -> bool:
-    """Return True if ANY application to this company was made in the last *days*.
-
-    Unlike is_in_cooldown (which checks company+title), this check is title-
-    agnostic: if we applied to Acme for any role within the last 6 months we
-    skip Acme entirely — hiring managers see all applications, so submitting
-    again so soon looks bad.
-
-    Only counts rows with a real ATS % (genuine application); SKIP/FAIL/
-    MANUAL/EXPIRED rows don't trigger the cooldown.
-    """
+    """Return True if ANY application to this company was made in the last *days*."""
     import datetime as _dt
-
-    if not TRACKER_PATH.exists():
-        return False
 
     norm = normalize_company(company)
     if not norm:
         return False
 
     today = date.today()
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
+
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT date, company FROM applications "
+            "WHERE ats_status NOT IN ('SKIP','FAIL','MANUAL','EXPIRED') "
+            "AND ats_status != '' AND company != ''",
+        ).fetchall()
+
     most_recent: date | None = None
-    try:
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < ATS_COL_INDEX:
-                continue
-            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-            if not row_company:
-                continue
-            if normalize_company(row_company) != norm:
-                continue
-            ats = str(row[ATS_COL_INDEX - 1] or "").strip().upper()
-            if ats in _COOLDOWN_SKIP_STATUSES or not ats:
-                continue
-            row_date = row[0]
-            if isinstance(row_date, _dt.datetime):
-                row_date = row_date.date()
-            if not isinstance(row_date, _dt.date):
-                continue
-            if most_recent is None or row_date > most_recent:
-                most_recent = row_date
-    finally:
-        wb.close()
+    for row in rows:
+        if normalize_company(row["company"]) != norm:
+            continue
+        row_date_str = str(row["date"] or "").strip()
+        try:
+            row_date = _dt.date.fromisoformat(row_date_str)
+        except ValueError:
+            continue
+        if most_recent is None or row_date > most_recent:
+            most_recent = row_date
 
     if most_recent is None:
         return False
     return (today - most_recent).days < days
 
 
-# ── Email response tracking ───────────────────────────────────────────────────
+# ── Email response / confirmation ─────────────────────────────────────────────
 
 _TITLE_STOP = frozenset({
     "senior", "junior", "mid", "lead", "principal", "staff", "head",
@@ -1358,13 +924,11 @@ _TITLE_STOP = frozenset({
 
 
 def _title_tokens(title: str) -> set[str]:
-    """Meaningful word tokens from a job title for similarity scoring."""
     tokens = re.findall(r"[a-z]+", _strip_diacritics(title.lower()))
     return {t for t in tokens if len(t) >= 3 and t not in _TITLE_STOP}
 
 
 def _title_similarity(a: str, b: str) -> float:
-    """Jaccard-style overlap score [0.0–1.0] between two job titles."""
     ta, tb = _title_tokens(a), _title_tokens(b)
     if not ta or not tb:
         return 0.0
@@ -1376,102 +940,153 @@ def lookup_by_company_and_title(
     title: str,
     title_min_score: float = 0.5,
 ) -> list[dict]:
-    """Find tracker rows where company normalizes to the same key and title
+    """Find tracker rows where company normalises to the same key and title
     similarity is at or above *title_min_score*.
 
-    Returns list of dicts (same shape as lookup_url) with an added
-    ``title_score`` field (0.0–1.0). Sorted by score descending.
-    Rows with status SKIP/FAIL/EXPIRED/MANUAL are included — caller decides.
+    Returns list of dicts with keys: id, company, title, ats, sent, url,
+    confirmation, title_score. Sorted by score descending.
     """
-    if not TRACKER_PATH.exists():
-        return []
     norm_company = normalize_company(company)
     if not norm_company:
         return []
 
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    ws = wb.active
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, company, title, ats_status, sent, url, confirmation "
+            "FROM applications WHERE company != ''"
+        ).fetchall()
+
     results = []
-    try:
-        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-            if not row or len(row) < TITLE_COL_INDEX:
-                continue
-            row_company = str(row[COMPANY_COL_INDEX - 1] or "").strip()
-            if not row_company or normalize_company(row_company) != norm_company:
-                continue
-            row_title = str(row[TITLE_COL_INDEX - 1] or "").strip()
-            score = _title_similarity(title, row_title)
-            if score < title_min_score:
-                continue
-            results.append({
-                "row": row_num,
-                "company": row_company,
-                "title": row_title,
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip() if len(row) >= ATS_COL_INDEX else "",
-                "sent": str(row[SENT_COL_INDEX - 1] or "").strip() if len(row) >= SENT_COL_INDEX else "",
-                "url": str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else "",
-                "confirmation": str(row[COL_CONFIRMATION - 1] or "").strip() if len(row) >= COL_CONFIRMATION else "",
-                "title_score": score,
-            })
-    finally:
-        wb.close()
+    for row in rows:
+        if normalize_company(row["company"]) != norm_company:
+            continue
+        score = _title_similarity(title, row["title"])
+        if score < title_min_score:
+            continue
+        results.append({
+            "id":           row["id"],
+            "company":      row["company"],
+            "title":        row["title"],
+            "ats":          row["ats_status"],
+            "sent":         row["sent"],
+            "url":          row["url"],
+            "confirmation": row["confirmation"],
+            "title_score":  score,
+        })
 
     results.sort(key=lambda r: r["title_score"], reverse=True)
     return results
 
 
-_CONFIRMED_FILL = PatternFill("solid", fgColor="C6EFCE")  # light green
+def set_confirmation(row_id: str, date_str: str) -> None:
+    """Write *date_str* to the Confirmation column for the given row_id.
 
-
-def set_confirmation(row_num: int, date_str: str) -> None:
-    """Write *date_str* to the Confirmation column of *row_num* with green fill.
-
-    No-op if tracker does not exist or row_num is out of range.
+    No-op if row_id is empty or not found.
+    (Replaces the former xlsx row_num-based version.)
     """
-    if not TRACKER_PATH.exists():
+    if not row_id or not date_str:
         return
-    wb = openpyxl.load_workbook(TRACKER_PATH)
-    ws = wb.active
-    if row_num < 2 or row_num > ws.max_row:
-        wb.close()
-        return
-    cell = ws.cell(row=row_num, column=COL_CONFIRMATION, value=date_str)
-    if date_str:
-        cell.fill = _CONFIRMED_FILL
-    _save_with_retry(wb)
-
-
-DATE_COL_INDEX = 1  # "Date" — application date
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET confirmation=? WHERE id=?",
+            (date_str, row_id),
+        )
 
 
 def get_applications_on_date(date_str: str) -> list[dict]:
-    """Return all tracker rows where Date == *date_str* (format 'YYYY-MM-DD').
+    """Return all tracker rows where Date == *date_str* (format 'YYYY-MM-DD')."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT date, company, title, ats_status, url FROM applications "
+            "WHERE date=? AND company != ''",
+            (date_str,),
+        ).fetchall()
+    return [
+        {
+            "date":    r["date"],
+            "company": r["company"],
+            "title":   r["title"],
+            "ats":     r["ats_status"],
+            "url":     r["url"],
+        }
+        for r in rows
+    ]
 
-    Each result dict has: date, company, title, ats, url.
-    Skips rows with no company name.
-    """
-    if not TRACKER_PATH.exists():
-        return []
-    results: list[dict] = []
-    wb = openpyxl.load_workbook(TRACKER_PATH, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            row_date = str(row[DATE_COL_INDEX - 1] or "").strip()
-            if row_date != date_str:
-                continue
-            company = str(row[COMPANY_COL_INDEX - 1] or "").strip() if len(row) >= COMPANY_COL_INDEX else ""
-            if not company:
-                continue
-            results.append({
-                "date": row_date,
-                "company": company,
-                "title": str(row[TITLE_COL_INDEX - 1] or "").strip() if len(row) >= TITLE_COL_INDEX else "",
-                "ats": str(row[ATS_COL_INDEX - 1] or "").strip() if len(row) >= ATS_COL_INDEX else "",
-                "url": str(row[URL_COL_INDEX - 1] or "").strip() if len(row) >= URL_COL_INDEX else "",
-            })
-    finally:
-        wb.close()
-    return results
+
+# ── Google Sheets metadata ────────────────────────────────────────────────────
+
+def set_sheets_row(row_id: str, sheets_row: int) -> None:
+    """Store the Google Sheets 1-based row index for a tracker row."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_row=? WHERE id=?",
+            (sheets_row, row_id),
+        )
+
+
+def get_sheets_row(row_id: str) -> int | None:
+    """Return the Google Sheets row index for a row, or None if not yet pushed."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT sheets_row FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    return int(row["sheets_row"]) if row and row["sheets_row"] is not None else None
+
+
+def mark_sheets_dirty(row_id: str) -> None:
+    """Flag a tracker row as needing a Sheets resync."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_dirty=1 WHERE id=?", (row_id,)
+        )
+
+
+def mark_sheets_clean(row_id: str) -> None:
+    """Clear the sheets_dirty flag after a successful Sheets write."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_dirty=0 WHERE id=?", (row_id,)
+        )
+
+
+def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
+    """Return (row_id, row_dict, sheets_row) for all rows that need Sheets sync."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, date, company, title, stack, ats_status, url, folder,
+                   sent, reapplication, to_learn, drive_url, confirmation, answer,
+                   sheets_row
+            FROM applications
+            WHERE sheets_dirty=1
+            """
+        ).fetchall()
+    result = []
+    for r in rows:
+        row_dict = {
+            "Date":           r["date"],
+            "Company":        r["company"],
+            "Job Title":      r["title"],
+            "Stack":          r["stack"],
+            "ATS %":          r["ats_status"],
+            "URL":            r["url"],
+            "Folder":         r["folder"],
+            "Sent":           r["sent"],
+            "Re-application": r["reapplication"],
+            "To Learn":       r["to_learn"],
+            "ID":             r["id"],
+            "Drive URL":      r["drive_url"],
+            "Confirmation":   r["confirmation"],
+            "Answer":         r["answer"],
+        }
+        result.append((r["id"], row_dict, r["sheets_row"]))
+    return result
+
+
+def get_dirty_sheets_count() -> int:
+    """Return the number of rows flagged for Sheets resync."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1"
+        ).fetchone()
+    return row["n"] if row else 0

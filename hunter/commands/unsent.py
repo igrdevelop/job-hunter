@@ -6,8 +6,6 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from hunter.config import TRACKER_PATH
-
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +14,7 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         from hunter.tracker_cache import cache
         if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
+            await cache.load_from_db()
         total = await cache.unsent_count()
         angular_n = await cache.unsent_angular_count()
         if total == 0:

@@ -4,8 +4,6 @@ import logging
 
 from telegram.ext import ContextTypes
 
-from hunter.config import TRACKER_PATH
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +23,7 @@ async def scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from hunter.tracker_cache import cache
         if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
+            await cache.load_from_db()
         from hunter import gsheets_sync
         result = await gsheets_sync.pull_full_snapshot()
         updated = result.get("updated", 0)

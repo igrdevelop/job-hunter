@@ -8,13 +8,14 @@ All async methods are driven via asyncio.run() in sync test functions.
 """
 
 import asyncio
+import uuid
 from pathlib import Path
 
-import openpyxl
 import pytest
 
 from hunter.tracker_cache import TrackerCache
 from hunter.tracker import TRACKER_HEADERS, normalize_url, dedup_key
+from hunter.db import get_db
 
 
 # ---------------------------------------------------------------------------
@@ -62,59 +63,77 @@ ROW_C = make_row(
 )
 
 
-def _make_xlsx(path: Path, rows: list[dict]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(TRACKER_HEADERS)
-    for r in rows:
-        ws.append([r.get(h, "") for h in TRACKER_HEADERS])
-    wb.save(path)
+def _insert_row(tracker_db: Path, row: dict) -> None:
+    """Insert a tracker row dict directly into the test SQLite DB."""
+    from hunter.tracker import normalize_url
+    row_id = row.get("ID") or uuid.uuid4().hex[:8]
+    url = row.get("URL", "")
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, stack, ats_status, url, url_norm,
+             folder, sent, reapplication, to_learn, drive_url, confirmation, answer)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row_id,
+                row.get("Date", ""),
+                row.get("Company", ""),
+                row.get("Job Title", ""),
+                row.get("Stack", ""),
+                row.get("ATS %", ""),
+                url,
+                normalize_url(url),
+                row.get("Folder", ""),
+                row.get("Sent", ""),
+                row.get("Re-application", ""),
+                row.get("To Learn", ""),
+                row.get("Drive URL", ""),
+                row.get("Confirmation", ""),
+                row.get("Answer", ""),
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Load from Excel
+# Load from DB
 # ---------------------------------------------------------------------------
 
-class TestLoadFromExcel:
-    def test_empty_when_file_missing(self, tmp_path):
+class TestLoadFromDB:
+    def test_empty_when_db_empty(self, tracker_db):
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "nonexistent.xlsx"))
+        run(c.load_from_db())
         assert c.size == 0
         assert c.loaded
 
-    def test_loads_rows(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A, ROW_B])
+    def test_loads_rows(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
+        _insert_row(tracker_db, ROW_B)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert c.size == 2
         assert "aaaaaaaa" in c.rows
         assert "bbbbbbbb" in c.rows
 
-    def test_indexes_url(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
+    def test_indexes_url(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert run(c.is_known_url(ROW_A["URL"]))
 
-    def test_indexes_company_title(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
+    def test_indexes_company_title(self, tracker_db):
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
+        run(c.load_from_db())
         assert run(c.is_known_ct(ROW_A["Company"], ROW_A["Job Title"]))
 
-    def test_skips_rows_without_id(self, tmp_path):
-        row_no_id = make_row(Company="X")  # ID=""
-        _make_xlsx(tmp_path / "t.xlsx", [row_no_id])
+    def test_load_from_excel_deprecated_wrapper(self, tracker_db):
+        """load_from_excel() still works (deprecated alias for load_from_db())."""
+        _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
-        assert c.size == 0
-
-    def test_records_sheet_row_index(self, tmp_path):
-        _make_xlsx(tmp_path / "t.xlsx", [ROW_A])
-        c = TrackerCache()
-        run(c.load_from_excel(tmp_path / "t.xlsx"))
-        # Header is row 1, first data row is row 2
-        assert c.sheet_row_index.get("aaaaaaaa") == 2
+        run(c.load_from_excel())   # no path needed — reads from DB
+        assert c.size == 1
 
 
 # ---------------------------------------------------------------------------
@@ -124,16 +143,9 @@ class TestLoadFromExcel:
 class TestAdd:
     def test_add_single_row(self):
         c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=5))
-        assert c.size == 1
-        assert run(c.is_known_url(ROW_A["URL"]))
-        assert c.sheet_row_index["aaaaaaaa"] == 5
-
-    def test_add_without_sheet_row(self):
-        c = TrackerCache()
         run(c.add(ROW_A))
         assert c.size == 1
-        assert "aaaaaaaa" not in c.sheet_row_index
+        assert run(c.is_known_url(ROW_A["URL"]))
 
     def test_add_missing_id_skipped(self):
         c = TrackerCache()
@@ -182,20 +194,6 @@ class TestUpdate:
         run(c.add(ROW_A))
         with pytest.raises(ValueError, match="Unknown field"):
             run(c.update_field("aaaaaaaa", "NonExistent", "x"))
-
-    def test_mark_dirty_and_clean(self):
-        c = TrackerCache()
-        run(c.add(ROW_A))
-        run(c.mark_dirty("aaaaaaaa"))
-        assert "aaaaaaaa" in c.dirty_ids
-        run(c.mark_clean("aaaaaaaa"))
-        assert "aaaaaaaa" not in c.dirty_ids
-
-    def test_set_sheet_row_index(self):
-        c = TrackerCache()
-        run(c.add(ROW_A))
-        run(c.set_sheet_row_index("aaaaaaaa", 7))
-        assert c.sheet_row_index["aaaaaaaa"] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -271,96 +269,6 @@ class TestStats:
         assert len(unsent) == 1
         assert unsent[0]["ID"] == "aaaaaaaa"
 
-    def test_dirty_rows(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=3))
-        run(c.mark_dirty("aaaaaaaa"))
-        dirty = run(c.dirty_rows())
-        assert len(dirty) == 1
-        row_id, row, sheet_idx = dirty[0]
-        assert row_id == "aaaaaaaa"
-        assert sheet_idx == 3
-
-
-# ---------------------------------------------------------------------------
-# apply_pull_delta — conflict matrix (§9)
-# ---------------------------------------------------------------------------
-
-class TestApplyPullDelta:
-    def test_no_changes_when_identical(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        to_write = run(c.apply_pull_delta([(2, dict(ROW_A))]))
-        assert to_write == []
-
-    def test_user_adds_sent_date(self):
-        """Excel empty, Sheets has user date → trust Sheets, return for Excel write."""
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))  # Sent=""
-        sheet_row = dict(ROW_A)
-        sheet_row["Sent"] = "2026-05-14"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == "2026-05-14"
-        assert c.rows["aaaaaaaa"]["Sent"] == "2026-05-14"
-
-    def test_bot_expired_wins_over_empty_sheets(self):
-        """Excel=EXPIRED, Sheets empty → bot wins, no Excel write needed."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="EXPIRED")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = ""
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert to_write == []
-        assert c.rows["aaaaaaaa"]["Sent"] == "EXPIRED"
-
-    def test_user_sent_beats_expired(self):
-        """Excel=EXPIRED, Sheets has user date → edge case, trust Sheets."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="EXPIRED")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = "2026-05-10"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == "2026-05-10"
-
-    def test_user_erases_sent(self):
-        """Excel has date, Sheets empty (user erased) → trust Sheets."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="2026-05-01")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = ""
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == ""
-
-    def test_user_updates_to_learn(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        sheet_row = dict(ROW_A)
-        sheet_row["To Learn"] = "RxJS"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert c.rows["aaaaaaaa"]["To Learn"] == "RxJS"
-
-    def test_updates_sheet_row_index(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        run(c.apply_pull_delta([(7, dict(ROW_A))]))
-        assert c.sheet_row_index["aaaaaaaa"] == 7
-
-    def test_missing_id_in_sheets_ignored(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        to_write = run(c.apply_pull_delta([(3, make_row())]))
-        assert to_write == []
-
 
 # ---------------------------------------------------------------------------
 # Concurrency
@@ -406,15 +314,3 @@ class TestConcurrency:
         c = asyncio.run(_run())
         assert c.rows["aaaaaaaa"]["ATS %"] == "SKIP"
 
-    def test_no_deadlock_on_pull_delta(self):
-        """apply_pull_delta holds lock internally — must not deadlock."""
-        async def _run():
-            c = TrackerCache()
-            await c.add(ROW_A, sheet_row=2)
-            return await asyncio.wait_for(
-                c.apply_pull_delta([(2, dict(ROW_A))]),
-                timeout=2.0,
-            )
-
-        result = asyncio.run(_run())
-        assert result == []

@@ -32,7 +32,6 @@ from hunter.config import (
     TELEGRAM_CHAT_ID,
     TIMEZONE,
     GSHEETS_ENABLED,
-    TRACKER_PATH,
 )
 
 # Always-needed by main.py and _post_init:
@@ -78,6 +77,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_gsheets_push_sent":    ("hunter.commands.gsheets", "cmd_gsheets_push_sent"),
     "cmd_gdrive_upload_missing": ("hunter.commands.gdrive", "cmd_gdrive_upload_missing"),
     "cmd_check_responses":      ("hunter.commands.check_responses", "cmd_check_responses"),
+    "cmd_export":               ("hunter.commands.export",          "cmd_export"),
     "cmd_url":          ("hunter.commands.url_message", "cmd_url"),
     "button_callback":  ("hunter.commands.url_message", "button_callback"),
     "_handle_apply":    ("hunter.commands.url_message", "_handle_apply"),
@@ -130,6 +130,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("gsheets_push_sent",     "Sync Sent/EXPIRED from tracker.xlsx → Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
         BotCommand("check_responses",       "Check Gmail confirmations [days]"),
+        BotCommand("export",                "Export tracker as .xlsx file"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -181,7 +182,7 @@ async def _post_init(app: Application) -> None:
     # correct immediately after startup (not only after the first /hunt).
     try:
         from hunter.tracker_cache import cache
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         logger.info("[startup] tracker_cache loaded")
     except Exception as e:
         logger.warning("[startup] tracker_cache load failed: %s", e)
@@ -208,6 +209,7 @@ def build_application() -> Application:
     )
     from hunter.commands.gdrive import cmd_gdrive_upload_missing
     from hunter.commands.check_responses import cmd_check_responses
+    from hunter.commands.export import cmd_export
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
 
@@ -230,6 +232,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("gsheets_push_sent",     cmd_gsheets_push_sent))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
     app.add_handler(CommandHandler("check_responses",       cmd_check_responses))
+    app.add_handler(CommandHandler("export",               cmd_export))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))

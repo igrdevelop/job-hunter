@@ -27,13 +27,13 @@ def _confirmed_result(company="NASK", title="Senior Frontend Developer",
         date="2026-05-20", subject="...", platform=platform,
     )
     candidate = {
-        "row": 2, "company": company, "title": title,
+        "id": "rowid0002", "company": company, "title": title,
         "ats": "85%", "sent": "", "url": "https://example.com/1",
         "confirmation": existing_confirmation,
         "title_score": 1.0,
     }
     return MatchResult(email=email, match_type="exact",
-                       candidates=[candidate], row_num=2)
+                       candidates=[candidate], row_id="rowid0002")
 
 
 def _ambiguous_result(company="Acme", title="Angular Dev"):
@@ -42,9 +42,9 @@ def _ambiguous_result(company="Acme", title="Angular Dev"):
         date="2026-05-20", subject="...", platform="erecruiter",
     )
     candidates = [
-        {"row": 2, "company": company, "title": "Angular Developer",
+        {"id": "rowid0002", "company": company, "title": "Angular Developer",
          "ats": "85%", "sent": "", "url": "", "response": "", "title_score": 0.8},
-        {"row": 3, "company": company, "title": "Angular Engineer",
+        {"id": "rowid0003", "company": company, "title": "Angular Engineer",
          "ats": "85%", "sent": "", "url": "", "response": "", "title_score": 0.75},
     ]
     return MatchResult(email=email, match_type="ambiguous", candidates=candidates)
@@ -104,17 +104,17 @@ def test_format_all_groups():
     assert "📭" in msg
 
 
-def test_format_confirmed_without_row_num_excluded():
-    """Results with no row_num (ambiguous resolved to no_match) not in confirmed section."""
+def test_format_confirmed_without_row_id_excluded():
+    """Results with no row_id (ambiguous resolved to no_match) not in confirmed section."""
     email = ConfirmationEmail(company="X", title="Y", date="2026-05-20",
                               subject="...", platform="direct")
     result = MatchResult(email=email, match_type="fuzzy",
-                         candidates=[{"row": 2, "company": "X", "title": "Y",
+                         candidates=[{"id": "rowid0002", "company": "X", "title": "Y",
                                       "ats": "85%", "sent": "", "url": "",
                                       "response": "", "title_score": 0.8}],
-                         row_num=None)  # no row_num → excluded from confirmed
+                         row_id=None)  # no row_id → excluded from confirmed
     msg = _format_check_responses_report([result])
-    # Should not appear in confirmed section since row_num is None
+    # Should not appear in confirmed section since row_id is None
     assert "✅" not in msg
 
 

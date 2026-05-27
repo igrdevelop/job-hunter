@@ -1,14 +1,16 @@
 """B5 wiring — hunt loop must skip jobs that are within the cooldown window."""
 import asyncio
 import datetime
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
-import openpyxl
 import pytest
 
 from hunter.models import Job
 from hunter.main import run_hunt
+from hunter.tracker import normalize_url
+from hunter.db import get_db
 
 
 # ---------------------------------------------------------------------------
@@ -20,17 +22,21 @@ def _make_job(company: str, title: str, url: str) -> Job:
                salary=None, url=url, source="test")
 
 
-def _make_tracker(tmp_path: Path, rows: list[dict]) -> Path:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-                "Folder", "Sent", "Re-application", "To Learn", "ID"])
-    for r in rows:
-        ws.append([r.get("date"), r.get("company", ""), r.get("title", ""),
-                   "", r.get("ats", "95%"), r.get("url", ""), "", "", "", "", "abc"])
-    path = tmp_path / "tracker.xlsx"
-    wb.save(path)
-    return path
+def _insert_cooldown_row(tracker_db, *, date_str, company: str, title: str,
+                         ats: str, url: str = "") -> None:
+    """Insert a row with the given date into the test DB."""
+    if not url:
+        url = f"https://example.com/{uuid.uuid4().hex[:8]}"
+    norm = normalize_url(url)
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (uuid.uuid4().hex[:8], str(date_str), company, title, ats, url, norm),
+        )
 
 
 def _run(coro):
@@ -41,14 +47,16 @@ def _run(coro):
 # core test: cooldown job never reaches send_job_cards
 # ---------------------------------------------------------------------------
 
-def test_cooldown_job_excluded_from_new_jobs(tmp_path: Path) -> None:
+def test_cooldown_job_excluded_from_new_jobs(tracker_db) -> None:
     today = datetime.date.today()
-    tracker = _make_tracker(tmp_path, [
-        # Acme was applied to 5 days ago — within 30-day cooldown
-        {"date": today - datetime.timedelta(days=5),
-         "company": "Acme", "title": "Angular Dev",
-         "url": "https://example.com/job/1", "ats": "97%"},
-    ])
+    _insert_cooldown_row(
+        tracker_db,
+        date_str=today - datetime.timedelta(days=5),
+        company="Acme",
+        title="Angular Dev",
+        url="https://example.com/job/1",
+        ats="97%",
+    )
 
     fresh_job = _make_job("Acme", "Angular Dev", "https://justjoin.it/job-offer/acme-angular-dev-new")
     unrelated_job = _make_job("OtherCo", "React Dev", "https://justjoin.it/job-offer/other-react")
@@ -62,8 +70,6 @@ def test_cooldown_job_excluded_from_new_jobs(tmp_path: Path) -> None:
         pass
 
     with (
-        patch("hunter.tracker.TRACKER_PATH", tracker),
-        patch("hunter.main.TRACKER_PATH", tracker),
         patch("hunter.main.AUTO_APPLY", False),
         patch("hunter.main.ALL_SOURCES", []),
         patch("hunter.main.apply_filters_with_stats", return_value=([fresh_job, unrelated_job], {})),
@@ -80,14 +86,17 @@ def test_cooldown_job_excluded_from_new_jobs(tmp_path: Path) -> None:
     assert "OtherCo" in sent_companies, "OtherCo should pass through"
 
 
-def test_expired_cooldown_job_passes_through(tmp_path: Path) -> None:
+def test_expired_cooldown_job_passes_through(tracker_db) -> None:
     """Job applied 20 days ago is past the 12-day default cooldown — must show again."""
     today = datetime.date.today()
-    tracker = _make_tracker(tmp_path, [
-        {"date": today - datetime.timedelta(days=20),
-         "company": "Acme", "title": "Angular Dev",
-         "url": "https://example.com/old", "ats": "97%"},
-    ])
+    _insert_cooldown_row(
+        tracker_db,
+        date_str=today - datetime.timedelta(days=20),
+        company="Acme",
+        title="Angular Dev",
+        url="https://example.com/old",
+        ats="97%",
+    )
 
     job = _make_job("Acme", "Angular Dev", "https://justjoin.it/job-offer/acme-new-posting")
     captured_cards: list[list[Job]] = []
@@ -99,8 +108,6 @@ def test_expired_cooldown_job_passes_through(tmp_path: Path) -> None:
         pass
 
     with (
-        patch("hunter.tracker.TRACKER_PATH", tracker),
-        patch("hunter.main.TRACKER_PATH", tracker),
         patch("hunter.main.AUTO_APPLY", False),
         patch("hunter.main.ALL_SOURCES", []),
         patch("hunter.main.apply_filters_with_stats", return_value=([job], {})),
