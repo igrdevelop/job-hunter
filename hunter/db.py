@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS applications (
     confirmation  TEXT    NOT NULL DEFAULT '',
     answer        TEXT    NOT NULL DEFAULT '',
     sheets_row    INTEGER,
-    sheets_dirty  INTEGER NOT NULL DEFAULT 0
+    sheets_dirty  INTEGER NOT NULL DEFAULT 0,
+    fail_count    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_url_norm
@@ -109,12 +110,30 @@ def get_db(path: Path = TRACKER_DB_PATH) -> Generator[sqlite3.Connection, None, 
 
 # ── Schema init ───────────────────────────────────────────────────────────────
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add any missing columns (incremental schema migrations for existing DBs).
+
+    Called during init_db() after CREATE TABLE IF NOT EXISTS so that
+    existing databases gain new columns without needing a full rebuild.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
+    migrations = [
+        ("sheets_row",   "INTEGER"),
+        ("sheets_dirty", "INTEGER NOT NULL DEFAULT 0"),
+        ("fail_count",   "INTEGER NOT NULL DEFAULT 0"),
+    ]
+    for col, definition in migrations:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE applications ADD COLUMN {col} {definition}")
+            log.info("db: added missing column '%s' to applications", col)
+
+
 def init_db(
     path: Path = TRACKER_DB_PATH,
     *,
     xlsx_path: Path | None = None,
 ) -> None:
-    """Create tables if they do not exist.
+    """Create tables if they do not exist and apply incremental migrations.
 
     Args:
         path: Path to the SQLite database file to initialise.
@@ -131,6 +150,7 @@ def init_db(
 
     with get_db(path) as conn:
         conn.executescript(_DDL)
+        _ensure_columns(conn)
 
     if need_migration:
         n = migrate_from_excel(_xlsx, path)

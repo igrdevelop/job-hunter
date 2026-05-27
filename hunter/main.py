@@ -28,8 +28,8 @@ from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
-    add_failed, get_failed_jobs, remove_failed, is_known,
-    is_in_cooldown,
+    add_failed, get_failed_jobs, remove_failed, increment_fail_count,
+    is_known, is_in_cooldown, MAX_FAIL_RETRIES,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -121,6 +121,16 @@ async def _run_hunt_impl(
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
 
+        # Gmail: upload the log snapshot to Drive right after the scan so the
+        # Drive copy reflects the full email pipeline trace (who sent, which
+        # URLs were extracted, enrichment results) while the rest of the hunt
+        # continues.  Fire-and-forget via create_task — doesn't block fetching.
+        if source.name == "gmail":
+            asyncio.get_event_loop().create_task(
+                _upload_log_to_drive(),
+                name="gmail_log_upload",
+            )
+
     fetch_lines = "\n".join(
         f"  {name}: <b>{cnt}</b>" if isinstance(cnt, int) else f"  {name}: {cnt}"
         for name, cnt in fetch_stats.items()
@@ -139,16 +149,12 @@ async def _run_hunt_impl(
         known_urls = await asyncio.to_thread(get_known_urls)
         known_ct = await asyncio.to_thread(get_known_company_titles)
     except Exception as e:
-        logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
+        logger.exception("[Hunt] Failed to read tracker DB for dedup")
         hint = str(e)[:400]
         await send_text(
             context,
-            "❌ <b>Failed to read tracker.xlsx</b> (dedup before hunt).\n\n"
-            f"<pre>{hint}</pre>\n\n"
-            "Common cause of <code>[Content_Types].xml</code> errors — the file is not a real "
-            "Excel workbook (truncated, 0 bytes, renamed HTML/CSV, corrupt archive). "
-            f"Check: <code>{TRACKER_PATH}</code>\n"
-            "Open in Excel or restore from backup.",
+            "❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n"
+            f"<pre>{hint}</pre>",
         )
         return
 
@@ -308,6 +314,24 @@ async def _upload_to_drive(url: str) -> None:
         logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
 
 
+async def _upload_log_to_drive() -> None:
+    """Upload hunter_errors.log to Drive immediately after gmail scan (best-effort).
+
+    Called right after GmailSource.search() returns so the Drive copy reflects
+    the full gmail pipeline trace (emails processed, URLs extracted, enrichment
+    results) while the rest of the hunt is still running.
+    """
+    try:
+        from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+        if not GDRIVE_ENABLED:
+            return
+        from hunter import gdrive_sync
+        await gdrive_sync.upload_log_file(PROJECT_DIR / "logs" / "hunter_errors.log")
+        logger.debug("[gmail] log snapshot uploaded to Drive")
+    except Exception as _e:
+        logger.debug("[gmail] log upload to Drive failed: %s", _e)
+
+
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
     """Process all jobs sequentially with configurable delay between them."""
     total = len(jobs)
@@ -336,7 +360,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 context,
                 f"📋 [{i}/{total}] <b>JobLeads — MANUAL</b>: {job.company} — {job.title}\n"
                 "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
-                "<i>tracker.xlsx updated, URL dedup active.</i>",
+                "<i>Tracker updated, URL dedup active.</i>",
             )
         else:
             failed += 1
@@ -403,7 +427,22 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "(JobLeads: see apply_agent message about job_posting.txt)",
             )
         else:
-            logger.info(f"[retry] Still failing: {job.company} - {job.title}")
+            new_count = await asyncio.to_thread(increment_fail_count, job.url)
+            if new_count >= MAX_FAIL_RETRIES:
+                logger.warning(
+                    "[retry] Giving up on %s - %s after %d failures",
+                    job.company, job.title, new_count,
+                )
+                await send_text(
+                    context,
+                    f"🚫 <b>Giving up</b> on {job.company} — {job.title} "
+                    f"(failed {new_count}× — won't retry again).",
+                )
+            else:
+                logger.info(
+                    "[retry] Still failing (%d/%d): %s - %s",
+                    new_count, MAX_FAIL_RETRIES, job.company, job.title,
+                )
 
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)

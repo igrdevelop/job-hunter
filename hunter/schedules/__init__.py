@@ -24,7 +24,7 @@ from hunter.config import (
 from hunter.schedules.hunt import scheduled_hunt
 from hunter.schedules.check_expired import scheduled_check_expired
 from hunter.schedules.tracker_backup import scheduled_tracker_backup
-from hunter.schedules.gdrive import scheduled_gdrive_upload_missing
+from hunter.schedules.gdrive import scheduled_gdrive_upload_missing, scheduled_gdrive_upload_logs
 from hunter.schedules.gsheets import scheduled_gsheets_resync, scheduled_gsheets_pull
 from hunter.schedules.pending_report import scheduled_pending_report
 from hunter.schedules.email_responses import scheduled_check_email_responses
@@ -38,6 +38,7 @@ __all__ = [
     "scheduled_check_expired",
     "scheduled_tracker_backup",
     "scheduled_gdrive_upload_missing",
+    "scheduled_gdrive_upload_logs",
     "scheduled_gsheets_resync",
     "scheduled_gsheets_pull",
     "scheduled_pending_report",
@@ -113,6 +114,14 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             name="tracker_backup_daily",
         )
         logger.info("[Schedule] tracker_backup at %02d:%02d %s", bh, bm, TIMEZONE)
+
+    # ── Daily log upload to Drive at 06:10 ───────────────────────────────────
+    app.job_queue.run_daily(
+        callback=scheduled_gdrive_upload_logs,
+        time=dt_time(6, 10, tzinfo=tz),
+        name="gdrive_upload_logs_daily",
+    )
+    logger.info("[Schedule] gdrive_upload_logs at 06:10 %s", TIMEZONE)
 
     # ── Sheets resync every 5 min ─────────────────────────────────────────────
     app.job_queue.run_repeating(

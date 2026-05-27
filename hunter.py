@@ -14,6 +14,7 @@ from pathlib import Path
 
 from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROJECT_DIR
 from hunter.telegram_bot import build_application
+from hunter.db import init_db, TRACKER_DB_PATH
 
 # ── Console handler (INFO+) ───────────────────────────────────────────────────
 _fmt = logging.Formatter(
@@ -24,7 +25,7 @@ _console = logging.StreamHandler(sys.stdout)
 _console.setLevel(logging.INFO)
 _console.setFormatter(_fmt)
 
-# ── File handler (WARNING+ with full tracebacks) ──────────────────────────────
+# ── File handler (INFO+ so gmail pipeline trace lands in the log file) ────────
 _log_dir = PROJECT_DIR / "logs"
 _log_dir.mkdir(exist_ok=True)
 _file_handler = RotatingFileHandler(
@@ -33,7 +34,7 @@ _file_handler = RotatingFileHandler(
     backupCount=10,              # keep 10 rotated files → up to 50 MB history
     encoding="utf-8",
 )
-_file_handler.setLevel(logging.WARNING)
+_file_handler.setLevel(logging.INFO)
 _file_handler.setFormatter(_fmt)
 
 logging.root.setLevel(logging.DEBUG)
@@ -58,6 +59,9 @@ def _check_config() -> bool:
 def main() -> None:
     if not _check_config():
         sys.exit(1)
+
+    # Ensure SQLite DB and tables exist (creates + migrates from tracker.xlsx if needed)
+    init_db(TRACKER_DB_PATH)
 
     run_now = "--now" in sys.argv
 
