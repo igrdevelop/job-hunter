@@ -121,6 +121,16 @@ async def _run_hunt_impl(
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
 
+        # Gmail: upload the log snapshot to Drive right after the scan so the
+        # Drive copy reflects the full email pipeline trace (who sent, which
+        # URLs were extracted, enrichment results) while the rest of the hunt
+        # continues.  Fire-and-forget via create_task — doesn't block fetching.
+        if source.name == "gmail":
+            asyncio.get_event_loop().create_task(
+                _upload_log_to_drive(),
+                name="gmail_log_upload",
+            )
+
     fetch_lines = "\n".join(
         f"  {name}: <b>{cnt}</b>" if isinstance(cnt, int) else f"  {name}: {cnt}"
         for name, cnt in fetch_stats.items()
@@ -302,6 +312,24 @@ async def _upload_to_drive(url: str) -> None:
             await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
     except Exception as _e:
         logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
+
+
+async def _upload_log_to_drive() -> None:
+    """Upload hunter_errors.log to Drive immediately after gmail scan (best-effort).
+
+    Called right after GmailSource.search() returns so the Drive copy reflects
+    the full gmail pipeline trace (emails processed, URLs extracted, enrichment
+    results) while the rest of the hunt is still running.
+    """
+    try:
+        from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+        if not GDRIVE_ENABLED:
+            return
+        from hunter import gdrive_sync
+        await gdrive_sync.upload_log_file(PROJECT_DIR / "logs" / "hunter_errors.log")
+        logger.debug("[gmail] log snapshot uploaded to Drive")
+    except Exception as _e:
+        logger.debug("[gmail] log upload to Drive failed: %s", _e)
 
 
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
