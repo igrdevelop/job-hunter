@@ -5,11 +5,17 @@ $ARGUMENTS
 
 ---
 
-## Step 1 - Load generation rules
+## Step 1 - Load generation rules and base CV
 
 Read the file `D:/LearningProject/Claude/prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
 
 Also read the candidate profile from `D:/LearningProject/Claude/prompts/candidate_profile.md` — use it as the single source of truth for all candidate data.
+
+After reading the job posting (Step 2), detect the primary stack (Angular / React / JavaScript) and load the matching base CV if available:
+- Angular → `D:/LearningProject/Claude/prompts/base_cv_angular.md`
+- React / JavaScript / other → no base CV yet, derive everything from candidate profile
+
+Use the base CV as a starting point for experience bullets and skills order. Follow the "Base CV" instructions in `generation_rules.md`.
 
 ---
 
