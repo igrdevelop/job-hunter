@@ -137,6 +137,45 @@ async def delete_application_folder(drive_url: str) -> bool:
         return False
 
 
+async def upload_log_file(log_path: Path) -> str | None:
+    """Upload a log file to ``Job Hunter/Logs/{filename}`` on Google Drive.
+
+    Creates a ``Logs`` subfolder inside the root Drive folder if it does not
+    exist yet.  If the file was uploaded before it is overwritten in-place so
+    the Drive folder stays tidy (one file, always current).
+
+    Best-effort: returns None when Drive is disabled or on any API error.
+    """
+    if not _ready():
+        return None
+    if not log_path.exists() or not log_path.is_file():
+        log.debug("gdrive_sync.upload_log_file: %s not found, skipping", log_path)
+        return None
+
+    try:
+        from hunter.gdrive_client import get_or_create_folder, upload_file
+
+        svc = _get_service()
+
+        if GDRIVE_ROOT_FOLDER_ID:
+            root_id = GDRIVE_ROOT_FOLDER_ID
+        else:
+            root_id = await asyncio.to_thread(
+                get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
+            )
+
+        logs_folder_id = await asyncio.to_thread(
+            get_or_create_folder, svc, "Logs", root_id
+        )
+        file_id = await asyncio.to_thread(upload_file, svc, log_path, logs_folder_id)
+        url = f"https://drive.google.com/file/d/{file_id}/view"
+        log.info("gdrive_sync: uploaded log %s → %s", log_path.name, url)
+        return url
+    except Exception as e:
+        log.warning("gdrive_sync.upload_log_file: failed for %s: %s", log_path.name, e)
+        return None
+
+
 _UPLOAD_TIMEOUT = 120  # seconds per folder
 
 
