@@ -1011,3 +1011,82 @@ def get_applications_on_date(date_str: str) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ── Google Sheets metadata ────────────────────────────────────────────────────
+
+def set_sheets_row(row_id: str, sheets_row: int) -> None:
+    """Store the Google Sheets 1-based row index for a tracker row."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_row=? WHERE id=?",
+            (sheets_row, row_id),
+        )
+
+
+def get_sheets_row(row_id: str) -> int | None:
+    """Return the Google Sheets row index for a row, or None if not yet pushed."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT sheets_row FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    return int(row["sheets_row"]) if row and row["sheets_row"] is not None else None
+
+
+def mark_sheets_dirty(row_id: str) -> None:
+    """Flag a tracker row as needing a Sheets resync."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_dirty=1 WHERE id=?", (row_id,)
+        )
+
+
+def mark_sheets_clean(row_id: str) -> None:
+    """Clear the sheets_dirty flag after a successful Sheets write."""
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET sheets_dirty=0 WHERE id=?", (row_id,)
+        )
+
+
+def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
+    """Return (row_id, row_dict, sheets_row) for all rows that need Sheets sync."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, date, company, title, stack, ats_status, url, folder,
+                   sent, reapplication, to_learn, drive_url, confirmation, answer,
+                   sheets_row
+            FROM applications
+            WHERE sheets_dirty=1
+            """
+        ).fetchall()
+    result = []
+    for r in rows:
+        row_dict = {
+            "Date":           r["date"],
+            "Company":        r["company"],
+            "Job Title":      r["title"],
+            "Stack":          r["stack"],
+            "ATS %":          r["ats_status"],
+            "URL":            r["url"],
+            "Folder":         r["folder"],
+            "Sent":           r["sent"],
+            "Re-application": r["reapplication"],
+            "To Learn":       r["to_learn"],
+            "ID":             r["id"],
+            "Drive URL":      r["drive_url"],
+            "Confirmation":   r["confirmation"],
+            "Answer":         r["answer"],
+        }
+        result.append((r["id"], row_dict, r["sheets_row"]))
+    return result
+
+
+def get_dirty_sheets_count() -> int:
+    """Return the number of rows flagged for Sheets resync."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1"
+        ).fetchone()
+    return row["n"] if row else 0

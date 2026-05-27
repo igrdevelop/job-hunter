@@ -419,13 +419,13 @@ validate_content, compute_output_folder, ApplyError). All module-level mutable g
 (_SKIP_DEDUP, _FULL_MODE, _APPLY_META_COMPANY/TITLE) replaced by function parameters.
 apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 
-### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk)
+### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk) ✅ COMPLETE (2026-05-27)
 
-- [ ] **5.1** Create `hunter/db.py` with SQLite schema
-- [ ] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
-- [ ] **5.3** Add `/export` command for Excel export
-- [ ] **5.4** Keep openpyxl only for doc generation formatting
-- [ ] **5.5** gsheets_sync: replace tracker_cache with db queries
+- [x] **5.1** Create `hunter/db.py` with SQLite schema (WAL mode, `sheets_row`+`sheets_dirty` columns)
+- [x] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
+- [x] **5.3** Add `/export` command for Excel export
+- [x] **5.4** Keep openpyxl only for doc generation formatting; tracker_cache loads from SQLite
+- [x] **5.5** gsheets_sync: all Sheets metadata (`sheets_row`, `sheets_dirty`) moved from TrackerCache to DB. 6 new tracker.py functions. `_apply_pull_delta_db()` replaces `cache.apply_pull_delta()`. TrackerCache no longer has `sheet_row_index`, `dirty_ids`, or Sheets-related methods.
 
 ### Phase 6 — Project structure (after phases 1-5)
 
@@ -495,3 +495,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-26 | sonnet | Fix hanging test: test_cmd_url_force_waiting_triggers_force_run patched bot._force_run but cmd_url calls url_message._force_run directly; changed patch target to hunter.commands.url_message._force_run. 748 tests in 4.55s. |
 | 2026-05-26 | opus | Phase 3 complete: merged job_fetch/ (23 files, ~2475 lines) into hunter/sources/. Each source now owns matches_url + fetch_text. hunter.sources.fetch_job_text() dispatches by URL. linkedin_parse helpers folded into linkedin source. Workable JSON-API extraction restored on AtsAggregator. job_fetch/ deleted. 94 new tests, 842 total in 4.84s. |
 | 2026-05-27 | sonnet | Phase 4 complete: split apply_agent.py (1473→194 lines) into hunter/apply_shared.py (702), hunter/apply_api.py (370), hunter/apply_cli.py (331). All module globals eliminated; functions importable with clean params. 74 new tests (916 total in 6s). |
+| 2026-05-27 | sonnet | Phase 5 complete: SQLite tracker migration. 5.1 db.py schema, 5.2 all tracker CRUD → SQLite, 5.3 /export command, 5.4 openpyxl removed from tracker_cache (load_from_db), 5.5 gsheets Sheets metadata moved to DB (set_sheets_row etc.), gsheets_sync rewritten, _apply_pull_delta_db replaces cache.apply_pull_delta. 937 tests pass. |

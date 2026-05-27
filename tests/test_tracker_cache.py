@@ -128,13 +128,6 @@ class TestLoadFromDB:
         run(c.load_from_db())
         assert run(c.is_known_ct(ROW_A["Company"], ROW_A["Job Title"]))
 
-    def test_sheet_row_index_empty_after_load(self, tracker_db):
-        """sheet_row_index is NOT populated at load time; only by set_sheet_row_index()."""
-        _insert_row(tracker_db, ROW_A)
-        c = TrackerCache()
-        run(c.load_from_db())
-        assert "aaaaaaaa" not in c.sheet_row_index
-
     def test_load_from_excel_deprecated_wrapper(self, tracker_db):
         """load_from_excel() still works (deprecated alias for load_from_db())."""
         _insert_row(tracker_db, ROW_A)
@@ -150,16 +143,9 @@ class TestLoadFromDB:
 class TestAdd:
     def test_add_single_row(self):
         c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=5))
-        assert c.size == 1
-        assert run(c.is_known_url(ROW_A["URL"]))
-        assert c.sheet_row_index["aaaaaaaa"] == 5
-
-    def test_add_without_sheet_row(self):
-        c = TrackerCache()
         run(c.add(ROW_A))
         assert c.size == 1
-        assert "aaaaaaaa" not in c.sheet_row_index
+        assert run(c.is_known_url(ROW_A["URL"]))
 
     def test_add_missing_id_skipped(self):
         c = TrackerCache()
@@ -208,20 +194,6 @@ class TestUpdate:
         run(c.add(ROW_A))
         with pytest.raises(ValueError, match="Unknown field"):
             run(c.update_field("aaaaaaaa", "NonExistent", "x"))
-
-    def test_mark_dirty_and_clean(self):
-        c = TrackerCache()
-        run(c.add(ROW_A))
-        run(c.mark_dirty("aaaaaaaa"))
-        assert "aaaaaaaa" in c.dirty_ids
-        run(c.mark_clean("aaaaaaaa"))
-        assert "aaaaaaaa" not in c.dirty_ids
-
-    def test_set_sheet_row_index(self):
-        c = TrackerCache()
-        run(c.add(ROW_A))
-        run(c.set_sheet_row_index("aaaaaaaa", 7))
-        assert c.sheet_row_index["aaaaaaaa"] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -297,96 +269,6 @@ class TestStats:
         assert len(unsent) == 1
         assert unsent[0]["ID"] == "aaaaaaaa"
 
-    def test_dirty_rows(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=3))
-        run(c.mark_dirty("aaaaaaaa"))
-        dirty = run(c.dirty_rows())
-        assert len(dirty) == 1
-        row_id, row, sheet_idx = dirty[0]
-        assert row_id == "aaaaaaaa"
-        assert sheet_idx == 3
-
-
-# ---------------------------------------------------------------------------
-# apply_pull_delta — conflict matrix (§9)
-# ---------------------------------------------------------------------------
-
-class TestApplyPullDelta:
-    def test_no_changes_when_identical(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        to_write = run(c.apply_pull_delta([(2, dict(ROW_A))]))
-        assert to_write == []
-
-    def test_user_adds_sent_date(self):
-        """Excel empty, Sheets has user date → trust Sheets, return for Excel write."""
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))  # Sent=""
-        sheet_row = dict(ROW_A)
-        sheet_row["Sent"] = "2026-05-14"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == "2026-05-14"
-        assert c.rows["aaaaaaaa"]["Sent"] == "2026-05-14"
-
-    def test_bot_expired_wins_over_empty_sheets(self):
-        """Excel=EXPIRED, Sheets empty → bot wins, no Excel write needed."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="EXPIRED")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = ""
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert to_write == []
-        assert c.rows["aaaaaaaa"]["Sent"] == "EXPIRED"
-
-    def test_user_sent_beats_expired(self):
-        """Excel=EXPIRED, Sheets has user date → edge case, trust Sheets."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="EXPIRED")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = "2026-05-10"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == "2026-05-10"
-
-    def test_user_erases_sent(self):
-        """Excel has date, Sheets empty (user erased) → trust Sheets."""
-        c = TrackerCache()
-        row = make_row(ID="aaaaaaaa", URL="https://x.com/1",
-                       Company="X", **{"Job Title": "Dev"}, Sent="2026-05-01")
-        run(c.add(row, sheet_row=2))
-        sheet_row = dict(row)
-        sheet_row["Sent"] = ""
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert to_write[0]["Sent"] == ""
-
-    def test_user_updates_to_learn(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        sheet_row = dict(ROW_A)
-        sheet_row["To Learn"] = "RxJS"
-        to_write = run(c.apply_pull_delta([(2, sheet_row)]))
-        assert len(to_write) == 1
-        assert c.rows["aaaaaaaa"]["To Learn"] == "RxJS"
-
-    def test_updates_sheet_row_index(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        run(c.apply_pull_delta([(7, dict(ROW_A))]))
-        assert c.sheet_row_index["aaaaaaaa"] == 7
-
-    def test_missing_id_in_sheets_ignored(self):
-        c = TrackerCache()
-        run(c.add(ROW_A, sheet_row=2))
-        to_write = run(c.apply_pull_delta([(3, make_row())]))
-        assert to_write == []
-
 
 # ---------------------------------------------------------------------------
 # Concurrency
@@ -432,15 +314,3 @@ class TestConcurrency:
         c = asyncio.run(_run())
         assert c.rows["aaaaaaaa"]["ATS %"] == "SKIP"
 
-    def test_no_deadlock_on_pull_delta(self):
-        """apply_pull_delta holds lock internally — must not deadlock."""
-        async def _run():
-            c = TrackerCache()
-            await c.add(ROW_A, sheet_row=2)
-            return await asyncio.wait_for(
-                c.apply_pull_delta([(2, dict(ROW_A))]),
-                timeout=2.0,
-            )
-
-        result = asyncio.run(_run())
-        assert result == []

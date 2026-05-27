@@ -89,44 +89,37 @@ def test_mirror_new_row_noop_when_no_id():
 
 
 def test_mirror_new_row_appends_row_and_caches_index():
-    fake_cache = MagicMock()
-    fake_cache.set_sheet_row_index = AsyncMock()
-    fake_cache.mark_clean = AsyncMock()
-    fake_cache.mark_dirty = AsyncMock()
-
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=[5])),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.set_sheets_row") as mock_set_row,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
+        patch("hunter.gsheets_sync.mark_sheets_dirty") as mock_dirty,
     ):
         from hunter import gsheets_sync
         run(gsheets_sync.mirror_new_row(_make_row()))
 
-    fake_cache.set_sheet_row_index.assert_called_once_with("abc12345", 5)
-    fake_cache.mark_clean.assert_called_once_with("abc12345")
-    fake_cache.mark_dirty.assert_not_called()
+    mock_set_row.assert_called_once_with("abc12345", 5)
+    mock_clean.assert_called_once_with("abc12345")
+    mock_dirty.assert_not_called()
 
 
 def test_mirror_new_row_marks_dirty_on_exception():
-    fake_cache = MagicMock()
-    fake_cache.set_sheet_row_index = AsyncMock()
-    fake_cache.mark_clean = AsyncMock()
-    fake_cache.mark_dirty = AsyncMock()
-
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(side_effect=Exception("network"))),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.mark_sheets_dirty") as mock_dirty,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
     ):
         from hunter import gsheets_sync
         run(gsheets_sync.mirror_new_row(_make_row()))
 
-    fake_cache.mark_dirty.assert_called_once_with("abc12345")
-    fake_cache.mark_clean.assert_not_called()
+    mock_dirty.assert_called_once_with("abc12345")
+    mock_clean.assert_not_called()
 
 
 # ── mirror_cell_update ────────────────────────────────────────────────────────
@@ -138,38 +131,32 @@ def test_mirror_cell_update_noop_when_not_ready():
 
 
 def test_mirror_cell_update_marks_dirty_when_no_sheet_row():
-    fake_cache = MagicMock()
-    fake_cache.sheet_row_index = {}
-    fake_cache.mark_dirty = AsyncMock()
-
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_sheets_row", return_value=None),
+        patch("hunter.gsheets_sync.mark_sheets_dirty") as mock_dirty,
     ):
         from hunter import gsheets_sync
         run(gsheets_sync.mirror_cell_update("abc12345", "Sent", "EXPIRED"))
 
-    fake_cache.mark_dirty.assert_called_once_with("abc12345")
+    mock_dirty.assert_called_once_with("abc12345")
 
 
 def test_mirror_cell_update_calls_update_cell():
-    fake_cache = MagicMock()
-    fake_cache.sheet_row_index = {"abc12345": 7}
-    fake_cache.mark_clean = AsyncMock()
-    fake_cache.mark_dirty = AsyncMock()
-
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_sync.get_sheets_row", return_value=7),
         patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=None)),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
+        patch("hunter.gsheets_sync.mark_sheets_dirty") as mock_dirty,
     ):
         from hunter import gsheets_sync
         run(gsheets_sync.mirror_cell_update("abc12345", "Sent", "EXPIRED"))
 
-    fake_cache.mark_clean.assert_called_once_with("abc12345")
-    fake_cache.mark_dirty.assert_not_called()
+    mock_clean.assert_called_once_with("abc12345")
+    mock_dirty.assert_not_called()
 
 
 # ── mirror_expired_batch ──────────────────────────────────────────────────────
@@ -209,12 +196,9 @@ def test_resync_dirty_noop_when_not_ready():
 
 
 def test_resync_dirty_returns_zero_when_no_dirty_rows():
-    fake_cache = MagicMock()
-    fake_cache.dirty_rows = AsyncMock(return_value=[])
-
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_rows_for_sheets", return_value=[]),
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.resync_dirty())
@@ -223,65 +207,59 @@ def test_resync_dirty_returns_zero_when_no_dirty_rows():
 
 
 def test_resync_dirty_appends_row_without_sheet_row():
-    fake_cache = MagicMock()
     row = _make_row("newrow1")
-    fake_cache.dirty_rows = AsyncMock(return_value=[("newrow1", row, None)])
-    fake_cache.set_sheet_row_index = AsyncMock()
-    fake_cache.mark_clean = AsyncMock()
 
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
-        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=[8])),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_rows_for_sheets", return_value=[("newrow1", row, None)]),
+        patch("hunter.gsheets_client.append_rows", return_value=[8]),
+        patch("hunter.gsheets_sync.set_sheets_row") as mock_set_row,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.resync_dirty())
 
     assert result == 1
-    fake_cache.set_sheet_row_index.assert_called_once_with("newrow1", 8)
-    fake_cache.mark_clean.assert_called_once_with("newrow1")
+    mock_set_row.assert_called_once_with("newrow1", 8)
+    mock_clean.assert_called_once_with("newrow1")
 
 
 def test_resync_dirty_updates_existing_sheet_row():
-    fake_cache = MagicMock()
     row = _make_row("existing1")
-    fake_cache.dirty_rows = AsyncMock(return_value=[("existing1", row, 10)])
-    fake_cache.mark_clean = AsyncMock()
 
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
-        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=None)),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_rows_for_sheets", return_value=[("existing1", row, 10)]),
+        patch("hunter.gsheets_client.update_row", return_value=None),
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.resync_dirty())
 
     assert result == 1
-    fake_cache.mark_clean.assert_called_once_with("existing1")
+    mock_clean.assert_called_once_with("existing1")
 
 
 def test_resync_dirty_counts_failures():
-    fake_cache = MagicMock()
     row = _make_row("fail1")
-    fake_cache.dirty_rows = AsyncMock(return_value=[("fail1", row, None)])
-    fake_cache.mark_clean = AsyncMock()
 
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
-        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(side_effect=Exception("timeout"))),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_rows_for_sheets", return_value=[("fail1", row, None)]),
+        patch("hunter.gsheets_client.append_rows", side_effect=Exception("timeout")),
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.resync_dirty())
 
     assert result == 0
-    fake_cache.mark_clean.assert_not_called()
+    mock_clean.assert_not_called()
 
 
 # ── validate_startup ──────────────────────────────────────────────────────────
@@ -361,14 +339,11 @@ def test_validate_startup_ok_sheet_accessible(tmp_path):
 # ── status_report ─────────────────────────────────────────────────────────────
 
 def test_status_report_disabled():
-    fake_cache = MagicMock()
-    fake_cache.dirty_rows = AsyncMock(return_value=[])
-
     with (
         patch("hunter.gsheets_sync.GSHEETS_ENABLED", False),
         patch("hunter.gsheets_sync.GSHEETS_TRACKER_ID", ""),
         patch("hunter.gsheets_sync._service", None),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_sheets_count", return_value=0),
     ):
         from hunter import gsheets_sync
         report = run(gsheets_sync.status_report())
@@ -378,14 +353,11 @@ def test_status_report_disabled():
 
 
 def test_status_report_enabled_with_sheet():
-    fake_cache = MagicMock()
-    fake_cache.dirty_rows = AsyncMock(return_value=[("id1", {}, None)])
-
     with (
         patch("hunter.gsheets_sync.GSHEETS_ENABLED", True),
         patch("hunter.gsheets_sync.GSHEETS_TRACKER_ID", "sheet123"),
         patch("hunter.gsheets_sync._service", MagicMock()),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_sync.get_dirty_sheets_count", return_value=1),
     ):
         from hunter import gsheets_sync
         report = run(gsheets_sync.status_report())
@@ -420,18 +392,14 @@ def test_pull_full_snapshot_read_all_error():
 
 
 def test_pull_full_snapshot_no_changes():
-    fake_cache = MagicMock()
-    fake_cache.set_sheet_row_index = AsyncMock()
-    fake_cache.apply_pull_delta = AsyncMock(return_value=[])
-
     sheets_rows = [(2, {"ID": "abc12345", "Sent": "2026-05-01", "To Learn": "RxJS", "Re-application": ""})]
 
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
-        patch("hunter.gsheets_sync.asyncio.to_thread", new=AsyncMock(return_value=sheets_rows)),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
+        patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[]) as mock_delta,
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.pull_full_snapshot())
@@ -439,34 +407,21 @@ def test_pull_full_snapshot_no_changes():
     assert result["pulled"] == 1
     assert result["updated"] == 0
     assert result["errors"] == []
-    fake_cache.set_sheet_row_index.assert_called_once_with("abc12345", 2)
+    mock_delta.assert_called_once_with(sheets_rows)
 
 
-def test_pull_full_snapshot_writes_excel_on_changes():
-    fake_cache = MagicMock()
-    fake_cache.set_sheet_row_index = AsyncMock()
+def test_pull_full_snapshot_writes_db_on_changes():
     changed_row = _make_row("abc12345")
     changed_row["Sent"] = "2026-05-10"
-    fake_cache.apply_pull_delta = AsyncMock(return_value=[changed_row])
-
     sheets_rows = [(2, {"ID": "abc12345", "Sent": "2026-05-10", "To Learn": "", "Re-application": ""})]
-    excel_call_results = [sheets_rows, 1]  # first call = read_all, second = apply_pull_updates
-
-    call_count = 0
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return sheets_rows
-        return 1  # apply_pull_updates return value
 
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
-        patch("hunter.gsheets_sync.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("hunter.gsheets_sync.cache", fake_cache),
+        patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
+        patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[changed_row]),
+        patch("hunter.gsheets_sync.apply_pull_updates", return_value=1),
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.pull_full_snapshot())
@@ -598,9 +553,9 @@ def test_push_missing_rows_pushes_absent_rows():
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_client.read_all", return_value=sheets_data),
         patch("hunter.gsheets_client.append_rows", return_value=[3]) as mock_append,
-        patch("hunter.tracker.read_all_tracker_rows", return_value=tracker_data),
-        patch("hunter.tracker_cache.cache.set_sheet_row_index", new_callable=AsyncMock),
-        patch("hunter.tracker_cache.cache.mark_clean", new_callable=AsyncMock),
+        patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=tracker_data),
+        patch("hunter.gsheets_sync.set_sheets_row"),
+        patch("hunter.gsheets_sync.mark_sheets_clean"),
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.push_missing_rows())
@@ -623,9 +578,9 @@ def test_push_missing_rows_nothing_to_push_when_all_present():
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_client.read_all", return_value=sheets_data),
         patch("hunter.gsheets_client.append_rows") as mock_append,
-        patch("hunter.tracker.read_all_tracker_rows", return_value=tracker_data),
-        patch("hunter.tracker_cache.cache.set_sheet_row_index", new_callable=AsyncMock),
-        patch("hunter.tracker_cache.cache.mark_clean", new_callable=AsyncMock),
+        patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=tracker_data),
+        patch("hunter.gsheets_sync.set_sheets_row"),
+        patch("hunter.gsheets_sync.mark_sheets_clean"),
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.push_missing_rows())
@@ -633,3 +588,98 @@ def test_push_missing_rows_nothing_to_push_when_all_present():
     assert result["pushed"] == 0
     assert result["already_present"] == 2
     mock_append.assert_not_called()
+
+
+# ── _apply_pull_delta_db — conflict matrix ────────────────────────────────────
+
+def _db_row(row_id: str = "abc12345", **overrides) -> dict:
+    """Build a minimal tracker row dict for conflict-matrix tests."""
+    base = {
+        "ID": row_id, "Company": "Acme", "Job Title": "Dev",
+        "URL": f"https://x.com/{row_id}", "Sent": "", "To Learn": "",
+        "Re-application": "", "Stack": "Angular", "ATS %": "80",
+        "Date": "2026-05-01", "Folder": "", "Drive URL": "",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestApplyPullDeltaDB:
+    """Conflict matrix for _apply_pull_delta_db (moved from TrackerCache in Phase 5.5)."""
+
+    def _run(self, db_rows, sheets_rows):
+        """Call _apply_pull_delta_db with mocked DB and set_sheets_row."""
+        from hunter.gsheets_sync import _apply_pull_delta_db
+        with (
+            patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=db_rows),
+            patch("hunter.gsheets_sync.set_sheets_row"),
+        ):
+            return _apply_pull_delta_db(sheets_rows)
+
+    def test_no_changes_when_identical(self):
+        row = _db_row(Sent="2026-05-01")
+        to_write = self._run([row], [(2, dict(row))])
+        assert to_write == []
+
+    def test_user_adds_sent_date(self):
+        """DB Sent="", Sheets Sent="2026-05-14" → trust Sheets."""
+        row = _db_row(Sent="")
+        sheet_row = {**row, "Sent": "2026-05-14"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["Sent"] == "2026-05-14"
+
+    def test_bot_expired_wins_over_empty_sheets(self):
+        """DB=EXPIRED, Sheets empty → keep EXPIRED, no write."""
+        row = _db_row(Sent="EXPIRED")
+        sheet_row = {**row, "Sent": ""}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert to_write == []
+
+    def test_user_sent_beats_expired(self):
+        """DB=EXPIRED, Sheets has user date → trust Sheets (edge case)."""
+        row = _db_row(Sent="EXPIRED")
+        sheet_row = {**row, "Sent": "2026-05-10"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["Sent"] == "2026-05-10"
+
+    def test_user_erases_sent(self):
+        """DB has date, Sheets empty (user erased) → trust Sheets."""
+        row = _db_row(Sent="2026-05-01")
+        sheet_row = {**row, "Sent": ""}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["Sent"] == ""
+
+    def test_user_updates_to_learn(self):
+        row = _db_row()
+        sheet_row = {**row, "To Learn": "RxJS"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["To Learn"] == "RxJS"
+
+    def test_user_updates_re_application(self):
+        row = _db_row()
+        sheet_row = {**row, "Re-application": "+"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["Re-application"] == "+"
+
+    def test_set_sheets_row_called_for_matched_row(self):
+        """sheets_row index should be persisted for every matched row."""
+        row = _db_row()
+        from hunter.gsheets_sync import _apply_pull_delta_db
+        with (
+            patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=[row]),
+            patch("hunter.gsheets_sync.set_sheets_row") as mock_set,
+        ):
+            _apply_pull_delta_db([(7, dict(row))])
+        mock_set.assert_called_once_with("abc12345", 7)
+
+    def test_missing_id_in_sheets_ignored(self):
+        """Sheets rows without matching DB ID are silently skipped."""
+        row = _db_row()
+        sheet_row = {**row, "ID": "unknownid"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert to_write == []
