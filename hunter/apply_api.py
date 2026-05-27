@@ -39,6 +39,33 @@ from hunter.apply_shared import (
 )
 from hunter.services.apply_service import build_generate_docs_cmd
 
+_BASE_CV_FILES = {
+    "angular": "base_cv_angular.md",
+}
+
+
+def _detect_stack_hint(job_text: str) -> str:
+    """Return a stack keyword ('Angular', 'React', …) based on job text keywords."""
+    text = job_text.lower()
+    if "angular" in text:
+        return "Angular"
+    if "react" in text:
+        return "React"
+    return ""
+
+
+def _load_base_cv(stack_hint: str) -> str:
+    """Return base CV markdown for the given stack, or '' if none available."""
+    key = stack_hint.lower()
+    filename = _BASE_CV_FILES.get(key)
+    if not filename:
+        return ""
+    path = PROMPTS_DIR / filename
+    if not path.exists():
+        print(f"[apply_agent] Warning: base CV not found at {path}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
 
 def main_api(
     url: str,
@@ -137,8 +164,16 @@ def main_api(
         print(f"[apply_agent] WARNING: {profile_path} not found, using generation_rules.md only")
         system_prompt = instructions
 
+    # Step 2.5 — Load base CV for detected stack (injected into user message)
+    stack_hint = _detect_stack_hint(job_text)
+    base_cv = _load_base_cv(stack_hint)
+    if base_cv:
+        print(f"[apply_agent] Step 2.5: Loaded base CV for stack '{stack_hint}'")
+    else:
+        print(f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch")
+
     # Step 3 — Call LLM
-    print(f"[apply_agent] Step 2: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
+    print(f"[apply_agent] Step 3: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
     try:
         from llm_client import call_llm, LLMError
         url_hint = (
@@ -147,6 +182,8 @@ def main_api(
             else "(none — text pasted directly by user)"
         )
         user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+        if base_cv:
+            user_message += f"\n\n---\n\n## Base CV — {stack_hint} Track (use as starting point for bullets)\n\n{base_cv}"
 
         if skip_dedup:
             user_message += (
