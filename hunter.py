@@ -14,6 +14,7 @@ from pathlib import Path
 
 from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROJECT_DIR
 from hunter.telegram_bot import build_application
+from hunter.db import init_db, TRACKER_DB_PATH
 
 # ── Console handler (INFO+) ───────────────────────────────────────────────────
 _fmt = logging.Formatter(
@@ -58,6 +59,9 @@ def _check_config() -> bool:
 def main() -> None:
     if not _check_config():
         sys.exit(1)
+
+    # Ensure SQLite DB and tables exist (creates + migrates from tracker.xlsx if needed)
+    init_db(TRACKER_DB_PATH)
 
     run_now = "--now" in sys.argv
 
