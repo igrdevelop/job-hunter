@@ -6,6 +6,18 @@ IMPORTANT: Never use em dashes or en dashes (characters like \u2014 or \u2013) a
 
 ---
 
+## Base CV (when provided)
+
+If the input contains a "## Base CV" section, use it as your starting point for the experience bullets and skills ordering. Rules:
+
+- **Do NOT copy bullets verbatim.** Adapt them: weave in job-specific keywords, adjust metrics emphasis, reorder to front-load what this job values most.
+- **Skills order**: start from the base CV skills order, then move job-required skills to the front if they are not already there.
+- **Bullets**: treat base bullets as a quality baseline \u2014 they are pre-polished. Enrich them with job keywords rather than rewriting from scratch.
+- **Summary**: always write fresh for this specific job (do not take from base CV).
+- If no Base CV is provided, derive everything from the candidate profile as usual.
+
+---
+
 ## Instructions
 
 ### Step 1 - Analyze the Job Posting
