@@ -88,7 +88,7 @@ config, schema, source list, refactor plan).
                 │                                      ▼                                       │
                 │   ┌── C. LLM CALL ──────────────────────────────────────────────────────┐    │
                 │   │  llm_client.call_llm(                                               │    │
-                │   │    system_prompt.md + candidate_profile.md + job_text               │    │
+                │   │    generation_rules.md + candidate_profile.md + job_text               │    │
                 │   │  )  →  content.json {resume, cover_letter, ats_score, ...}          │    │
                 │   │   API mode  : Anthropic / OpenAI                                    │    │
                 │   │   CLI mode  : claude CLI (Pro subscription)                         │    │

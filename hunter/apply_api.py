@@ -124,7 +124,7 @@ def main_api(
         return
 
     # Step 2 — Read system prompt (instructions + candidate profile)
-    prompt_path = PROMPTS_DIR / "system_prompt.md"
+    prompt_path = PROMPTS_DIR / "generation_rules.md"
     profile_path = PROMPTS_DIR / "candidate_profile.md"
     if not prompt_path.exists():
         print(f"[apply_agent] ERROR: {prompt_path} not found")
@@ -134,7 +134,7 @@ def main_api(
         profile = profile_path.read_text(encoding="utf-8")
         system_prompt = profile + "\n\n---\n\n" + instructions
     else:
-        print(f"[apply_agent] WARNING: {profile_path} not found, using system_prompt.md only")
+        print(f"[apply_agent] WARNING: {profile_path} not found, using generation_rules.md only")
         system_prompt = instructions
 
     # Step 3 — Call LLM

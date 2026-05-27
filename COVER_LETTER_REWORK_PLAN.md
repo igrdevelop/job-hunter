@@ -7,13 +7,13 @@ Created: 2026-05-13
 
 ## Problem
 
-Current cover letters sound like AI-generated boilerplate despite a detailed prompt in `system_prompt.md`.
+Current cover letters sound like AI-generated boilerplate despite a detailed prompt in `generation_rules.md`.
 
 **Root causes:**
 1. Prompt explicitly allows AI phrases ("I am writing to express my interest", "Thank you for considering my application", "As you may see from my attached resume")
 2. No real examples for tone reference — agent has no anchor for what "good" looks like
 3. `build_cover_letter` in `generate_docs.py` produces bare text — no letterhead, no recipient, no signature with contacts
-4. CL instructions duplicated in two places (`apply.md` and `system_prompt.md`) with conflicts
+4. CL instructions duplicated in two places (`apply.md` and `generation_rules.md`) with conflicts
 5. No way to regenerate just the CL without re-running full `/apply`
 
 **Evidence:**
@@ -31,7 +31,7 @@ Current cover letters sound like AI-generated boilerplate despite a detailed pro
 - Length: 150-220 words EN / 120-180 words PL
 - DOCX: proper business letter with letterhead, date, recipient, signature block
 - Tone: matches the 15 EN/PL examples in `prompts/examples/`
-- Single source of truth for CL rules: `system_prompt.md`
+- Single source of truth for CL rules: `generation_rules.md`
 - Separate `/cover-letter` command for iteration
 
 ---
@@ -40,11 +40,11 @@ Current cover letters sound like AI-generated boilerplate despite a detailed pro
 
 | Component | Status | Problem |
 |-----------|--------|---------|
-| `prompts/system_prompt.md` CL section | ~100 lines, two-layer model, story bank, banned phrases | Allows AI-tone openers and closings |
+| `prompts/generation_rules.md` CL section | ~100 lines, two-layer model, story bank, banned phrases | Allows AI-tone openers and closings |
 | `generate_docs.py` `build_cover_letter` | 6 lines, bare text split by `\n` | No letterhead, recipient, date, signature |
 | `prompts/examples/` | Just created (not yet committed) | Prompt doesn't reference them |
-| `tools/regen_covers_v2_last3.py` | Works, calls LLM with `system_prompt.md` | Inherits all prompt problems |
-| `.claude/commands/apply.md` | Has own CL instructions (lines 134-142) | Duplicates/conflicts with `system_prompt.md` |
+| `tools/regen_covers_v2_last3.py` | Works, calls LLM with `generation_rules.md` | Inherits all prompt problems |
+| `.claude/commands/apply.md` | Has own CL instructions (lines 134-142) | Duplicates/conflicts with `generation_rules.md` |
 | `.claude/commands/cover-letter.md` | Does not exist | Cannot iterate CL without full `/apply` |
 
 ---
@@ -62,7 +62,7 @@ Files created in `prompts/examples/`:
 
 ---
 
-## Phase 2 — Clean up CL prompt in `system_prompt.md`
+## Phase 2 — Clean up CL prompt in `generation_rules.md`
 
 ### 2.1 — Replace Layer A opener permission
 
@@ -192,7 +192,7 @@ build_cover_letter(
 
 ### 3.4 — Update content.json prompt instructions
 
-In `system_prompt.md` Output JSON section, add note:
+In `generation_rules.md` Output JSON section, add note:
 ```
 Do NOT include signature block (Best regards / name) in cover_letter_en or cover_letter_pl
 text — the DOCX template adds it automatically. End the text after the last body paragraph.
@@ -211,7 +211,7 @@ This is partially there already ("the DOCX template handles that") but needs to 
 **Mode 1 — Regenerate (path to content.json):**
 1. Read the existing `content.json`
 2. Read the job posting from `job_posting.txt` in the same folder (or from `apply_url`)
-3. Generate new `cover_letter_en` and `cover_letter_pl` using rules from `system_prompt.md`
+3. Generate new `cover_letter_en` and `cover_letter_pl` using rules from `generation_rules.md`
 4. Read `prompts/examples/cl_examples_en.md` and `cl_examples_pl.md` for tone
 5. Update `cover_letter_en` and `cover_letter_pl` in `content.json`
 6. Run `python generate_docs.py <content.json>` to rebuild DOCX/PDF
@@ -235,7 +235,7 @@ Before outputting, verify:
 
 ---
 
-## Phase 5 — Sync `/apply` with `system_prompt.md`
+## Phase 5 — Sync `/apply` with `generation_rules.md`
 
 ### In `.claude/commands/apply.md`
 
@@ -251,19 +251,19 @@ Before outputting, verify:
 ```
 ### Cover Letter
 
-Follow the Cover Letter rules in prompts/system_prompt.md exactly.
+Follow the Cover Letter rules in prompts/generation_rules.md exactly.
 Read prompts/examples/cl_examples_en.md (or _pl.md) for tone reference before writing.
 Match the examples' brevity: 150-220 words EN, 120-180 words PL.
 Each body paragraph = one project + one metric. No filler sentences.
 ```
 
-Single source of truth: `system_prompt.md`.
+Single source of truth: `generation_rules.md`.
 
 ---
 
 ## Phase 6 — Update `tools/regen_covers_v2_last3.py`
 
-This script already calls LLM with `system_prompt.md`. After Phase 2 changes, it automatically picks up new rules. Additional changes:
+This script already calls LLM with `generation_rules.md`. After Phase 2 changes, it automatically picks up new rules. Additional changes:
 
 1. Add examples to the system prompt it sends:
    ```python
@@ -282,8 +282,8 @@ This script already calls LLM with `system_prompt.md`. After Phase 2 changes, it
 | # | What | File(s) | Dependencies | Testable? |
 |---|------|---------|--------------|-----------|
 | 1 | Letterhead in DOCX | `generate_docs.py` | None | Yes — run on any existing content.json |
-| 2 | Clean CL prompt | `system_prompt.md` | None | Yes — run `tools/generate_sample_classic_cover.py` |
-| 3 | Add examples reference | `system_prompt.md` | Phase 1 (done) | Yes — same test |
+| 2 | Clean CL prompt | `generation_rules.md` | None | Yes — run `tools/generate_sample_classic_cover.py` |
+| 3 | Add examples reference | `generation_rules.md` | Phase 1 (done) | Yes — same test |
 | 4 | Sync apply.md | `.claude/commands/apply.md` | After 2-3 | Manual — run `/apply` |
 | 5 | New `/cover-letter` cmd | `.claude/commands/cover-letter.md` | After 2-3 | Manual — run `/cover-letter` |
 | 6 | Update regen script | `tools/regen_covers_v2_last3.py` | After 1-3 | Yes — `python tools/regen_covers_v2_last3.py --count 1` |
@@ -300,5 +300,5 @@ This script already calls LLM with `system_prompt.md`. After Phase 2 changes, it
 - [ ] DOCX has recipient block (company name, "Re: job title")
 - [ ] DOCX has signature with contacts (email, phone)
 - [ ] `/cover-letter` command works standalone
-- [ ] `/apply` defers to `system_prompt.md` for CL rules (no duplication)
+- [ ] `/apply` defers to `generation_rules.md` for CL rules (no duplication)
 - [ ] `regen_covers_v2_last3.py` produces letters matching new format

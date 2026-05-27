@@ -7,7 +7,7 @@ $ARGUMENTS
 
 ## Step 1 - Load generation rules
 
-Read the file `D:/LearningProject/Claude/prompts/system_prompt.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
+Read the file `D:/LearningProject/Claude/prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
 
 Also read the candidate profile from `D:/LearningProject/Claude/prompts/candidate_profile.md` — use it as the single source of truth for all candidate data.
 
@@ -48,7 +48,7 @@ mkdir -p "D:/LearningProject/Claude/Applications/{date}/{CompanyName}"
 
 ## Step 4 - Generate content
 
-Follow all rules from `system_prompt.md` (loaded in Step 1) to produce the full application package: resume EN, cover letter EN+PL, about me EN+PL, ATS analysis.
+Follow all rules from `generation_rules.md` (loaded in Step 1) to produce the full application package: resume EN, cover letter EN+PL, about me EN+PL, ATS analysis.
 
 One difference from the API pipeline: set `"resume_pl": null` by default. Only populate it with a full Polish-translated resume when `--full` is explicitly passed as an argument.
 
@@ -61,7 +61,7 @@ One difference from the API pipeline: set `"resume_pl": null` by default. Only p
 
 Write to `D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json`.
 
-The JSON schema is defined in `system_prompt.md`. Additionally include these workflow fields:
+The JSON schema is defined in `generation_rules.md`. Additionally include these workflow fields:
 
 ```json
 {

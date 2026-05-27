@@ -185,7 +185,7 @@ hunter/
   ats_companies.json        Company list for ATS aggregator
 
 prompts/
-  system_prompt.md          LLM instructions for resume/CL generation
+  generation_rules.md          LLM instructions for resume/CL generation
   candidate_profile.md      Candidate data (single source of truth for personal info)
 
 tests/                      37+ test files, ~3200 lines (pytest)
@@ -245,7 +245,7 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 1. `job_fetch.fetch_job_text(url)` — fetch full job description
 2. Save `job_posting.txt` to output folder
 3. `expired_check.is_job_expired(text)` — skip if expired
-4. LLM call: `candidate_profile.md` + `system_prompt.md` + job text -> `content.json`
+4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
 5. Cover letter self-review loop (up to 3 LLM rounds)
 6. Output folder: `Applications/{today}/{CompanyName}/`
 7. `generate_docs.py` -> DOCX + PDF (LibreOffice headless)

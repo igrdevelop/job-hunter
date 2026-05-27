@@ -55,7 +55,7 @@ def _convert_docx_pdf(docx: Path) -> None:
 
 
 def _load_system_prompt() -> str:
-    prompt_path = PROJECT_DIR / "prompts" / "system_prompt.md"
+    prompt_path = PROJECT_DIR / "prompts" / "generation_rules.md"
     profile_path = PROJECT_DIR / "prompts" / "candidate_profile.md"
     instructions = prompt_path.read_text(encoding="utf-8")
     if profile_path.exists():
