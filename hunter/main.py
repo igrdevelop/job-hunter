@@ -28,8 +28,8 @@ from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
-    add_failed, get_failed_jobs, remove_failed, is_known,
-    is_in_cooldown,
+    add_failed, get_failed_jobs, remove_failed, increment_fail_count,
+    is_known, is_in_cooldown, MAX_FAIL_RETRIES,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -399,7 +399,22 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "(JobLeads: see apply_agent message about job_posting.txt)",
             )
         else:
-            logger.info(f"[retry] Still failing: {job.company} - {job.title}")
+            new_count = await asyncio.to_thread(increment_fail_count, job.url)
+            if new_count >= MAX_FAIL_RETRIES:
+                logger.warning(
+                    "[retry] Giving up on %s - %s after %d failures",
+                    job.company, job.title, new_count,
+                )
+                await send_text(
+                    context,
+                    f"🚫 <b>Giving up</b> on {job.company} — {job.title} "
+                    f"(failed {new_count}× — won't retry again).",
+                )
+            else:
+                logger.info(
+                    "[retry] Still failing (%d/%d): %s - %s",
+                    new_count, MAX_FAIL_RETRIES, job.company, job.title,
+                )
 
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)

@@ -364,11 +364,23 @@ def lookup_company(company: str) -> list[dict]:
 
 # ── FAIL-row management ───────────────────────────────────────────────────────
 
+# Stop retrying a FAIL job after this many consecutive apply failures.
+MAX_FAIL_RETRIES: int = 3
+
+_PASTE_NO_URL = "paste://no-url"
+
+
 def get_failed_jobs() -> list[Job]:
-    """Return Job objects for all rows with ATS status 'FAIL'."""
+    """Return Job objects for all FAIL rows that are still worth retrying.
+
+    Excluded:
+    - paste://no-url rows (no URL → apply_agent can't fetch the posting)
+    - rows with fail_count >= MAX_FAIL_RETRIES (gave up after N attempts)
+    """
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT title, company, url FROM applications WHERE ats_status='FAIL'"
+            "SELECT title, company, url, fail_count FROM applications "
+            "WHERE ats_status='FAIL'"
         ).fetchall()
     return [
         Job(
@@ -381,7 +393,25 @@ def get_failed_jobs() -> list[Job]:
         )
         for r in rows
         if r["url"]
+        and r["url"] != _PASTE_NO_URL
+        and (r["fail_count"] or 0) < MAX_FAIL_RETRIES
     ]
+
+
+def increment_fail_count(url: str) -> int:
+    """Increment fail_count for the FAIL row with this URL. Returns new count."""
+    norm = normalize_url(url)
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET fail_count = fail_count + 1 "
+            "WHERE ats_status='FAIL' AND url_norm=?",
+            (norm,),
+        )
+        row = conn.execute(
+            "SELECT fail_count FROM applications WHERE ats_status='FAIL' AND url_norm=?",
+            (norm,),
+        ).fetchone()
+    return int(row["fail_count"]) if row else 0
 
 
 def remove_failed(url: str) -> None:
