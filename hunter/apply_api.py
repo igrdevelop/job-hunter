@@ -66,7 +66,11 @@ def _detect_stack_hint(job_text: str) -> str:
     has_next = "next.js" in text or "nextjs" in text
     has_react = "react" in text
     has_angular = "angular" in text
-    if has_nest or has_next:
+    # Next.js always implies React track (Next.js IS a React framework)
+    if has_next:
+        return "fullstack_react_next"
+    # NestJS alone: route by frontend framework
+    if has_nest:
         if has_react and not has_angular:
             return "fullstack_react_next"
         return "fullstack_angular_nest"
