@@ -41,17 +41,34 @@ from hunter.services.apply_service import build_generate_docs_cmd
 
 _BASE_CV_FILES = {
     "angular": "base_cv_angular.md",
+    "react": "base_cv_react.md",
+    "javascript": "base_cv_react.md",
+    "fullstack": "base_cv_fullstack_nest.md",
+    "nest": "base_cv_fullstack_nest.md",
+    "ai": "base_cv_ai.md",
+}
+
+_AI_KEYWORDS = {
+    "llm", "ai engineer", "ai developer", "ml engineer", "machine learning",
+    "prompt engineer", "langchain", "openai", "anthropic", "llm integration",
+    "ai-first", "ai first", "agentic", "copilot", "cursor ide",
 }
 
 
 def _detect_stack_hint(job_text: str) -> str:
-    """Return a stack keyword ('Angular', 'React', …) based on job text keywords."""
+    """Return a stack key for _BASE_CV_FILES based on job text keywords."""
     text = job_text.lower()
+    # AI-first signals: explicit AI/LLM engineering role keywords
+    if any(kw in text for kw in _AI_KEYWORDS):
+        return "ai"
+    # Fullstack signals: NestJS
+    if "nestjs" in text or "nest.js" in text:
+        return "fullstack"
     if "angular" in text:
-        return "Angular"
-    if "react" in text:
-        return "React"
-    return ""
+        return "angular"
+    if "react" in text or "next.js" in text or "nextjs" in text:
+        return "react"
+    return "javascript"
 
 
 def _load_base_cv(stack_hint: str) -> str:
