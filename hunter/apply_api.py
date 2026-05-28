@@ -43,8 +43,8 @@ _BASE_CV_FILES = {
     "angular": "base_cv_angular.md",
     "react": "base_cv_react.md",
     "javascript": "base_cv_react.md",
-    "fullstack": "base_cv_fullstack_nest.md",
-    "nest": "base_cv_fullstack_nest.md",
+    "fullstack_angular_nest": "base_cv_fullstack_angular_nest.md",
+    "fullstack_react_next": "base_cv_fullstack_react_next.md",
     "ai": "base_cv_ai.md",
 }
 
@@ -61,12 +61,18 @@ def _detect_stack_hint(job_text: str) -> str:
     # AI-first signals: explicit AI/LLM engineering role keywords
     if any(kw in text for kw in _AI_KEYWORDS):
         return "ai"
-    # Fullstack signals: NestJS
-    if "nestjs" in text or "nest.js" in text:
-        return "fullstack"
-    if "angular" in text:
+    # Fullstack: NestJS/Next.js signals
+    has_nest = "nestjs" in text or "nest.js" in text
+    has_next = "next.js" in text or "nextjs" in text
+    has_react = "react" in text
+    has_angular = "angular" in text
+    if has_nest or has_next:
+        if has_react and not has_angular:
+            return "fullstack_react_next"
+        return "fullstack_angular_nest"
+    if has_angular:
         return "angular"
-    if "react" in text or "next.js" in text or "nextjs" in text:
+    if has_react:
         return "react"
     return "javascript"
 

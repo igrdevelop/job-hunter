@@ -13,7 +13,8 @@ Also read the candidate profile from `D:/LearningProject/Claude/prompts/candidat
 
 After reading the job posting (Step 2), detect the primary stack and load the matching base CV:
 - AI-first / LLM / Agentic roles → `D:/LearningProject/Claude/prompts/base_cv_ai.md`
-- NestJS / Full-Stack (Node.js backend) → `D:/LearningProject/Claude/prompts/base_cv_fullstack_nest.md`
+- React + Next.js / NestJS (React prominent) → `D:/LearningProject/Claude/prompts/base_cv_fullstack_react_next.md`
+- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `D:/LearningProject/Claude/prompts/base_cv_fullstack_angular_nest.md`
 - Angular → `D:/LearningProject/Claude/prompts/base_cv_angular.md`
 - React / Next.js / JavaScript → `D:/LearningProject/Claude/prompts/base_cv_react.md`
 
