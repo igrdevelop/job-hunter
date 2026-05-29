@@ -48,9 +48,8 @@ def run_track(track: str) -> bool:
     print(f"{'='*60}\n")
 
     env = os.environ.copy()
-    env["APPLICATIONS_DIR"] = str(out_dir)
-    env["APPLY_USE_CLI"] = "false"       # force API mode: CLI ignores APPLICATIONS_DIR override
-    env["TELEGRAM_BOT_TOKEN"] = ""       # suppress Telegram notifications
+    env["APPLICATIONS_DIR"] = str(out_dir)   # CLI reads this via $APPLICATIONS_DIR in apply.md
+    env["TELEGRAM_BOT_TOKEN"] = ""           # suppress Telegram notifications
     env["TELEGRAM_CHAT_ID"] = "0"
 
     cmd = [

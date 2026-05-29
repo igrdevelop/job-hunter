@@ -39,18 +39,24 @@ If input is plain text: use it directly.
 
 ## Step 3 - Create output folder
 
-```
-D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/
+First, determine the base applications directory:
+```bash
+echo $APPLICATIONS_DIR
 ```
 
-Use today's date as the parent folder. If a folder for this company already exists today, append `_2`, `_3`, etc.:
+- If `APPLICATIONS_DIR` is set and non-empty → use it as the base
+- Otherwise → use `D:/LearningProject/Claude/Applications`
+
+Then create: `{base_dir}/{YYYY-MM-DD}/{CompanyName}/`
+
+If a folder for this company already exists today, append `_2`, `_3`, etc.:
 ```
-D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}_2/
+{base_dir}/{YYYY-MM-DD}/{CompanyName}_2/
 ```
 
 Create the folder:
 ```bash
-mkdir -p "D:/LearningProject/Claude/Applications/{date}/{CompanyName}"
+mkdir -p "{base_dir}/{date}/{CompanyName}"
 ```
 
 ---
@@ -68,13 +74,13 @@ One difference from the API pipeline: set `"resume_pl": null` by default. Only p
 ⚠️ Save content.json INSIDE the output folder, not in the project root.
 ⚠️ Do NOT write any Python scripts or create any .py files.
 
-Write to `D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json`.
+Write to `{base_dir}/{YYYY-MM-DD}/{CompanyName}/content.json` (using the same `{base_dir}` from Step 3).
 
 The JSON schema is defined in `generation_rules.md`. Additionally include these workflow fields:
 
 ```json
 {
-  "output_folder": "D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}",
+  "output_folder": "{base_dir}/{YYYY-MM-DD}/{CompanyName}",
   "apply_url": "the original input URL (or apply button URL if different)"
 }
 ```
@@ -83,12 +89,12 @@ Then run the generator:
 
 **Default (short mode)** — PDF only, EN CV only:
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json"
+python D:/LearningProject/Claude/generate_docs.py "{base_dir}/{YYYY-MM-DD}/{CompanyName}/content.json"
 ```
 
 **Full mode** (only when `--full` is explicitly passed):
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "D:/LearningProject/Claude/Applications/{YYYY-MM-DD}/{CompanyName}/content.json" --full
+python D:/LearningProject/Claude/generate_docs.py "{base_dir}/{YYYY-MM-DD}/{CompanyName}/content.json" --full
 ```
 
 ---
