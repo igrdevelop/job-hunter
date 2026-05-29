@@ -25,6 +25,17 @@ from typing import Any
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 _PROFILE_PATH = _PROMPTS_DIR / "candidate_profile.md"
 
+
+def _coerce_str(val: Any) -> str:
+    """Coerce LLM output to plain string (handles dict/list from malformed LLM responses)."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return " ".join(str(v) for v in val.values() if v)
+    if isinstance(val, list):
+        return ", ".join(str(v) for v in val if v)
+    return str(val) if val is not None else ""
+
 # ---------------------------------------------------------------------------
 # Month name → number map (handles EN and PL month names)
 # ---------------------------------------------------------------------------
@@ -241,6 +252,14 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
     edu_en, courses_en = _load_profile_education_courses()
 
     # -- 1. Education & courses fallback --
+    # Coerce to string first (LLM sometimes returns dict/list)
+    if not isinstance(resume.get("education"), str):
+        resume["education"] = _coerce_str(resume.get("education"))
+        fixes.append(f"[{lang}] education coerced to string")
+    if not isinstance(resume.get("courses"), str):
+        resume["courses"] = _coerce_str(resume.get("courses"))
+        fixes.append(f"[{lang}] courses coerced to string")
+
     if not (resume.get("education") or "").strip():
         if edu_en:
             resume["education"] = edu_en

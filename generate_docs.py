@@ -217,14 +217,20 @@ def build_resume(doc, data, stack):
     # EDUCATION
     add_section_heading(doc, "EDUCATION")
     p = doc.add_paragraph()
-    run = p.add_run(data.get("education", ""))
+    edu = data.get("education", "")
+    if not isinstance(edu, str):
+        edu = ", ".join(str(v) for v in edu.values() if v) if isinstance(edu, dict) else str(edu or "")
+    run = p.add_run(edu)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
 
     # ADDITIONAL COURSES
     add_section_heading(doc, "ADDITIONAL COURSES")
     p = doc.add_paragraph()
-    run = p.add_run(data.get("courses", ""))
+    courses = data.get("courses", "")
+    if not isinstance(courses, str):
+        courses = ", ".join(str(v) for v in courses) if isinstance(courses, list) else str(courses or "")
+    run = p.add_run(courses)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
 

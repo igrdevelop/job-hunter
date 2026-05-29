@@ -49,6 +49,7 @@ def run_track(track: str) -> bool:
 
     env = os.environ.copy()
     env["APPLICATIONS_DIR"] = str(out_dir)
+    env["APPLY_USE_CLI"] = "false"       # force API mode: CLI ignores APPLICATIONS_DIR override
     env["TELEGRAM_BOT_TOKEN"] = ""       # suppress Telegram notifications
     env["TELEGRAM_CHAT_ID"] = "0"
 
@@ -93,7 +94,7 @@ def main() -> None:
     print("  Summary")
     print(f"{'='*60}")
     for track, ok in results.items():
-        status = "✅ OK" if ok else "❌ FAILED"
+        status = "OK" if ok else "FAILED"
         print(f"  {track:<30} {status}")
 
     if not all(results.values()):

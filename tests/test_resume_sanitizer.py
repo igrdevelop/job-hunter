@@ -334,5 +334,5 @@ def test_sanitize_real_case_emagine():
         # Education / courses filled
         assert result["education"] == REAL_EDUCATION
         assert result["courses"] == REAL_COURSES
-        # 4 company fixes + 2 education/courses
-        assert len(fixes) == 6
+        # 4 company fixes + 2 education/courses fills + 1 courses coerce (None→str)
+        assert len(fixes) == 7
