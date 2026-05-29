@@ -1,53 +1,51 @@
-URL: https://justjoin.it/job-offer/co-brick-fullstack-developer-nestjs-angular--gliwice-javascript
+URL: https://justjoin.it/job-offer/devqube-sp-z-o-o--fullstack-developer-angular-nestjs--wroclaw-javascript
 
-Job Title: Fullstack Developer (NestJS / Angular)
-Company: co.brick
-Location: Gliwice, Poland (100% remote)
+Job Title: Fullstack Developer (NestJS)
+Company: Devqube Sp. z o.o.
+Location: Wrocław / Remote
 Experience Level: Senior
 Employment: B2B
+Salary: 10 000 – 18 000 PLN/month net
 
 --- Job Description ---
 
-Szukamy 3 doświadczonych programistów Fullstack do całkowitej przebudowy i modernizacji systemów produkcyjnych klasy MES.
-
-Projekt polega na przeprojektowaniu istniejącego oprogramowania wspierającego zarządzanie produkcją - od podstaw, z naciskiem na skalowalność, nowoczesną architekturę backendową i integrację z frontendem Angular.
+Devqube poszukuje doświadczonych Fullstack Developerów do przebudowy systemów produkcyjnych dla klienta z Niemiec. Projekt zakłada realny wpływ na architekturę — nie rutynowe taski, ale projektowanie od podstaw.
 
 Zakres obowiązków:
-- Aktywny udział w całkowitej przebudowie i modernizacji systemów MES
-- Tworzenie skalowalnych rozwiązań backendowych w NestJS / Node.js
-- Projektowanie architektury backendowej mikroserwisów
-- Współpraca przy integracji z frontendem Angular
-- Projektowanie i optymalizacja baz danych (PostgreSQL, TypeORM)
-- Implementacja REST API oraz WebSocket dla komunikacji real-time
-- Code review i dbałość o jakość kodu (TypeScript, testy jednostkowe i e2e)
-- Praca w metodologii Agile / Scrum
+- Przebudowa i modernizacja systemów produkcyjnych (klasa MES) dla klienta z Niemiec
+- Projektowanie architektury backendowej w NestJS z wykorzystaniem zaawansowanych dekoratorów i wzorców mikroserwisowych
+- Tworzenie skalowalnych REST API oraz integracja z frontendem Angular
+- Implementacja komunikacji real-time (WebSocket / Socket.io)
+- Projektowanie schematów baz danych (PostgreSQL / TypeORM)
+- Code review, dbałość o jakość kodu TypeScript
+- Praca w metodologii Scrum, bezpośredni kontakt z klientem (EN B2+)
 
 Wymagania (must-have):
-- NestJS / Node.js – bardzo dobra znajomość i doświadczenie w projektowaniu architektury backendowej
-- Angular – dobra znajomość na potrzeby rozwoju frontendu
-- TypeScript – biegłość w pisaniu typowanego kodu po obu stronach (frontend i backend)
-- PostgreSQL / TypeORM – doświadczenie w projektowaniu schematów baz danych
+- Angular – dobra znajomość, doświadczenie w budowie komponentów i state management
+- NestJS – bardzo dobra znajomość, doświadczenie z architekturą backendową
+- TypeScript – biegłość po obu stronach stacku
+- PostgreSQL / TypeORM – projektowanie i optymalizacja baz danych
 - REST API – projektowanie i implementacja
 - Git – praca w zespole z branching strategy
-- Doświadczenie z systemami MES – praktyczna znajomość systemów wspierających zarządzanie produkcją
-- Język angielski – minimum poziom B2
+- Angielski – minimum B2 (kontakt z klientem z Niemiec)
 
 Mile widziane:
-- Docker / Kubernetes – podstawowa znajomość konteneryzacji
-- RxJS – znajomość reactive programming
-- WebSocket / Socket.io – doświadczenie z komunikacją real-time
-- Mikroserwisy – znajomość wzorców projektowych
-- Redis – caching i kolejkowanie
-- CI/CD – GitHub Actions lub podobne
-- Jest – testy jednostkowe i integracyjne
-- Nx Monorepo – doświadczenie z monorepo
+- Mikroserwisy – znajomość wzorców (CQRS, Event Sourcing)
+- Advanced NestJS decorators – własne dekoratory, interceptory, guardy
+- RxJS – reactive programming w Angular
+- Docker / Kubernetes – konteneryzacja
+- Redis – caching, kolejkowanie
+- GitHub Actions / CI/CD
+- Jest – testy jednostkowe i e2e
+- Nx Monorepo
+- Podstawy języka niemieckiego
 
 Co oferujemy:
-- 100% praca zdalna
-- B2B
-- Projekt greenfield – modernizacja od podstaw
-- Zespół 3 fullstack developerów + tech lead
-- Stack: NestJS, Angular, TypeScript, PostgreSQL, Docker
+- B2B 10 000 – 18 000 PLN/miesiąc netto
+- 100% remote lub biuro we Wrocławiu
+- Budżet szkoleniowy, lekcje angielskiego
+- Karta sportowa, opieka medyczna
+- Wpływ na decyzje techniczne
 
 --- Requirements ---
-NestJS, Angular, TypeScript, Node.js, PostgreSQL
+NestJS, Angular, TypeScript, Node.js, PostgreSQL, Microservices
