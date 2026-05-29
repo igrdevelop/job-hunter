@@ -1,0 +1,44 @@
+AI Frontend Engineer / LLM Integration Specialist
+Company: TechForge AI
+Location: Remote (Global)
+Type: Full-time or B2B
+
+About TechForge AI:
+TechForge AI builds developer tooling and internal platforms powered by large language models. Our products help engineering teams integrate LLMs into their workflows through intuitive dashboards, evaluation tools, and agentic pipelines. We use Claude, GPT-4, and open-source models.
+
+We are looking for an AI Frontend Engineer who can bridge the gap between LLM backends and user-facing interfaces — someone who has actually shipped AI-powered features, not just used ChatGPT.
+
+Requirements (must-have):
+- 5+ years of frontend engineering experience
+- Strong TypeScript and JavaScript skills
+- Experience building LLM-powered features (chat interfaces, recommendation UIs, evaluation dashboards)
+- Hands-on experience with at least one AI coding tool: GitHub Copilot, Cursor, Claude Code, or similar
+- Experience with prompt engineering and LLM API integration (OpenAI, Anthropic, or similar)
+- REST API and WebSocket integration for real-time AI responses (streaming)
+- Understanding of agentic workflows and AI pipelines
+- Unit testing and code review culture
+
+Nice to have:
+- Experience with LLM evaluation frameworks or benchmarking tools
+- Familiarity with LangChain, LlamaIndex, or similar orchestration libraries
+- React or Angular (either is fine)
+- Node.js for lightweight API proxies
+- Docker and CI/CD basics
+- Spec-driven development with AI agents (e.g. writing specs for Copilot/Cursor)
+
+What you will do:
+- Build and maintain TypeScript/React dashboards for LLM performance evaluation (latency, throughput, quality metrics)
+- Implement real-time streaming UI for LLM responses via WebSocket/SSE
+- Develop agentic workflow UIs that let users monitor and control multi-step AI pipelines
+- Integrate Anthropic API and OpenAI API into frontend features
+- Write component specifications for AI-assisted development workflows
+- Collaborate with ML engineers and backend teams to design AI feature contracts
+
+Tech stack:
+TypeScript, React or Angular, Node.js, Anthropic API, OpenAI API, WebSocket/SSE, Jest, Docker, CI/CD
+
+We offer:
+- $90 000 – $140 000 / year (or equivalent B2B)
+- 100% remote, async-first
+- Access to latest LLM APIs and compute
+- AI-first engineering culture

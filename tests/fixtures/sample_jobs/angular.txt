@@ -1,0 +1,46 @@
+Senior Angular Developer
+Company: Devapo sp. z o.o.
+Location: Wrocław / Remote (Poland)
+Type: B2B contract, long-term
+
+About us:
+Devapo is a Polish software house delivering enterprise web applications for clients in banking, insurance, and logistics. Our team of 80+ engineers works with modern JavaScript/TypeScript stacks. We value clean code, solid architecture, and continuous improvement.
+
+We are looking for a Senior Angular Developer to join a team building a real-time financial dashboard platform used by 50+ institutional clients across Europe.
+
+Requirements (must-have):
+- 5+ years of Angular experience (Angular 12+)
+- Strong TypeScript skills
+- RxJS and reactive programming patterns
+- NgRx or similar state management
+- Unit testing with Jest or Jasmine/Karma
+- E2E testing with Cypress or Playwright
+- Experience with REST APIs and WebSocket integration
+- Code review culture, clean code practices
+- Agile / Scrum experience
+
+Nice to have:
+- Angular Material or PrimeNG
+- NX Monorepo
+- CI/CD pipelines (Jenkins, GitHub Actions)
+- AG Grid for complex data tables
+- Experience with financial or banking domain
+- SonarQube integration
+- Docker basics
+
+What you will do:
+- Develop and maintain Angular modules for a real-time financial reporting dashboard
+- Implement complex reactive forms and AG Grid tables with server-side pagination
+- Write unit and E2E tests to maintain 80%+ coverage
+- Participate in architecture discussions and code reviews
+- Collaborate with backend (Java Spring) and QA teams in Scrum sprints
+
+Tech stack:
+Angular 15-17, TypeScript, RxJS, NgRx, AG Grid, Angular Material, Jest, Cypress, Jenkins, SonarQube, WebSocket, REST API
+
+We offer:
+- B2B: 22 000 – 28 000 PLN/month
+- 100% remote or hybrid (Wrocław office)
+- Long-term project (2+ years)
+- Flexible hours
+- English-speaking team

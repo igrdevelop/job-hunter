@@ -1,0 +1,47 @@
+Senior Full-Stack Developer (Angular + NestJS)
+Company: FinEdge Solutions
+Location: Warsaw / Hybrid
+Type: B2B, long-term
+
+About FinEdge:
+FinEdge Solutions provides white-label financial software for banks and credit unions in CEE. Our platform handles loan origination, risk scoring, and customer onboarding for 15+ banking institutions. Team of 60 engineers, agile, English-speaking.
+
+We are looking for a Senior Full-Stack Developer to own feature development end-to-end — from Angular UI to NestJS microservices.
+
+Requirements (must-have):
+- 5+ years of software development experience
+- Angular (version 10+) — forms, routing, state management
+- NestJS for backend microservices
+- TypeScript across the full stack
+- REST API design and implementation
+- PostgreSQL or another relational database
+- RxJS for reactive data handling
+- Unit testing (Jest) on both frontend and backend
+- Git, CI/CD pipelines
+
+Nice to have:
+- NgRx or other Angular state management
+- Docker and Kubernetes basics
+- GraphQL
+- Redis for caching
+- Microservices architecture patterns
+- Banking or fintech domain experience
+- SonarQube, code quality tools
+- Agile / SAFe experience
+
+What you will do:
+- Design and implement full-stack features: Angular UI + NestJS API + database schema
+- Build complex Angular forms for loan application and risk assessment workflows
+- Implement NestJS microservices with REST and event-driven communication
+- Write unit and integration tests for both layers
+- Participate in architecture decisions and cross-team API contracts
+- Code review across frontend and backend
+
+Tech stack:
+Angular 14-17, NestJS, TypeScript, RxJS, NgRx, PostgreSQL, Redis, Docker, Jest, REST API, GitHub Actions
+
+We offer:
+- 24 000 – 30 000 PLN/month B2B
+- Hybrid (Warsaw office 2 days/week)
+- Stable, long-term project
+- Banking domain expertise

@@ -1,0 +1,47 @@
+Senior Full-Stack Engineer (React + Next.js)
+Company: Boldare
+Location: Remote (Poland/EU)
+Type: B2B contract
+
+About Boldare:
+Boldare is a product design and development company working with scale-ups and enterprises. We build digital products from 0 to 1 and scale them. Current project: a SaaS e-commerce analytics platform for mid-market retailers, processing millions of events daily.
+
+We are looking for a Senior Full-Stack Engineer to join a small, autonomous product team (5 engineers) building a Next.js-based analytics platform.
+
+Requirements (must-have):
+- 5+ years of JavaScript/TypeScript development
+- 3+ years of React (hooks, context, performance optimization)
+- Next.js (App Router, SSR, SSG, API routes)
+- Node.js for backend API routes and scripts
+- PostgreSQL or similar relational DB
+- REST API design
+- Jest and React Testing Library
+- Git, CI/CD
+
+Nice to have:
+- NestJS for dedicated microservices
+- Prisma or TypeORM
+- GraphQL
+- Redis
+- Docker / Kubernetes
+- Tailwind CSS
+- Cypress or Playwright
+- AWS or Vercel deployment
+- E-commerce or analytics domain
+
+What you will do:
+- Build Next.js pages and React components for analytics dashboards with complex data visualizations
+- Implement Node.js API routes and NestJS microservices for data aggregation
+- Optimize SSR performance and Core Web Vitals for fast page loads
+- Design PostgreSQL schemas and write efficient queries
+- Write unit tests with Jest/RTL and E2E tests with Cypress
+- Collaborate with product designer and backend engineers in weekly sprints
+
+Tech stack:
+Next.js 14, React 18, TypeScript, Node.js, NestJS, PostgreSQL, Prisma, Tailwind CSS, Jest, Cypress, Docker, Vercel
+
+We offer:
+- 26 000 – 34 000 PLN/month B2B
+- 100% remote
+- Small autonomous team, real ownership
+- Modern stack, no legacy code

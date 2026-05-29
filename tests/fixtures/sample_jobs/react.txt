@@ -1,0 +1,45 @@
+Senior React Developer
+Company: Netguru
+Location: Remote (EU timezone)
+Type: B2B, long-term
+
+About Netguru:
+Netguru is a leading software consultancy building digital products for scale-ups and enterprises across Europe and the US. We specialize in React/Node.js solutions for fintech, e-commerce, and SaaS clients.
+
+We are looking for a Senior React Developer to work on a US-based SaaS platform for procurement automation serving Fortune 500 clients.
+
+Requirements (must-have):
+- 5+ years of frontend experience
+- 3+ years of React (hooks, context API, functional components)
+- TypeScript proficiency
+- State management: Redux, Zustand, or Recoil
+- REST API and GraphQL integration
+- Jest and React Testing Library for unit tests
+- Experience with performance optimization (lazy loading, memoization, code splitting)
+- Node.js basics (scripts, simple API routes)
+
+Nice to have:
+- Next.js
+- Storybook for component documentation
+- Cypress or Playwright for E2E
+- Webpack or Vite configuration
+- Docker basics
+- AWS familiarity
+- Tailwind CSS or styled-components
+- Agile / Scrum
+
+What you will do:
+- Build reusable React component libraries used across multiple product teams
+- Implement complex data visualization dashboards with large dataset handling
+- Optimize frontend performance — bundle size, rendering, lazy loading
+- Write unit tests with Jest + RTL, E2E with Cypress
+- Collaborate with a US-based product team (English daily)
+
+Tech stack:
+React 18, TypeScript, Redux Toolkit, GraphQL, Node.js, Jest, React Testing Library, Cypress, Storybook, Webpack, Tailwind CSS
+
+We offer:
+- 25 000 – 32 000 PLN/month B2B
+- 100% remote, EU timezone
+- US client, English-only communication
+- Long-term project
