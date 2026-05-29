@@ -120,20 +120,28 @@ def _is_cli_available() -> bool:
 
 # ── CLI pipeline ──────────────────────────────────────────────────────────────
 
-def main_cli(url: str, *, skip_dedup: bool = False, full_mode: bool = False) -> None:
+def main_cli(
+    url: str,
+    *,
+    skip_dedup: bool = False,
+    full_mode: bool = False,
+    paste_text: str = "",
+) -> None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
 
     Parameters
     ----------
-    url:        Job URL to process.
+    url:        Job URL to process (may be PASTE_NO_URL_PLACEHOLDER when paste_text set).
     skip_dedup: When True, bypass tracker dedup check.
     full_mode:  When True, pass --full to generate_docs.py (DOCX + PDF, PL CV).
+    paste_text: Pre-supplied job text (skips HTTP fetch). CLI receives it directly.
 
     Raises ApplyError on failure so apply_agent.main() can try API fallback.
     """
-    print(f"\n[apply_agent] CLI mode | URL: {url}\n")
+    url_display = url if url and "paste://" not in url else "(pasted text, no URL)"
+    print(f"\n[apply_agent] CLI mode | URL: {url_display}\n")
 
-    if _already_processed(url, skip_dedup=skip_dedup):
+    if not paste_text and _already_processed(url, skip_dedup=skip_dedup):
         try:
             from hunter.tracker import lookup_url
             rows = lookup_url(url)
@@ -153,17 +161,26 @@ def main_cli(url: str, *, skip_dedup: bool = False, full_mode: bool = False) -> 
 
     folders_before = _get_existing_folders()
 
-    # Pre-fetch job text via JSON API so Claude CLI doesn't have to WebFetch
-    apply_input = url
+    # Determine apply_input for the CLI skill:
+    # - paste_text provided → use it directly (no HTTP fetch needed)
+    # - URL provided → pre-fetch via JSON API so Claude CLI doesn't have to WebFetch
+    apply_input: str
     job_text: str | None = None
-    try:
-        from hunter.sources import fetch_job_text
-        job_text = fetch_job_text(url)
-        if job_text and len(job_text) > 100:
-            apply_input = f"URL: {url}\n\n{job_text}"
-            print(f"[apply_agent] Pre-fetched {len(job_text)} chars via JSON API")
-    except Exception as e:
-        print(f"[apply_agent] Pre-fetch failed ({e}), passing raw URL to Claude")
+
+    if paste_text:
+        apply_input = paste_text
+        job_text = paste_text
+        print(f"[apply_agent] Using pasted text ({len(paste_text)} chars) — skipping fetch")
+    else:
+        apply_input = url
+        try:
+            from hunter.sources import fetch_job_text
+            job_text = fetch_job_text(url)
+            if job_text and len(job_text) > 100:
+                apply_input = f"URL: {url}\n\n{job_text}"
+                print(f"[apply_agent] Pre-fetched {len(job_text)} chars via JSON API")
+        except Exception as e:
+            print(f"[apply_agent] Pre-fetch failed ({e}), passing raw URL to Claude")
 
     # Check for expired offer before spinning up Claude CLI
     if job_text:

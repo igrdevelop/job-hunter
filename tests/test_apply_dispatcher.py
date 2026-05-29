@@ -72,26 +72,43 @@ def test_pipelines_have_no_module_level_globals() -> None:
 
 # ── main() dispatcher — paste flow ────────────────────────────────────────────
 
-def test_main_paste_text_calls_main_api(monkeypatch) -> None:
-    """When paste_text is provided, main() must call main_api (never main_cli)."""
-    api_calls, cli_calls = [], []
+def test_main_paste_text_with_cli_uses_cli(monkeypatch) -> None:
+    """When paste_text is provided and CLI is available, main() tries CLI first."""
+    cli_calls = []
 
-    def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
-                      jobleads_company="", jobleads_title=""):
-        api_calls.append(url)
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
+        cli_calls.append((url, paste_text))
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False):
-        cli_calls.append(url)
-
-    monkeypatch.setattr("apply_agent.main_api", fake_main_api)
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
+    monkeypatch.setattr("apply_agent._is_cli_available", lambda: True)
+    monkeypatch.setattr("apply_agent.APPLY_USE_CLI", False)
     monkeypatch.setattr("apply_agent.LLM_API_KEY", "test-key")
 
     import apply_agent
     apply_agent.main("https://example.com/job/1", paste_text="Job posting text here.")
 
-    assert api_calls == ["https://example.com/job/1"]
-    assert cli_calls == [], "main_cli must NOT be called when paste_text is provided"
+    assert len(cli_calls) == 1
+    assert cli_calls[0][1] == "Job posting text here."
+
+
+def test_main_paste_text_without_cli_uses_api(monkeypatch) -> None:
+    """When paste_text is provided and CLI is unavailable, main() uses API."""
+    api_calls = []
+
+    def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
+                      jobleads_company="", jobleads_title=""):
+        api_calls.append((url, paste_text))
+
+    monkeypatch.setattr("apply_agent.main_api", fake_main_api)
+    monkeypatch.setattr("apply_agent._is_cli_available", lambda: False)
+    monkeypatch.setattr("apply_agent.APPLY_USE_CLI", False)
+    monkeypatch.setattr("apply_agent.LLM_API_KEY", "test-key")
+
+    import apply_agent
+    apply_agent.main("https://example.com/job/1", paste_text="Job posting text here.")
+
+    assert len(api_calls) == 1
+    assert api_calls[0][1] == "Job posting text here."
 
 
 def test_main_paste_without_api_key_exits(monkeypatch) -> None:
@@ -109,7 +126,7 @@ def test_main_force_cli_calls_main_cli_directly(monkeypatch) -> None:
     """--cli flag must send directly to main_cli without checking CLI availability."""
     cli_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False):
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
         cli_calls.append(url)
 
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
@@ -164,7 +181,7 @@ def test_main_cli_failure_falls_back_to_api(monkeypatch) -> None:
     from hunter.apply_shared import ApplyError
     api_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False):
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
         raise ApplyError("CLI failed")
 
     def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
