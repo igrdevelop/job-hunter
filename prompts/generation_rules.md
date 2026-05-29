@@ -66,14 +66,15 @@ RED LINES (never cross):
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
 - NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
 - NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
+- NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-21)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
+- NEVER invent client scale or prestige. Do not write "Fortune 500", "top-tier clients", "enterprise at scale", or similar claims unless explicitly stated in the job posting or candidate profile.
+- NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text.
 
 ### Step 3 - Generate Content
 
 **Resume (EN) - ATS-optimized:**
 - Headline: `Senior Frontend Developer ({stack})`
 - Summary (3-4 sentences): mirror job posting language, include "10+ years" + primary stack, 1-2 achievements, domain match.
-- **Angular version in summary**: never write a specific version number (e.g. "Angular 18+" or "Angular 21"). Write "modern Angular" or "Angular (2-21)" to reflect the full version range. Specific versions belong only in experience `stack_line` fields.
-- **Do not invent client scale**: never write "Fortune 500", "top-tier clients", "enterprise at scale" or similar claims unless the job posting or candidate profile explicitly states them.
 - Skills: reorder - job-relevant first, keep all existing skills, add all plausible skills from the job posting
 - Experience: include ALL roles from the candidate profile in reverse chronological order (currently 7; the most recent role MUST be first). Aggressively reframe bullets to emphasize relevance to THIS job. You may enrich "Stack:" lines with plausible technologies. You may rewrite bullets to naturally include job keywords. Do NOT invent entire roles.
 - ATS rules: single column, no tables/graphics/icons, standard section names (SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, ADDITIONAL COURSES), contact info in body
