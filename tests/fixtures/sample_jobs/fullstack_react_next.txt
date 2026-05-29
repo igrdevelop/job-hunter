@@ -1,47 +1,71 @@
-Senior Full-Stack Engineer (React + Next.js)
-Company: Boldare
-Location: Remote (Poland/EU)
-Type: B2B contract
+URL: https://justjoin.it/job-offer/appliscale-senior-fullstack-frontend-heavy---react-engineer-krakow-javascript
 
-About Boldare:
-Boldare is a product design and development company working with scale-ups and enterprises. We build digital products from 0 to 1 and scale them. Current project: a SaaS e-commerce analytics platform for mid-market retailers, processing millions of events daily.
+Job Title: Senior Fullstack (Frontend heavy - React) Engineer
+Company: Appliscale
+Location: Kraków (remote)
+Experience Level: senior
+Salary: 5286.0–6955.0 USD B2B
+Salary: 4493.0–5912.0 EUR B2B
+Salary: 3883.0–5109.0 GBP B2B
+Salary: 4114.0–5413.0 CHF B2B
+Salary: 19000.0–25000.0 PLN B2B
 
-We are looking for a Senior Full-Stack Engineer to join a small, autonomous product team (5 engineers) building a Next.js-based analytics platform.
+--- Job Description ---
+About the role
 
-Requirements (must-have):
-- 5+ years of JavaScript/TypeScript development
-- 3+ years of React (hooks, context, performance optimization)
-- Next.js (App Router, SSR, SSG, API routes)
-- Node.js for backend API routes and scripts
-- PostgreSQL or similar relational DB
-- REST API design
-- Jest and React Testing Library
-- Git, CI/CD
+You will need to be an expert in frontend development with a thorough understanding of the technologies involved. Strong frontend skills where you can demonstrate your ability to apply these technologies, as well as deploy and maintain them will be crucial to success. 
+
+Technologies we work with: React, TypeScript, JavaScript, HTML, CSS, Cypress, Playwright, Node.js, REST APIs, AWS, Terraform
+
+Responsibilities:
+
+- 
+Designing, writing, testing functionalities for a frontend system written in React & TypeScript
+- 
+Design frontend software architecture with connection to backend services and mobile apps
+- 
+Deploying and maintaining frontend / backend applications 
+- 
+Maintaining system on production used by consumers from several European countries
+- 
+Debugging issues
+- 
+Scoping and assessing the complexity of features
+- 
+Participating in sprint planning, daily sprints and meetings with product owners for grooming new features
+- 
+Collaborating with other team members and teams who depend on functionalities that you develop
+- 
+Recruiting and mentoring new team members
+
+Required qualifications:
+
+- 
+5+ years of production software development experience in React
+- 
+Strong understanding of software engineering principles, testing, design systems
+- 
+Solid hands-on experience in TypeScript
+- 
+Know-how of REST APIs
+- 
+Familiarity with DBMS like PostgreSQL, DynamoDB
+- 
+Computer Science degree
+- 
+AI Tooling usage
+- 
+Able to work with Agile methodologies such as SCRUM and/or Kanban
+- 
+Good communication and collaboration skills
+- 
+Self-motivation, proactive attitude
+- 
+Proficiency in English
 
 Nice to have:
-- NestJS for dedicated microservices
-- Prisma or TypeORM
-- GraphQL
-- Redis
-- Docker / Kubernetes
-- Tailwind CSS
-- Cypress or Playwright
-- AWS or Vercel deployment
-- E-commerce or analytics domain
 
-What you will do:
-- Build Next.js pages and React components for analytics dashboards with complex data visualizations
-- Implement Node.js API routes and NestJS microservices for data aggregation
-- Optimize SSR performance and Core Web Vitals for fast page loads
-- Design PostgreSQL schemas and write efficient queries
-- Write unit tests with Jest/RTL and E2E tests with Cypress
-- Collaborate with product designer and backend engineers in weekly sprints
-
-Tech stack:
-Next.js 14, React 18, TypeScript, Node.js, NestJS, PostgreSQL, Prisma, Tailwind CSS, Jest, Cypress, Docker, Vercel
-
-We offer:
-- 26 000 – 34 000 PLN/month B2B
-- 100% remote
-- Small autonomous team, real ownership
-- Modern stack, no legacy code
+- 
+Exposure to backend development (can be in TypeScript)
+- 
+Some experience or interest in developing Cloud and Infrastructure solutions with AWS and CI/CD processes supported by tools like Docker, Kubernetes, Jenkins, Terraform, CircleCI, GitlabCI, Datadog, etc.
