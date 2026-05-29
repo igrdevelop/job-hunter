@@ -1,47 +1,53 @@
-Senior Full-Stack Developer (Angular + NestJS)
-Company: FinEdge Solutions
-Location: Warsaw / Hybrid
-Type: B2B, long-term
+URL: https://justjoin.it/job-offer/co-brick-fullstack-developer-nestjs-angular--gliwice-javascript
 
-About FinEdge:
-FinEdge Solutions provides white-label financial software for banks and credit unions in CEE. Our platform handles loan origination, risk scoring, and customer onboarding for 15+ banking institutions. Team of 60 engineers, agile, English-speaking.
+Job Title: Fullstack Developer (NestJS / Angular)
+Company: co.brick
+Location: Gliwice, Poland (100% remote)
+Experience Level: Senior
+Employment: B2B
 
-We are looking for a Senior Full-Stack Developer to own feature development end-to-end — from Angular UI to NestJS microservices.
+--- Job Description ---
 
-Requirements (must-have):
-- 5+ years of software development experience
-- Angular (version 10+) — forms, routing, state management
-- NestJS for backend microservices
-- TypeScript across the full stack
-- REST API design and implementation
-- PostgreSQL or another relational database
-- RxJS for reactive data handling
-- Unit testing (Jest) on both frontend and backend
-- Git, CI/CD pipelines
+Szukamy 3 doświadczonych programistów Fullstack do całkowitej przebudowy i modernizacji systemów produkcyjnych klasy MES.
 
-Nice to have:
-- NgRx or other Angular state management
-- Docker and Kubernetes basics
-- GraphQL
-- Redis for caching
-- Microservices architecture patterns
-- Banking or fintech domain experience
-- SonarQube, code quality tools
-- Agile / SAFe experience
+Projekt polega na przeprojektowaniu istniejącego oprogramowania wspierającego zarządzanie produkcją - od podstaw, z naciskiem na skalowalność, nowoczesną architekturę backendową i integrację z frontendem Angular.
 
-What you will do:
-- Design and implement full-stack features: Angular UI + NestJS API + database schema
-- Build complex Angular forms for loan application and risk assessment workflows
-- Implement NestJS microservices with REST and event-driven communication
-- Write unit and integration tests for both layers
-- Participate in architecture decisions and cross-team API contracts
-- Code review across frontend and backend
+Zakres obowiązków:
+- Aktywny udział w całkowitej przebudowie i modernizacji systemów MES
+- Tworzenie skalowalnych rozwiązań backendowych w NestJS / Node.js
+- Projektowanie architektury backendowej mikroserwisów
+- Współpraca przy integracji z frontendem Angular
+- Projektowanie i optymalizacja baz danych (PostgreSQL, TypeORM)
+- Implementacja REST API oraz WebSocket dla komunikacji real-time
+- Code review i dbałość o jakość kodu (TypeScript, testy jednostkowe i e2e)
+- Praca w metodologii Agile / Scrum
 
-Tech stack:
-Angular 14-17, NestJS, TypeScript, RxJS, NgRx, PostgreSQL, Redis, Docker, Jest, REST API, GitHub Actions
+Wymagania (must-have):
+- NestJS / Node.js – bardzo dobra znajomość i doświadczenie w projektowaniu architektury backendowej
+- Angular – dobra znajomość na potrzeby rozwoju frontendu
+- TypeScript – biegłość w pisaniu typowanego kodu po obu stronach (frontend i backend)
+- PostgreSQL / TypeORM – doświadczenie w projektowaniu schematów baz danych
+- REST API – projektowanie i implementacja
+- Git – praca w zespole z branching strategy
+- Doświadczenie z systemami MES – praktyczna znajomość systemów wspierających zarządzanie produkcją
+- Język angielski – minimum poziom B2
 
-We offer:
-- 24 000 – 30 000 PLN/month B2B
-- Hybrid (Warsaw office 2 days/week)
-- Stable, long-term project
-- Banking domain expertise
+Mile widziane:
+- Docker / Kubernetes – podstawowa znajomość konteneryzacji
+- RxJS – znajomość reactive programming
+- WebSocket / Socket.io – doświadczenie z komunikacją real-time
+- Mikroserwisy – znajomość wzorców projektowych
+- Redis – caching i kolejkowanie
+- CI/CD – GitHub Actions lub podobne
+- Jest – testy jednostkowe i integracyjne
+- Nx Monorepo – doświadczenie z monorepo
+
+Co oferujemy:
+- 100% praca zdalna
+- B2B
+- Projekt greenfield – modernizacja od podstaw
+- Zespół 3 fullstack developerów + tech lead
+- Stack: NestJS, Angular, TypeScript, PostgreSQL, Docker
+
+--- Requirements ---
+NestJS, Angular, TypeScript, Node.js, PostgreSQL
