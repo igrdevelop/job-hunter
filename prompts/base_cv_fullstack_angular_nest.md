@@ -1,4 +1,4 @@
-# Base CV — Full-Stack Track (Angular/React + NestJS/Node.js)
+# Base CV — Full-Stack Track (Angular + NestJS/Node.js)
 
 Pre-optimized full-stack bullets and skills for use as a generation baseline.
 LLM must use these as a starting point and adapt keywords/framing to the specific job posting.
@@ -11,7 +11,7 @@ Node.js and backend exposure are woven into every role where plausible.
 
 ## Skills (Full-stack ordered — reorder by job relevance, add missing from posting)
 
-**frontend**: TypeScript, JavaScript, Angular (2-21), React, Nx Monorepo, NgRx, RxJS, Signals, AG Grid, HTML, SCSS, Bootstrap
+**frontend**: TypeScript, JavaScript, Angular (2-21), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, HTML, SCSS, Bootstrap
 **backend**: Node.js, NestJS, REST API, WebSockets (SignalR)
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API

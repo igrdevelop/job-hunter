@@ -44,7 +44,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
 
 **bullets**:
-- Built an AI decision-support feature: React/TypeScript frontend consumed Node.js-proxied LLM recommendations, helping procurement teams select optimal vendor options from large datasets of historical and real-time data.
+- Built an AI decision-support feature: TypeScript frontend consumed Node.js-proxied LLM recommendations, helping procurement teams select optimal vendor options from large datasets of historical and real-time data.
 - Architected a workflow-consolidation module using AG Grid with server-side data processing via REST APIs: unified fragmented procurement workflows into a single table, surfacing LLM-analyzed best-fit vendor options per client.
 - Delivered an automation dashboard with reactive state management, improving procurement workflow visibility across a platform serving enterprise clients globally; developed throughout using Cursor + Claude as agentic coding tools.
 - Drove frontend architecture decisions in a cross-functional team of ~10 within a ~200-person engineering org; enforced code quality through TypeScript code reviews in Agile (Scrum).

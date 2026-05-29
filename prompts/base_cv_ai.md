@@ -12,7 +12,7 @@ NOTE: Do NOT write "Angular" in any role title. Use "AI Frontend Developer", "Se
 ## Skills (AI/tooling-ordered — reorder by job relevance, add missing from posting)
 
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API, Claude Opus / Sonnet (spec-driven agentic workflows), LLM integration, prompt engineering
-**frontend**: TypeScript, JavaScript, Angular (2-21), React (familiar), RxJS, Nx Monorepo, NgRx, Signals, AG Grid, Node.js, HTML, SCSS
+**frontend**: TypeScript, JavaScript, Angular (2-21), RxJS, Nx Monorepo, NgRx, Signals, AG Grid, Node.js, HTML, SCSS
 **tools**: Jest, Cypress, SonarQube, Git, Jenkins, Webpack
 **methodologies**: Agentic Development Workflows, Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
 **languages**: English (Fluent), Polish (B2), Russian (Native)
