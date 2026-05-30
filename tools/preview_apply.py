@@ -2,7 +2,8 @@
 tools/preview_apply.py — Run apply pipeline against sample job fixtures.
 
 Outputs go to tests/output/{track}/ instead of Applications/.
-Uses API mode (APPLY_USE_CLI=false) with --paste-file.
+Uses CLI mode (Pro subscription) when available, API as fallback.
+APPLICATIONS_DIR env var is set so CLI writes to tests/output/{track}/.
 
 Usage:
     python tools/preview_apply.py --track angular
