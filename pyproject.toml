@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "job-hunter"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    # HTTP / scraping
+    "requests",
+    "cloudscraper",
+    "beautifulsoup4",
+    # Config / data
+    "python-dotenv",
+    "openpyxl",
+    "python-docx",
+    "pytz",
+    # Telegram bot
+    "python-telegram-bot[job-queue]",
+    # LLM
+    "anthropic",
+    # Google APIs
+    "google-api-python-client==2.131.0",
+    "google-auth==2.29.0",
+    "google-auth-oauthlib==1.2.0",
+    "google-auth-httplib2==0.2.0",
+    # ATS scoring
+    "scikit-learn",
+]
+
+[project.optional-dependencies]
+browser = ["playwright"]
+dev = ["pytest"]
+
+[project.scripts]
+hunter = "hunter.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hunter*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = ["tests/", "tools/"]

@@ -436,11 +436,11 @@ apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 - [x] **5.4** Keep openpyxl only for doc generation formatting; tracker_cache loads from SQLite
 - [x] **5.5** gsheets_sync: all Sheets metadata (`sheets_row`, `sheets_dirty`) moved from TrackerCache to DB. 6 new tracker.py functions. `_apply_pull_delta_db()` replaces `cache.apply_pull_delta()`. TrackerCache no longer has `sheet_row_index`, `dirty_ids`, or Sheets-related methods.
 
-### Phase 6 — Project structure (after phases 1-5)
+### Phase 6 — Project structure (after phases 1-5) ✅ COMPLETE (2026-05-31)
 
-- [ ] **6.1** Add `pyproject.toml` with metadata and mypy config
-- [ ] **6.2** Make project installable (`pip install -e .`)
-- [ ] **6.3** Entry point: `python -m hunter` instead of `python hunter.py`
+- [x] **6.1** Add `pyproject.toml` with metadata and mypy config (replaces `pytest.ini`)
+- [x] **6.2** Make project installable (`pip install -e .`); Dockerfile updated with `pip install -e . --no-deps`
+- [x] **6.3** Entry point: `python -m hunter` via `hunter/__main__.py`; `hunter.py` becomes a thin shim; `hunter` CLI script registered in `pyproject.toml`
 
 ---
 
@@ -506,4 +506,5 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-27 | sonnet | Phase 4 complete: split apply_agent.py (1473→194 lines) into hunter/apply_shared.py (702), hunter/apply_api.py (370), hunter/apply_cli.py (331). All module globals eliminated; functions importable with clean params. 74 new tests (916 total in 6s). |
 | 2026-05-27 | sonnet | Phase 5 complete: SQLite tracker migration. 5.1 db.py schema, 5.2 all tracker CRUD → SQLite, 5.3 /export command, 5.4 openpyxl removed from tracker_cache (load_from_db), 5.5 gsheets Sheets metadata moved to DB (set_sheets_row etc.), gsheets_sync rewritten, _apply_pull_delta_db replaces cache.apply_pull_delta. 937 tests pass. |
 | 2026-05-27 | sonnet | Drive log upload: upload_log_file() in gdrive_sync.py uploads hunter_errors.log to Job Hunter/Logs/ on Drive daily at 06:10 (scheduled_gdrive_upload_logs). 5 new tests (942 total). |
+| 2026-05-31 | sonnet | Phase 6 complete: pyproject.toml (metadata + mypy + pytest config), hunter/__main__.py (main() moved from hunter.py), hunter.py → thin shim, pytest.ini deleted, Dockerfile updated with pip install -e . --no-deps. |
 | 2026-05-29 | sonnet | CV generation quality: 5 base CVs per track (angular/react/ai/fullstack_angular_nest/fullstack_react_next), stack detection in apply_api.py (31 tests), generation_rules.md renamed + strengthened RED LINES (no Angular version in summary, no invented client scale, no foreign-language keywords in EN), CLI paste-file support via Pro subscription, APPLICATIONS_DIR env var in apply.md, preview_apply.py tool, real job fixtures in tests/fixtures/sample_jobs/. 976 tests total. |
