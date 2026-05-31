@@ -1,0 +1,80 @@
+URL: https://justjoin.it/job-offer/clurgo-senior-fullstack-developer-react-node-js--warszawa-javascript
+
+Job Title: Senior Fullstack Developer (React+Node.js))
+Company: Clurgo
+Location: Warszawa (remote)
+Experience Level: senior
+Salary: 4365.0–5456.0 CHF B2B
+Salary: 4768.0–5960.0 EUR B2B
+Salary: 4120.0–5150.0 GBP B2B
+Salary: 5608.0–7010.0 USD B2B
+Salary: 20160.0–25200.0 PLN B2B
+
+--- Job Description ---
+Clurgo to firma stworzona przez developerów dla developerów. Nasze zespoły łączą pełne spektrum kompetencji - od rozwoju oprogramowania i infrastruktury, przez analizę oraz testy, aż po strategiczne zarządzanie produktem i procesami. Realizujemy różnorodne projekty IT dla klientów z wielu branż, dbając o dobre praktyki programistyczne i zachowanie work-life balance. Tworzymy rozwiązania, które mają znaczenie - dla firm w Polsce i na całym świecie.
+
+✅Projekt skupia się na rozwoju oraz utrzymaniu aplikacji wspierających zarządzanie kampaniami reklamowymi i działania marketingowe w kanałach cyfrowych
+
+✅Technologie i narzędzia: React, Node.js, TypeScript, AWS Lambda, AWS CDK, Terraform, GitHub Actions, Datadog, GitHub Copilot
+
+Szukamy Ciebie, jeśli:
+
+- 
+masz minimum 6 lat doświadczenia komercyjnego jako Software Developer
+- 
+posiadasz mocne doświadczenie frontendowe (ok. 80%) z React i TypeScript
+- 
+ostatnie 2-3 lata pracowałeś/aś w roli Fullstack Developer z przewagą frontendu
+- 
+masz doświadczenie backendowe (Node.js)
+- 
+pracowałeś/aś z rozwiązaniami serverless w AWS (Lambda, CDK)
+- 
+znasz Terraform i rozumiesz Infrastructure as Code
+- 
+masz doświadczenie z CI/CD (GitHub Actions)
+- 
+pracujesz w metodykach Agile
+- 
+potrafisz efektywnie komunikować się w zespole i brać ownership za rozwiązania
+- 
+komunikujesz się w języku angielskim na poziomie minimum B2 (codzienna komunikacja z zespołami z Polski i UK)
+
+Mile widziane:
+
+- 
+doświadczenie z Datadog
+- 
+praktyczna znajomość GitHub Copilot lub innych AI coding assistants
+- 
+doświadczenie w projektach z obszaru media / digital advertising / streaming
+
+Zadania:
+
+- 
+rozwój nowych funkcjonalności systemów wspierających planowanie i zarządzanie kampaniami reklamowymi
+- 
+utrzymanie oraz rozbudowa istniejących aplikacji marketingowych
+- 
+tworzenie skalowalnych rozwiązań frontendowych i backendowych
+- 
+rozwój architektury serverless w środowisku AWS
+- 
+współpraca z międzynarodowym zespołem produktowym i technologicznym
+- 
+dbanie o jakość kodu, automatyzację oraz monitoring aplikacji
+
+Czego możesz się spodziewać:
+
+- 
+współpracy w oparciu o kontrakt B2B
+- 
+pracy zdalnej
+- 
+🏃‍♀️benefitów: opieka medyczna, karta multisport, lekcje języka angielskiego
+- 
+🎉integracji - lubimy spędzać razem czas
+- 
+profesjonalnego procesu rekrutacyjnego – zawsze otrzymasz od nas feedback niezależnie od decyzji
+
+Poznaj nas lepiej👉 https://www.facebook.com/clurgo/

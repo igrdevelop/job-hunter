@@ -39,6 +39,60 @@ from hunter.apply_shared import (
 )
 from hunter.services.apply_service import build_generate_docs_cmd
 
+_BASE_CV_FILES = {
+    "angular": "base_cv_angular.md",
+    "react": "base_cv_react.md",
+    "javascript": "base_cv_react.md",
+    "fullstack_angular_nest": "base_cv_fullstack_angular_nest.md",
+    "fullstack_react_next": "base_cv_fullstack_react_next.md",
+    "ai": "base_cv_ai.md",
+}
+
+_AI_KEYWORDS = {
+    "llm", "ai engineer", "ai developer", "ml engineer", "machine learning",
+    "prompt engineer", "langchain", "openai", "anthropic", "llm integration",
+    "ai-first", "ai first", "agentic", "copilot", "cursor ide",
+}
+
+
+def _detect_stack_hint(job_text: str) -> str:
+    """Return a stack key for _BASE_CV_FILES based on job text keywords."""
+    text = job_text.lower()
+    # AI-first signals: explicit AI/LLM engineering role keywords
+    if any(kw in text for kw in _AI_KEYWORDS):
+        return "ai"
+    # Fullstack: NestJS/Next.js signals
+    has_nest = "nestjs" in text or "nest.js" in text
+    has_next = "next.js" in text or "nextjs" in text
+    has_react = "react" in text
+    has_angular = "angular" in text
+    # Next.js always implies React track (Next.js IS a React framework)
+    if has_next:
+        return "fullstack_react_next"
+    # NestJS alone: route by frontend framework
+    if has_nest:
+        if has_react and not has_angular:
+            return "fullstack_react_next"
+        return "fullstack_angular_nest"
+    if has_angular:
+        return "angular"
+    if has_react:
+        return "react"
+    return "javascript"
+
+
+def _load_base_cv(stack_hint: str) -> str:
+    """Return base CV markdown for the given stack, or '' if none available."""
+    key = stack_hint.lower()
+    filename = _BASE_CV_FILES.get(key)
+    if not filename:
+        return ""
+    path = PROMPTS_DIR / filename
+    if not path.exists():
+        print(f"[apply_agent] Warning: base CV not found at {path}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
 
 def main_api(
     url: str,
@@ -124,7 +178,7 @@ def main_api(
         return
 
     # Step 2 — Read system prompt (instructions + candidate profile)
-    prompt_path = PROMPTS_DIR / "system_prompt.md"
+    prompt_path = PROMPTS_DIR / "generation_rules.md"
     profile_path = PROMPTS_DIR / "candidate_profile.md"
     if not prompt_path.exists():
         print(f"[apply_agent] ERROR: {prompt_path} not found")
@@ -134,11 +188,19 @@ def main_api(
         profile = profile_path.read_text(encoding="utf-8")
         system_prompt = profile + "\n\n---\n\n" + instructions
     else:
-        print(f"[apply_agent] WARNING: {profile_path} not found, using system_prompt.md only")
+        print(f"[apply_agent] WARNING: {profile_path} not found, using generation_rules.md only")
         system_prompt = instructions
 
+    # Step 2.5 — Load base CV for detected stack (injected into user message)
+    stack_hint = _detect_stack_hint(job_text)
+    base_cv = _load_base_cv(stack_hint)
+    if base_cv:
+        print(f"[apply_agent] Step 2.5: Loaded base CV for stack '{stack_hint}'")
+    else:
+        print(f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch")
+
     # Step 3 — Call LLM
-    print(f"[apply_agent] Step 2: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
+    print(f"[apply_agent] Step 3: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
     try:
         from llm_client import call_llm, LLMError
         url_hint = (
@@ -147,6 +209,8 @@ def main_api(
             else "(none — text pasted directly by user)"
         )
         user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+        if base_cv:
+            user_message += f"\n\n---\n\n## Base CV — {stack_hint} Track (use as starting point for bullets)\n\n{base_cv}"
 
         if skip_dedup:
             user_message += (

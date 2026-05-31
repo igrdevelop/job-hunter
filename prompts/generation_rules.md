@@ -6,6 +6,18 @@ IMPORTANT: Never use em dashes or en dashes (characters like \u2014 or \u2013) a
 
 ---
 
+## Base CV (when provided)
+
+If the input contains a "## Base CV" section, use it as your starting point for the experience bullets and skills ordering. Rules:
+
+- **Do NOT copy bullets verbatim.** Adapt them: weave in job-specific keywords, adjust metrics emphasis, reorder to front-load what this job values most.
+- **Skills order**: start from the base CV skills order, then move job-required skills to the front if they are not already there.
+- **Bullets**: treat base bullets as a quality baseline \u2014 they are pre-polished. Enrich them with job keywords rather than rewriting from scratch.
+- **Summary**: always write fresh for this specific job (do not take from base CV).
+- If no Base CV is provided, derive everything from the candidate profile as usual.
+
+---
+
 ## Instructions
 
 ### Step 1 - Analyze the Job Posting
@@ -54,6 +66,9 @@ RED LINES (never cross):
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
 - NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
 - NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
+- NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-21)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
+- NEVER invent client scale or prestige. Do not write "Fortune 500", "top-tier clients", "enterprise at scale", or similar claims unless explicitly stated in the job posting or candidate profile.
+- NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text.
 
 ### Step 3 - Generate Content
 

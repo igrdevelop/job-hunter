@@ -1,0 +1,71 @@
+URL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69
+
+Senior Frontend Engineer
+Company: Feedzai
+URL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69
+Work arrangement: remote
+Remote: yes
+Location: Remote OK: Portugal
+Category: engineering
+Role: Frontend Engineer
+Level: senior
+Schedule: summer_fridays
+Tags: Web Accessibility, Component Architecture, Service Mindset, WCAG Standards, Semantic HTML, Package Management, TypeScript, React, HTML5, CSS-in-JS, JavaScript ES6+, Jest, Cypress, Storybook, React Testing Library, npm, Chromatic
+
+Feedzai is the world’s first RiskOps platform for financial risk management, and the market leader in safeguarding global commerce with today’s most advanced cloud-based risk management platform, powered by machine learning and artificial intelligence. Feedzai is securing the transition to a cashless world while enabling digital trust in every transaction and payment type. The world’s largest banks, processors, and retailers trust Feedzai to protect trillions of dollars and manage risk while improving the customer experience for everyday users, without compromising privacy. Feedzai is a Series D company and has raised $282M to date. With a valuation of $2 billion, our technology protects 1 billion consumers and 90 billion transactions each year.
+
+**The Engineering (Tech) Team** is responsible for all Feedzai product development. Together with Product Management and Data Science, we build the next generation of tools to catch fraud in real-time with a machine learning first approach. Formed by engineers and managed by engineers, at Feedzai, you will find one of the most talented teams out there, from junior to senior engineers.
+
+We are fast-paced and provide a safe, open, and collaborative environment that encourages us to lean in, try new things and discover our potential with continuous learning for everyone.
+
+While building the best value for our customers, you will work with a wide range of technical challenges. Such as building distributed systems that need to operate 24/7 and ultra-low latencies, solving UI/UX problems to help fraud analysts to fight fraud more efficiently. In addition, designing extensive databases from relational, NoSQL and graphs, validate and develop new data science techniques and algorithms.
+
+**You:** We’re looking for a Frontend Engineer to join the **Escudo team**, the team responsible for maintaining and evolving Feedzai’s Design System. Escudo is the backbone of our user interfaces, ensuring consistency, accessibility and efficiency across our entire product suite.
+
+Your mission goes beyond building features; you will be **building the building blocks**. You will treat the Design System as an internal product, focusing on scalability, adoption, and creating a world-class developer experience for your colleagues, bridging the gap between Design and Engineering.
+
+**The Escudo Team:** The Escudo Team builds the foundation that allows Feedzai to disrupt the financial crime industry with speed and consistency. We view our fellow engineers and designers as our primary customers. By providing a robust, cloud-first, and flexible design system, we enable product teams to focus on solving complex financial risk problems rather than reinventing UI components. Being part of this team means you value precision, empathy for the developer experience, and the power of shared standards. We define how Feedzai looks and feels.
+
+**Your Day to Day:**
+
+- **Architect & Build:** Develop highly reusable, accessible (WCAG), and performant React components that serve as the standard for all Feedzai products.
+- **Bridge Design & Code:** Collaborate closely with Product Designers to translate visual language into code, ensuring pixel-perfect implementation.
+- **Empower Developers:** Write clear, comprehensive documentation (using tools like Storybook) and create tooling that makes it easy for product teams to adopt and use the system.
+- **Quality Assurance:** Be the guardian of frontend standards. Implement rigorous testing strategies (unit and component testing) to ensure zero regressions in the library.
+- **Support & Advocate:** Act as a consultant for product teams, helping them implement complex UI patterns and gathering feedback to iterate on the system.
+- **Strategic Evolution:** Have an active role in decisions regarding the frontend architecture and the long-term roadmap of the Escudo library.
+
+**You Have & You Know-how:**
+
+- BSc/MSc degree in Computer Science, or a similar technical degree.
+- 4+ years of experience in modern JavaScript (ES6+), HTML5, and **advanced CSS** (Flexbox, Grid, CSS-in-JS/Modules).
+- Deep experience with **React** and its ecosystem.
+- **Strong proficiency in TypeScript** (essential for building type-safe libraries).
+- Demonstrated experience **architecting, building, or significantly contributing to a Design System** (not just using one).
+- Solid knowledge of **Web Accessibility standards (WCAG)** and semantic HTML.
+- Experience with testing frameworks (Jest, React Testing Library) and visual regression tools (e.g., Chromatic, Cypress).
+- Experience with **Storybook** or similar documentation platforms.
+- A "Service Mindset" or "Platform Mindset"—you enjoy helping other developers succeed.
+- Experience with npm package management and release lifecycles is a plus.
+
+The **Product Team** builds our product to disrupt the financial crime industry from a data-led approach. We partner with our clients using a holistic lens and have result-driven solutions to manage financial risk with a cloud-first platform and a world-class UX interface. Being part of this team, you have a voice in planning, strategizing, and challenging the status quo. Your thoughts and ideas are valued. Our fast-paced and open environment encourages us to lean in, try new things, and  discover our potential. We define and act on what could be in tomorrow's world, not on what is today. **Join Us!**
+
+#LI-Remote #LI-MG3
+
+* * *
+
+**Your First 30-Days at Feedzai:**
+
+You will be immersed in our brand with training, connections, and one-on-one time with your manager. You may shadow your colleagues virtually or onsite at an office depending on where you work as you are supported through your Feedzai journey. In addition, you will have access to a ton of information to give you history, context, and all the knowledge you can handle about Feedzai and the team. Finally, you will start working on projects and collaborating on work currently being done. We can't wait to have you join the team!
+
+[Life at Feedzai Instagram](https://www.instagram.com/life_at_feedzai/)
+
+[Feedzai Culture](https://careers.feedzai.com/mirabud/2023/10/Codebook.pdf)
+
+* * *
+
+**Feedzai is an Equal Opportunity Employer and we value diversity at our company. We do not discriminate on the basis of race, religion, color, national origin, gender, sexual orientation, age, marital status, veteran status, or disability status.**
+
+**Feedzai does not accept unsolicited resumes from recruiters or employment agencies.**
+
+**Feedzai will use the personal data you provide us with by filling out this form for reviewing your application and to potentially negotiate a contract with you. Your personal data will be retained by Feedzai for 24 months following your application. Please see our Privacy Notice available at https://www.feedzai.com/legal/feedzai-candidate-privacy-policy/ and https://www.feedzai.com/legal/feedzai-california-candidates-privacy-policy/ for more information on how we process your personal data.**

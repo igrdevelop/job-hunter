@@ -18,7 +18,7 @@ if not LLM_API_KEY:
 
 from llm_client import call_llm
 
-SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
+SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "generation_rules.md").read_text(encoding="utf-8")
 CANDIDATE = (Path(__file__).parent / "prompts" / "candidate_profile.md").read_text(encoding="utf-8")
 
 

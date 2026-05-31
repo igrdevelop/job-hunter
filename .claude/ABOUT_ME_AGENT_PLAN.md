@@ -8,7 +8,7 @@ Read `CLAUDE.md` before touching anything.
 Call it automatically on `--full` and on demand via Telegram `/about_me` command.
 
 **Scope:** New module, one new Telegram command, small changes to `generate_docs.py`.
-No changes to `candidate_profile.md`, `system_prompt.md`, tracker schema, or scrapers.
+No changes to `candidate_profile.md`, `generation_rules.md`, tracker schema, or scrapers.
 
 ---
 
@@ -122,7 +122,7 @@ def generate_about_me(folder: Path, lang: str) -> str:
 
 ### Prompt design
 
-System prompt (keep it SHORT — this is not system_prompt.md):
+System prompt (keep it SHORT — this is not generation_rules.md):
 
 ```
 You are writing a professional "About Me" / self-introduction for a senior developer's
@@ -323,7 +323,7 @@ BotCommand("about_me", "Generate About Me for a job URL (lang + url)"),
 ## Out of scope — do NOT do
 
 - Changing `candidate_profile.md` (already updated separately)
-- Changing `system_prompt.md` or main LLM call in `apply_agent.py`
+- Changing `generation_rules.md` or main LLM call in `apply_agent.py`
 - Generating About Me DOCX or PDF (only .txt)
 - Supporting About Me without an existing tracker entry
 - Changing tracker schema

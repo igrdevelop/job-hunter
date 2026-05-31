@@ -49,7 +49,9 @@ TRACKER_BACKUP_DIR: Path = Path(
 ).expanduser()
 TRACKER_BACKUP_KEEP_FILES: int = max(0, int(os.getenv("TRACKER_BACKUP_KEEP_FILES", "90")))
 TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
-APPLICATIONS_DIR = PROJECT_DIR / "Applications"
+APPLICATIONS_DIR: Path = Path(
+    os.getenv("APPLICATIONS_DIR", str(PROJECT_DIR / "Applications"))
+).expanduser()
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"

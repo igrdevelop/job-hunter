@@ -1,0 +1,114 @@
+URL: https://justjoin.it/job-offer/accenture-frontend-engineer---ai-solutions-ai-data-evergreen-open--wroclaw-javascript
+
+Job Title: Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)
+Company: Accenture
+Location: Wrocław (hybrid)
+Experience Level: mid
+
+--- Job Description ---
+Job Description
+
+WHO WE ARE
+
+Accenture is a leading global professional services company that helps the world’s leading businesses, governments, and other organizations build their digital core, optimize their operations, accelerate revenue growth, and enhance citizen services. We offer solutions and assets across Strategy & Consulting, Technology, Operations, Industry X, and Accenture Song.
+
+At the AI&Data, we work locally and globally with over 250 Poland-based specialists. Our expertise spans data architecture and sectoral specialization. We collaborate with tech partners like Microsoft, AWS, Google, Oracle, and Snowflake to implement cutting-edge solutions. We provide comprehensive support from strategy definition to solution implementation and development, covering all aspects of Data & Analytics.
+
+THE WORK
+
+As a Frontend Engineer – AI Solutions, you will design and build the user-facing layer of GenAI and agentic AI solutions for leading global enterprises. You’re the person who makes powerful AI systems usable – turning complex agent interactions, streaming LLM outputs, and enterprise data into intuitive, polished product experiences.
+
+We’re looking for someone who is React-strong, thinks in terms of user experience, and is excited about solving the unique UI/UX challenges that come with building AI-powered products.
+
+You will:
+
+- 
+Build modern, responsive frontends for GenAI products using React and TypeScript – conversational interfaces, agent dashboards, data exploration tools, and interactive analytics views
+- 
+Design and implement AI-specific interaction patterns: streaming chat, real-time agent status, citation rendering, confidence indicators, and graceful handling of AI uncertainty
+- 
+Own the UX quality of AI products – making deliberate decisions about information architecture, component design, accessibility, and how users interact with AI outputs
+- 
+Integrate frontends with backend APIs, LLM services, and streaming endpoints – working closely with GenAI engineers to deliver seamless end-to-end experiences
+- 
+Collaborate with engineers, designers, and consultants on cross-functional teams, shaping how enterprise users experience AI
+
+Flexible: The work location for this role may include a mix of working remotely (most of the time), onsite at a client or in an Accenture office – depending on specific project circumstances. With all our roles, there is some in-person time for collaboration, learning and building relationships with clients, peers, leaders, and communities. As an employer, we will be as flexible as possible to support your specific work/life needs.
+
+WHAT’S IN IT FOR YOU?
+
+- 
+Build the interface layer of cutting-edge AI: you’ll shape how users actually experience GenAI – the part that makes the difference between a demo and a product.
+- 
+Solve UI/UX problems that barely exist yet: streaming agent interactions, multi-agent status views, conversational analytics – these design patterns are being invented right now, and you’ll be the one inventing them.
+- 
+Grow at the intersection of frontend engineering and AI: work alongside experienced AI & Data practitioners, gaining unique product engineering expertise that very few frontend developers have today.
+
+Qualification
+
+HERE’S WHAT YOU’LL NEED
+
+- 
+Min. 3 years of commercial experience in frontend development
+- 
+Strong proficiency in React and TypeScript
+- 
+Solid understanding of modern frontend architecture – state management, component design, performance optimization, and responsive design
+- 
+Experience integrating frontends with REST APIs, WebSockets, or streaming endpoints
+- 
+Strong UX sensibility – ability to make deliberate design and interaction decisions, not just implement mockups
+- 
+Familiarity with AI-powered product interfaces (chatbots, conversational UIs, dashboards with AI-generated content) or a strong interest in this space
+- 
+Proficiency with AI-assisted development tools (e.g., Cursor, Copilot, or similar) – we expect these to be a core part of your daily workflow, not an occasional add-on
+- 
+Good command of English (min. B2+)
+
+BONUS POINTS IF YOU HAVE
+
+- 
+Experience building real-time or streaming UIs (e.g., Server-Sent Events, WebSocket-based interfaces)
+- 
+Hands-on experience with UI component libraries and design systems (e.g., Shadcn, Radix, Material UI)
+- 
+Familiarity with Next.js or similar full-stack React frameworks
+- 
+Basic understanding of LLMs, prompt engineering, or how GenAI APIs work
+- 
+Experience with data visualization libraries (e.g., D3.js, Recharts, Visx)
+- 
+Knowledge of accessibility standards (WCAG) and inclusive design practices
+- 
+Experience with frontend testing (e.g., Playwright, Cypress, React Testing Library)
+- 
+Basic backend or API development experience (Node.js, Python, FastAPI)
+- 
+Research indicates that some candidates, especially the most diverse ones, may hesitate to apply for positions if they don’t meet all requirements. If you believe you possess the necessary skills, even if not meeting every requirement, we wholeheartedly encourage you to submit your application.
+
+WHAT WE OFFER?
+
+- 
+A permanent employment contract
+- 
+Individual support of a People Lead and a clearly defined path of professional development, including the possibility of a session with a Coach
+- 
+A comprehensive training package, including: soft skills, technical and language training, access to e-learning platforms, Gallup test, GenAI training, possibility of co-financing courses and certifications
+- 
+Employee Assistance Program offering legal, financial and psychological consultations
+- 
+Employee Share Purchase Plan – employees who own company shares are automatically eligible for quarterly dividends
+- 
+Paid employee referral program
+- 
+Private medical care and life insurance
+- 
+Access to the Worksmile benefits platform (including the Multisport card)
+
+Interview Note: We value practical skills. During the technical interview, we’ll give you a real problem to solve and debug together – using your preferred development setup, including any AI-assisted tools you work with day to day.
+
+WHAT WE BELIEVE:
+
+Accenture does not discriminate employment candidates on the basis of race, religion, color, sex, age, disability, national origin, political beliefs, trade union membership, ethnicity, denomination, sexual orientation or any other basis impermissible under Polish law. All our leaders are committed to building a better, stronger and more durable company for future generations to create positive, long-lasting change. Inclusion and diversity are fundamental to our culture and core values. Our rich diversity makes us more innovative and creative, which helps us better serve our clients and our communities. Our position as partner to many of the world’s leading businesses, organizations and governments affords us both an extraordinary opportunity and a tremendous responsibility to make a difference. Sustainability is one of our greatest responsibilities, which we embed it into everything we do and for everyone we work with. Clicking apply I hereby express my consent to process my personal data included in my job offer by Accenture Sp. z o.o. or any other entity of the Accenture group for recruitment purposes, and that it is a data controller within the meaning of GDPR. More information about Accenture (and if necessary also its representative) can be found here: https://www.accenture.com/pl-pl/privacy-policy
+
+#LI-EU

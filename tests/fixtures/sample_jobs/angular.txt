@@ -1,0 +1,16 @@
+URL: https://solid.jobs/o/eubp6fwh
+
+Job Title: Senior Frontend Developer
+Company: Lumicode (Grupa Pentacomp)
+Location: Warszawa, PL
+Salary: 90.0-110.0 PLN
+Employment: CONTRACTOR
+
+--- Job Description ---
+Kim jesteśmy    Lumicode Sp. z o.o. należy do Grupy Pentacomp  , która jest producentem rozwiązań informatycznych i dostawcą profesjonalnych usług IT dla dużych przedsiębiorstw i sektora publicznego.    Jako   Pentacomp   tworzymy rozwiązania IT łączące innowacyjność z latami doświadczeń - a ich mamy całkiem sporo. Istniejemy na rynku prawie 30 lat i możemy pochwalić się wieloma zrealizowanymi projektami.    Aktualnie poszukujemy do projektu   Senior     Frontend  Developera -  poziom senior  .   -  Praca zdalna; -  Stawka do   110 pln/h netto + VAT B2B  ; - Skorzystanie z  karty sportowej oraz możliwość skorzystania z prywatnej opieki zdrowotnej; -  Praca od zaraz; -  Szybki proces rekrutacyjny.    Zadania:   -  Rozwój i utrzymanie aplikacji frontendowych opartych o   Angular 18+  . -  Implementacja logiki i widoków z wykorzystaniem   RxJS  ,   Signals   oraz   Signal Store  . -  Tworzenie i rozwijanie komponentów zgodnych z   design systemem   organizacji. -  Praca w środowisku   NX monorepo   - budowa, modułowanie i optymalizacja aplikacji. -  Współpraca z analitykami i zespołami   UX/UI   przy projektowaniu funkcjonalności. -  Implementacja interfejsów użytkownika zgodnie z makietami i prototypami w   Figma  . -  Integracja frontendu z backendem (REST API).  
+
+ Kogo poszukujemy? 
+ -  Angular -  RxJS -  Signals / Signal Store - Doświadczenie z  design systemami - Doświadczenie z  NX monorepo - Praca z zespołami  analitycznymi  oraz  UX/UI - Umiejętność pracy z  Figma
+
+--- Requirements ---
+JavaScript, Angular

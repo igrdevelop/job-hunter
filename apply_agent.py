@@ -70,30 +70,15 @@ def main(
     jobleads_title: str = "",
 ) -> None:
     """Dispatch to CLI or API pipeline based on availability and flags."""
-    # Pasted text: CLI mode can't handle it (no structured content.json guaranteed)
-    if paste_text:
-        if not LLM_API_KEY:
-            print("[apply_agent] ERROR: --paste-file requires LLM_API_KEY (CLI mode not supported).")
-            sys.exit(1)
-        main_api(
-            url or PASTE_NO_URL_PLACEHOLDER,
-            paste_text=paste_text,
-            skip_dedup=force,
-            full_mode=full,
-            jobleads_company=jobleads_company,
-            jobleads_title=jobleads_title,
-        )
-        return
-
     if force_cli or APPLY_USE_CLI:
-        main_cli(url, skip_dedup=force, full_mode=full)
+        main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
         return
 
     cli_ok = _is_cli_available()
     if cli_ok:
         print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
         try:
-            main_cli(url, skip_dedup=force, full_mode=full)
+            main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
             return
         except (ApplyError, SystemExit) as e:
             if LLM_API_KEY:
@@ -105,7 +90,8 @@ def main(
 
     if LLM_API_KEY:
         main_api(
-            url,
+            url or PASTE_NO_URL_PLACEHOLDER,
+            paste_text=paste_text,
             skip_dedup=force,
             full_mode=full,
             jobleads_company=jobleads_company,

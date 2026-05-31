@@ -33,6 +33,9 @@ Desktop.ini
 # Generated application documents (large, per-user)
 Applications/
 
+# Preview apply output (local testing)
+tests/output/
+
 # Local daily copies of tracker / to_send (see hunter/tracker_backup.py)
 backups/
 
