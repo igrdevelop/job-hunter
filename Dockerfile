@@ -20,4 +20,4 @@ COPY . .
 
 RUN mkdir -p Applications backups
 
-CMD ["python", "hunter.py"]
+CMD ["python", "-m", "hunter"]
