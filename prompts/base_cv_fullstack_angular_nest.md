@@ -16,7 +16,7 @@ Node.js and backend exposure are woven into every role where plausible.
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Full-Stack Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
@@ -91,12 +91,12 @@ Node.js and backend exposure are woven into every role where plausible.
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; prototyped key modules in React.
+- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; prototyped key modules in React; evaluated Nest.js as the backend ecosystem matured during the engagement.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 REST API queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization using TypeScript, AG Grid, WebSockets (SignalR) and a .NET backend, as sole frontend developer (team: 1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, AG Grid, SignalR, SCSS.
+**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, Nest.js (familiar), AG Grid, SignalR, SCSS.
 
 ---
 

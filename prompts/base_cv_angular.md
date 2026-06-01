@@ -12,14 +12,14 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack, Node.js
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
 ## Experience
 
 ### Role 1 — Alten Poland (Apr 2026 - May 2026)
-**title**: Frontend Developer, Angular (part-time contract)
+**title**: Frontend Developer (part-time contract)
 **company**: Alten Poland
 **period**: Apr 2026 - May 2026
 **subtitle**: Intel (client) | LLM Evaluation Tooling for OpenVINO | Wroclaw, Poland
@@ -34,7 +34,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
-**title**: Senior Frontend Developer (Angular)
+**title**: Senior Frontend Developer
 **company**: Fairmarkit (via contractor)
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
@@ -50,7 +50,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 3 — Venture Labs (Jul 2023 - Apr 2025)
-**title**: Senior Frontend Developer (Angular)
+**title**: Senior Frontend Developer
 **company**: Venture Labs
 **period**: Jul 2023 - Apr 2025
 **subtitle**: Banking Platform | Client: Atruvia AG (300+ German cooperative banks) | Poland
@@ -66,7 +66,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 4 — SII (Nov 2022 - Jul 2023)
-**title**: Senior Frontend Developer (Angular)
+**title**: Senior Frontend Developer
 **company**: SII
 **period**: Nov 2022 - Jul 2023
 **subtitle**: Finance Sector | Financial Instruments Management
@@ -81,23 +81,23 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 5 — Altoros (Apr 2018 - Nov 2022)
-**title**: Senior Frontend Developer (Angular)
+**title**: Senior Frontend Developer
 **company**: Altoros
 **period**: Apr 2018 - Nov 2022
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform in Angular 11-14 with Node.js backend — merchants managed independent shops with separate databases via a custom admin panel.
+- Built and scaled a multi-tenant e-commerce platform in Angular 11-14 with Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; evaluated Nest.js as the backend ecosystem matured during the engagement.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization in Angular 6-8, AG Grid, and SignalR as sole frontend developer (1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: Angular 6-14, TypeScript, RxJS, AG Grid, SignalR, Node.js, SCSS.
+**stack_line**: Stack: Angular 6-14, TypeScript, RxJS, AG Grid, SignalR, Node.js, Nest.js (familiar), SCSS.
 
 ---
 
 ### Role 6 — SolbegSoft (Apr 2016 - Apr 2018)
-**title**: Frontend Developer (Angular)
+**title**: Frontend Developer
 **company**: SolbegSoft
 **period**: Apr 2016 - Apr 2018
 **subtitle**: Maintenance Services Management
