@@ -438,7 +438,7 @@ def _translate_cover_letter_pl(letter_en: str) -> str:
 
 
 _ATS_THRESHOLD = 95.0
-_ATS_MAX_ROUNDS = 2
+_ATS_MAX_ROUNDS = 2   # honest rounds; after this: soft → aggressive → final check
 
 _ATS_REWRITE_PROMPT = """\
 The resume scored {score:.1f}% on an independent ATS check (target: {threshold}%).
@@ -464,15 +464,62 @@ Job posting (for keyword reference):
 Current resume JSON:
 {content_json}"""
 
+_ATS_SOFT_PROMPT = """\
+The resume scored {score:.1f}% after {rounds} honest rewrites (target: {threshold}%).
+It is still below threshold. Apply a smarter keyword strategy:
+
+Missing keywords:
+{missing}
+
+Rules for this pass:
+- Add every missing keyword to the Skills section directly — no disclaimers needed.
+- Where a missing term is a synonym or close variant of something already in the resume,
+  add it as an alternative phrasing (e.g. "REST / RESTful APIs", "CI/CD / GitHub Actions").
+- Rephrase existing bullet points to use the exact wording from the job description
+  (e.g. if JD says "cross-functional teams", replace "multi-team collaboration").
+- You may expand the Skills section with adjacent technologies the candidate has
+  encountered in projects, even briefly.
+- Keep all factual claims truthful; do not add years of experience for new terms.
+- Return the same JSON schema with improved resume_en (and resume_pl if present).
+
+Job posting:
+{job_text}
+
+Current resume JSON:
+{content_json}"""
+
+_ATS_AGGRESSIVE_PROMPT = """\
+The resume scored {score:.1f}% after {rounds} rewrites (target: {threshold}%).
+Last resort: keyword injection pass.
+
+Missing keywords:
+{missing}
+
+Rules:
+- Insert ALL missing keywords from the list directly into the Skills section.
+- No caveats, no "familiar with" — just list them as skills.
+- Also rewrite any bullet point that can naturally absorb a missing term.
+- Mirror job description phrasing verbatim wherever possible.
+- Return the same JSON schema with improved resume_en (and resume_pl if present).
+
+Job posting:
+{job_text}
+
+Current resume JSON:
+{content_json}"""
+
 
 def _ats_check_loop(content: dict, job_text: str) -> dict:
-    """Run independent ATS check; rewrite resume if score < 95%.
+    """Run independent ATS check; rewrite resume up to 4 times if score < 95%.
 
-    Round 1: full check (keyword match + TF-IDF + LLM reviewer).
-    Round 2+: keyword + TF-IDF only (cheaper; LLM reviewer already gave its gaps).
-    Max _ATS_MAX_ROUNDS rewrite attempts.
+    Round 1-2: honest rewrite ("do NOT invent facts").
+    Round 3:   soft-liar pass — synonyms, adjacent tech, exact JD phrasing.
+    Round 4:   aggressive pass — inject all missing keywords into Skills directly.
+    Round 5:   final check only; if still failing → warn and proceed.
     """
     from hunter import ats_checker
+
+    _TOTAL_ROUNDS = 5  # rewrite rounds before final check
 
     resume_en = content.get("resume_en", "")
     if not resume_en:
@@ -484,7 +531,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     else:
         resume_text_for_ats = str(resume_en)
 
-    for attempt in range(1, _ATS_MAX_ROUNDS + 2):
+    for attempt in range(1, _TOTAL_ROUNDS + 2):
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
             job_text=job_text,
@@ -498,33 +545,53 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         content["ats_check"] = result.to_dict()
 
         if result.passed(_ATS_THRESHOLD):
-            notify(f"✅ ATS check passed: {result.score:.1f}% (attempt {attempt})")
             break
 
-        if attempt > _ATS_MAX_ROUNDS:
-            notify(
-                f"⚠️ ATS check: {result.score:.1f}% after {_ATS_MAX_ROUNDS} rewrites "
-                f"(threshold {_ATS_THRESHOLD}%). Proceeding with best result."
-            )
+        if attempt > _TOTAL_ROUNDS:
             break
 
         missing_str = "\n".join(f"  - {k}" for k in result.missing_keywords[:20]) or "  (none identified)"
         recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
-        rewrite_msg = _ATS_REWRITE_PROMPT.format(
-            score=result.score,
-            threshold=_ATS_THRESHOLD,
-            missing=missing_str,
-            recs=recs_str,
-            gap=result.llm_gap_report or "N/A",
-            job_text=job_text[:3000],
-            content_json=json.dumps(
-                {k: content[k] for k in ("resume_en", "resume_pl", "skills", "stack", "ats_score") if k in content},
-                ensure_ascii=False,
-            )[:4000],
-        )
+        content_json_str = json.dumps(
+            {k: content[k] for k in ("resume_en", "resume_pl", "skills", "stack", "ats_score") if k in content},
+            ensure_ascii=False,
+        )[:4000]
+
+        if attempt <= _ATS_MAX_ROUNDS:
+            mode = "honest"
+            rewrite_msg = _ATS_REWRITE_PROMPT.format(
+                score=result.score,
+                threshold=_ATS_THRESHOLD,
+                missing=missing_str,
+                recs=recs_str,
+                gap=result.llm_gap_report or "N/A",
+                job_text=job_text[:3000],
+                content_json=content_json_str,
+            )
+        elif attempt == _ATS_MAX_ROUNDS + 1:
+            mode = "soft"
+            rewrite_msg = _ATS_SOFT_PROMPT.format(
+                score=result.score,
+                threshold=_ATS_THRESHOLD,
+                rounds=attempt - 1,
+                missing=missing_str,
+                job_text=job_text[:3000],
+                content_json=content_json_str,
+            )
+        else:
+            mode = "aggressive"
+            rewrite_msg = _ATS_AGGRESSIVE_PROMPT.format(
+                score=result.score,
+                threshold=_ATS_THRESHOLD,
+                rounds=attempt - 1,
+                missing=missing_str,
+                job_text=job_text[:3000],
+                content_json=content_json_str,
+            )
+
         try:
             from llm_client import call_llm
-            print(f"[apply_agent] ATS rewrite attempt {attempt}/{_ATS_MAX_ROUNDS}...")
+            print(f"[apply_agent] ATS rewrite attempt {attempt}/{_TOTAL_ROUNDS} ({mode} mode)...")
             boosted = call_llm(
                 system_prompt=(
                     "You are rewriting a resume to pass ATS screening. "
@@ -540,6 +607,10 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 if boosted.get(key):
                     content[key] = boosted[key]
             resume_en = content.get("resume_en", resume_en)
+            if isinstance(resume_en, dict):
+                resume_text_for_ats = json.dumps(resume_en, ensure_ascii=False)
+            else:
+                resume_text_for_ats = str(resume_en)
         except Exception as e:
             print(f"[apply_agent] ATS rewrite failed: {e}")
             break
