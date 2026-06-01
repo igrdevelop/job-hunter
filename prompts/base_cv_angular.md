@@ -19,7 +19,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ## Experience
 
 ### Role 1 — Alten Poland (Apr 2026 - May 2026)
-**title**: Frontend Developer (part-time contract)
+**title**: Frontend Developer, Angular (part-time contract)
 **company**: Alten Poland
 **period**: Apr 2026 - May 2026
 **subtitle**: Intel (client) | LLM Evaluation Tooling for OpenVINO | Wroclaw, Poland
@@ -34,7 +34,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
-**title**: Senior Frontend Developer
+**title**: Senior Frontend Developer (Angular)
 **company**: Fairmarkit (via contractor)
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
@@ -50,7 +50,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 3 — Venture Labs (Jul 2023 - Apr 2025)
-**title**: Senior Frontend Developer
+**title**: Senior Frontend Developer (Angular)
 **company**: Venture Labs
 **period**: Jul 2023 - Apr 2025
 **subtitle**: Banking Platform | Client: Atruvia AG (300+ German cooperative banks) | Poland
@@ -66,7 +66,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 4 — SII (Nov 2022 - Jul 2023)
-**title**: Senior Frontend Developer
+**title**: Senior Frontend Developer (Angular)
 **company**: SII
 **period**: Nov 2022 - Jul 2023
 **subtitle**: Finance Sector | Financial Instruments Management
@@ -97,7 +97,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 6 — SolbegSoft (Apr 2016 - Apr 2018)
-**title**: Frontend Developer
+**title**: Frontend Developer (Angular)
 **company**: SolbegSoft
 **period**: Apr 2016 - Apr 2018
 **subtitle**: Maintenance Services Management

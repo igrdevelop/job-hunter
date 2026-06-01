@@ -15,7 +15,7 @@
 
 ### Work Experience
 
-**Frontend Developer (part-time contract) | Alten Poland** - Apr 2026 - May 2026
+**Frontend Developer (Angular, part-time contract) | Alten Poland** - Apr 2026 - May 2026
 Intel (client) | OpenVINO LLM Evaluation Tooling | Wrocław, Poland
 - Refactored 20+ heterogeneous LLM evaluation report pages into 2 unified Angular page templates, enabling ~10 new composable reports without per-report frontend rework.
 - Built daily-diff dashboards comparing LLM inference performance across releases (latency, throughput, runtime parameters), letting engineers spot regressions vs. prior day and prior release at a glance.
@@ -23,7 +23,7 @@ Intel (client) | OpenVINO LLM Evaluation Tooling | Wrocław, Poland
 - Frontend tooling supporting OpenVINO - Intel's open-source AI inference framework for LLM optimization across CPU/GPU/NPU backends.
 Stack: Angular, TypeScript, RxJS, SCSS. AI dev tools: GitHub Copilot, Claude Opus (spec-driven agentic refactor).
 
-**Senior Frontend Developer | Fairmarkit (via contractor)** - Jun 2025 - March 2026
+**Senior Frontend Developer (Angular) | Fairmarkit (via contractor)** - Jun 2025 - March 2026
 AI-powered Enterprise Procurement Platform | USA (Global)
 - Contributed to frontend development of an AI-powered procurement platform serving enterprise clients globally, built with Angular 21 in an Nx monorepo.
 - Built an AI decision-support feature: Angular frontend consumed LLM-generated recommendations helping procurement teams select optimal supplier options from large datasets of historical and real-time data.
@@ -35,7 +35,7 @@ AI-powered Enterprise Procurement Platform | USA (Global)
 - Developed using Cursor + Claude as agentic coding tools throughout the engagement.
 Stack: Angular 21, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS. AI dev tools: Cursor, Claude.
 
-**Senior Frontend Developer | Venture Labs** - July 2023 - April 2025
+**Senior Frontend Developer (Angular) | Venture Labs** - July 2023 - April 2025
 Banking Sector | Carbon Footprint Calculations | Poland | Client: Atruvia AG - core banking IT provider for 300+ German cooperative banks
 - Built two Angular applications from scratch, actively used by 300+ German banks.
 - Provided ongoing support and feature development for a third critical application.
@@ -45,7 +45,7 @@ Banking Sector | Carbon Footprint Calculations | Poland | Client: Atruvia AG - c
 - Conducted regular code reviews and worked in a cross-functional Agile team (10+ members).
 Stack: Angular 14-19, TypeScript, SCSS, RxJS, NgRx, Java (backend).
 
-**Senior Frontend Developer | SII** - November 2022 - July 2023
+**Senior Frontend Developer (Angular) | SII** - November 2022 - July 2023
 Finance Sector | Financial Instruments Management
 - Developed new frontend features and modules, led Angular version upgrades.
 - Participated in architecture discussions, worked closely with backend, analysts, and QA in Agile.
@@ -64,7 +64,7 @@ E-commerce | Insurance | Healthcare | Grant Management
 
 - Grant Management: Joined an existing large team working on a grants distribution platform (Bill Gates-style applicant/proposal workflow). The only project where unit tests were used extensively. Did a short Node.js backend rotation alongside the frontend work — handled a small set of backend endpoints and integration tasks before returning to full-time frontend on other Altoros projects. Stack: Angular, TypeScript, Node.js.
 
-**Frontend Developer | SolbegSoft** - April 2016 - April 2018
+**Frontend Developer (Angular) | SolbegSoft** - April 2016 - April 2018
 Maintenance Services Management
 - Developed a work-order management platform for service engineers: field managers photograph issues → WO created on server → task table assigns workers → mobile/web app delivers WO to engineers.
 - Collaborated with BE and QA in Agile. Team: 10 members (2 FE, 5 BE, 2 QA, 1 PM).
