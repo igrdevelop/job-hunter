@@ -15,7 +15,7 @@ RUN playwright install chromium --with-deps
 # Copy only the package before full COPY so the editable-install layer is cached
 # independently of source changes (tests, docs, configs).
 COPY hunter/ hunter/
-RUN pip install --no-cache-dir -e . --no-deps
+RUN pip install --no-cache-dir --no-build-isolation -e . --no-deps
 
 COPY . .
 
