@@ -147,9 +147,9 @@ async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _force_waiting.add(chat_id)
         await update.message.reply_text(
             "🔧 <b>Force mode</b>\n\n"
-            "Пришли ссылку на вакансию (или полный текст объявления).\n\n"
-            "<i>Если вакансия уже в трекере — старые файлы будут удалены "
-            "(Drive + сервер + строка в трекере) и сгенерированы заново.</i>",
+            "Send a job URL or paste the full job posting text.\n\n"
+            "<i>If the job is already in the tracker, old files will be deleted "
+            "(Drive + server + tracker row) and regenerated from scratch.</i>",
             parse_mode=ParseMode.HTML,
         )
         return

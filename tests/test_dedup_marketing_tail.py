@@ -1,5 +1,5 @@
 """
-Tests for П-1.1: _strip_marketing_tail() in dedup_key.
+Tests for P-1.1: _strip_marketing_tail() in dedup_key.
 
 Gmail job-alert enrichers append marketing copy after the real title.
 These tests verify that dedup_key() collapses enriched and original titles

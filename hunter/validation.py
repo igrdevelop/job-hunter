@@ -1,7 +1,7 @@
 """Input validation helpers for the apply pipeline."""
 import re
 
-MIN_JOB_TEXT_LEN = 300  # П-2.2: raised from 200 — real postings are rarely <300 chars
+MIN_JOB_TEXT_LEN = 300  # P-2.2: raised from 200 — real postings are rarely <300 chars
 
 _BOGUS_NAMES: frozenset[str] = frozenset({
     "unknown",

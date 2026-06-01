@@ -165,7 +165,7 @@ class TrackerCache:
 
         Used as a soft dedup when URL and exact company+title checks both miss —
         e.g. Gmail enriches "Angular Developer" → "Remote Angular Developer —
-        Build great UIs", which П-1.1 reduces to "Remote Angular Developer" but
+        Build great UIs", which P-1.1 reduces to "Remote Angular Developer" but
         still doesn't exactly match the stored "Angular Developer".
 
         The check is O(n) in rows-per-company (typically 1-5) so it is only

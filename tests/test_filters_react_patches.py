@@ -1,9 +1,9 @@
 """
-Tests for П-3.x: React-only filter fixes.
+Tests for P-3.x: React-only filter fixes.
 
-П-3.1: _is_react_only_title() — title-based check for all sources
-П-3.2: Gmail bypass no longer silences exclude_pattern / react checks
-П-3.3: react native added to exclude_patterns
+P-3.1: _is_react_only_title() — title-based check for all sources
+P-3.2: Gmail bypass no longer silences exclude_pattern / react checks
+P-3.3: react native added to exclude_patterns
 """
 import pytest
 from hunter.filters import apply_filters, apply_filters_with_stats, _is_react_only_title
@@ -24,7 +24,7 @@ def _gmail_job(*, title: str, location: str = "remote") -> Job:
 
 
 # ---------------------------------------------------------------------------
-# П-3.1 — _is_react_only_title unit tests
+# P-3.1 — _is_react_only_title unit tests
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("title", [
@@ -50,7 +50,7 @@ def test_is_react_only_title_negative(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-3.1 — applied via apply_filters for regular sources
+# P-3.1 — applied via apply_filters for regular sources
 # ---------------------------------------------------------------------------
 
 def test_react_developer_title_blocked_for_regular_source() -> None:
@@ -66,7 +66,7 @@ def test_react_native_engineer_blocked() -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-3.2 — Gmail bypass no longer silences React / exclude-pattern checks
+# P-3.2 — Gmail bypass no longer silences React / exclude-pattern checks
 # ---------------------------------------------------------------------------
 
 def test_react_developer_blocked_even_from_gmail() -> None:
@@ -85,7 +85,7 @@ def test_react_native_blocked_from_gmail_via_exclude_pattern() -> None:
 
 
 def test_magento_blocked_from_gmail() -> None:
-    """Magento in Gmail title → exclude_pattern must fire (was bypassed before П-3.2)."""
+    """Magento in Gmail title → exclude_pattern must fire (was bypassed before P-3.2)."""
     job = _gmail_job(title="Magento Developer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
@@ -118,12 +118,12 @@ def test_junior_blocked_from_gmail() -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-3.3 — React Native in exclude_patterns
+# P-3.3 — React Native in exclude_patterns
 # (Use gmail source so title_kw is bypassed and we test the real target filter)
 # ---------------------------------------------------------------------------
 
 def test_react_native_blocked_via_gmail() -> None:
-    """React Native in a Gmail job title is blocked (П-3.1 title check or П-3.3 pattern)."""
+    """React Native in a Gmail job title is blocked (P-3.1 title check or P-3.3 pattern)."""
     job = _gmail_job(title="Senior React Native Engineer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
