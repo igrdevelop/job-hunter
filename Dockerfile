@@ -7,15 +7,11 @@ RUN apt-get update && apt-get install -y \
     libreoffice \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt pyproject.toml ./
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium --with-deps
 
-# Copy only the package before full COPY so the editable-install layer is cached
-# independently of source changes (tests, docs, configs).
-COPY hunter/ hunter/
-RUN pip install --no-cache-dir -e . --no-deps
-
+# No pip install needed — WORKDIR /app is on sys.path, python -m hunter works directly.
 COPY . .
 
 RUN mkdir -p Applications backups
