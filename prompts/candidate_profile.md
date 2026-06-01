@@ -3,7 +3,7 @@
 **Name**: Ihar Petrasheuski (also known as Igor Pietraszewski)
 **Contact**: +48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland
 
-**Core Stack**: Angular (2-21), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS, React (familiar)
+**Core Stack**: Angular (2-21), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS, React, Next.js
 **Tools**: Jest, Jasmine, Cypress, Git, Jenkins, Webpack, Node.js
 **AI Dev Tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API, Claude Opus / Sonnet (spec-driven agentic workflows)
 **Methodologies**: Agile (Scrum, SAFe), Frontend Architecture, Code Reviews, Performance Optimization, CI/CD
@@ -56,13 +56,13 @@ E-commerce | Insurance | Healthcare | Grant Management
 
 <!-- SOURCE DETAILS — use selectively based on job relevance, not all at once -->
 
-- E-commerce: Built and scaled a multi-tenant e-commerce platform with a powerful admin panel — merchants and admins could create independent shops with separate databases. Prototyped a few admin-panel modules in React during early platform exploration before the team standardized on Angular. Stack: Angular 11-14, TypeScript, React (component prototypes), SCSS, Node.js.
+- E-commerce: Built and scaled a multi-tenant e-commerce platform with a powerful admin panel — merchants and admins could create independent shops with separate databases. Prototyped admin-panel modules in React (component patterns, state handling) during early platform exploration before the team standardized on Angular. Also contributed Node.js backend endpoints for the admin panel; later evaluated Nest.js as it gained traction during the engagement. Stack: Angular 11-14, TypeScript, React (component prototypes), SCSS, Node.js, Nest.js (familiar).
 
 - Healthcare (British Hospital): Inherited a partially complete app from a chain of developers; optimized performance by splitting complex queries into parallel requests, implementing lazy loading and pagination, and simplifying UI component logic — delivered the application to final client sale. Stack: Angular 11-14, RxJS, AG Grid, .NET.
 
 - Insurance: Built a real-time incident management system with live maps and SignalR as the sole frontend developer on the project (team: 1 FE + 2 BE + 1 QA + 1 PM). Stack: Angular 6-8, AG Grid.
 
-- Grant Management: Joined an existing large team working on a grants distribution platform (Bill Gates-style applicant/proposal workflow). The only project where unit tests were used extensively.
+- Grant Management: Joined an existing large team working on a grants distribution platform (Bill Gates-style applicant/proposal workflow). The only project where unit tests were used extensively. Did a short Node.js backend rotation alongside the frontend work — handled a small set of backend endpoints and integration tasks before returning to full-time frontend on other Altoros projects. Stack: Angular, TypeScript, Node.js.
 
 **Frontend Developer (Angular) | SolbegSoft** - April 2016 - April 2018
 Maintenance Services Management
@@ -79,4 +79,4 @@ Stack: AngularJS, JavaScript, SCSS.
 
 **Education**: Belarusian State Technological University - Bachelor, PE and Systems of Information Processing
 **Additional Training**: IT Academy (Belarus) - Frontend / JavaScript track (HTML/CSS/JS, JavaScript Advanced)
-**Additional Courses**: Angular Updates Course, Angular Advanced Course, Angular Core Course, JS Architecture Workshop, RxJS Course, Java basic Course, Node.js Course, JavaScript Advanced Level. Frontend Angular & JavaScript courses by Ilya Kantor (learn.javascript.ru): Angular 4.x (2017), Advanced Angular Masterclass (2018), Node.js (2019).
+**Additional Courses**: Angular Updates Course, Angular Advanced Course, Angular Core Course, JS Architecture Workshop, RxJS Course, Java basic Course, Node.js Course, JavaScript Advanced Level, React, Next.js. Frontend Angular & JavaScript courses by Ilya Kantor (learn.javascript.ru): Angular 4.x (2017), Advanced Angular Masterclass (2018), Node.js (2019).
