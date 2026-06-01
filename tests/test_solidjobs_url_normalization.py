@@ -1,5 +1,4 @@
-from hunter.sources.solidjobs import SolidJobsSource
-from job_fetch.solidjobs import normalize_solidjobs_offer_url
+from hunter.sources.solidjobs import SolidJobsSource, normalize_solidjobs_offer_url
 
 
 def test_job_fetch_normalizes_rss_offer_url() -> None:

@@ -11,6 +11,12 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 _GERMAN_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
+        # P-9.1: Job title signals — "Frontend Developer with German", "(German)", etc.
+        # These appear in the title itself when German is a hard requirement.
+        r"\bwith\s+german\b",
+        r"\(german\)",
+        r"\bgerman\s+speaking\b",
+        r"\bspeaking\s+german\b",
         # English
         r"\bfluent\s+in\s+german\b",
         r"\bnative(?:[-\s]+level)?\s+german\b",
@@ -102,6 +108,86 @@ def _append_technology_field(tech_texts: list[str], technology) -> None:
                 tech_texts.append(_lower_text_fragment(item.get("name")))
             else:
                 tech_texts.append(_lower_text_fragment(item))
+
+
+def _is_node_only_title(title: str) -> bool:
+    """Return True when the title signals a Node.js backend role with no FE signal.
+
+    Catches "TypeScript/Node.js Developer", "Node.js Backend Engineer", etc.
+    that aren't caught by \bbackend\b because the word 'backend' isn't in the title.
+    Runs for ALL sources.
+
+    Does NOT fire when the title also contains a front-end signal (angular,
+    frontend, react, ui, spa, ux) — those are full-stack roles we want to see.
+    """
+    if not FILTER.get("exclude_react_without_angular", False):
+        # Re-use the same enable flag; Node filtering is part of "FE-only" mode
+        return False
+
+    t = title.lower()
+    # Front-end signals — don't block if any of these appear as whole words
+    _FE_SIGNAL_RES = (
+        r"\bangular\b", r"\bfrontend\b", r"\bfront-end\b",
+        r"\breact\b", r"\bvue\b",
+        r"\bui\b",      # "UI / Node.js Developer" — UI is FE
+        r"\bux\b",
+        r"\bspa\b",
+    )
+    if any(re.search(p, t, re.IGNORECASE) for p in _FE_SIGNAL_RES):
+        return False
+
+    # Node.js in title + absence of FE signals = backend/full-stack role
+    node_patterns = (
+        r"\bnode\.?js\b",
+        r"\bnode\s+developer\b",
+        r"\bnode\s+engineer\b",
+    )
+    return any(re.search(p, t, re.IGNORECASE) for p in node_patterns)
+
+
+def _is_fullstack_without_angular(title: str) -> bool:
+    """Return True when the title says 'fullstack' but Angular is absent.
+
+    "Fullstack (Angular + React)" → Angular present → False (passes through).
+    "Fullstack Developer"         → no Angular    → True  (blocked).
+    "Full Stack Node.js"          → no Angular    → True  (blocked).
+
+    We no longer put bare fullstack patterns in exclude_patterns so that
+    Angular fullstack roles are visible.
+    """
+    t = title.lower()
+    if "angular" in t:
+        return False
+    return bool(re.search(r"\bfull[-\s]?stack\b", t, re.IGNORECASE))
+
+
+def _is_react_only_title(title: str) -> bool:
+    """Return True when the job title signals React-only with no Angular involvement.
+
+    Title-only check that runs for ALL sources (including gmail_*) before the
+    more expensive raw-data check.  Catches "React Developer", "React Native
+    Engineer", "Frontend (React)" etc. that slip through the Gmail bypass.
+
+    Only triggers when 'angular' is absent from the title.
+    """
+    if not FILTER.get("exclude_react_without_angular", False):
+        return False
+    t = title.lower()
+    if "angular" in t:
+        return False
+    # Plain React role in title — must have a role word to avoid false positives
+    # on descriptions like "React + Angular Developer"
+    react_title_patterns = (
+        r"\breact\s+developer\b",
+        r"\breact\s+engineer\b",
+        r"\breact\s+native\b",
+        r"\breact\.js\s+developer\b",
+        r"\breact\.js\s+engineer\b",
+        r"\bfrontend\s+(?:developer|engineer)\s*[\(\[\{]?\s*react\b",
+        r"\bsoftware\s+engineer\s+react\b",
+        r"(?:^|\s)react\s*(?:developer|engineer|programm)",
+    )
+    return any(re.search(p, t, re.IGNORECASE) for p in react_title_patterns)
 
 
 def _is_react_without_angular(job: Job) -> bool:
@@ -227,13 +313,71 @@ def _is_german_language_required(job: Job) -> bool:
     return any(p.search(blob) for p in _GERMAN_REQUIRED_RES)
 
 
+# Cities where hybrid work is NOT acceptable (too far from Wrocław).
+# A job whose location or title contains one of these AND doesn't contain an
+# allowed location token (remote/wroclaw) is rejected.
+# LinkedIn often returns "Poland" as location with the city in the title (e.g.
+# "Jlabs Angular Dev Kraków - Zabłocie"), so we check BOTH location and title.
+_ANTI_HYBRID_CITIES: frozenset[str] = frozenset({
+    "kraków", "krakow", "cracow",
+    "warszawa", "warsaw",
+    "gdańsk", "gdansk", "gdynia", "trójmiasto", "trojmiasto",
+    "poznań", "poznan",
+    "łódź", "lodz",
+    "katowice", "silesia", "śląsk", "slask",
+    "rzeszów", "rzeszow",
+    "lublin",
+    "szczecin",
+    "bydgoszcz",
+    "toruń", "torun",
+    "białystok", "bialystok",
+})
+
+
 def _matches_location(job: Job) -> bool:
-    """Check if job location matches allowed locations (all sources including LinkedIn)."""
+    """Check if job location matches allowed locations.
+
+    Anti-hybrid-city logic (P-6.1): if the location or title contains a city
+    in _ANTI_HYBRID_CITIES with no allowed location token (remote/wroclaw), the
+    job is rejected even if the top-level location field says just 'Poland'.
+    This catches LinkedIn listings where city appears only in the title.
+    """
     locations = FILTER.get("locations", [])
     if not locations:
         return True
+
     loc = job.location.lower() if isinstance(job.location, str) else str(job.location).lower()
-    return any(token in loc for token in locations)
+
+    # If any allowed token is present in location, accept immediately
+    if any(token in loc for token in locations):
+        return True
+
+    # Check title for anti-hybrid cities — LinkedIn often puts city there
+    # (e.g. "Angular Dev Kraków - Zabłocie" with location="Poland")
+    title_lower = (job.title or "").lower()
+    blob = f"{loc} {title_lower}"
+
+    # If blob contains an anti-city but NO allowed token → reject
+    has_anti_city = any(city in blob for city in _ANTI_HYBRID_CITIES)
+    has_allowed = any(token in blob for token in locations)
+
+    if has_anti_city and not has_allowed:
+        return False
+
+    # Allowed token found somewhere in location+title (e.g. "Wrocław" in title
+    # with location="Poland") → accept
+    if has_allowed:
+        return True
+
+    # Location field is empty/blank and title has no anti-city → we have no
+    # geo information at all.  Treat as unknown: let it through rather than
+    # silently dropping a potentially remote offer.
+    if not loc.strip():
+        return True
+
+    # Non-empty location that matched neither the whitelist nor anti-cities
+    # (e.g. "Berlin", "Poland") → reject (strict whitelist).
+    return False
 
 
 def apply_filters(jobs: list[Job]) -> list[Job]:
@@ -244,9 +388,16 @@ def apply_filters(jobs: list[Job]) -> list[Job]:
 def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]]:
     """Filter jobs and return (passing_jobs, reason_counts).
 
-    Gmail-sourced jobs (source starts with 'gmail_') bypass title/location
-    filters — the user's alert subscriptions already pre-filter for relevance.
-    Only level exclusions apply to them.
+    Gmail-sourced jobs (source starts with 'gmail_') bypass only the
+    title-keyword and require-angular checks — the user's alert subscriptions
+    already pre-filter for relevance.  All other checks run uniformly for
+    every source including gmail_*:
+      - level exclusions  (intern / manager / tech lead)
+      - title-only React check  (_is_react_only_title)
+      - exclude_pattern  (Java, .NET, Magento, React Native …)
+      - raw-skills React check  (_is_react_without_angular)
+      - location check  (_matches_location — same whitelist as all sources)
+      - German language requirement
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
                         react_no_angular, location, german
@@ -265,6 +416,7 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
     for job in jobs:
         is_gmail = job.source.startswith("gmail_")
 
+        # ── Title-keyword / require-angular — Gmail bypass (pre-filtered by alerts) ──
         if not is_gmail:
             if not _matches_title_keywords(job.title):
                 reasons["title_kw"] += 1
@@ -272,22 +424,51 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
             if not _requires_angular_check(job.title):
                 reasons["require_angular"] += 1
                 continue
+
+        # ── Hard filters — apply to ALL sources including gmail_* ──────────────────
+
+        # Level/seniority exclusions (intern, manager, tech lead, etc.)
         if _is_excluded_level(job.title):
             reasons["level"] += 1
             continue
-        if not is_gmail:
-            if _matches_exclude_pattern(job.title):
-                reasons["exclude_pattern"] += 1
-                continue
-            if _is_react_without_angular(job):
-                reasons["react_no_angular"] += 1
-                continue
-            if not _matches_location(job):
-                reasons["location"] += 1
-                continue
+
+        # Title-only React check (P-3.1) — catches "React Developer" from any source
+        if _is_react_only_title(job.title):
+            reasons["react_no_angular"] += 1
+            continue
+
+        # Node.js backend title check (P-5.1) — catches "TypeScript/Node.js Developer"
+        # where 'backend' is absent but the role is clearly BE
+        if _is_node_only_title(job.title):
+            reasons["exclude_pattern"] += 1
+            continue
+
+        # Fullstack without Angular — blocked; fullstack WITH Angular passes
+        # (bare patterns removed from exclude_patterns so this check owns the logic)
+        if _is_fullstack_without_angular(job.title):
+            reasons["exclude_pattern"] += 1
+            continue
+
+        # Exclude-pattern: Java, .NET, Magento, React Native, Node backend …
+        if _matches_exclude_pattern(job.title):
+            reasons["exclude_pattern"] += 1
+            continue
+
+        # Raw-skills React check (needs API data — may be absent for gmail_*)
+        if _is_react_without_angular(job):
+            reasons["react_no_angular"] += 1
+            continue
+
+        # ── Location — uniform check for ALL sources ──────────────────────────────
+        if not _matches_location(job):
+            reasons["location"] += 1
+            continue
+
+        # German language requirement — check full text blob for all sources
         if _is_german_language_required(job):
             reasons["german"] += 1
             continue
+
         result.append(job)
 
     return result, reasons

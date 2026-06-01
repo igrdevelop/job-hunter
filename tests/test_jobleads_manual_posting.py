@@ -3,13 +3,10 @@
 from pathlib import Path
 
 from hunter import tracker
-from job_fetch.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting
+from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting
 
 
-def test_try_load_manual_job_posting_returns_none_until_paste(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_try_load_manual_job_posting_returns_none_until_paste(tmp_path, tracker_db) -> None:
     folder = tmp_path / "Applications" / "2026-04-20" / "AcmeCo"
     folder.mkdir(parents=True)
     url = "https://www.jobleads.com/pl/job/angular-dev--poland--abc123deadbeef000000000000000"
@@ -36,10 +33,7 @@ def test_try_load_manual_job_posting_returns_none_until_paste(tmp_path, monkeypa
     assert url in text
 
 
-def test_get_url_status_flags_treats_manual_as_not_success(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
+def test_get_url_status_flags_treats_manual_as_not_success(tmp_path, tracker_db) -> None:
     folder = tmp_path / "Applications" / "2026-04-20" / "Beta"
     folder.mkdir(parents=True)
     url = "https://www.jobleads.com/pl/job/fe--poland--def456deadbeef0000000000000000"

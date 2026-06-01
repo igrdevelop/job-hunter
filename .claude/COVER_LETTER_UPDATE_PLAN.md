@@ -1,10 +1,10 @@
 # Cover Letter Quality Update — Execution Plan
 
-**Owner context:** This repo is a job-hunter bot that generates tailored resumes + cover letters via LLM for Ihar Petrasheuski (Senior Angular Frontend, Wroclaw). The generation prompt lives in `prompts/system_prompt.md`; the apply pipeline lives in `apply_agent.py`. See `CLAUDE.md` for full project context.
+**Owner context:** This repo is a job-hunter bot that generates tailored resumes + cover letters via LLM for Ihar Petrasheuski (Senior Angular Frontend, Wroclaw). The generation prompt lives in `prompts/generation_rules.md`; the apply pipeline lives in `apply_agent.py`. See `CLAUDE.md` for full project context.
 
 **Goal:** Improve the quality of generated cover letters (EN + PL). Current output reads AI-generated, sometimes hallucinates tech experience, uses formulaic CTAs, and lacks metrics. This plan fixes that.
 
-**Scope:** `prompts/system_prompt.md` + `apply_agent.py` self-review loop only. No changes to resume generation, `candidate_profile.md`, or doc-generation code.
+**Scope:** `prompts/generation_rules.md` + `apply_agent.py` self-review loop only. No changes to resume generation, `candidate_profile.md`, or doc-generation code.
 
 **Non-goals:** No refactor of `generate_docs.py`, no new scrapers, no tracker schema changes.
 
@@ -28,7 +28,7 @@ Reviewed 4 recent generated CLs in `Applications/2026-04-22/` and `Applications/
 ## Policy decisions (do NOT change these — user confirmed)
 
 ### Careful embellishment IS allowed
-The existing "plausible adjacent tech" policy in `prompts/system_prompt.md` Step 2 extends to cover letters. The user explicitly permits claiming unfamiliar tech in the CL, **carefully**. Do NOT introduce a blanket anti-hallucination ban.
+The existing "plausible adjacent tech" policy in `prompts/generation_rules.md` Step 2 extends to cover letters. The user explicitly permits claiming unfamiliar tech in the CL, **carefully**. Do NOT introduce a blanket anti-hallucination ban.
 
 Three tiers:
 
@@ -40,7 +40,7 @@ Three tiers:
 
 ---
 
-## Edit 1 — `prompts/system_prompt.md`, Cover Letter EN section (currently lines ~68–139)
+## Edit 1 — `prompts/generation_rules.md`, Cover Letter EN section (currently lines ~68–139)
 
 Replace the entire Cover Letter EN block with the structure below. Keep everything OUTSIDE the Cover Letter section untouched (Step 1, Step 2, Resume section, Step 4 ATS, JSON schema, etc.).
 
@@ -110,7 +110,7 @@ Matching guide (keep existing, unchanged):
 
 ---
 
-## Edit 2 — `prompts/system_prompt.md`, Cover Letter PL section
+## Edit 2 — `prompts/generation_rules.md`, Cover Letter PL section
 
 Currently a one-liner: *"Cover Letter PL: natural Polish translation of the EN cover letter."*
 
@@ -141,7 +141,7 @@ The review loop prompt should enumerate these 6 gates explicitly and ask the LLM
 
 ## Edit 4 (optional, do last) — domain hook pack
 
-In `prompts/system_prompt.md`, extend the "Domain → which proof to pull into the hook" table from the current 5 domains to 8–10:
+In `prompts/generation_rules.md`, extend the "Domain → which proof to pull into the hook" table from the current 5 domains to 8–10:
 
 - Banking / fintech → Venture Labs / 300 German banks
 - Enterprise SaaS / procurement → Fairmarkit
@@ -194,14 +194,14 @@ Before adding a NEW domain row, grep `prompts/candidate_profile.md` to verify th
 
 | Date | Agent | What was done |
 |------|-------|---------------|
-| 2026-05-13 | sonnet-4-6 | Edit 1 (system_prompt.md): word count 180→220, CTA rules strengthened (banned 5 generic closings, required concrete anchor), safe/danger verbs table added, Avoid list expanded (+aligns with my background, +aligns perfectly with, +comfortable with, +excited to, +proven track record, +leverage, +synergy, +perfect fit, +ideal match), Proof paragraph CAO structure added, Story bank extended to 15 domains (Edit 4). |
+| 2026-05-13 | sonnet-4-6 | Edit 1 (generation_rules.md): word count 180→220, CTA rules strengthened (banned 5 generic closings, required concrete anchor), safe/danger verbs table added, Avoid list expanded (+aligns with my background, +aligns perfectly with, +comfortable with, +excited to, +proven track record, +leverage, +synergy, +perfect fit, +ideal match), Proof paragraph CAO structure added, Story bank extended to 15 domains (Edit 4). |
 | 2026-05-13 | sonnet-4-6 | Edit 3 (apply_agent.py): _CL_WORD_MIN 180→220, _BANNED_BODY_PHRASES +5 patterns (aligns with my background, aligns perfectly with, excited to, comfortable with, +aligns perfectly with), _BANNED_CTA_PHRASES +2 (I look forward to hearing from you, Thank you for considering my application), user_msg in review loop updated with new banned CTA list and banned body phrase list. `python -m py_compile apply_agent.py` passes. |
 
 ---
 
 ## Success criteria (definition of done)
 
-- [x] `prompts/system_prompt.md` updated per Edits 1 + 2 (+ optional 4).
+- [x] `prompts/generation_rules.md` updated per Edits 1 + 2 (+ optional 4).
 - [x] `apply_agent.py` self-review loop extended per Edit 3; the 6 gates are explicit in the review prompt.
 - [x] 3 smoke-test CLs generated via `smoke_test_cl.py` on real Applications/ job_posting.txt files.
   - Antal Angular: banned phrase `proven track record` caught, review loop fixed → PASS

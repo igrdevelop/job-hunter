@@ -1,20 +1,22 @@
 """
-telegram_bot.py — Telegram bot: notifications, inline buttons, callback handlers.
+telegram_bot.py — Thin dispatcher: owns _post_init + build_application.
 
-Pending jobs are stored in memory (dict job_id → Job) per session.
-If the bot restarts, old buttons become "expired" — that's acceptable.
+After the Phase 1–7 refactor, logic lives in:
+  hunter/bot/         — state, keyboards, notifications, paste, formatters, apply_runner
+  hunter/commands/    — one file per Telegram command handler
+  hunter/schedules/   — one file per JobQueue callback; register() wires them all
+
+Import strategy:
+  - Eager: only what main.py needs at startup (send_text, send_job_cards)
+    and what _post_init / build_application need directly.
+  - Lazy: all command handlers + schedules — imported inside build_application()
+    so tests that import hunter.telegram_bot don't pay the full 37-module cost.
+  - __getattr__: backward-compat re-exports for tests that do
+    `from hunter.telegram_bot import _parse_hunt_source_args` etc.
 """
 
-import asyncio
 import logging
-import re
-import subprocess
-import sys
-import tempfile
-from pathlib import Path
-from typing import Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -26,1078 +28,84 @@ from telegram.ext import (
 )
 
 from hunter.config import (
-    APPLY_AGENT_PATH,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TIMEZONE,
-    SCHEDULE_TIMES,
-    SCHEDULE_SOURCE_OFFSET_MIN,
-    TRACKER_BACKUP_ENABLED,
-    TRACKER_BACKUP_TIME,
-    EXPIRED_CHECK_TIME,
     GSHEETS_ENABLED,
-    GSHEETS_REFRESH_INTERVAL_MIN,
-    TRACKER_PATH,
 )
-from hunter.models import Job
-from hunter.tracker import (
-    add_skipped,
 
-    lookup_url,
-    lookup_company,
-    manual_jobleads_job_posting_path,
-    normalize_url,
-)
+# Always-needed by main.py and _post_init:
+from hunter.bot.notifications import send_text, send_job_cards, _tg_notify
+from hunter.bot.paste import _looks_like_paste, _extract_url
 
 logger = logging.getLogger(__name__)
 
-# In-memory store: job_id (10-char hash) → Job
-# Cleared on bot restart — acceptable trade-off vs complexity of persistence
-_pending_jobs: dict[str, Job] = {}
-
-
-# ── Keyboard factory ──────────────────────────────────────────────────────────
-
-def _make_keyboard(job_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Apply", callback_data=f"apply:{job_id}"),
-        InlineKeyboardButton("❌ Skip",  callback_data=f"skip:{job_id}"),
-    ]])
-
-
-# ── Public API (called from main.py) ─────────────────────────────────────────
-
-async def send_text(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
-    if len(text) > 4096:
-        text = text[:4090] + "\n…"
-    await context.bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=text,
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def send_job_cards(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
-    """Send one Telegram message per job with Apply/Skip buttons."""
-    for job in jobs:
-        jid = job.job_id()
-        _pending_jobs[jid] = job
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=job.telegram_text(),
-            parse_mode=ParseMode.HTML,
-            reply_markup=_make_keyboard(jid),
-            disable_web_page_preview=True,
-        )
-
-
-# ── Command handlers ──────────────────────────────────────────────────────────
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "🤖 <b>Job Hunter Bot</b>\n\n"
-        "Commands:\n"
-        "/hunt [source …] - run search (all sources, or e.g. <code>/hunt arbeitnow justjoin</code>)\n"
-        "/schedule - show source schedule\n"
-        "/status - show schedule + bot status\n"
-        "/force — принудительная генерация: <code>/force URL</code> или <code>/force</code> "
-        "+ длинный текст вакансии (обход дедупа и React-only; JobLeads: "
-        "<code>job_posting.txt</code>)\n"
-        "/process_manual - process MANUAL rows with filled job_posting.txt\n"
-        "/sync_sent - sync Sent column from Google Sheets → tracker.xlsx\n"
-        "/unsent - сколько неотосланных заявок и сколько с ANGULAR\n"
-        "/check_expired - проверить трекер на истёкшие вакансии\n"
-        "/gsheets_status - статус интеграции Google Sheets\n"
-        "/gsheets_resync - повторно отправить «грязные» строки в Sheets\n"
-        "/gsheets_push_missing - добавить в Sheets строки из tracker.xlsx которых там нет\n"
-        "/gdrive_upload_missing - загрузить все папки из tracker.xlsx на Google Drive\n\n"
-        "Or just send a job URL to generate docs.",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-def _parse_hunt_source_args(args: list[str], valid_names: set[str]) -> tuple[list[str] | None, list[str]]:
-    """Split /hunt arguments into source slugs. Returns (names or None for «all», unknown slugs)."""
-    requested: list[str] = []
-    for a in args:
-        for part in a.split(","):
-            part = part.strip().lower()
-            if part:
-                requested.append(part)
-    if not requested:
-        return None, []
-    seen: set[str] = set()
-    unique: list[str] = []
-    for r in requested:
-        if r not in seen:
-            seen.add(r)
-            unique.append(r)
-    unknown = [r for r in unique if r not in valid_names]
-    if unknown:
-        return [], unknown
-    return unique, []
-
-
-async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manual trigger — full hunt or a subset of sources (same names as in /schedule)."""
-    from hunter.main import run_hunt
-    from hunter.sources import ALL_SOURCES
-
-    valid_names = {s.name for s in ALL_SOURCES}
-    source_names, unknown = _parse_hunt_source_args(context.args or [], valid_names)
-
-    if unknown:
-        avail = ", ".join(sorted(valid_names))
-        await update.message.reply_text(
-            f"❌ Unknown source(s): <b>{', '.join(unknown)}</b>\n\n"
-            f"Available: <code>{avail}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    if source_names:
-        label = ", ".join(source_names)
-        await update.message.reply_text(
-            f"🔍 Running hunt: <b>{label}</b>",
-            parse_mode=ParseMode.HTML,
-        )
-        await run_hunt(context, source_names=source_names)
-    else:
-        await update.message.reply_text("🔍 Running hunt (all sources)...")
-        await run_hunt(context)
-
-
-async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Force-process: URL from tracker / React-only, or full pasted posting after /force."""
-    raw = (update.message.text or "").strip()
-    m = re.match(r"/force(?:@\w+)?\s*(.*)\Z", raw, flags=re.DOTALL | re.IGNORECASE)
-    body = (m.group(1) or "").strip() if m else ""
-
-    if not body:
-        await update.message.reply_text(
-            "<b>/force</b> — принудительная генерация (<code>--force</code>):\n\n"
-            "• <code>/force https://…</code> — по ссылке\n"
-            "• <code>/force</code> и с новой строки (или через пробел) полный текст вакансии — "
-            "как обычная вставка, но с обходом дедупа и React-only\n\n"
-            "Текст должен быть достаточно длинным (как при вставке JD), иначе пришли http-ссылку.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    if _looks_like_paste(body):
-        await update.message.reply_text(
-            f"🔧 <b>Force + текст вакансии</b> — {len(body.strip())} симв. "
-            "Обход: дедуп трекера, React-only. Запускаю…",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        logger.info(f"[Force] paste mode ({len(body)} chars)")
-        await _handle_paste(update, body, force=True)
-        return
-
-    if body.startswith("http"):
-        url = _extract_url(body) or body.split()[0].strip()
-        await update.message.reply_text(
-            f"⏳ <b>Force: запускаю генерацию</b> (<code>--force</code>)\n"
-            f"🔗 {url}\n\n"
-            "Обход: дедуп трекера, React-only skip; для JobLeads — вставленный "
-            "<code>job_posting.txt</code> подставится при fetch.",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        logger.info(f"[Force] Launching apply_agent --force for: {url}")
-        asyncio.create_task(_run_apply_agent(url, force=True))
-        return
-
-    await update.message.reply_text(
-        "После <code>/force</code> нужна <b>http(s)-ссылка</b> или длинный текст вакансии "
-        "(как при обычной вставке). Одно слово без ссылки не подходит.",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process all MANUAL-pending tracker rows whose job_posting.txt is already filled."""
-    from hunter.tracker import get_all_manual_pending
-    from job_fetch.jobleads import try_load_manual_job_posting
-
-    rows = await asyncio.to_thread(get_all_manual_pending)
-    if not rows:
-        await update.message.reply_text("✅ Нет MANUAL вакансий для обработки.")
-        return
-
-    ready = []
-    for row in rows:
-        content = await asyncio.to_thread(try_load_manual_job_posting, row["url"])
-        if content:
-            ready.append(row)
-
-    if not ready:
-        lines = [
-            f"  Row {r['row']}: <b>{r['company']}</b> - {r['title']}"
-            + (f"\n    📁 <code>{r['folder']}</code>" if r.get("folder") else "")
-            for r in rows
-        ]
-        await update.message.reply_text(
-            f"📝 <b>Найдено {len(rows)} MANUAL вакансий, но ни одна не готова.</b>\n\n"
-            + "\n".join(lines)
-            + "\n\nДобавь текст вакансии под маркером в <code>job_posting.txt</code> и повтори.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    not_ready_count = len(rows) - len(ready)
-    note = f" (ещё {not_ready_count} ожидают текста)" if not_ready_count else ""
-    await update.message.reply_text(
-        f"🚀 <b>Запускаю обработку {len(ready)} готовых вакансий{note}…</b>",
-        parse_mode=ParseMode.HTML,
-    )
-    logger.info(f"[process_manual] Processing {len(ready)} ready MANUAL rows")
-
-    ok = failed = 0
-    total = len(ready)
-    for i, row in enumerate(ready, 1):
-        url = row["url"]
-        try:
-            await update.message.reply_text(
-                f"⏳ [{i}/{total}] <b>{row['company']}</b> — {row['title']}\n🔗 {url}",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-        except Exception:
-            pass
-
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_APPLY_AGENT_TIMEOUT)
-
-        if proc.returncode == 0:
-            ok += 1
-            logger.info(f"[process_manual] OK: {url}")
-        else:
-            failed += 1
-            logger.error(f"[process_manual] FAIL: {url}\n{stderr.decode(errors='replace')[-300:]}")
-
-    await update.message.reply_text(
-        f"🏁 <b>process_manual завершён</b>\n✅ {ok} / ❌ {failed} / Всего: {total}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from hunter.main import _hunt_lock
-    from hunter.config import AUTO_APPLY
-    from hunter.sources import ALL_SOURCES
-
-    pending = len(_pending_jobs)
-    lock_status = "🔒 Auto-apply in progress" if _hunt_lock.locked() else "🔓 Idle"
-    mode = "AUTO" if AUTO_APPLY else "MANUAL"
-
-    active_lines = ""
-    if _active_apply_urls:
-        urls_list = "\n".join(f"  • {u}" for u in sorted(_active_apply_urls))
-        active_lines = f"\n⚙️ Generating ({len(_active_apply_urls)}):\n{urls_list}"
-
-    schedule_str = _build_schedule_text()
-    await update.message.reply_text(
-        f"{schedule_str}\n\n"
-        f"🔧 Mode: {mode}\n"
-        f"{lock_status}\n"
-        f"📋 Pending decisions: {pending} jobs"
-        f"{active_lines}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the full source schedule as a clean table."""
-    await update.message.reply_text(
-        _build_schedule_text(),
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Сколько неотосланных заявок в трекере и сколько с ANGULAR в Stack."""
-    try:
-        from hunter.tracker_cache import cache
-        if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
-        total = await cache.unsent_count()
-        angular_n = await cache.unsent_angular_count()
-        if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет.</b>"
-        else:
-            msg = (
-                f"📋 <b>Неотосланных заявок:</b> {total}\n"
-                f"🔷 <b>С ANGULAR в Stack:</b> {angular_n}"
-            )
-    except Exception as exc:
-        logger.exception("[unsent] Failed: %s", exc)
-        msg = f"❌ Не удалось прочитать трекер: <code>{exc}</code>"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
-
-async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Check all unsent tracker rows for expired job offers."""
-    from hunter.expired_marker import run_check
-
-    status_msg = await update.message.reply_text(
-        "🔍 Проверяю трекер на истёкшие вакансии...\n"
-        "<i>EXPIRED будет записан прямо в tracker.xlsx.</i>",
-        parse_mode=ParseMode.HTML,
-    )
-
-    async def progress_cb(text: str) -> None:
-        try:
-            await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
-
-    try:
-        result = await run_check(progress_cb=progress_cb)
-    except Exception as e:
-        logger.exception("[check_expired] Failed: %s", e)
-        await status_msg.edit_text(
-            f"❌ Ошибка: <code>{str(e)[:200]}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    total   = result["total"]
-    alive   = result["alive"]
-    expired = result["expired"]
-    errors  = result["errors"]
-    skipped = result.get("skipped", [])
-
-    lines = [f"✅ <b>Проверка завершена</b> — {total} вакансий\n"]
-
-    if expired:
-        lines.append(f"⏭ <b>Истекло ({len(expired)}):</b>")
-        for item in expired:
-            lines.append(f"  • {item['company']} — {item['title']}")
-        lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
-        lines.append("")
-
-    if errors:
-        lines.append(f"⚠️ <b>Ошибки загрузки ({len(errors)}):</b>")
-        for item in errors[:5]:
-            lines.append(f"  • {item['company']}: {item['error'][:60]}")
-        if len(errors) > 5:
-            lines.append(f"  … ещё {len(errors) - 5}")
-        lines.append("")
-
-    lines.append(f"✅ Живых: <b>{alive}</b>")
-    if skipped:
-        lines.append(f"⏩ Пропущено (jobleads): <b>{len(skipped)}</b>")
-
-    await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
-
-
-async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Pull Sent/To Learn/Re-application changes from Google Sheets → tracker.xlsx."""
-    from hunter import gsheets_sync
-    from hunter.config import GSHEETS_ENABLED
-
-    if not GSHEETS_ENABLED:
-        await update.message.reply_text(
-            "ℹ️ Google Sheets отключён (GSHEETS_ENABLED=false). /sync_sent недоступен.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    await update.message.reply_text("⏳ Синхронизирую Sheets → tracker.xlsx…")
-    try:
-        result = await gsheets_sync.pull_full_snapshot()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка pull: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    pulled = result["pulled"]
-    updated = result["updated"]
-    errors = result["errors"]
-
-    lines = [f"✅ <b>sync_sent завершён</b>"]
-    lines.append(f"  Строк из Sheets: {pulled}")
-    lines.append(f"  Обновлено в tracker.xlsx: {updated}")
-    if errors:
-        lines.append(f"⚠️ Ошибки: {'; '.join(errors[:2])}")
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-
-
-async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show Google Sheets integration status."""
-    from hunter import gsheets_sync
-    try:
-        report = await gsheets_sync.status_report()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Не удалось получить статус: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    enabled = report["enabled"]
-    if not enabled:
-        await update.message.reply_text(
-            "ℹ️ <b>Google Sheets отключён</b> (GSHEETS_ENABLED=false).\n"
-            "Задай GSHEETS_ENABLED=true в .env чтобы включить.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    lines = ["📊 <b>Google Sheets статус</b>"]
-    lines.append(f"  Сервис: {'✅ OK' if report['service_ok'] else '❌ не инициализирован'}")
-    if report.get("sheet_url"):
-        lines.append(f"  Таблица: <a href=\"{report['sheet_url']}\">открыть</a>")
-    elif report.get("sheet_id"):
-        lines.append(f"  ID: <code>{report['sheet_id']}</code>")
-    else:
-        lines.append("  Таблица: не настроена")
-    dirty = report.get("dirty_count", 0)
-    lines.append(f"  Грязных строк: {dirty}")
-    if dirty:
-        lines.append("  ℹ️ Запусти /gsheets_resync для повторной отправки")
-    await update.message.reply_text(
-        "\n".join(lines),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-
-
-async def cmd_gsheets_resync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Retry dirty rows → Google Sheets."""
-    from hunter import gsheets_sync
-    await update.message.reply_text("⏳ Повторная отправка грязных строк в Sheets…")
-    try:
-        synced = await gsheets_sync.resync_dirty()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-    await update.message.reply_text(
-        f"✅ <b>gsheets_resync</b>: отправлено {synced} строк(и).",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Upload all tracker.xlsx application folders to Google Drive."""
-    from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
-    if not GDRIVE_ENABLED:
-        await update.message.reply_text(
-            "⚠️ GDRIVE_ENABLED=false — Google Drive не активирован.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    status_msg = await update.message.reply_text(
-        "⏳ Загружаю папки из tracker.xlsx на Google Drive…",
-        parse_mode=ParseMode.HTML,
-    )
-
-    async def _progress(text: str) -> None:
-        try:
-            await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
-
-    try:
-        from hunter import gdrive_sync
-        result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    uploaded = result["uploaded"]
-    skipped = result["skipped_missing"]
-    errors = result.get("errors", [])
-    err_note = ""
-    if errors:
-        err_lines = "\n".join(f"  • {e[:120]}" for e in errors[:5])
-        err_note = f"\n⚠️ Ошибки ({len(errors)}):\n<code>{err_lines}</code>"
-    await update.message.reply_text(
-        f"✅ <b>gdrive_upload_missing</b>\n"
-        f"  📤 Загружено: {uploaded}\n"
-        f"  ⏭ Нет локально: {skipped}"
-        f"{err_note}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Push tracker.xlsx rows that are absent from Google Sheets (by ID)."""
-    from hunter import gsheets_sync
-    await update.message.reply_text(
-        "⏳ Ищу строки в tracker.xlsx, которых нет в Sheets…",
-        parse_mode=ParseMode.HTML,
-    )
-    try:
-        result = await gsheets_sync.push_missing_rows()
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Ошибка: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    pushed = result["pushed"]
-    already = result["already_present"]
-    errors = result.get("errors", [])
-    err_note = f"\n⚠️ <code>{errors[0][:200]}</code>" if errors else ""
-    await update.message.reply_text(
-        f"✅ <b>gsheets_push_missing</b>\n"
-        f"  📤 Добавлено: {pushed}\n"
-        f"  ✔️ Уже были: {already}"
-        f"{err_note}",
-        parse_mode=ParseMode.HTML,
-    )
-
-
-def _build_schedule_text() -> str:
-    from hunter.sources import ALL_SOURCES
-
-    lines = []
-    for idx, source in enumerate(ALL_SOURCES):
-        times = []
-        for base_time in SCHEDULE_TIMES:
-            h, m = map(int, base_time.split(":"))
-            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
-            total %= 24 * 60
-            times.append(f"{total // 60:02d}:{total % 60:02d}")
-        lines.append(f"  <b>{source.name}</b>: {' / '.join(times)}")
-
-    schedule_str = "\n".join(lines)
-    return (
-        f"⏰ <b>Расписание</b> ({TIMEZONE}, интервал {SCHEDULE_SOURCE_OFFSET_MIN} мин):\n"
-        f"{schedule_str}"
-    )
-
-
-# ── Callback handler (Apply / Skip buttons) ───────────────────────────────────
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data or ""
-    if ":" not in data:
-        return
-
-    action, job_id = data.split(":", 1)
-    job: Optional[Job] = _pending_jobs.get(job_id)
-
-    if not job:
-        await query.edit_message_text(
-            query.message.text + "\n\n⚠️ Expired — restart bot and run /hunt again.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    if action == "skip":
-        await _handle_skip(query, job, job_id)
-    elif action == "apply":
-        await _handle_apply(query, job, job_id, context)
-
-
-async def _handle_skip(query, job: Job, job_id: str) -> None:
-    row = await asyncio.to_thread(add_skipped, job)
-    _pending_jobs.pop(job_id, None)
-    if row:
-        try:
-            from hunter.tracker_cache import cache
-            await cache.add(row)
-            from hunter import gsheets_sync
-            await gsheets_sync.mirror_new_row(row)
-        except Exception as _e:
-            logger.warning("[skip] cache/gsheets update failed: %s", _e)
-
-    original = query.message.text
-    await query.edit_message_text(
-        original + "\n\n❌ <i>Skipped</i>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=None,
-    )
-    logger.info(f"[Skip] {job.company} — {job.title}")
-
-
-async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _pending_jobs.pop(job_id, None)
-
-    original = query.message.text
-    await query.edit_message_text(
-        original + "\n\n⏳ <i>Generating documents...</i>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=None,
-    )
-
-    logger.info(f"[Apply] Launching apply_agent for: {job.url}")
-
-    # Run apply_agent.py as a detached subprocess so bot stays responsive
-    # apply_agent.py will send its own Telegram notification when done
-    asyncio.create_task(_run_apply_agent(job.url))
-
-
-_APPLY_AGENT_TIMEOUT = 900  # 15 min hard cap per job
-
-# Active manual apply_agent URLs — used by /status to show in-progress jobs.
-_active_apply_urls: set[str] = set()
-
-
-async def _tg_notify(text: str) -> None:
-    """Send a message to the configured chat via bot token (no context needed)."""
-    from telegram import Bot
-    try:
-        async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
-            await bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-    except Exception as e:
-        logger.error(f"[tg_notify] failed: {e}")
-
-
-async def _run_apply_agent(
-    url: str,
-    force: bool = False,
-    paste_file: Optional[str] = None,
-) -> None:
-    """Run apply_agent.py via apply_service, don't block the event loop.
-
-    If ``paste_file`` is set, URL may be empty — apply_agent will use the pasted
-    text instead of fetching.
-    """
-    from hunter.services.apply_service import run_apply_agent_for_url
-
-    label = url or "(pasted text)"
-    if url:
-        _active_apply_urls.add(url)
-    try:
-        outcome, error_detail = await run_apply_agent_for_url(
-            url=url,
-            timeout_sec=_APPLY_AGENT_TIMEOUT,
-            apply_agent_path=APPLY_AGENT_PATH,
-            python_executable=sys.executable,
-            force=force,
-            paste_file=paste_file,
-        )
-        if outcome == "fail":
-            logger.error(f"[apply_agent] failed for {label}")
-            err_block = (
-                f"\n\n<pre>{error_detail[:800]}</pre>" if error_detail else ""
-            )
-            await _tg_notify(
-                f"❌ <b>apply_agent завершился с ошибкой</b>\n🔗 {label}{err_block}"
-            )
-        else:
-            logger.info(f"[apply_agent] done ({outcome}) for {label}")
-            if url:
-                try:
-                    from hunter.tracker_cache import cache
-                    from hunter.config import TRACKER_PATH
-                    await cache.load_from_excel(TRACKER_PATH)
-                    row = await cache.get_row_by_url(url)
-                    if row:
-                        from hunter import gsheets_sync
-                        await gsheets_sync.mirror_new_row(row)
-                except Exception as _e:
-                    logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
-            # Upload application folder to Google Drive (best-effort)
-            try:
-                from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
-                if GDRIVE_ENABLED:
-                    from hunter.tracker import get_folder_by_url
-                    folder_str = await asyncio.to_thread(get_folder_by_url, url)
-                    if folder_str:
-                        from hunter import gdrive_sync
-                        drive_url = await gdrive_sync.upload_application_folder(
-                            PROJECT_DIR / folder_str
-                        )
-                        if drive_url:
-                            await _tg_notify(
-                                f'📁 <a href="{drive_url}">Открыть папку на Drive</a>'
-                            )
-            except Exception as _e:
-                logger.warning("[apply_agent] gdrive upload failed: %s", _e)
-    except Exception as e:
-        logger.error(f"[apply_agent] exception: {e}")
-        await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
-    finally:
-        _active_apply_urls.discard(url)
-        if paste_file:
-            try:
-                Path(paste_file).unlink(missing_ok=True)
-            except Exception as cleanup_err:
-                logger.warning(
-                    f"[apply_agent] could not delete paste file {paste_file}: {cleanup_err}"
-                )
-
-
-# ── URL message handler ───────────────────────────────────────────────────────
-
-# Any message longer than this counts as "pasted job posting" if it isn't a single URL.
-# Typical job postings are 1-4 KB; short greetings / single URLs stay well below this.
-# 200 catches compact JD summaries users paste from recruiters (~250 chars) without
-# reacting to casual chat.
-_PASTE_TEXT_MIN_LEN = 200
-
-_URL_RE = re.compile(r"https?://\S+")
-
-
-def _looks_like_paste(text: str) -> bool:
-    """True when user likely pasted a job posting (with or without URL)."""
-    stripped = text.strip()
-    if len(stripped) < _PASTE_TEXT_MIN_LEN:
-        return False
-    # Text with a URL + lots of extra content → paste with URL hint
-    urls = _URL_RE.findall(stripped)
-    if urls:
-        non_url_len = len(_URL_RE.sub("", stripped).strip())
-        return non_url_len >= _PASTE_TEXT_MIN_LEN
-    # No URL at all but long message → pure paste
-    return True
-
-
-def _extract_url(text: str) -> str:
-    """Return the first http(s) URL found in text, or ''."""
-    m = _URL_RE.search(text)
-    return m.group(0).rstrip(").,;") if m else ""
-
-
-async def cmd_about_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Generate (or regenerate) About Me for a job URL in the tracker.
-
-    Usage: /about_me <lang> <url>
-    lang: en | pl
-    """
-    args = context.args or []
-    if len(args) != 2:
-        await update.message.reply_text(
-            "Usage: /about_me <lang> <url>\nExample: /about_me pl https://justjoin.it/job-offer/..."
-        )
-        return
-
-    lang, url = args[0].lower(), args[1]
-    if lang not in ("en", "pl"):
-        await update.message.reply_text("lang must be 'en' or 'pl'")
-        return
-
-    from hunter.tracker import get_folder_by_url, normalize_url
-    from hunter.config import PROJECT_DIR
-
-    normalized = normalize_url(url)
-    folder_str = get_folder_by_url(normalized)
-    if not folder_str:
-        await update.message.reply_text(
-            "URL not found in tracker. Run /force to process it first."
-        )
-        return
-
-    folder_path = PROJECT_DIR / folder_str
-    if not (folder_path / "job_posting.txt").exists():
-        await update.message.reply_text(
-            "No job_posting.txt in folder - cannot generate."
-        )
-        return
-
-    await update.message.reply_text(f"⏳ Generating About Me ({lang.upper()})...")
-
-    import asyncio
-    from hunter.about_me_agent import generate_about_me
-
-    result = await asyncio.to_thread(generate_about_me, folder_path, lang)
-    if not result:
-        await update.message.reply_text("❌ Generation failed - check logs.")
-        return
-
-    await update.message.reply_text(result)
-    await update.message.reply_text(
-        f"✅ Saved to {folder_str}/About_Me_{lang.upper()}.txt"
-    )
-
-
-async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle plain text messages.
-
-    - Long pasted job text (>= _PASTE_TEXT_MIN_LEN, with or without URL) → paste flow
-    - Single job URL (JustJoin, NoFluffJobs, LinkedIn /jobs/view/...) → apply_agent
-    - LinkedIn search / alert URL (/jobs/search?...) → extract job ids → batch apply
-    """
-    text = (update.message.text or "").strip()
-
-    # Paste-mode branch: user forwarded/pasted the posting text itself.
-    if _looks_like_paste(text):
-        n = len(text.strip())
-        await update.message.reply_text(
-            f"📥 <b>Текст вакансии получен</b> — {n} симв. Сохраняю и проверяю трекер…",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        await _handle_paste(update, text)
-        return
-
-    if not text.startswith("http"):
-        await update.message.reply_text(
-            "ℹ️ Отправь ссылку на вакансию (начинается с http) и я сгенерирую документы.\n"
-            "Либо вставь сюда полный текст вакансии (можно с ссылкой или без) — "
-            "я обработаю его напрямую.\n\n"
-            "Также можно отправить ссылку из LinkedIn алерта — вытащу все вакансии из неё.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    from job_fetch.linkedin_parse import is_linkedin_search, parse_linkedin_job_ids, job_view_url
-    from hunter.config import MAX_JOBS_PER_RUN
-
-    # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
-    from job_fetch.linkedin_parse import normalize_linkedin_url
-    text = normalize_linkedin_url(text)
-
-    if is_linkedin_search(text):
-        job_ids = parse_linkedin_job_ids(text)
-        if not job_ids:
-            await update.message.reply_text(
-                "⚠️ LinkedIn ссылка распознана, но id вакансий не найдены.\n"
-                "Попробуй прислать прямую ссылку на конкретную вакансию.",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-        capped = job_ids[:MAX_JOBS_PER_RUN]
-        skipped = len(job_ids) - len(capped)
-
-        msg = (
-            f"🔗 <b>LinkedIn алерт</b>: найдено <b>{len(job_ids)}</b> вакансий\n"
-            + (f"⚠️ Обрабатываю первые {MAX_JOBS_PER_RUN} (MAX_JOBS_PER_RUN)\n" if skipped else "")
-            + f"Запускаю последовательно..."
-        )
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-        logger.info(f"[URL handler] LinkedIn batch: {len(capped)} jobs from alert")
-
-        asyncio.create_task(_run_linkedin_batch(capped, update))
-        return
-
-    # Single job URL — check tracker first
-    entries = await asyncio.to_thread(lookup_url, text)
-    if entries:
-        only_manual = all(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
-        if only_manual:
-            from job_fetch.jobleads import try_load_manual_job_posting
-            manual_content = await asyncio.to_thread(try_load_manual_job_posting, text)
-            if manual_content:
-                await update.message.reply_text(
-                    f"✅ <b>Текст вакансии найден в файле — запускаю генерацию…</b>\n"
-                    f"🔗 {text}\n\nЭто займёт 1-2 минуты.",
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                logger.info(f"[URL handler] MANUAL row with ready file, launching apply_agent: {text}")
-                asyncio.create_task(_run_apply_agent(text))
-                return
-            else:
-                e = entries[-1]
-                folder_info = f'\n📁 <code>{e["folder"]}</code>' if e.get("folder") else ""
-                await update.message.reply_text(
-                    f"📝 <b>Вакансия ожидает текста (MANUAL)</b>\n\n"
-                    f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
-                    f"Вставь полный текст вакансии под маркером в <code>job_posting.txt</code> и пришли эту ссылку ещё раз.\n"
-                    f"Либо отправь сюда текст вакансии (можно вместе со ссылкой) — обработаю сразу.",
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                return
-
-        lines = []
-        for e in entries:
-            sent_info = f' | Sent: {e["sent"]}' if e["sent"] else ""
-            folder_info = f'\n    Folder: <code>{e["folder"]}</code>' if e["folder"] else ""
-            lines.append(
-                f'  Row {e["row"]}: <b>{e["company"]}</b> - {e["title"]}\n'
-                f'    ATS: {e["ats"]}{sent_info}{folder_info}'
-            )
-        detail = "\n".join(lines)
-        await update.message.reply_text(
-            f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
-            f"{detail}\n\n"
-            f"Отправь /force {text}\nесли хочешь обработать заново.",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        return
-
-    await update.message.reply_text(
-        f"⏳ <b>Запускаю генерацию...</b>\n🔗 {text}\n\nЭто займёт 1-2 минуты.",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-    logger.info(f"[URL handler] Launching apply_agent for: {text}")
-    asyncio.create_task(_run_apply_agent(text))
-
-
-async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
-    """Save the pasted job text to a temp file and run apply_agent in paste mode.
-
-    The URL (if found inside the text) is passed to apply_agent so it ends up in
-    the tracker. If no URL — apply_agent runs without one and writes an empty URL cell.
-
-    ``force=True`` passes ``--force`` (bypass tracker duplicate block and React-only skip).
-    """
-    from job_fetch.jobleads import JOBLEADS_PASTE_MARKER
-
-    url = _extract_url(text)
-    url_inferred = False
-
-    # If URL is already tracked, only block when it is NOT a MANUAL-pending row.
-    manual_pending = False
-    entries = []
-    if url:
-        entries = await asyncio.to_thread(lookup_url, url)
-        manual_pending = any(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
-        if entries and not manual_pending and not force:
-            detail = "\n".join(
-                f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}\n"
-                f"    ATS: {e['ats']}"
-                + (f" | Sent: {e['sent']}" if e['sent'] else "")
-                for e in entries
-            )
-            await update.message.reply_text(
-                f"⚠️ <b>Эта вакансия уже в трекере!</b>\n\n"
-                f"{detail}\n\n"
-                f"Отправь <code>/force {url}</code> или <code>/force</code> с полным текстом.",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-            return
-
-    # If this is a MANUAL-pending JobLeads row, write into its job_posting.txt and rerun apply.
-    if manual_pending and url and "jobleads.com" in url.lower():
-        jp = await asyncio.to_thread(manual_jobleads_job_posting_path, url)
-        if jp and jp.is_file():
-            try:
-                existing = jp.read_text(encoding="utf-8", errors="replace")
-                if JOBLEADS_PASTE_MARKER in existing:
-                    prefix, _ = existing.split(JOBLEADS_PASTE_MARKER, 1)
-                    jp.write_text(prefix + JOBLEADS_PASTE_MARKER + "\n\n" + text.strip() + "\n", encoding="utf-8")
-                else:
-                    # Fallback: overwrite file if marker is missing for some reason.
-                    jp.write_text(text.strip() + "\n", encoding="utf-8")
-            except Exception as e:
-                await update.message.reply_text(
-                    f"❌ Не удалось записать текст в <code>{jp}</code>\n<pre>{str(e)[:500]}</pre>",
-                    parse_mode=ParseMode.HTML,
-                )
-                return
-
-            inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
-            force_note = " <code>--force</code>" if force else ""
-            await update.message.reply_text(
-                "✅ <b>Подтверждаю:</b> текст записан в <code>job_posting.txt</code>, "
-                f"запускаю генерацию документов{force_note}.\n"
-                f"🔗 {url}{inferred_note}\n\n"
-                "Ориентировочно 1–2 мин; готовые файлы пришлю отдельным сообщением.",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-            logger.info(f"[paste handler] Updated MANUAL job_posting.txt and rerun apply url={url} force={force}")
-            asyncio.create_task(_run_apply_agent(url, force=force))
-            return
-
-    try:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".txt",
-            prefix="tg_paste_",
-            delete=False,
-        )
-        with tmp as fh:
-            fh.write(text)
-        paste_path = tmp.name
-    except Exception as e:
-        logger.exception("[paste handler] failed to write temp file")
-        await update.message.reply_text(
-            f"❌ Не удалось сохранить присланный текст во временный файл: <code>{e}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    chars = len(text)
-    if url:
-        inferred_note = " (URL восстановил из трекера)" if url_inferred else ""
-        url_line = f"🔗 {url}{inferred_note}"
-    else:
-        url_line = "🔗 (ссылка не найдена — обрабатываю без неё)"
-    mode = "режим вставки + <code>--force</code>" if force else "режим вставки"
-    await update.message.reply_text(
-        "✅ <b>Подтверждаю:</b> текст сохранён, запускаю <code>apply_agent</code> "
-        f"({mode}, {chars} симв.).\n"
-        f"{url_line}\n\n"
-        "Ориентировочно 1–2 мин; результат пришлю сюда же.",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-    logger.info(
-        f"[paste handler] Launching apply_agent paste mode ({chars} chars) url={url or '—'} force={force}"
-    )
-    asyncio.create_task(_run_apply_agent(url, force=force, paste_file=paste_path))
-
-
-async def _run_linkedin_batch(job_ids: list[str], update) -> None:
-    """Run apply_agent sequentially for each LinkedIn job id."""
-    from job_fetch.linkedin_parse import job_view_url
-
-    total = len(job_ids)
-    ok = failed = 0
-
-    for i, jid in enumerate(job_ids, 1):
-        url = job_view_url(jid)
-        try:
-            await update.message.reply_text(
-                f"⏳ [{i}/{total}] LinkedIn job {jid}",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-        except Exception:
-            pass
-
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode == 0:
-            ok += 1
-            logger.info(f"[linkedin_batch] OK job {jid}")
-        else:
-            failed += 1
-            logger.error(f"[linkedin_batch] FAIL job {jid}: {stderr.decode(errors='replace')[-300:]}")
-
-    try:
-        await update.message.reply_text(
-            f"🏁 <b>LinkedIn batch done</b>\n✅ {ok} / ❌ {failed} / Total: {total}",
-            parse_mode=ParseMode.HTML,
-        )
-    except Exception:
-        pass
+# ── Backward-compat lazy re-exports (used by tests) ──────────────────────────
+# Each entry: attribute_name → (module_path, real_attribute_name)
+_LAZY_ATTRS: dict[str, tuple[str, str]] = {
+    # bot infrastructure
+    "_pending_jobs":              ("hunter.bot.state",        "_pending_jobs"),
+    "_active_apply_urls":         ("hunter.bot.state",        "_active_apply_urls"),
+    "_force_waiting":             ("hunter.bot.state",        "_force_waiting"),
+    "_APPLY_AGENT_TIMEOUT":       ("hunter.bot.state",        "_APPLY_AGENT_TIMEOUT"),
+    "_make_keyboard":             ("hunter.bot.keyboards",    "_make_keyboard"),
+    "_PASTE_TEXT_MIN_LEN":        ("hunter.bot.paste",        "_PASTE_TEXT_MIN_LEN"),
+    "_URL_RE":                    ("hunter.bot.paste",        "_URL_RE"),
+    "_build_schedule_text":       ("hunter.bot.formatters",   "_build_schedule_text"),
+    "_format_check_responses_report": ("hunter.bot.formatters", "_format_check_responses_report"),
+    "_format_daily_summary":      ("hunter.bot.formatters",   "_format_daily_summary"),
+    "_run_apply_agent":           ("hunter.bot.apply_runner", "_run_apply_agent"),
+    "_run_linkedin_batch":        ("hunter.bot.apply_runner", "_run_linkedin_batch"),
+    "_handle_paste":              ("hunter.bot.apply_runner", "_handle_paste"),
+    # commands
+    "cmd_start":          ("hunter.commands.start",          "cmd_start"),
+    "cmd_schedule":       ("hunter.commands.schedule",       "cmd_schedule"),
+    "cmd_unsent":         ("hunter.commands.unsent",         "cmd_unsent"),
+    "cmd_status":         ("hunter.commands.status",         "cmd_status"),
+    "cmd_sync_sent":      ("hunter.commands.sync_sent",      "cmd_sync_sent"),
+    "cmd_hunt":           ("hunter.commands.hunt",           "cmd_hunt"),
+    "_parse_hunt_source_args": ("hunter.commands.hunt",      "parse_hunt_source_args"),
+    "cmd_force":          ("hunter.commands.force",          "cmd_force"),
+    "_force_run":         ("hunter.commands.force",          "_force_run"),
+    "_force_cleanup":     ("hunter.commands.force",          "_force_cleanup"),
+    "cmd_process_manual": ("hunter.commands.process_manual", "cmd_process_manual"),
+    "cmd_about_me":       ("hunter.commands.about_me",       "cmd_about_me"),
+    "cmd_check_expired":  ("hunter.commands.check_expired",  "cmd_check_expired"),
+    "cmd_debug_url":      ("hunter.commands.debug_url",      "cmd_debug_url"),
+    "cmd_gsheets_status":       ("hunter.commands.gsheets", "cmd_gsheets_status"),
+    "cmd_gsheets_push_missing": ("hunter.commands.gsheets", "cmd_gsheets_push_missing"),
+    "cmd_gsheets_push_sent":    ("hunter.commands.gsheets", "cmd_gsheets_push_sent"),
+    "cmd_gdrive_upload_missing": ("hunter.commands.gdrive", "cmd_gdrive_upload_missing"),
+    "cmd_check_responses":      ("hunter.commands.check_responses", "cmd_check_responses"),
+    "cmd_export":               ("hunter.commands.export",          "cmd_export"),
+    "cmd_url":          ("hunter.commands.url_message", "cmd_url"),
+    "button_callback":  ("hunter.commands.url_message", "button_callback"),
+    "_handle_apply":    ("hunter.commands.url_message", "_handle_apply"),
+    "_handle_skip":     ("hunter.commands.url_message", "_handle_skip"),
+    # schedules
+    "_scheduled_hunt":                  ("hunter.schedules.hunt",            "scheduled_hunt"),
+    "_scheduled_check_expired":         ("hunter.schedules.check_expired",   "scheduled_check_expired"),
+    "_scheduled_tracker_backup":        ("hunter.schedules.tracker_backup",  "scheduled_tracker_backup"),
+    "_scheduled_gdrive_upload_missing": ("hunter.schedules.gdrive",          "scheduled_gdrive_upload_missing"),
+    "_scheduled_gsheets_resync":        ("hunter.schedules.gsheets",         "scheduled_gsheets_resync"),
+    "_scheduled_gsheets_pull":          ("hunter.schedules.gsheets",         "scheduled_gsheets_pull"),
+    "_scheduled_pending_report":        ("hunter.schedules.pending_report",  "scheduled_pending_report"),
+    "_scheduled_check_email_responses": ("hunter.schedules.email_responses", "scheduled_check_email_responses"),
+    "_scheduled_daily_summary":         ("hunter.schedules.daily_summary",   "scheduled_daily_summary"),
+}
+
+
+def __getattr__(name: str):
+    """Lazy re-export for backward compat with tests and external callers."""
+    if name in _LAZY_ATTRS:
+        import importlib
+        mod_path, attr = _LAZY_ATTRS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        # Cache in module globals so subsequent accesses don't re-import
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module 'hunter.telegram_bot' has no attribute {name!r}")
 
 
 # ── Application factory ───────────────────────────────────────────────────────
@@ -1108,18 +116,21 @@ async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start",           "Show help"),
         BotCommand("hunt",            "Run search (optional: source names)"),
-        BotCommand("status",          "Bot status and schedule"),
-        BotCommand("schedule",        "Show source schedule"),
+        BotCommand("status",          "Current activity: active jobs, pending, FAIL queue"),
+        BotCommand("schedule",        "Hunt timetable per source"),
         BotCommand("force",           "Process URL even if already in tracker"),
         BotCommand("process_manual",  "Process MANUAL rows with filled job_posting.txt"),
         BotCommand("sync_sent",       "Sync Sent column from Google Sheets"),
         BotCommand("unsent",          "Unsent applications count + Angular"),
         BotCommand("check_expired",   "Check unsent rows for expired job offers"),
+        BotCommand("debug_url",       "Diagnose expired detection for a single URL"),
         BotCommand("about_me",        "Generate About Me for a job URL (lang + url)"),
         BotCommand("gsheets_status",        "Google Sheets integration status"),
-        BotCommand("gsheets_resync",        "Retry dirty rows → Google Sheets"),
         BotCommand("gsheets_push_missing",  "Push tracker rows missing from Sheets"),
+        BotCommand("gsheets_push_sent",     "Sync Sent/EXPIRED from tracker.xlsx → Sheets"),
         BotCommand("gdrive_upload_missing", "Upload all tracker folders to Google Drive"),
+        BotCommand("check_responses",       "Check Gmail confirmations [days]"),
+        BotCommand("export",                "Export tracker as .xlsx file"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -1135,14 +146,14 @@ async def _post_init(app: Application) -> None:
                 try:
                     await app.bot.send_message(
                         chat_id=TELEGRAM_CHAT_ID,
-                        text=f"⚠️ <b>Google Sheets не готов</b>\n<code>{err}</code>",
+                        text=f"⚠️ <b>Google Sheets not ready</b>\n<code>{err}</code>",
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception:
                     pass
                 return  # don't try to bootstrap if creds are broken
 
-            async def _tg_notify(text: str) -> None:
+            async def _tg_notify_local(text: str) -> None:
                 try:
                     await app.bot.send_message(
                         chat_id=TELEGRAM_CHAT_ID,
@@ -1153,7 +164,7 @@ async def _post_init(app: Application) -> None:
                 except Exception as _e:
                     logger.warning("[gsheets] notify failed: %s", _e)
 
-            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify)
+            result = await gsheets_sync.init_or_load_spreadsheet(notify_cb=_tg_notify_local)
             if result.get("error"):
                 logger.error("[gsheets] init failed: %s", result["error"])
             else:
@@ -1171,7 +182,7 @@ async def _post_init(app: Application) -> None:
     # correct immediately after startup (not only after the first /hunt).
     try:
         from hunter.tracker_cache import cache
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         logger.info("[startup] tracker_cache loaded")
     except Exception as e:
         logger.warning("[startup] tracker_cache load failed: %s", e)
@@ -1180,7 +191,27 @@ async def _post_init(app: Application) -> None:
 def build_application() -> Application:
     """Build and configure the Telegram Application instance."""
     import pytz
-    from datetime import time as dt_time
+
+    # Import all handlers lazily — only when the bot actually starts.
+    from hunter.commands.start import cmd_start
+    from hunter.commands.schedule import cmd_schedule
+    from hunter.commands.unsent import cmd_unsent
+    from hunter.commands.status import cmd_status
+    from hunter.commands.sync_sent import cmd_sync_sent
+    from hunter.commands.hunt import cmd_hunt
+    from hunter.commands.force import cmd_force
+    from hunter.commands.process_manual import cmd_process_manual
+    from hunter.commands.about_me import cmd_about_me
+    from hunter.commands.check_expired import cmd_check_expired
+    from hunter.commands.debug_url import cmd_debug_url
+    from hunter.commands.gsheets import (
+        cmd_gsheets_status, cmd_gsheets_push_missing, cmd_gsheets_push_sent,
+    )
+    from hunter.commands.gdrive import cmd_gdrive_upload_missing
+    from hunter.commands.check_responses import cmd_check_responses
+    from hunter.commands.export import cmd_export
+    from hunter.commands.url_message import cmd_url, button_callback
+    from hunter.schedules import register as _register_schedules
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
@@ -1194,11 +225,14 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("unsent",         cmd_unsent))
     app.add_handler(CommandHandler("sync_sent",      cmd_sync_sent))
     app.add_handler(CommandHandler("check_expired",  cmd_check_expired))
+    app.add_handler(CommandHandler("debug_url",      cmd_debug_url))
     app.add_handler(CommandHandler("about_me",       cmd_about_me))
-    app.add_handler(CommandHandler("gsheets_status",       cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_resync",       cmd_gsheets_resync))
-    app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
+    app.add_handler(CommandHandler("gsheets_status",        cmd_gsheets_status))
+    app.add_handler(CommandHandler("gsheets_push_missing",  cmd_gsheets_push_missing))
+    app.add_handler(CommandHandler("gsheets_push_sent",     cmd_gsheets_push_sent))
     app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
+    app.add_handler(CommandHandler("check_responses",       cmd_check_responses))
+    app.add_handler(CommandHandler("export",               cmd_export))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -1206,238 +240,8 @@ def build_application() -> Application:
     # Plain URL messages → auto-apply
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_url))
 
-    # Staggered per-source scheduled hunts.
-    # Each source gets its own daily job at: base_time + source_index * offset_min.
-    # Times wrap past midnight with modulo 24h.
+    # Register all scheduled jobs via hunter.schedules
     tz = pytz.timezone(TIMEZONE)
-    from hunter.sources import ALL_SOURCES
-
-    for idx, source in enumerate(ALL_SOURCES):
-        for base_time in SCHEDULE_TIMES:
-            h, m = map(int, base_time.split(":"))
-            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
-            total %= 24 * 60
-            fire_hour, fire_min = total // 60, total % 60
-
-            app.job_queue.run_daily(
-                callback=_scheduled_hunt,
-                time=dt_time(fire_hour, fire_min, tzinfo=tz),
-                name=f"hunt_{source.name}_{base_time}",
-                data={"source_names": [source.name]},
-            )
-            logger.info(
-                f"[Schedule] {source.name} at "
-                f"{fire_hour:02d}:{fire_min:02d} {TIMEZONE}"
-            )
-
-    # Daily pending-report at 09:00 and 21:00
-    for report_hour in (9, 21):
-        app.job_queue.run_daily(
-            callback=_scheduled_pending_report,
-            time=dt_time(report_hour, 0, tzinfo=tz),
-            name=f"pending_report_{report_hour:02d}00",
-        )
-        logger.info(f"[Schedule] pending_report at {report_hour:02d}:00 {TIMEZONE}")
-
-    # Daily expired check at EXPIRED_CHECK_TIME (default 00:00)
-    try:
-        ech, ecm = map(int, EXPIRED_CHECK_TIME.strip().split(":"))
-    except (ValueError, AttributeError):
-        ech, ecm = 0, 0
-        logger.warning("[Schedule] Invalid EXPIRED_CHECK_TIME=%r — using 00:00", EXPIRED_CHECK_TIME)
-    app.job_queue.run_daily(
-        callback=_scheduled_check_expired,
-        time=dt_time(ech, ecm, tzinfo=tz),
-        name="check_expired_daily",
-    )
-    logger.info(f"[Schedule] check_expired at {ech:02d}:{ecm:02d} {TIMEZONE}")
-
-    if TRACKER_BACKUP_ENABLED:
-        try:
-            bh, bm = map(int, TRACKER_BACKUP_TIME.strip().split(":"))
-            bh %= 24
-            bm %= 60
-        except (ValueError, AttributeError):
-            bh, bm = 6, 5
-            logger.warning(
-                "[Schedule] Invalid TRACKER_BACKUP_TIME=%r — using 06:05",
-                TRACKER_BACKUP_TIME,
-            )
-        app.job_queue.run_daily(
-            callback=_scheduled_tracker_backup,
-            time=dt_time(bh, bm, tzinfo=tz),
-            name="tracker_backup_daily",
-        )
-        logger.info(f"[Schedule] tracker_backup at {bh:02d}:{bm:02d} {TIMEZONE}")
-
-    # Retry dirty Sheets rows every 5 minutes (no-op when GSHEETS_ENABLED=false)
-    app.job_queue.run_repeating(
-        callback=_scheduled_gsheets_resync,
-        interval=300,
-        first=60,
-        name="gsheets_resync",
-    )
-    logger.info("[Schedule] gsheets_resync every 5 min")
-
-    # Pull Sheets → Excel every GSHEETS_REFRESH_INTERVAL_MIN (no-op when disabled)
-    if GSHEETS_ENABLED:
-        pull_interval_sec = max(60, GSHEETS_REFRESH_INTERVAL_MIN * 60)
-        app.job_queue.run_repeating(
-            callback=_scheduled_gsheets_pull,
-            interval=pull_interval_sec,
-            first=120,
-            name="gsheets_pull",
-        )
-        logger.info("[Schedule] gsheets_pull every %d min", GSHEETS_REFRESH_INTERVAL_MIN)
+    _register_schedules(app, tz)
 
     return app
-
-
-async def _scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Daily scheduled expired check — runs at midnight, marks EXPIRED in tracker.xlsx."""
-    from hunter.expired_marker import run_check
-
-    logger.info("[scheduled_check_expired] Starting daily expired check")
-
-    try:
-        result = await run_check()
-    except Exception as e:
-        logger.exception("[scheduled_check_expired] run_check failed: %s", e)
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"⚠️ <b>Scheduled check_expired failed</b>\n<pre>{str(e)[:300]}</pre>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    expired = result["expired"]
-    skipped = result.get("skipped", [])
-    errors  = result["errors"]
-
-    if not expired:
-        logger.info("[scheduled_check_expired] Nothing expired.")
-        return
-
-    lines = [f"🌙 <b>Ночная проверка истёкших</b>\n"]
-    lines.append(f"⏭ Истекло: <b>{len(expired)}</b>")
-    for item in expired:
-        lines.append(f"  • {item['company']} — {item['title']}")
-    if skipped:
-        lines.append(f"⏩ Пропущено (jobleads): {len(skipped)}")
-    if errors:
-        lines.append(f"⚠️ Ошибок: {len(errors)}")
-    lines.append(f"\n📊 tracker.xlsx обновлён — {len(expired)} строк(и) помечено EXPIRED.")
-    await context.bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text="\n".join(lines),
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def _scheduled_tracker_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Daily snapshot of tracker.xlsx (silent on success)."""
-    try:
-        import asyncio as _asyncio
-        from hunter.tracker_backup import run_tracker_backup
-
-        result = await _asyncio.to_thread(run_tracker_backup)
-        if not result.get("ok") or result.get("errors"):
-            err = "; ".join(result.get("errors") or [])[:400]
-            await context.bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"⚠️ <b>Tracker backup failed</b>\n<pre>{err}</pre>",
-                parse_mode=ParseMode.HTML,
-            )
-    except Exception as exc:
-        logger.exception("[tracker_backup] scheduled job failed: %s", exc)
-        try:
-            await context.bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"⚠️ <b>Tracker backup failed</b>\n<pre>{str(exc)[:400]}</pre>",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-
-
-async def _scheduled_hunt(context: ContextTypes.DEFAULT_TYPE) -> None:
-    from hunter.main import run_hunt
-    source_names = context.job.data.get("source_names") if context.job.data else None
-    try:
-        await run_hunt(context, source_names=source_names)
-    except Exception as e:
-        label = ", ".join(source_names) if source_names else "all"
-        logger.exception(f"[scheduled_hunt] Unhandled error for {label}")
-        extra = ""
-        if "Content_Types" in str(e) or "archive" in str(e).lower():
-            extra = (
-                "\n\n<i>Скорее всего повреждён или не-xlsx файл tracker.xlsx — "
-                "не ошибка борда в скобках.</i>"
-            )
-        try:
-            await context.bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"⚠️ <b>Hunt error</b> ({label}):\n<pre>{str(e)[:500]}</pre>{extra}",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-
-
-async def _scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Every-5-min job: push dirty rows to Google Sheets (no-op if disabled)."""
-    try:
-        from hunter import gsheets_sync
-        synced = await gsheets_sync.resync_dirty()
-        if synced:
-            logger.info("[scheduled_gsheets_resync] pushed %d dirty row(s)", synced)
-    except Exception as e:
-        logger.warning("[scheduled_gsheets_resync] failed: %s", e)
-
-
-async def _scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Periodic job: pull Sheets → tracker.xlsx (every GSHEETS_REFRESH_INTERVAL_MIN)."""
-    try:
-        from hunter.tracker_cache import cache
-        if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
-        from hunter import gsheets_sync
-        result = await gsheets_sync.pull_full_snapshot()
-        updated = result.get("updated", 0)
-        if updated:
-            logger.info("[scheduled_gsheets_pull] updated %d row(s) from Sheets", updated)
-        if result.get("errors"):
-            logger.warning("[scheduled_gsheets_pull] errors: %s", result["errors"])
-    except Exception as e:
-        logger.warning("[scheduled_gsheets_pull] failed: %s", e)
-
-
-async def _scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Scheduled job: report how many unsent applications are in tracker."""
-    try:
-        from hunter.tracker_cache import cache
-        if not cache.loaded:
-            await cache.load_from_excel(TRACKER_PATH)
-        total = await cache.unsent_count()
-        if total == 0:
-            msg = "📭 <b>Неотосланных заявок нет.</b>"
-        else:
-            rows = await cache.all_unsent()
-            fail_n = sum(1 for r in rows if r.get("ATS %") == "FAIL")
-            manual_n = sum(1 for r in rows if r.get("ATS %") == "MANUAL")
-            ready_n = total - fail_n - manual_n
-            parts = [f"📋 <b>Неотосланных заявок: {total}</b>"]
-            if ready_n:
-                parts.append(f"  ✅ Готовы к отправке: {ready_n}")
-            if manual_n:
-                parts.append(f"  📝 MANUAL (нужен текст): {manual_n}")
-            if fail_n:
-                parts.append(f"  ❌ FAIL: {fail_n}")
-            msg = "\n".join(parts)
-        await context.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=msg,
-            parse_mode=ParseMode.HTML,
-        )
-    except Exception:
-        logger.exception("[scheduled_pending_report] Failed")

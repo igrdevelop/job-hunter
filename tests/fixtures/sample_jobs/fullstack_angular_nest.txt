@@ -1,0 +1,51 @@
+URL: https://justjoin.it/job-offer/devqube-sp-z-o-o--fullstack-developer-angular-nestjs--wroclaw-javascript
+
+Job Title: Fullstack Developer (NestJS)
+Company: Devqube Sp. z o.o.
+Location: Wrocław / Remote
+Experience Level: Senior
+Employment: B2B
+Salary: 10 000 – 18 000 PLN/month net
+
+--- Job Description ---
+
+Devqube poszukuje doświadczonych Fullstack Developerów do przebudowy systemów produkcyjnych dla klienta z Niemiec. Projekt zakłada realny wpływ na architekturę — nie rutynowe taski, ale projektowanie od podstaw.
+
+Zakres obowiązków:
+- Przebudowa i modernizacja systemów produkcyjnych (klasa MES) dla klienta z Niemiec
+- Projektowanie architektury backendowej w NestJS z wykorzystaniem zaawansowanych dekoratorów i wzorców mikroserwisowych
+- Tworzenie skalowalnych REST API oraz integracja z frontendem Angular
+- Implementacja komunikacji real-time (WebSocket / Socket.io)
+- Projektowanie schematów baz danych (PostgreSQL / TypeORM)
+- Code review, dbałość o jakość kodu TypeScript
+- Praca w metodologii Scrum, bezpośredni kontakt z klientem (EN B2+)
+
+Wymagania (must-have):
+- Angular – dobra znajomość, doświadczenie w budowie komponentów i state management
+- NestJS – bardzo dobra znajomość, doświadczenie z architekturą backendową
+- TypeScript – biegłość po obu stronach stacku
+- PostgreSQL / TypeORM – projektowanie i optymalizacja baz danych
+- REST API – projektowanie i implementacja
+- Git – praca w zespole z branching strategy
+- Angielski – minimum B2 (kontakt z klientem z Niemiec)
+
+Mile widziane:
+- Mikroserwisy – znajomość wzorców (CQRS, Event Sourcing)
+- Advanced NestJS decorators – własne dekoratory, interceptory, guardy
+- RxJS – reactive programming w Angular
+- Docker / Kubernetes – konteneryzacja
+- Redis – caching, kolejkowanie
+- GitHub Actions / CI/CD
+- Jest – testy jednostkowe i e2e
+- Nx Monorepo
+- Podstawy języka niemieckiego
+
+Co oferujemy:
+- B2B 10 000 – 18 000 PLN/miesiąc netto
+- 100% remote lub biuro we Wrocławiu
+- Budżet szkoleniowy, lekcje angielskiego
+- Karta sportowa, opieka medyczna
+- Wpływ na decyzje techniczne
+
+--- Requirements ---
+NestJS, Angular, TypeScript, Node.js, PostgreSQL, Microservices

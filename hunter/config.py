@@ -25,17 +25,19 @@ APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
+GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
 MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "20"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
-CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "3"))
-CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "30"))
+CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
+CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
+TRACKER_DB_PATH = PROJECT_DIR / "tracker.db"
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
 TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
     "true",
@@ -47,7 +49,9 @@ TRACKER_BACKUP_DIR: Path = Path(
 ).expanduser()
 TRACKER_BACKUP_KEEP_FILES: int = max(0, int(os.getenv("TRACKER_BACKUP_KEEP_FILES", "90")))
 TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
-APPLICATIONS_DIR = PROJECT_DIR / "Applications"
+APPLICATIONS_DIR: Path = Path(
+    os.getenv("APPLICATIONS_DIR", str(PROJECT_DIR / "Applications"))
+).expanduser()
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"
@@ -104,6 +108,19 @@ FILTER = {
         "stażysta",
         "praktykant",
         "staz",
+        # P-8.1: management / leadership / non-IC roles
+        "tech lead",
+        "tech-lead",
+        "techlead",
+        "project lead",
+        "engineering manager",
+        "head of engineering",
+        "vp of engineering",
+        "cto",
+        # Part-time — not relevant for full-time search
+        "part-time",
+        "part time",
+        "parttime",
     ],
 
     "locations": [
@@ -126,15 +143,48 @@ FILTER = {
         r"\bsdet\b",
         r"quality\s+assurance",
         r"test\s+automation",
-        r"\bfullstack\b",
-        r"\bfull-stack\b",
-        r"\bfull stack\b",
+        # fullstack WITHOUT angular is handled by _is_fullstack_without_angular()
+        # in filters.py — we don't put it in exclude_patterns so Angular fullstack passes.
         r"\bbackend\b",
         r"\bback-end\b",
         r"\bvue\b",
         r"\bnuxt\b",
         r"\bmagento\b",
         r"\bruby\b",
+        # P-3.3: React Native — mobile-only, not FE web
+        r"\breact\s+native\b",
+        r"\breact[- ]native\b",
+        # P-4.1: eCommerce/CMS platforms — not web-FE stack
+        r"\bhyv[äa]\b",           # Hyva (Magento theme) — Finnish spelling variants
+        r"\badobe\s+commerce\b",   # Adobe Commerce = Magento rebranded
+        r"\bpwa\s+studio\b",       # Magento PWA Studio
+        r"\bshopware\b",
+        r"\bshopify\b",
+        r"\bbigcommerce\b",
+        r"\bwoocommerce\b",
+        r"\bdrupal\b",
+        r"\bwordpress\b",
+        r"\bsharepoint\b",
+        r"\bsap\b",
+        # P-7.1: Salesforce / DevOps / SRE / mobile / test-automation roles
+        r"\bsalesforce\b",
+        r"\bdevops\b",
+        r"\bdev-ops\b",
+        r"\bsre\b",                    # Site Reliability Engineer
+        r"\bplatform\s+engineer\b",
+        r"\bcloud\s+engineer\b",
+        r"\binfrastructure\s+engineer\b",
+        r"\bandroid\b",
+        r"\bios\s+developer\b",
+        r"\bswift\s+developer\b",
+        r"\bkotlin\s+developer\b",
+        r"\bflutter\b",
+        r"\bautomation\s+engineer\b",
+        r"\btesting\s+engineer\b",
+        # P-8.1: management / non-IC roles (regex for mixed-case not caught by exclude_levels)
+        r"\btech\s+lead\b",
+        r"\bproject\s+lead\b",
+        r"\bpart[- ]?time\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
@@ -144,6 +194,15 @@ FILTER = {
     # Set false if you speak German or use boards where this produces false positives.
     "exclude_german_language_required": True,
 }
+
+# ── JustJoin.it source config ────────────────────────────────────────────────
+JUSTJOIN_ENABLED: bool = os.getenv("JUSTJOIN_ENABLED", "true").lower() in ("true", "1", "yes")
+# Pages per workplaceType (remote/hybrid/office). 1 page = 100 items.
+# Default 3 → up to 900 items per type, ~2700 total (pre-filter reduces to ~tens).
+JUSTJOIN_MAX_PAGES: int = int(os.getenv("JUSTJOIN_MAX_PAGES", "3"))
+
+# ── NoFluffJobs source config ─────────────────────────────────────────────────
+NOFLUFFJOBS_ENABLED: bool = os.getenv("NOFLUFFJOBS_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── LinkedIn source config ────────────────────────────────────────────────────
 LINKEDIN_ENABLED: bool = os.getenv("LINKEDIN_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -225,6 +284,13 @@ GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches
 GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
 
+# ── Email response checker ────────────────────────────────────────────────────
+# Default look-back window for /check_responses (and the daily scheduled run).
+# Pass a larger number directly to the command: /check_responses 60
+EMAIL_RESPONSE_LOOKBACK_DAYS: int = int(os.getenv("EMAIL_RESPONSE_LOOKBACK_DAYS", "2"))
+# Time of day (Warsaw) for the daily automatic confirmation check
+EMAIL_RESPONSE_CHECK_TIME: str = os.getenv("EMAIL_RESPONSE_CHECK_TIME", "09:00")
+
 # ── Expired check schedule ───────────────────────────────────────────────────
 EXPIRED_CHECK_TIME: str = os.getenv("EXPIRED_CHECK_TIME", "00:00")
 
@@ -241,7 +307,7 @@ EXPIRED_CHECK_FETCH_TIMEOUT: float = float(os.getenv("EXPIRED_CHECK_FETCH_TIMEOU
 # ── LibreOffice ───────────────────────────────────────────────────────────────
 SOFFICE_PATH: str = os.getenv(
     "SOFFICE_PATH",
-    r"C:\Program Files\LibreOffice\program\soffice.exe",
+    "libreoffice",  # Linux/Docker default; Windows: set SOFFICE_PATH in .env
 )
 
 # ── JustJoin source config ────────────────────────────────────────────────────

@@ -36,7 +36,7 @@
 
 ## Шаг 5 — Промпты и документация
 
-- [system_prompt.md](../prompts/system_prompt.md), [apply.md](commands/apply.md): не использовать `remoteok` как `company_name`.
+- [generation_rules.md](../prompts/generation_rules.md), [apply.md](commands/apply.md): не использовать `remoteok` как `company_name`.
 - [CLAUDE.md](../CLAUDE.md): файл `remoteok.py` и toggle в списке.
 
 ## Шаг 6 — Тесты

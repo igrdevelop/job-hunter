@@ -65,14 +65,16 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
     lang_u = (lang or "EN").strip().upper()[:2] or "EN"
     ext = ".docx"
-    safe = _safe_stack_segment(stack, max_len=22)
-    primary = f"CV_{safe}_2026_{lang_u}{ext}"
+    # Fixed parts: "Ihar_Petrasheuski_CV_" (21) + "_2026_XX.docx" (13) = 34 chars reserved
+    max_stack = MAX_ATTACHMENT_BASENAME_LEN - 34
+    safe = _safe_stack_segment(stack, max_len=max_stack)
+    primary = f"Ihar_Petrasheuski_CV_{safe}_2026_{lang_u}{ext}"
     if len(primary) <= MAX_ATTACHMENT_BASENAME_LEN:
         return primary
-    fallback = f"CV_2026_{lang_u}{ext}"
+    fallback = f"Ihar_Petrasheuski_CV_2026_{lang_u}{ext}"
     if len(fallback) <= MAX_ATTACHMENT_BASENAME_LEN:
         return fallback
-    return f"CV_{lang_u}{ext}"
+    return f"CV_2026_{lang_u}{ext}"
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
@@ -215,14 +217,20 @@ def build_resume(doc, data, stack):
     # EDUCATION
     add_section_heading(doc, "EDUCATION")
     p = doc.add_paragraph()
-    run = p.add_run(data.get("education", ""))
+    edu = data.get("education", "")
+    if not isinstance(edu, str):
+        edu = ", ".join(str(v) for v in edu.values() if v) if isinstance(edu, dict) else str(edu or "")
+    run = p.add_run(edu)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
 
     # ADDITIONAL COURSES
     add_section_heading(doc, "ADDITIONAL COURSES")
     p = doc.add_paragraph()
-    run = p.add_run(data.get("courses", ""))
+    courses = data.get("courses", "")
+    if not isinstance(courses, str):
+        courses = ", ".join(str(v) for v in courses) if isinstance(courses, list) else str(courses or "")
+    run = p.add_run(courses)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
 
@@ -301,6 +309,18 @@ def main():
     with open(json_path, "r", encoding="utf-8") as f:
         content = json.load(f)
 
+    # Belt-and-suspenders: sanitize company names + education/courses even if
+    # apply_agent already ran sanitizer (handles manual / re-run scenarios).
+    try:
+        from hunter.resume_sanitizer import sanitize_content
+        content = sanitize_content(content)
+        # Persist corrected content back to disk
+        Path(json_path).write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as _san_err:
+        print(f"  [WARN] resume sanitizer: {_san_err}")
+
     output_folder = content["output_folder"]
     stack = content["stack"]
 
@@ -339,10 +359,12 @@ def main():
         build_cover_letter(doc, content["cover_letter_pl"])
         save_docx(doc, Path(output_folder) / "Cover_Letter_PL.docx")
 
-    # --- About Me (full mode only) ---
-    if full_mode:
+    # --- About Me ---
+    _about_me_pl = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
+    if full_mode or _about_me_pl:
         from hunter.about_me_agent import generate_about_me
-        generate_about_me(Path(output_folder), lang="en")
+        if full_mode:
+            generate_about_me(Path(output_folder), lang="en")
         generate_about_me(Path(output_folder), lang="pl")
 
     # --- Update tracker.xlsx before PDF step so a LibreOffice crash doesn't lose the record ---

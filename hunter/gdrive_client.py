@@ -204,11 +204,43 @@ def upload_folder(service: Any, folder_path: Path, parent_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+def delete_folder(service: Any, folder_id: str) -> bool:
+    """Permanently delete a Drive folder (and all its contents) by id.
+
+    Returns True on success, False if the folder was not found (already deleted).
+    Raises HttpError for other API errors.
+    """
+    try:
+        service.files().delete(fileId=folder_id).execute()
+        log.info("gdrive: deleted folder id=%s", folder_id)
+        return True
+    except HttpError as e:
+        if e.resp.status == 404:
+            log.warning("gdrive: delete_folder — folder %s not found (already deleted?)", folder_id)
+            return False
+        log.error("gdrive: delete_folder failed for id=%s: %s", folder_id, e)
+        raise
+
+
+# ---------------------------------------------------------------------------
 # URL helper
 # ---------------------------------------------------------------------------
 
 def folder_url(folder_id: str) -> str:
     return f"https://drive.google.com/drive/folders/{folder_id}"
+
+
+def folder_id_from_url(url: str) -> str | None:
+    """Extract folder_id from a Drive URL like
+    https://drive.google.com/drive/folders/<id>
+    Returns None if the URL doesn't match the expected pattern.
+    """
+    import re
+    m = re.search(r"/folders/([A-Za-z0-9_-]+)", url or "")
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------

@@ -43,7 +43,7 @@
 
 ## Шаг 7 — Сопутствующие правки (как для Arbeitnow)
 
-- [prompts/system_prompt.md](../prompts/system_prompt.md) и [.claude/commands/apply.md](commands/apply.md): не использовать `remotive` как `company_name`.
+- [prompts/generation_rules.md](../prompts/generation_rules.md) и [.claude/commands/apply.md](commands/apply.md): не использовать `remotive` как `company_name`.
 - [CLAUDE.md](../CLAUDE.md): строка в дереве `sources/` и в списке toggles `REMOTIVE_ENABLED`.
 - [.env.example](../.env.example): `REMOTIVE_ENABLED=true`.
 

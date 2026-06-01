@@ -1,4 +1,6 @@
 from hunter.config import (
+    JUSTJOIN_ENABLED,
+    NOFLUFFJOBS_ENABLED,
     LINKEDIN_ENABLED,
     BULLDOGJOB_ENABLED,
     PRACUJ_ENABLED,
@@ -16,14 +18,17 @@ from hunter.config import (
     ATS_AGGREGATOR_ENABLED,
     GMAIL_ENABLED,
 )
-from hunter.sources.justjoin import JustJoinSource
-from hunter.sources.nofluffjobs import NoFluffJobsSource
 
 # Registry — add new sources here as you build them
-ALL_SOURCES = [
-    JustJoinSource(),
-    NoFluffJobsSource(),
-]
+ALL_SOURCES = []
+
+if JUSTJOIN_ENABLED:
+    from hunter.sources.justjoin import JustJoinSource
+    ALL_SOURCES.append(JustJoinSource())
+
+if NOFLUFFJOBS_ENABLED:
+    from hunter.sources.nofluffjobs import NoFluffJobsSource
+    ALL_SOURCES.append(NoFluffJobsSource())
 
 if LINKEDIN_ENABLED:
     from hunter.sources.linkedin import LinkedInSource
@@ -88,3 +93,79 @@ if ATS_AGGREGATOR_ENABLED:
 if GMAIL_ENABLED:
     from hunter.sources.gmail import GmailSource
     ALL_SOURCES.append(GmailSource())
+
+
+# ── Detail-page dispatch ─────────────────────────────────────────────────────
+
+# Sources that handle detail-page fetching independent of the search-time
+# ENABLED flags. apply_agent / expired_marker / gmail_enricher should still be
+# able to fetch text from a URL even when its source is excluded from the hunt
+# cycle. Build a fresh roster lazily so we don't pay the per-source import cost
+# on cold paths.
+_FETCH_ROSTER: list = []
+
+
+def _fetch_roster() -> list:
+    """Return every concrete source that knows how to claim/extract a URL.
+
+    Unlike ALL_SOURCES this is independent of *_ENABLED config — even disabled
+    sources own URL parsing for their domain.
+    """
+    global _FETCH_ROSTER
+    if _FETCH_ROSTER:
+        return _FETCH_ROSTER
+
+    from hunter.sources.arbeitnow import ArbeitnowSource
+    from hunter.sources.ats_aggregator import AtsAggregatorSource
+    from hunter.sources.bulldogjob import BulldogJobSource
+    from hunter.sources.fourdayweek import FourdayweekSource
+    from hunter.sources.himalayas import HimalayasSource
+    from hunter.sources.inhire import InhireSource
+    from hunter.sources.jobleads import JobLeadsSource
+    from hunter.sources.justjoin import JustJoinSource
+    from hunter.sources.linkedin import LinkedInSource
+    from hunter.sources.nofluffjobs import NoFluffJobsSource
+    from hunter.sources.pracuj import PracujSource
+    from hunter.sources.remoteleaf import RemoteleafSource
+    from hunter.sources.remoteok import RemoteOkSource
+    from hunter.sources.remotive import RemotiveSource
+    from hunter.sources.solidjobs import SolidJobsSource
+    from hunter.sources.theprotocol import TheProtocolSource
+    from hunter.sources.weworkremotely import WeworkremotelySource
+
+    _FETCH_ROSTER = [
+        JustJoinSource(),
+        NoFluffJobsSource(),
+        LinkedInSource(),
+        BulldogJobSource(),
+        PracujSource(),
+        TheProtocolSource(),
+        SolidJobsSource(),
+        InhireSource(),
+        JobLeadsSource(),
+        ArbeitnowSource(),
+        RemotiveSource(),
+        RemoteOkSource(),
+        HimalayasSource(),
+        FourdayweekSource(),
+        WeworkremotelySource(),
+        RemoteleafSource(),
+        AtsAggregatorSource(),
+    ]
+    return _FETCH_ROSTER
+
+
+def fetch_job_text(url: str) -> str:
+    """Fetch and return plain-text job posting for a URL.
+
+    Resolves the URL to the first source whose ``matches_url`` returns True and
+    delegates to ``source.fetch_text``. Falls back to the generic HTML extractor
+    when nothing matches. Tracking/UTM params are stripped before dispatch.
+    """
+    from hunter.sources.html_fallback import clean_url, fetch_html
+
+    cleaned = clean_url(url)
+    for src in _fetch_roster():
+        if src.matches_url(cleaned):
+            return src.fetch_text(cleaned)
+    return fetch_html(cleaned)

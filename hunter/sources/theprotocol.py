@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import cloudscraper
 
@@ -31,7 +32,6 @@ BASE = "https://theprotocol.it"
 
 LISTING_URLS = [
     f"{BASE}/filtry/frontend;sp/wroclaw;wp",
-    f"{BASE}/filtry/angular;sp?remote=true",
     f"{BASE}/filtry/frontend;sp?remote=true",
 ]
 
@@ -49,16 +49,223 @@ _scraper.headers.update({
 })
 
 
+def _playwright_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html)
+    text = re.sub(r"<li[^>]*>", "- ", text)
+    text = re.sub(r"</?(p|div|h[1-6]|ul|ol|section|strong|em|span)[^>]*>", " ", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _format_job_posting_ld(jp: dict) -> str:
+    parts: list[str] = []
+    parts.append(f"Job Title: {jp.get('title', 'N/A')}")
+
+    org = jp.get("hiringOrganization") or {}
+    if isinstance(org, dict):
+        parts.append(f"Company: {org.get('name', 'N/A')}")
+
+    loc = jp.get("jobLocation")
+    if isinstance(loc, dict):
+        address = loc.get("address") or {}
+        city = address.get("addressLocality", "")
+        country = address.get("addressCountry", "")
+        loc_str = ", ".join(filter(None, [city, country]))
+        if loc_str:
+            parts.append(f"Location: {loc_str}")
+    elif isinstance(loc, list):
+        cities: list[str] = []
+        for l in loc:
+            addr = (l.get("address") or {})
+            c = addr.get("addressLocality", "")
+            if c:
+                cities.append(c)
+        if cities:
+            parts.append(f"Location: {', '.join(cities)}")
+
+    salary = jp.get("baseSalary") or {}
+    if isinstance(salary, dict):
+        value = salary.get("value") or {}
+        if isinstance(value, dict):
+            lo = value.get("minValue")
+            hi = value.get("maxValue")
+            currency = salary.get("currency", "PLN")
+            if lo or hi:
+                parts.append(f"Salary: {lo or '?'}-{hi or '?'} {currency}")
+
+    emp = jp.get("employmentType")
+    if emp:
+        if isinstance(emp, list):
+            emp = ", ".join(emp)
+        parts.append(f"Employment: {emp}")
+
+    desc = jp.get("description", "")
+    if desc:
+        parts.append(f"\n--- Job Description ---\n{_strip_html(desc)}")
+
+    quals = jp.get("qualifications") or jp.get("skills") or ""
+    if quals:
+        parts.append(
+            f"\n--- Requirements ---\n"
+            + (_strip_html(quals) if isinstance(quals, str) else str(quals))
+        )
+
+    text = "\n".join(parts)
+    if len(text) < 50:
+        return ""
+    return text
+
+
+def _try_json_ld(html: str) -> str:
+    matches = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.S,
+    )
+    for raw in matches:
+        try:
+            data = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if item.get("@type") == "JobPosting":
+                return _format_job_posting_ld(item)
+    return ""
+
+
+def _try_bs4_detail(html: str) -> str:
+    """theprotocol-specific DOM parser; has a dedicated company-name selector."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    parts: list[str] = []
+
+    h1 = soup.find("h1")
+    if h1:
+        parts.append(f"Job Title: {h1.get_text(strip=True)}")
+    else:
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            parts.append(f"Job Title: {og_title['content']}")
+
+    company_name: Optional[str] = None
+    anchor = soup.find("a", attrs={"data-test": "anchor-company-link"})
+    if anchor:
+        label = anchor.find("span")
+        if label:
+            label.decompose()
+        company_name = anchor.get_text(strip=True)
+
+    if not company_name:
+        for sel in [
+            {"itemprop": "hiringOrganization"},
+            {"data-cy": "company-name"},
+            {"data-testid": "company-name"},
+        ]:
+            el = soup.find(attrs=sel)
+            if el:
+                name_el = el.find(itemprop="name") or el
+                text_ = name_el.get_text(strip=True)
+                if text_ and len(text_) < 100:
+                    company_name = text_
+                    break
+
+    if company_name:
+        parts.append(f"Company: {company_name}")
+
+    og_desc = soup.find("meta", property="og:description")
+    if og_desc and og_desc.get("content"):
+        parts.append(f"Summary: {og_desc['content']}")
+
+    for tag in soup.find_all(
+        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
+    ):
+        tag.decompose()
+
+    main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
+    if main:
+        text = main.get_text(separator="\n", strip=True)
+    else:
+        text = soup.get_text(separator="\n", strip=True)
+
+    if text:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        parts.append("\n--- Page Content ---\n" + "\n".join(lines[:200]))
+
+    result = "\n".join(parts)
+    if len(result) < 100:
+        return ""
+    return result
+
+
 class TheProtocolSource(BaseSource):
     name = "theprotocol"
 
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "theprotocol.it" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Fetch a theprotocol.it offer via cloudscraper; JSON-LD → BS4 → fallback."""
+        from hunter.sources.html_fallback import fetch_html
+        try:
+            resp = _scraper.get(url, timeout=TIMEOUT)
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as e:
+            logger.warning(f"[theprotocol] HTTP fetch failed ({e}), trying html_fallback")
+            return fetch_html(url)
+
+        text = _try_json_ld(html)
+        if text and len(text) > 100:
+            return text
+
+        text = _try_bs4_detail(html)
+        if text and len(text) > 100:
+            return text
+
+        logger.warning("[theprotocol] All strategies failed, using html_fallback")
+        return fetch_html(url)
+
     def search(self) -> list[Job]:
+        if _playwright_available():
+            return self._search_playwright()
+        logger.warning("[theprotocol] playwright not installed, falling back to cloudscraper")
+        return self._search_cloudscraper()
+
+    def _search_playwright(self) -> list[Job]:
+        return self._run_search(use_playwright=True)
+
+    def _search_cloudscraper(self) -> list[Job]:
+        return self._run_search(use_playwright=False)
+
+    def _run_search(self, use_playwright: bool) -> list[Job]:
         seen_urls: set[str] = set()
         jobs: list[Job] = []
 
         for listing_url in LISTING_URLS:
             try:
-                parsed = self._fetch_listing(listing_url)
+                parsed = (
+                    self._fetch_listing_playwright(listing_url)
+                    if use_playwright
+                    else self._fetch_listing(listing_url)
+                )
                 logger.info(f"[theprotocol] {listing_url} -> {len(parsed)} raw jobs")
                 for raw in parsed:
                     job = self._parse(raw)
@@ -75,6 +282,26 @@ class TheProtocolSource(BaseSource):
         return jobs
 
     # -- Listing fetch ---------------------------------------------------------
+
+    def _fetch_listing_playwright(self, url: str) -> list[dict]:
+        from hunter.playwright_helper import chromium_page
+        try:
+            with chromium_page(url) as page:
+                html = page.content()
+        except Exception as e:
+            logger.error(f"[theprotocol] Playwright fetch failed for {url}: {e}")
+            return []
+
+        jobs = self._extract_next_data(html)
+        if jobs:
+            logger.debug(f"[theprotocol] __NEXT_DATA__ gave {len(jobs)} items from {url}")
+            return jobs
+        jobs = self._extract_bs4(html)
+        if jobs:
+            logger.debug(f"[theprotocol] BeautifulSoup gave {len(jobs)} items from {url}")
+            return jobs
+        logger.warning(f"[theprotocol] 0 jobs from {url} (HTML length={len(html)})")
+        return []
 
     def _fetch_listing(self, url: str) -> list[dict]:
         try:

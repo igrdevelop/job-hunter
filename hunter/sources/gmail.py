@@ -41,7 +41,7 @@ class GmailSource(BaseSource):
             .execute()
         )
         messages = results.get("messages", [])
-        logger.info(f"[gmail] Found {len(messages)} matching emails")
+        logger.info("[gmail] Found %d matching email(s) in the last %dh", len(messages), LOOKBACK_HOURS)
 
         jobs: list[Job] = []
         for stub in messages:
@@ -51,32 +51,46 @@ class GmailSource(BaseSource):
                 .get(userId="me", id=stub["id"], format="full")
                 .execute()
             )
-            jobs.extend(self._parse_message(msg))
+            found = self._parse_message(msg)
+            jobs.extend(found)
 
-        logger.info(f"[gmail] Extracted {len(jobs)} job URLs total")
+        logger.info("[gmail] Extracted %d job URL(s) total across all emails", len(jobs))
 
         if jobs and GMAIL_ENRICH_ENABLED:
             from hunter.gmail_enricher import enrich_jobs
             jobs = enrich_jobs(jobs)
-            logger.info(f"[gmail] After enrichment: {len(jobs)} jobs")
+            logger.info("[gmail] After enrichment: %d job(s)", len(jobs))
 
         return jobs
 
     # Subjects that indicate confirmation/activity emails, not job alert emails.
+    # Covers English (LinkedIn) and Polish (Pracuj, NoFluffJobs) platforms.
     _SKIP_SUBJECTS = (
+        # English
         "you applied",
         "your application",
         "application received",
         "application was sent",
+        # Polish — Pracuj.pl activity notifications
+        "zapoznał się z twoją aplikacją",   # employer viewed your application
+        "twoja aplikacja została wysłana",   # your application was sent
+        "potwierdzenie aplikacji",           # application confirmation
+        "aplikacja została przyjęta",        # application accepted
+        "dziękujemy za aplikację",           # thank you for applying
+        "pracodawca zaprosił cię",           # employer invited you
+        "zaproszenie do rozmowy",            # invitation to interview
     )
 
     def _parse_message(self, msg: dict) -> list[Job]:
         headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
-        subject = headers.get("Subject", "")
-        sender = headers.get("From", "")
+        subject = headers.get("Subject", "(no subject)")
+        sender  = headers.get("From", "(unknown sender)")
+        date    = headers.get("Date", "(no date)")
+
+        logger.info("[gmail] ✉  from=%r  date=%s  subject=%r", sender, date, subject)
 
         if any(s in subject.lower() for s in self._SKIP_SUBJECTS):
-            logger.debug(f"[gmail] skipping confirmation email: '{subject}'")
+            logger.info("[gmail]    → SKIP (confirmation/activity email)")
             return []
 
         body_text, body_html = self._extract_body(msg["payload"])
@@ -85,11 +99,21 @@ class GmailSource(BaseSource):
             if domain in sender:
                 try:
                     found = parser_fn(subject, body_text, body_html)
-                    logger.debug(f"[gmail] {domain}: {len(found)} jobs from '{subject}'")
+                    if found:
+                        logger.info(
+                            "[gmail]    → %s: extracted %d URL(s):",
+                            domain, len(found),
+                        )
+                        for job in found:
+                            logger.info("[gmail]       %s", job.url)
+                    else:
+                        logger.info("[gmail]    → %s: 0 URLs extracted (no matching pattern in body)", domain)
                     return found
                 except Exception as e:
-                    logger.warning(f"[gmail] Parser error ({domain}): {e}")
+                    logger.warning("[gmail]    → %s: parser error — %s", domain, e)
                     return []
+
+        logger.debug("[gmail]    → no parser matched sender %r", sender)
         return []
 
     def _extract_body(self, payload: dict) -> tuple[str, str]:

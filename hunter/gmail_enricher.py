@@ -75,8 +75,8 @@ def _enrich_justjoin(job: Job) -> Job:
 
 
 def _enrich_via_text(job: Job) -> Job:
-    """Generic enricher: calls job_fetch, parses structured header lines."""
-    from job_fetch import fetch_job_text
+    """Generic enricher: calls the source dispatcher, parses structured header lines."""
+    from hunter.sources import fetch_job_text
 
     text = fetch_job_text(job.url)
 
@@ -105,20 +105,35 @@ def _enrich_via_text(job: Job) -> Job:
 
 def _enrich_one(job: Job) -> Job:
     domain = (urlparse(job.url).hostname or "").lower()
+    logger.info("[gmail_enricher] enriching %s", job.url)
     try:
         if "justjoin.it" in domain:
-            return _enrich_justjoin(job)
-        if any(d in domain for d in ("nofluffjobs.com", "bulldogjob.com", "bulldogjob.pl", "pracuj.pl", "linkedin.com")):
-            return _enrich_via_text(job)
+            result = _enrich_justjoin(job)
+        elif any(d in domain for d in ("nofluffjobs.com", "bulldogjob.com", "bulldogjob.pl", "pracuj.pl", "linkedin.com")):
+            result = _enrich_via_text(job)
+        else:
+            logger.info("[gmail_enricher]   → no enricher for %r — keeping stub", domain)
+            return job
+
+        if result is job:
+            logger.info("[gmail_enricher]   → unchanged (stub kept): %r", job.title)
+        else:
+            logger.info(
+                "[gmail_enricher]   → enriched: %r @ %r  loc=%r",
+                result.title, result.company, result.location,
+            )
+        return result
     except Exception as e:
-        logger.debug(f"[gmail_enricher] {domain}: {e}")
-    return job
+        logger.warning("[gmail_enricher]   → FAILED for %s — %s", job.url, e)
+        return job
 
 
 def enrich_jobs(jobs: list[Job]) -> list[Job]:
     """Enrich Gmail stub jobs with real metadata. Thread-parallel, best-effort."""
     if not jobs:
         return jobs
+
+    logger.info("[gmail_enricher] starting enrichment for %d job(s)", len(jobs))
 
     enriched: dict[str, Job] = {}
     with ThreadPoolExecutor(max_workers=GMAIL_ENRICH_CONCURRENCY) as pool:
@@ -129,10 +144,12 @@ def enrich_jobs(jobs: list[Job]) -> list[Job]:
                 result = future.result(timeout=GMAIL_ENRICH_TIMEOUT)
                 enriched[url] = result
             except Exception as e:
-                logger.debug(f"[gmail_enricher] timeout/error for {url}: {e}")
+                logger.warning("[gmail_enricher] timeout/error for %s — %s", url, e)
                 for j in jobs:
                     if j.url == url:
                         enriched[url] = j
                         break
 
+    ok = sum(1 for j in jobs if enriched.get(j.url, j) is not j)
+    logger.info("[gmail_enricher] done: %d/%d enriched, %d kept as stub", ok, len(jobs), len(jobs) - ok)
     return [enriched.get(j.url, j) for j in jobs]

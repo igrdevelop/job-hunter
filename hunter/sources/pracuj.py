@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import cloudscraper
 
@@ -42,16 +43,327 @@ TIMEOUT = 25
 _scraper = cloudscraper.create_scraper()
 
 
+def _playwright_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+# ── Detail-page fetching helpers (ported from job_fetch/pracuj.py) ───────────
+
+_ARCHIVED_PATTERNS = (
+    'data-test="section-archived"',
+    "data-apply-type=\"ArchivedApplyPanel\"",
+    "Pracodawca zakończył zbieranie zgłoszeń",
+    "oferta wygasła",
+    "offer expired",
+)
+
+
+def _extract_archived_notice(html: str) -> str:
+    """Return expiry notice text if the page HTML contains an archived marker."""
+    html_lower = html.lower()
+    for marker in _ARCHIVED_PATTERNS:
+        if marker.lower() in html_lower:
+            return "\nPracodawca zakończył zbieranie zgłoszeń na tę ofertę\n"
+    return ""
+
+
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html)
+    text = re.sub(r"<li[^>]*>", "- ", text)
+    text = re.sub(r"</?(p|div|h[1-6]|ul|ol|section|strong|em|span)[^>]*>", " ", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _format_job_posting_ld(jp: dict) -> str:
+    # JSON-LD on Pracuj sometimes omits description; without it the result is unusable.
+    if not jp.get("description"):
+        return ""
+
+    parts: list[str] = []
+    parts.append(f"Job Title: {jp.get('title', 'N/A')}")
+
+    org = jp.get("hiringOrganization") or {}
+    if isinstance(org, dict):
+        parts.append(f"Company: {org.get('name', 'N/A')}")
+
+    loc = jp.get("jobLocation")
+    if isinstance(loc, dict):
+        address = loc.get("address") or {}
+        city = address.get("addressLocality", "")
+        country = address.get("addressCountry", "")
+        loc_str = ", ".join(filter(None, [city, country]))
+        if loc_str:
+            parts.append(f"Location: {loc_str}")
+    elif isinstance(loc, list):
+        cities: list[str] = []
+        for l in loc:
+            addr = (l.get("address") or {})
+            c = addr.get("addressLocality", "")
+            if c:
+                cities.append(c)
+        if cities:
+            parts.append(f"Location: {', '.join(cities)}")
+
+    salary = jp.get("baseSalary") or {}
+    if isinstance(salary, dict):
+        value = salary.get("value") or {}
+        if isinstance(value, dict):
+            lo = value.get("minValue")
+            hi = value.get("maxValue")
+            currency = salary.get("currency", "PLN")
+            if lo or hi:
+                parts.append(f"Salary: {lo or '?'}-{hi or '?'} {currency}")
+
+    emp = jp.get("employmentType")
+    if emp:
+        if isinstance(emp, list):
+            emp = ", ".join(emp)
+        parts.append(f"Employment: {emp}")
+
+    desc = jp.get("description", "")
+    if desc:
+        parts.append(f"\n--- Job Description ---\n{_strip_html(desc)}")
+
+    quals = jp.get("qualifications") or jp.get("skills") or ""
+    if quals:
+        parts.append(
+            f"\n--- Requirements ---\n"
+            + (_strip_html(quals) if isinstance(quals, str) else str(quals))
+        )
+
+    text = "\n".join(parts)
+    if len(text) < 50:
+        return ""
+    return text
+
+
+def _try_json_ld(html: str) -> str:
+    matches = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.S,
+    )
+    for raw in matches:
+        try:
+            data = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if item.get("@type") == "JobPosting":
+                return _format_job_posting_ld(item)
+    return ""
+
+
+def _format_next_data_offer(offer: dict) -> str:
+    parts: list[str] = []
+    title = offer.get("jobTitle") or offer.get("title") or offer.get("name", "N/A")
+    parts.append(f"Job Title: {title}")
+
+    company = offer.get("companyName") or offer.get("employer", {}).get("name", "N/A")
+    parts.append(f"Company: {company}")
+
+    locations = offer.get("locations") or offer.get("workplaces") or []
+    if isinstance(locations, list):
+        cities: list[str] = []
+        for loc in locations:
+            if isinstance(loc, dict):
+                city = loc.get("city") or loc.get("label", "")
+                if city:
+                    cities.append(city)
+            elif isinstance(loc, str):
+                cities.append(loc)
+        if cities:
+            parts.append(f"Location: {', '.join(cities)}")
+
+    work_modes = offer.get("workModes") or offer.get("workSchedules") or []
+    if work_modes:
+        if isinstance(work_modes, list):
+            parts.append(f"Work mode: {', '.join(str(w) for w in work_modes)}")
+
+    salary = offer.get("salary") or offer.get("salaryDisplayText") or ""
+    if isinstance(salary, dict):
+        lo = salary.get("from") or salary.get("min")
+        hi = salary.get("to") or salary.get("max")
+        currency = salary.get("currency", "PLN")
+        if lo or hi:
+            parts.append(f"Salary: {lo or '?'}-{hi or '?'} {currency}")
+    elif isinstance(salary, str) and salary:
+        parts.append(f"Salary: {salary}")
+
+    techs = offer.get("technologies") or offer.get("expectedTechnologies") or []
+    if techs and isinstance(techs, list):
+        tech_names: list[str] = []
+        for t in techs:
+            if isinstance(t, dict):
+                tech_names.append(t.get("name", str(t)))
+            else:
+                tech_names.append(str(t))
+        parts.append(f"Technologies: {', '.join(tech_names)}")
+
+    for key in ("description", "responsibilities", "requirements", "offered", "benefits"):
+        val = offer.get(key, "")
+        if val and isinstance(val, str):
+            parts.append(f"\n--- {key.title()} ---\n{_strip_html(val)}")
+        elif val and isinstance(val, list):
+            items = "\n".join(f"- {_strip_html(str(v))}" for v in val)
+            parts.append(f"\n--- {key.title()} ---\n{items}")
+
+    text = "\n".join(parts)
+    if len(text) < 50:
+        return ""
+    return text
+
+
+def _try_next_data(html: str) -> str:
+    m = re.search(
+        r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
+        html, re.S,
+    )
+    if not m:
+        return ""
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return ""
+
+    page_props = data.get("props", {}).get("pageProps", {})
+    offer = page_props.get("offer") or page_props.get("dehydratedState", {})
+    if not isinstance(offer, dict) or not offer:
+        return ""
+
+    if offer.get("isActive") is False:
+        return "\nPracodawca zakończył zbieranie zgłoszeń na tę ofertę\n"
+
+    return _format_next_data_offer(offer)
+
+
+def _try_bs4_detail(html: str) -> str:
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    parts: list[str] = []
+
+    h1 = soup.find("h1")
+    if h1:
+        parts.append(f"Job Title: {h1.get_text(strip=True)}")
+    else:
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            parts.append(f"Job Title: {og_title['content']}")
+
+    og_desc = soup.find("meta", property="og:description")
+    if og_desc and og_desc.get("content"):
+        parts.append(f"Summary: {og_desc['content']}")
+
+    for tag in soup.find_all(
+        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
+    ):
+        tag.decompose()
+
+    main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
+    if main:
+        text = main.get_text(separator="\n", strip=True)
+    else:
+        text = soup.get_text(separator="\n", strip=True)
+
+    if text:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        parts.append("\n--- Page Content ---\n" + "\n".join(lines[:200]))
+
+    result = "\n".join(parts)
+    if len(result) < 100:
+        return ""
+    return result
+
+
+def _fetch_detail_html(url: str) -> str:
+    """Try cloudscraper first, fall back to plain requests. Returns raw HTML or raises."""
+    try:
+        resp = _scraper.get(url, timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as cs_err:
+        logger.warning(f"[pracuj] cloudscraper failed ({cs_err}), trying plain requests")
+        import requests as _req
+        from hunter.sources.html_fallback import HEADERS as _FB_HEADERS
+        resp = _req.get(url, headers=_FB_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.text
+
+
 class PracujSource(BaseSource):
     name = "pracuj"
 
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "pracuj.pl" in host
+
+    def fetch_text(self, url: str) -> str:
+        """Fetch Pracuj.pl offer; cascade JSON-LD → __NEXT_DATA__ → BS4 → fallback.
+
+        Appends an archived-notice line when the page HTML signals an expired offer.
+        """
+        from hunter.sources.html_fallback import fetch_html
+        try:
+            html = _fetch_detail_html(url)
+        except Exception as e:
+            logger.warning(f"[pracuj] all HTTP strategies failed ({e}), using html_fallback")
+            return fetch_html(url)
+
+        archived_notice = _extract_archived_notice(html)
+
+        text = _try_json_ld(html)
+        if text and len(text) > 100:
+            return text + archived_notice
+
+        text = _try_next_data(html)
+        if text and len(text) > 100:
+            return text + archived_notice
+
+        text = _try_bs4_detail(html)
+        if text and len(text) > 100:
+            return text + archived_notice
+
+        logger.warning("[pracuj] All extraction strategies failed, using html_fallback")
+        result = fetch_html(url)
+        return result + archived_notice if result else result
+
     def search(self) -> list[Job]:
+        if _playwright_available():
+            return self._search_playwright()
+        logger.warning("[Pracuj] playwright not installed, falling back to cloudscraper")
+        return self._search_cloudscraper()
+
+    def _search_playwright(self) -> list[Job]:
+        return self._run_search(use_playwright=True)
+
+    def _search_cloudscraper(self) -> list[Job]:
+        return self._run_search(use_playwright=False)
+
+    def _run_search(self, use_playwright: bool) -> list[Job]:
         seen_norm_urls: set[str] = set()
         seen_group_ids: set[str] = set()
         jobs: list[Job] = []
 
         for url in LISTING_URLS:
-            raw_jobs = self._fetch_listing(url)
+            raw_jobs = (
+                self._fetch_listing_playwright(url)
+                if use_playwright
+                else self._fetch_listing(url)
+            )
             logger.info(f"[Pracuj] {url} -> {len(raw_jobs)} raw jobs")
             for raw in raw_jobs:
                 job = self._parse(raw)
@@ -75,6 +387,23 @@ class PracujSource(BaseSource):
         return jobs
 
     # -- Listing fetch ---------------------------------------------------------
+
+    def _fetch_listing_playwright(self, url: str) -> list[dict]:
+        from hunter.playwright_helper import chromium_page
+        try:
+            with chromium_page(url) as page:
+                html = page.content()
+        except Exception as e:
+            logger.error(f"[Pracuj] Playwright fetch failed for {url}: {e}")
+            return []
+
+        jobs = self._extract_next_data(html)
+        if jobs:
+            return jobs
+        jobs = self._extract_json_ld(html)
+        if jobs:
+            return jobs
+        return self._extract_bs4(html)
 
     def _fetch_listing(self, url: str) -> list[dict]:
         try:

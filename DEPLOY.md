@@ -1,84 +1,84 @@
-# Деплой Job Hunter на VPS
+# Deploying Job Hunter to a VPS
 
-Пошаговый гайд — делаешь сам, строчка за строчкой.
-
----
-
-## Где мы сейчас
-
-- [x] Фаза 1 — GitHub репо создан, код запушен
-- [ ] Фаза 2 — Dockerfile
-- [ ] Фаза 3 — VPS на Hetzner
-- [ ] Фаза 4 — GitHub Actions CI/CD
-- [ ] Фаза 5 — Первый запуск
+Step-by-step guide — do it yourself, line by line.
 
 ---
 
-## Фаза 2 — Dockerfile (делаешь локально)
+## Current status
 
-### Что такое Dockerfile?
-
-Dockerfile — это рецепт. Ты описываешь как собрать "коробку" (контейнер) с твоим ботом.
-Docker читает этот файл и создаёт образ — снапшот всего что нужно для запуска:
-Python, библиотеки, код. Потом этот образ запускается на любом сервере одинаково.
+- [x] Phase 1 — GitHub repo created, code pushed
+- [ ] Phase 2 — Dockerfile
+- [ ] Phase 3 — VPS on Hetzner
+- [ ] Phase 4 — GitHub Actions CI/CD
+- [ ] Phase 5 — First launch
 
 ---
 
-### Шаг 2.1 — Создать Dockerfile
+## Phase 2 — Dockerfile (done locally)
 
-Открой VS Code в папке `D:\LearningProject\Claude`.
-Создай файл `Dockerfile` (без расширения) в корне проекта.
+### What is a Dockerfile?
 
-Содержимое:
+A Dockerfile is a recipe. You describe how to build a "box" (container) with your bot.
+Docker reads the file and creates an image — a snapshot of everything needed to run:
+Python, libraries, code. That image can then be started on any server identically.
+
+---
+
+### Step 2.1 — Create Dockerfile
+
+Open VS Code in `D:\LearningProject\Claude`.
+Create a file called `Dockerfile` (no extension) in the project root.
+
+Contents:
 
 ```dockerfile
-# Берём официальный образ Python 3.11
-# slim = облегчённая версия без лишних инструментов (меньше размер)
+# Official Python 3.11 base image.
+# slim = lightweight variant without dev tools (smaller image size).
 FROM python:3.11-slim
 
-# Устанавливаем рабочую папку внутри контейнера
-# Все следующие команды будут выполняться отсюда
+# Set working directory inside the container.
+# All subsequent commands run from here.
 WORKDIR /app
 
-# Устанавливаем gcc — нужен для компиляции некоторых Python пакетов
-# После установки чистим кеш apt чтобы не раздувать образ
+# Install gcc — required to compile some Python packages.
+# Clean apt cache afterwards to keep the image small.
 RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем ТОЛЬКО requirements.txt (не весь код)
-# Зачем отдельно? Docker кеширует слои.
-# Если код изменился но requirements.txt нет — pip install не запустится снова
+# Copy ONLY requirements.txt (not the full source yet).
+# Why separately? Docker caches layers.
+# If source changes but requirements.txt does not, pip install is skipped.
 COPY requirements.txt .
 
-# Устанавливаем зависимости
-# --no-cache-dir = не сохранять кеш pip (экономим место)
+# Install dependencies.
+# --no-cache-dir = do not store pip cache (saves space).
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Теперь копируем весь код
-# Это отдельный слой — при изменении кода пересобирается только он
+# Now copy the full source.
+# Separate layer — only rebuilt when source changes.
 COPY . .
 
-# Создаём папку для документов (будет перекрыта volume с сервера)
+# Create the Applications folder (will be overridden by a server volume mount).
 RUN mkdir -p Applications
 
-# Команда запуска бота
+# Bot startup command.
 CMD ["python", "hunter.py"]
 ```
 
-После создания файла — скажи "готово", идём дальше.
+When done — say "ready", we'll continue.
 
 ---
 
-### Шаг 2.2 — Создать .dockerignore
+### Step 2.2 — Create .dockerignore
 
-Это как .gitignore, только для Docker.
-Docker не будет копировать эти файлы/папки в образ.
+Like .gitignore, but for Docker.
+Docker will not copy these files/folders into the image.
 
-Создай файл `.dockerignore` в корне проекта:
+Create `.dockerignore` in the project root:
 
 ```
-# Секреты — никогда не должны попасть в образ
+# Secrets — must never end up in the image
 .env
 .secrets/
 
@@ -86,79 +86,79 @@ Docker не будет копировать эти файлы/папки в об
 .git/
 .github/
 
-# Python кеш
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 
-# Персональные данные — не нужны в образе
+# Personal data — not needed in the image
 tracker.xlsx
 Applications/
 
-# Документы
+# Documents
 *.pdf
 *.docx
 
 # Claude Code
 .claude/
 
-# Тесты и dev файлы
+# Tests and dev files
 *.md
 DEPLOY.md
 ```
 
-После создания файла — скажи "готово".
+When done — say "ready".
 
 ---
 
-### Шаг 2.3 — Создать docker-compose.yml
+### Step 2.3 — Create docker-compose.yml
 
-docker-compose — это способ описать как запускать контейнер на сервере:
-какие переменные окружения, какие папки пробросить, политика перезапуска.
+docker-compose describes how to run the container on the server:
+which environment variables, which folders to mount, restart policy.
 
-Создай файл `docker-compose.yml` в корне проекта:
+Create `docker-compose.yml` in the project root:
 
 ```yaml
 version: "3.9"
 
 services:
   job-hunter:
-    # Берём образ из GitHub Container Registry (туда будет пушить CI/CD)
+    # Pull image from GitHub Container Registry (CI/CD pushes there).
     image: ghcr.io/igrdevelop/job-hunter:latest
     container_name: job-hunter
 
-    # always = если контейнер упал или сервер перезагрузился — автозапуск
+    # always = auto-restart if the container crashes or the server reboots.
     restart: always
 
-    # Загружаем переменные окружения из .env файла на сервере
+    # Load environment variables from the .env file on the server.
     env_file:
       - .env
 
-    # Volumes — пробрасываем папки с сервера внутрь контейнера
-    # Формат: путь_на_сервере:путь_внутри_контейнера
+    # Volumes — mount server folders into the container.
+    # Format: host_path:container_path
     volumes:
-      # tracker.xlsx живёт на диске сервера, не теряется при обновлении образа
+      # tracker.xlsx lives on the server disk; survives image updates.
       - ./tracker.xlsx:/app/tracker.xlsx
-      # Сгенерированные документы тоже сохраняются
+      # Generated application documents also persist.
       - ./Applications:/app/Applications
-      # LinkedIn сессия (если используется)
+      # LinkedIn session (if used).
       - ./.secrets:/app/.secrets
 
-    # Настройки логов
+    # Log settings.
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # максимум 10MB на файл лога
-        max-file: "3"     # хранить последние 3 файла
+        max-size: "10m"   # max 10 MB per log file
+        max-file: "3"     # keep the last 3 rotated files
 ```
 
-После создания файла — скажи "готово".
+When done — say "ready".
 
 ---
 
-### Шаг 2.4 — Закоммитить и запушить
+### Step 2.4 — Commit and push
 
-После того как все три файла созданы, выполни в терминале:
+After all three files are created, run in the terminal:
 
 ```bash
 git add Dockerfile .dockerignore docker-compose.yml
@@ -168,123 +168,123 @@ git push
 
 ---
 
-### Проверка Фазы 2
+### Phase 2 verification
 
-После пуша зайди на github.com/igrdevelop/job-hunter —
-в репо должны появиться три новых файла:
+After pushing, go to github.com/igrdevelop/job-hunter —
+three new files should appear in the repo:
 - `Dockerfile`
 - `.dockerignore`
 - `docker-compose.yml`
 
 ---
 
-## Фаза 3 — VPS на Hetzner
+## Phase 3 — VPS on Hetzner
 
-### Что такое VPS?
+### What is a VPS?
 
-VPS (Virtual Private Server) — это твой компьютер в интернете.
-Работает 24/7, имеет публичный IP адрес, ты управляешь им через SSH.
+A VPS (Virtual Private Server) is your computer on the internet.
+It runs 24/7, has a public IP address, and you control it over SSH.
 
-Hetzner — немецкий провайдер, лучшее соотношение цена/качество в Европе.
-CX22 — 2 CPU, 4GB RAM, 40GB SSD — €4.35/мес (~18 PLN).
-Этого хватит для бота + сайта в будущем.
+Hetzner is a German provider with the best price/performance ratio in Europe.
+CX22 — 2 CPU, 4 GB RAM, 40 GB SSD — €4.35/month (~18 PLN).
+More than enough for the bot and a future website.
 
 ---
 
-### Шаг 3.1 — Создать SSH ключ (если нет)
+### Step 3.1 — Create an SSH key (if you don't have one)
 
-SSH ключ — это как пароль, только безопаснее. Состоит из двух частей:
-- приватный ключ (у тебя на компьютере, никому не давать)
-- публичный ключ (даёшь серверу — он тебя узнаёт)
+An SSH key is like a password, but more secure. It has two parts:
+- private key (stays on your computer, never share it)
+- public key (give it to the server — it recognises you)
 
-Открой PowerShell и выполни:
+Open PowerShell and run:
 
 ```powershell
 ssh-keygen -t ed25519 -C "job-hunter-vps"
 ```
 
-Когда спросит путь — нажми Enter (сохранит в ~/.ssh/id_ed25519).
-Когда спросит passphrase — можно оставить пустым (просто Enter).
+When asked for a path — press Enter (saves to ~/.ssh/id_ed25519).
+When asked for a passphrase — leave it empty (just Enter).
 
-Покажи публичный ключ:
+Show the public key:
 
 ```powershell
 cat ~/.ssh/id_ed25519.pub
 ```
 
-Скопируй весь вывод — он понадобится при создании сервера.
+Copy the entire output — you'll need it when creating the server.
 
 ---
 
-### Шаг 3.2 — Создать сервер на Hetzner
+### Step 3.2 — Create a server on Hetzner
 
-1. Зайди на console.hetzner.com → зарегистрируйся
-2. New Project → название "job-hunter"
+1. Go to console.hetzner.com → register
+2. New Project → name it "job-hunter"
 3. Add Server:
-   - Location: **Nuremberg** (ближе к Польше)
+   - Location: **Nuremberg** (closest to Poland)
    - Image: **Ubuntu 22.04**
    - Type: **Shared vCPU → x86 → CX22**
-   - SSH Keys → Add SSH Key → вставь публичный ключ из шага 3.1
+   - SSH Keys → Add SSH Key → paste the public key from step 3.1
    - Name: `job-hunter`
 4. Create & Buy
 
-Запиши IP адрес сервера — он появится на странице после создания.
+Write down the server IP — it appears on the page after creation.
 
 ---
 
-### Шаг 3.3 — Первый вход на сервер
+### Step 3.3 — First login to the server
 
 ```powershell
-ssh root@ТВОЙ_IP
+ssh root@YOUR_IP
 ```
 
-Если спросит "Are you sure?" — введи `yes`.
+If asked "Are you sure?" — type `yes`.
 
-Ты внутри сервера. Командная строка изменится на что-то вроде:
+You are now inside the server. The prompt changes to something like:
 ```
 root@job-hunter:~#
 ```
 
 ---
 
-### Шаг 3.4 — Установить Docker
+### Step 3.4 — Install Docker
 
-Выполни команды по очереди:
+Run commands one by one:
 
 ```bash
-# Обновить список пакетов
+# Update package list
 apt update && apt upgrade -y
 
-# Установить Docker одной командой (официальный скрипт)
+# Install Docker using the official script
 curl -fsSL https://get.docker.com | sh
 
-# Установить docker-compose
+# Install docker-compose
 apt install docker-compose -y
 
-# Проверить что всё установилось
+# Verify installation
 docker --version
 docker-compose --version
 ```
 
 ---
 
-### Шаг 3.5 — Создать пользователя deploy
+### Step 3.5 — Create a deploy user
 
-Работать под root — плохая практика. Создаём отдельного пользователя:
+Running as root is bad practice. Create a dedicated user:
 
 ```bash
-# Создать пользователя
+# Create user
 useradd -m -s /bin/bash deploy
 
-# Добавить в группу docker (чтобы мог запускать контейнеры)
+# Add to the docker group (so they can run containers)
 usermod -aG docker deploy
 
-# Создать папку для проекта
+# Create project folder
 mkdir -p /home/deploy/job-hunter
 chown deploy:deploy /home/deploy/job-hunter
 ```
 
-Добавить SSH ключ для пользователя deploy:
+Add SSH key for the deploy user:
 
 ```bash
 mkdir -p /home/deploy/.ssh
@@ -294,110 +294,110 @@ chmod 700 /home/deploy/.ssh
 chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-Проверь что можешь войти как deploy (с твоего компьютера, не с сервера):
+Verify you can log in as deploy (from your computer, not the server):
 
 ```powershell
-ssh deploy@ТВОЙ_IP
+ssh deploy@YOUR_IP
 ```
 
 ---
 
-### Шаг 3.6 — Загрузить файлы на сервер
+### Step 3.6 — Upload files to the server
 
-С твоего компьютера (не с сервера!), в PowerShell:
+From your computer (not the server!), in PowerShell:
 
 ```powershell
-# Загрузить .env с секретами
-scp D:\LearningProject\Claude\.env deploy@ТВОЙ_IP:/home/deploy/job-hunter/
+# Upload .env with secrets
+scp D:\LearningProject\Claude\.env deploy@YOUR_IP:/home/deploy/job-hunter/
 
-# Загрузить docker-compose.yml
-scp D:\LearningProject\Claude\docker-compose.yml deploy@ТВОЙ_IP:/home/deploy/job-hunter/
+# Upload docker-compose.yml
+scp D:\LearningProject\Claude\docker-compose.yml deploy@YOUR_IP:/home/deploy/job-hunter/
 
-# Загрузить tracker.xlsx
-scp D:\LearningProject\Claude\tracker.xlsx deploy@ТВОЙ_IP:/home/deploy/job-hunter/
+# Upload tracker.xlsx
+scp D:\LearningProject\Claude\tracker.xlsx deploy@YOUR_IP:/home/deploy/job-hunter/
 
-# Создать папку Applications на сервере
-ssh deploy@ТВОЙ_IP "mkdir -p /home/deploy/job-hunter/Applications"
+# Create Applications folder on the server
+ssh deploy@YOUR_IP "mkdir -p /home/deploy/job-hunter/Applications"
 
-# Загрузить .secrets если используешь LinkedIn
-scp -r D:\LearningProject\Claude\.secrets deploy@ТВОЙ_IP:/home/deploy/job-hunter/
+# Upload .secrets if you use LinkedIn
+scp -r D:\LearningProject\Claude\.secrets deploy@YOUR_IP:/home/deploy/job-hunter/
 ```
 
 ---
 
-## Фаза 4 — GitHub Actions CI/CD
+## Phase 4 — GitHub Actions CI/CD
 
-### Что такое GitHub Actions?
+### What is GitHub Actions?
 
-Это автоматизация внутри GitHub. Ты описываешь в YAML файле:
-"когда кто-то пушит в master — сделай вот это".
+Automation built into GitHub. You describe in a YAML file:
+"when someone pushes to master — do this".
 
-"Вот это" в нашем случае:
-1. Собери Docker образ из кода
-2. Запушь образ в GitHub Container Registry
-3. Зайди на VPS по SSH
-4. Скачай новый образ
-5. Перезапусти контейнер
+"This" in our case:
+1. Build a Docker image from the code
+2. Push the image to GitHub Container Registry
+3. SSH into the VPS
+4. Pull the new image
+5. Restart the container
 
 ---
 
-### Шаг 4.1 — Добавить секреты в GitHub
+### Step 4.1 — Add secrets to GitHub
 
-Зайди на github.com/igrdevelop/job-hunter →
+Go to github.com/igrdevelop/job-hunter →
 Settings → Secrets and variables → Actions → New repository secret
 
-Добавь по одному:
+Add one by one:
 
 | Name | Value |
 |------|-------|
-| `VPS_HOST` | IP твоего сервера (например 65.21.123.45) |
+| `VPS_HOST` | Your server IP (e.g. 65.21.123.45) |
 | `VPS_USER` | `deploy` |
-| `VPS_SSH_KEY` | содержимое файла `~/.ssh/id_ed25519` (приватный ключ!) |
+| `VPS_SSH_KEY` | Contents of `~/.ssh/id_ed25519` (private key!) |
 | `VPS_WORK_DIR` | `/home/deploy/job-hunter` |
 
-Показать содержимое приватного ключа:
+Show the private key contents:
 ```powershell
 cat ~/.ssh/id_ed25519
 ```
 
-Копируй ВСЁ включая `-----BEGIN...` и `-----END...`.
+Copy EVERYTHING including `-----BEGIN...` and `-----END...`.
 
 ---
 
-### Шаг 4.2 — GitHub Container Registry токен
+### Step 4.2 — GitHub Container Registry token
 
-GitHub → Settings (твой профиль, не репо!) →
+GitHub → Settings (your profile, not the repo!) →
 Developer settings → Personal access tokens → Tokens (classic) →
 Generate new token (classic)
 
 - Note: `job-hunter-ghcr`
 - Expiration: No expiration
-- Поставь галочки: `write:packages`, `read:packages`, `delete:packages`
-- Generate token → скопируй токен
+- Check: `write:packages`, `read:packages`, `delete:packages`
+- Generate token → copy the token
 
-Добавь как секрет в репо (шаг 4.1):
+Add it as a repo secret (step 4.1):
 
 | Name | Value |
 |------|-------|
-| `GHCR_TOKEN` | токен который только что скопировал |
+| `GHCR_TOKEN` | the token you just copied |
 
 ---
 
-### Шаг 4.3 — Создать workflow файл
+### Step 4.3 — Create the workflow file
 
-Создай папки и файл:
+Create the folders and file:
 ```
 .github/
   workflows/
     deploy.yml
 ```
 
-Содержимое `deploy.yml`:
+Contents of `deploy.yml`:
 
 ```yaml
 name: Deploy Job Hunter
 
-# Запускать при каждом push в ветку master
+# Run on every push to master.
 on:
   push:
     branches: [ master ]
@@ -411,11 +411,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Скачать код из репозитория
+      # 1. Check out the repository.
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Залогиниться в GitHub Container Registry
+      # 2. Log in to GitHub Container Registry.
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
@@ -423,7 +423,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      # 3. Собрать и запушить Docker образ
+      # 3. Build and push the Docker image.
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -433,7 +433,7 @@ jobs:
             ghcr.io/${{ env.IMAGE_NAME }}:latest
             ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-      # 4. Задеплоить на VPS через SSH
+      # 4. Deploy to VPS over SSH.
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -443,22 +443,22 @@ jobs:
           script: |
             cd ${{ secrets.VPS_WORK_DIR }}
 
-            # Залогиниться в GHCR
+            # Log in to GHCR.
             echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Скачать новый образ
+            # Pull the new image.
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
 
-            # Перезапустить контейнер с новым образом
+            # Restart the container with the new image.
             docker-compose up -d --pull always
 
-            # Удалить старые образы (экономия диска)
+            # Remove old images to free disk space.
             docker image prune -f
 
-            echo "✅ Deploy complete!"
+            echo "Deploy complete!"
 ```
 
-После создания файла:
+After creating the file:
 
 ```bash
 git add .github/
@@ -468,10 +468,10 @@ git push origin develop
 
 ---
 
-### Шаг 4.4 — Сделать первый деплой
+### Step 4.4 — First deploy
 
-Сейчас CI/CD запускается при push в **master**.
-Смержи develop в master:
+CI/CD triggers on push to **master**.
+Merge develop into master:
 
 ```bash
 git checkout master
@@ -479,88 +479,88 @@ git merge develop
 git push origin master
 ```
 
-Зайди на github.com/igrdevelop/job-hunter → вкладка **Actions**.
-Увидишь запущенный workflow. Он займёт 2-3 минуты.
-Зелёная галочка = деплой прошёл успешно.
+Go to github.com/igrdevelop/job-hunter → **Actions** tab.
+You will see the workflow running. It takes 2–3 minutes.
+Green checkmark = deploy succeeded.
 
 ---
 
-## Фаза 5 — Первый запуск
+## Phase 5 — First launch
 
-### Шаг 5.1 — Зайти на сервер
+### Step 5.1 — Log in to the server
 
 ```powershell
-ssh deploy@ТВОЙ_IP
+ssh deploy@YOUR_IP
 cd /home/deploy/job-hunter
 ```
 
-### Шаг 5.2 — Залогиниться в GHCR (один раз)
+### Step 5.2 — Log in to GHCR (once)
 
 ```bash
-echo ТУТ_ТВОЙ_GHCR_TOKEN | docker login ghcr.io -u igrdevelop --password-stdin
+echo YOUR_GHCR_TOKEN | docker login ghcr.io -u igrdevelop --password-stdin
 ```
 
-### Шаг 5.3 — Запустить бота
+### Step 5.3 — Start the bot
 
 ```bash
 docker-compose up -d
 ```
 
-### Шаг 5.4 — Проверить что работает
+### Step 5.4 — Verify it works
 
 ```bash
-# Статус контейнера
+# Container status
 docker-compose ps
 
-# Логи в реальном времени (Ctrl+C чтобы выйти)
+# Live logs (Ctrl+C to exit)
 docker-compose logs -f
 ```
 
-Если в Telegram пришло сообщение от бота — всё работает.
+If a message from the bot arrives in Telegram — everything works.
 
 ---
 
-## Полезные команды (на сервере)
+## Useful commands (on the server)
 
 ```bash
-# Смотреть логи
+# View logs
 docker-compose logs -f job-hunter
 
-# Перезапустить
+# Restart
 docker-compose restart job-hunter
 
-# Остановить
+# Stop
 docker-compose stop
 
-# Обновить вручную (обычно это делает CI/CD автоматически)
+# Update manually (usually CI/CD does this automatically)
 docker-compose pull && docker-compose up -d
 
-# Зайти внутрь контейнера для отладки
+# Shell into the container for debugging
 docker exec -it job-hunter bash
 
-# Сколько памяти/CPU использует контейнер
+# Memory/CPU usage
 docker stats job-hunter
 ```
 
 ---
 
-## После деплоя — как обновлять бота
+## After deploy — how to update the bot
 
-Теперь рабочий процесс:
+The workflow going forward:
 
 ```bash
-# 1. Сделай изменения в коде локально
-# 2. Закоммить
+# 1. Make changes to the code locally.
+# 2. Commit.
 git add .
-git commit -m "fix: что-то исправил"
+git commit -m "fix: description of the fix"
 
-# 3. Смержи в master
+# 3. Merge into master.
 git checkout master
 git merge develop
 git push origin master
 
-# 4. GitHub Actions автоматически задеплоит за 2-3 минуты
-# Следи в github.com/igrdevelop/job-hunter → Actions
+# 4. GitHub Actions deploys automatically in 2–3 minutes.
+#    Watch progress at github.com/igrdevelop/job-hunter -> Actions.
 ```
 
-Ничего больше делать не нужно.
+Nothing else needs to be done.

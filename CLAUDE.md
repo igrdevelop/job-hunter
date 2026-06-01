@@ -127,7 +127,7 @@ hunter/
   models.py                 Job dataclass
   filters.py                Central filter: keywords, level, location, patterns, React-only, German
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
-  telegram_bot.py           Telegram bot: all handlers, schedule, callbacks (1266 lines)
+  telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
   tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (~980 lines)
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
@@ -139,28 +139,65 @@ hunter/
   gdrive_client.py          Low-level Drive API v3 wrapper
   gmail_client.py           Gmail API wrapper
   gmail_parsers.py          Parse job alert emails from various boards
+  bot/
+    state.py                Shared mutable state (_pending_jobs, _active_apply_urls, _force_waiting)
+    keyboards.py            _make_keyboard() — InlineKeyboardMarkup factory
+    notifications.py        send_text(), send_job_cards(), _tg_notify()
+    paste.py                _looks_like_paste(), _extract_url(), URL_RE
+    formatters.py           _build_schedule_text(), _format_check_responses_report(), _format_daily_summary()
+    apply_runner.py         _run_apply_agent(), _run_linkedin_batch(), _handle_paste()
+  commands/                 One file per Telegram command handler
+    start.py                /start
+    schedule.py             /schedule
+    unsent.py               /unsent
+    status.py               /status
+    sync_sent.py            /sync_sent
+    hunt.py                 /hunt + parse_hunt_source_args
+    force.py                /force + _force_cleanup + _force_run
+    process_manual.py       /process_manual
+    about_me.py             /about_me
+    check_expired.py        /check_expired
+    debug_url.py            /debug_url
+    gsheets.py              /gsheets_status + /gsheets_push_missing + /gsheets_push_sent
+    gdrive.py               /gdrive_upload_missing
+    check_responses.py      /check_responses
+    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
+  schedules/                One file per JobQueue callback
+    hunt.py                 scheduled_hunt
+    check_expired.py        scheduled_check_expired
+    tracker_backup.py       scheduled_tracker_backup
+    gdrive.py               scheduled_gdrive_upload_missing
+    gsheets.py              scheduled_gsheets_resync + scheduled_gsheets_pull
+    pending_report.py       scheduled_pending_report
+    email_responses.py      scheduled_check_email_responses
+    daily_summary.py        scheduled_daily_summary
+    __init__.py             register(app, tz) — wires all callbacks into the Application
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
-  sources/                  17 scrapers (see table above)
-    base.py                 BaseSource ABC: search() -> list[Job]
-    __init__.py             ALL_SOURCES registry (conditional imports by ENABLED flags)
+  sources/                  17 scrapers (see table above) + per-site detail-page fetchers
+    base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
+    __init__.py             ALL_SOURCES registry + fetch_job_text() URL dispatcher
+    html_fallback.py        Generic HTML -> text fallback + clean_url() helper
   ats/                      ATS provider adapters
     base.py                 ATSProvider ABC: fetch(slug, company_name) -> list[Job]
     workable.py / greenhouse.py / lever.py / recruitee.py / ashby.py
   ats_companies.json        Company list for ATS aggregator
 
-job_fetch/                  Per-site detail text fetchers (22 files)
-  __init__.py               Dispatcher: domain -> fetcher
-  html_fallback.py          Generic HTML -> text (BeautifulSoup)
-  ats_workable.py / ats_greenhouse.py / ...  ATS detail fetchers
-
 prompts/
-  system_prompt.md          LLM instructions for resume/CL generation
-  candidate_profile.md      Candidate data (single source of truth for personal info)
+  generation_rules.md           LLM instructions for resume/CL generation (was system_prompt.md)
+  candidate_profile.md          Candidate data (single source of truth for personal info)
+  base_cv_angular.md            Pre-polished bullets for Angular track
+  base_cv_react.md              Pre-polished bullets for React / JS track
+  base_cv_ai.md                 Pre-polished bullets for AI-first track
+  base_cv_fullstack_angular_nest.md  Pre-polished bullets for Angular + NestJS track
+  base_cv_fullstack_react_next.md    Pre-polished bullets for React + Next.js track
+  examples/                     Cover letter examples, About Me texts, candidate CV DOCX
 
 tests/                      37+ test files, ~3200 lines (pytest)
+tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
+tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
 
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
@@ -183,6 +220,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_MODEL` | `claude-3-5-haiku-20241022` | Model for API mode |
 | `LLM_API_KEY` | — | API key for LLM provider |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
+| `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
@@ -216,7 +254,7 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 1. `job_fetch.fetch_job_text(url)` — fetch full job description
 2. Save `job_posting.txt` to output folder
 3. `expired_check.is_job_expired(text)` — skip if expired
-4. LLM call: `candidate_profile.md` + `system_prompt.md` + job text -> `content.json`
+4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
 5. Cover letter self-review loop (up to 3 LLM rounds)
 6. Output folder: `Applications/{today}/{CompanyName}/`
 7. `generate_docs.py` -> DOCX + PDF (LibreOffice headless)
@@ -246,6 +284,7 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 | 9 | Re-application | `+` flag |
 | 10 | To Learn | Skills gap |
 | 11 | ID | Short UUID (8-char hex) — Google Sheets sync key |
+| 12 | Drive URL | Google Drive folder URL after upload (local-only, not synced to Sheets) |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
@@ -333,15 +372,15 @@ GSHEETS_ENABLED=true
 
 ### Structural
 
-1. **telegram_bot.py is a ~1380-line monolith.** Contains 17+ handlers, build_application, schedule setup, LinkedIn batch, paste flow, expired check flow, force logic. Hard to navigate and test.
+1. ~~**telegram_bot.py is a ~1380-line monolith.**~~ ✅ Resolved (Phase 1–7 refactor, 2026-05-26): split into `bot/` (6 modules), `commands/` (15 files), `schedules/` (9 files). `telegram_bot.py` is now a ~200-line import shim that re-exports everything for backward compat.
 
-2. **job_fetch/ is a separate parallel package (22 files, 2475 lines).** Every site has a file in both `hunter/sources/` (search/listing) and `job_fetch/` (detail text fetch). URLs, headers, and domain knowledge are duplicated across packages.
+2. ~~**job_fetch/ is a separate parallel package (22 files, 2475 lines).**~~ ✅ Resolved (Phase 3 refactor, 2026-05-26): each source now owns its detail-page extraction (`matches_url` + `fetch_text` on `BaseSource`). `hunter.sources.fetch_job_text(url)` dispatches to the matching source. `job_fetch/` deleted.
 
 3. **apply_agent.py is 1297 lines.** Contains two full pipelines (API + CLI mode), Telegram notification, folder management, LLM calling, cover letter review loop, paste flow, force mode, JobLeads MANUAL flow. Could be split.
 
 ### Infrastructure
 
-4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). LinkedIn job_fetch falls back to `html_fallback` without Playwright but gets lower-quality text.
+4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). Without Playwright, `LinkedInSource.fetch_text` falls back to `html_fallback` and gets lower-quality text.
 
 ### Code Quality
 
@@ -362,39 +401,46 @@ GSHEETS_ENABLED=true
 - [x] **1.3** Add `__pycache__/` and `*.pyc` to `.gitignore`, remove tracked `__pycache__` dirs (was already done)
 - [x] **1.4** Unify `_run_apply_agent` in `telegram_bot.py` to use `services/apply_service.py`
 
-### Phase 2 — Split telegram_bot.py (MEDIUM risk)
+### Phase 2 — Split telegram_bot.py (MEDIUM risk) ✅ COMPLETE (2026-05-26)
 
-- [ ] **2.1** Extract command handlers into `hunter/commands/` module (hunt, force, status, expired, etc.)
-- [ ] **2.2** Extract `build_application()` + schedule setup into `hunter/app.py`
-- [ ] **2.3** Keep `telegram_bot.py` as thin dispatcher + send_text/send_job_cards API
+- [x] **2.1** Extract command handlers into `hunter/commands/` module (15 files)
+- [x] **2.1b** Extract bot infrastructure into `hunter/bot/` (6 files: state, keyboards, notifications, paste, formatters, apply_runner)
+- [x] **2.1c** Extract scheduled callbacks into `hunter/schedules/` (9 files + register() helper)
+- [x] **2.2** `build_application()` + schedule setup remain in `telegram_bot.py` (schedule uses `schedules.register()`)
+- [x] **2.3** `telegram_bot.py` is now a ~200-line import shim with re-exports for backward compat
 
-### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk)
+### Phase 3 — Merge job_fetch/ into sources/ (MEDIUM risk) ✅ COMPLETE (2026-05-26)
 
-- [ ] **3.1** Add `fetch_text(url) -> str` method to `BaseSource` ABC
-- [ ] **3.2** Move `job_fetch/*.py` logic into corresponding `hunter/sources/*.py`
-- [ ] **3.3** Update `apply_agent.py` to call `source.fetch_text(url)` instead of `job_fetch.fetch_job_text()`
-- [ ] **3.4** Delete `job_fetch/` package
+- [x] **3.1** Add `fetch_text(url) -> str` + `matches_url(url) -> bool` to `BaseSource` ABC; port `html_fallback` into `hunter/sources/`
+- [x] **3.2** Move `job_fetch/*.py` logic into the corresponding `hunter/sources/*.py` — 5 batches: trivial wrappers (3.2a), ATS aggregator (3.2b), JSON APIs (3.2c), NEXT_DATA/cloudscraper (3.2d), Playwright-heavy (3.2e)
+- [x] **3.3** Add `hunter.sources.fetch_job_text(url)` dispatcher + route every caller (`apply_agent`, `expired_marker`, `gmail_enricher`, `bot/apply_runner`, `commands/*`) through it. Fold `linkedin_parse.py` URL helpers into `hunter/sources/linkedin.py`.
+- [x] **3.4** Delete `job_fetch/` package
 
-### Phase 4 — Split apply_agent.py (MEDIUM risk)
+### Phase 4 — Split apply_agent.py (MEDIUM risk) ✅ COMPLETE (2026-05-27)
 
-- [ ] **4.1** Extract API pipeline into `hunter/apply_api.py`
-- [ ] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
-- [ ] **4.3** Make apply callable as import (not just subprocess)
-- [ ] **4.4** Keep `apply_agent.py` as thin CLI entry point
+- [x] **4.1** Extract API pipeline into `hunter/apply_api.py`
+- [x] **4.2** Extract CLI pipeline into `hunter/apply_cli.py`
+- [x] **4.3** Make apply callable as import (not just subprocess)
+- [x] **4.4** Keep `apply_agent.py` as thin CLI entry point
 
-### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk)
+Shared helpers extracted to `hunter/apply_shared.py` (constants, Telegram, CL review,
+validate_content, compute_output_folder, ApplyError). All module-level mutable globals
+(_SKIP_DEDUP, _FULL_MODE, _APPLY_META_COMPANY/TITLE) replaced by function parameters.
+apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 
-- [ ] **5.1** Create `hunter/db.py` with SQLite schema
-- [ ] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
-- [ ] **5.3** Add `/export` command for Excel export
-- [ ] **5.4** Keep openpyxl only for doc generation formatting
-- [ ] **5.5** gsheets_sync: replace tracker_cache with db queries
+### Phase 5 — SQLite tracker (HIGH impact, MEDIUM risk) ✅ COMPLETE (2026-05-27)
 
-### Phase 6 — Project structure (after phases 1-5)
+- [x] **5.1** Create `hunter/db.py` with SQLite schema (WAL mode, `sheets_row`+`sheets_dirty` columns)
+- [x] **5.2** Migrate tracker functions to SQLite (atomic writes, no PermissionError)
+- [x] **5.3** Add `/export` command for Excel export
+- [x] **5.4** Keep openpyxl only for doc generation formatting; tracker_cache loads from SQLite
+- [x] **5.5** gsheets_sync: all Sheets metadata (`sheets_row`, `sheets_dirty`) moved from TrackerCache to DB. 6 new tracker.py functions. `_apply_pull_delta_db()` replaces `cache.apply_pull_delta()`. TrackerCache no longer has `sheet_row_index`, `dirty_ids`, or Sheets-related methods.
 
-- [ ] **6.1** Add `pyproject.toml` with metadata and mypy config
-- [ ] **6.2** Make project installable (`pip install -e .`)
-- [ ] **6.3** Entry point: `python -m hunter` instead of `python hunter.py`
+### Phase 6 — Project structure (after phases 1-5) ✅ COMPLETE (2026-05-31)
+
+- [x] **6.1** Add `pyproject.toml` with metadata and mypy config (replaces `pytest.ini`)
+- [x] **6.2** Make project installable (`pip install -e .`); Dockerfile updated with `pip install -e . --no-deps`
+- [x] **6.3** Entry point: `python -m hunter` via `hunter/__main__.py`; `hunter.py` becomes a thin shim; `hunter` CLI script registered in `pyproject.toml`
 
 ---
 
@@ -453,3 +499,12 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-13 | composer | to_send: detect LibreOffice Calc lock (`.~lock.*#`); skip rebuild when editor holds file; Telegram/gitignore/docs aligned |
 | 2026-05-14 | sonnet | Google Sheets integration complete (GSHEETS_PLAN.md, phases 1-7): gsheets_client, tracker_cache, drop to_send.xlsx (15 files), gsheets_sync (mirror/pull/resync/bootstrap), /gsheets_status /gsheets_resync commands, 5-min resync + 30-min pull schedules, state file for Docker restart safety, 51 new tests (351 total) |
 | 2026-05-15 | sonnet | Google Drive upload (GDRIVE_PLAN.md): gdrive_client (Drive API v3 wrapper), gdrive_sync (lazy singleton, upload_application_folder), GDRIVE_* config, telegram_bot hook after apply (best-effort, 22 new tests, 373 total) |
+| 2026-05-22 | sonnet | Drive URL tracking: tracker col 12 (Drive URL), get_drive_url_by_url, set_drive_url, upload_application_folder writes URL after upload, upload_missing_folders skips already-uploaded rows (17 new tests, 458 total) |
+| 2026-05-26 | opus | Phase 2 complete: split telegram_bot.py (1967→200 lines) into bot/ (6), commands/ (15), schedules/ (9). All 748 tests pass. |
+| 2026-05-26 | sonnet | Fix hanging test: test_cmd_url_force_waiting_triggers_force_run patched bot._force_run but cmd_url calls url_message._force_run directly; changed patch target to hunter.commands.url_message._force_run. 748 tests in 4.55s. |
+| 2026-05-26 | opus | Phase 3 complete: merged job_fetch/ (23 files, ~2475 lines) into hunter/sources/. Each source now owns matches_url + fetch_text. hunter.sources.fetch_job_text() dispatches by URL. linkedin_parse helpers folded into linkedin source. Workable JSON-API extraction restored on AtsAggregator. job_fetch/ deleted. 94 new tests, 842 total in 4.84s. |
+| 2026-05-27 | sonnet | Phase 4 complete: split apply_agent.py (1473→194 lines) into hunter/apply_shared.py (702), hunter/apply_api.py (370), hunter/apply_cli.py (331). All module globals eliminated; functions importable with clean params. 74 new tests (916 total in 6s). |
+| 2026-05-27 | sonnet | Phase 5 complete: SQLite tracker migration. 5.1 db.py schema, 5.2 all tracker CRUD → SQLite, 5.3 /export command, 5.4 openpyxl removed from tracker_cache (load_from_db), 5.5 gsheets Sheets metadata moved to DB (set_sheets_row etc.), gsheets_sync rewritten, _apply_pull_delta_db replaces cache.apply_pull_delta. 937 tests pass. |
+| 2026-05-27 | sonnet | Drive log upload: upload_log_file() in gdrive_sync.py uploads hunter_errors.log to Job Hunter/Logs/ on Drive daily at 06:10 (scheduled_gdrive_upload_logs). 5 new tests (942 total). |
+| 2026-05-31 | sonnet | Phase 6 complete: pyproject.toml (metadata + mypy + pytest config), hunter/__main__.py (main() moved from hunter.py), hunter.py → thin shim, pytest.ini deleted, Dockerfile updated with pip install -e . --no-deps. |
+| 2026-05-29 | sonnet | CV generation quality: 5 base CVs per track (angular/react/ai/fullstack_angular_nest/fullstack_react_next), stack detection in apply_api.py (31 tests), generation_rules.md renamed + strengthened RED LINES (no Angular version in summary, no invented client scale, no foreign-language keywords in EN), CLI paste-file support via Pro subscription, APPLICATIONS_DIR env var in apply.md, preview_apply.py tool, real job fixtures in tests/fixtures/sample_jobs/. 976 tests total. |

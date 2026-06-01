@@ -28,7 +28,8 @@ from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
-    add_failed, get_failed_jobs, remove_failed, is_known,
+    add_failed, get_failed_jobs, remove_failed, increment_fail_count,
+    is_known, is_in_cooldown, MAX_FAIL_RETRIES,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -120,6 +121,16 @@ async def _run_hunt_impl(
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
 
+        # Gmail: upload the log snapshot to Drive right after the scan so the
+        # Drive copy reflects the full email pipeline trace (who sent, which
+        # URLs were extracted, enrichment results) while the rest of the hunt
+        # continues.  Fire-and-forget via create_task — doesn't block fetching.
+        if source.name == "gmail":
+            asyncio.get_event_loop().create_task(
+                _upload_log_to_drive(),
+                name="gmail_log_upload",
+            )
+
     fetch_lines = "\n".join(
         f"  {name}: <b>{cnt}</b>" if isinstance(cnt, int) else f"  {name}: {cnt}"
         for name, cnt in fetch_stats.items()
@@ -138,16 +149,12 @@ async def _run_hunt_impl(
         known_urls = await asyncio.to_thread(get_known_urls)
         known_ct = await asyncio.to_thread(get_known_company_titles)
     except Exception as e:
-        logger.exception("[Hunt] Failed to read tracker.xlsx for dedup")
+        logger.exception("[Hunt] Failed to read tracker DB for dedup")
         hint = str(e)[:400]
         await send_text(
             context,
-            "❌ <b>Не удалось прочитать tracker.xlsx</b> (дедуп перед охотой).\n\n"
-            f"<pre>{hint}</pre>\n\n"
-            "Типичная причина сообщения про <code>[Content_Types].xml</code> — файл "
-            "не настоящий Excel (обрезан, 0 байт, переименованный HTML/CSV, битый архив). "
-            f"Проверь: <code>{TRACKER_PATH}</code>\n"
-            "Открой в Excel или восстанови из бэкапа.",
+            "❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n"
+            f"<pre>{hint}</pre>",
         )
         return
 
@@ -156,6 +163,7 @@ async def _run_hunt_impl(
     new_jobs: list[Job] = []
     dup_url = 0
     dup_ct = 0
+    dup_cooldown = 0
     for j in filtered:
         norm = normalize_url(j.url)
         if norm in known_urls or norm in seen_urls_this_run:
@@ -166,16 +174,36 @@ async def _run_hunt_impl(
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
             continue
+        # Fuzzy title dedup — catches Gmail-enriched variants such as
+        # "Remote Angular Developer" vs stored "Angular Developer" (same company).
+        # Only called when URL and exact CT checks both miss (hot path unaffected).
+        try:
+            from hunter.tracker_cache import cache as _cache
+            if await _cache.is_fuzzy_ct(j.company, j.title):
+                logger.info(
+                    f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}"
+                )
+                dup_ct += 1
+                continue
+        except Exception as _fe:
+            logger.debug("[Hunt] fuzzy CT check failed: %s", _fe)
+        if await asyncio.to_thread(is_in_cooldown, j.company, j.title):
+            logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
+            dup_cooldown += 1
+            continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
         new_jobs.append(j)
 
-    skipped_total = dup_url + dup_ct
-    logger.info(f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct})")
+    skipped_total = dup_url + dup_ct + dup_cooldown
+    logger.info(
+        f"[Hunt] New: {len(new_jobs)} "
+        f"(dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
+    )
 
     # ── Gmail breakdown ──────────────────────────────────────────────────────
     gmail_section = ""
-    gmail_jobs = [j for j in all_jobs if j.source.startswith("gmail_")]
+    gmail_jobs = [j for j in new_jobs if j.source.startswith("gmail_")]
     if gmail_jobs:
         # Group by sub-source (gmail_linkedin, gmail_justjoin, etc.)
         from collections import defaultdict
@@ -186,18 +214,18 @@ async def _run_hunt_impl(
         gmail_lines = ["\n<b>--- Gmail ---</b>"]
         for src, jobs in sorted(by_source.items()):
             aggregator = src.replace("gmail_", "")
-            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} вакансий:")
+            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} jobs:")
             # Group by email subject
             by_subject: dict[str, list[Job]] = defaultdict(list)
             for j in jobs:
                 by_subject[j.title].append(j)
             for subject, sjobs in by_subject.items():
                 subj_short = subject[:60] + ("…" if len(subject) > 60 else "")
-                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)} шт.)")
+                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)})")
                 for j in sjobs[:5]:  # max 5 URLs per email
                     gmail_lines.append(f"      🔗 {j.url}")
                 if len(sjobs) > 5:
-                    gmail_lines.append(f"      … ещё {len(sjobs) - 5}")
+                    gmail_lines.append(f"      … {len(sjobs) - 5} more")
         gmail_section = "\n".join(gmail_lines)
 
     # ── Send detailed report ─────────────────────────────────────────────────
@@ -262,12 +290,46 @@ async def _sync_to_sheets(url: str) -> None:
     try:
         from hunter.tracker_cache import cache
         from hunter import gsheets_sync
-        await cache.load_from_excel(TRACKER_PATH)
+        await cache.load_from_db()
         row = await cache.get_row_by_url(url)
         if row:
             await gsheets_sync.mirror_new_row(row)
     except Exception as _e:
         logger.warning("[auto_apply] gsheets mirror failed for %s: %s", url, _e)
+
+
+async def _upload_to_drive(url: str) -> None:
+    """Upload application folder to Google Drive immediately after apply (best-effort)."""
+    try:
+        from hunter.config import GDRIVE_ENABLED
+        if not GDRIVE_ENABLED:
+            return
+        from hunter.tracker import get_folder_by_url
+        from hunter.config import PROJECT_DIR
+        from hunter import gdrive_sync
+        folder_str = await asyncio.to_thread(get_folder_by_url, url)
+        if folder_str:
+            await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
+    except Exception as _e:
+        logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
+
+
+async def _upload_log_to_drive() -> None:
+    """Upload hunter_errors.log to Drive immediately after gmail scan (best-effort).
+
+    Called right after GmailSource.search() returns so the Drive copy reflects
+    the full gmail pipeline trace (emails processed, URLs extracted, enrichment
+    results) while the rest of the hunt is still running.
+    """
+    try:
+        from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+        if not GDRIVE_ENABLED:
+            return
+        from hunter import gdrive_sync
+        await gdrive_sync.upload_log_file(PROJECT_DIR / "logs" / "hunter_errors.log")
+        logger.debug("[gmail] log snapshot uploaded to Drive")
+    except Exception as _e:
+        logger.debug("[gmail] log upload to Drive failed: %s", _e)
 
 
 async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -> None:
@@ -289,6 +351,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             ok += 1
             consecutive_fails = 0
             await _sync_to_sheets(job.url)
+            await _upload_to_drive(job.url)
             await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
         elif outcome == "manual":
             manual_n += 1
@@ -296,8 +359,8 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             await send_text(
                 context,
                 f"📋 [{i}/{total}] <b>JobLeads — MANUAL</b>: {job.company} — {job.title}\n"
-                "См. сообщение выше: допиши <code>job_posting.txt</code> и снова Apply по той же ссылке.\n"
-                "<i>tracker.xlsx обновлён, дедуп по URL включён.</i>",
+                "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
+                "<i>Tracker updated, URL dedup active.</i>",
             )
         else:
             failed += 1
@@ -354,16 +417,32 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             ok += 1
             await asyncio.to_thread(remove_failed, job.url)
             await _sync_to_sheets(job.url)
+            await _upload_to_drive(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1
             await send_text(
                 context,
                 f"📋 Retry → MANUAL: {job.company} — {job.title}\n"
-                "(JobLeads: см. сообщение apply_agent про job_posting.txt)",
+                "(JobLeads: see apply_agent message about job_posting.txt)",
             )
         else:
-            logger.info(f"[retry] Still failing: {job.company} - {job.title}")
+            new_count = await asyncio.to_thread(increment_fail_count, job.url)
+            if new_count >= MAX_FAIL_RETRIES:
+                logger.warning(
+                    "[retry] Giving up on %s - %s after %d failures",
+                    job.company, job.title, new_count,
+                )
+                await send_text(
+                    context,
+                    f"🚫 <b>Giving up</b> on {job.company} — {job.title} "
+                    f"(failed {new_count}× — won't retry again).",
+                )
+            else:
+                logger.info(
+                    "[retry] Still failing (%d/%d): %s - %s",
+                    new_count, MAX_FAIL_RETRIES, job.company, job.title,
+                )
 
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)

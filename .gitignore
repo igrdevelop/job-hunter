@@ -33,11 +33,17 @@ Desktop.ini
 # Generated application documents (large, per-user)
 Applications/
 
+# Preview apply output (local testing)
+tests/output/
+
 # Local daily copies of tracker / to_send (see hunter/tracker_backup.py)
 backups/
 
 # Tracker (per-user data)
 tracker.xlsx
+tracker.db
+tracker.db-wal
+tracker.db-shm
 tracker.backup.*.xlsx
 to_send.xlsx
 to_send.backup.*.xlsx
@@ -47,9 +53,10 @@ ssh.txt
 ~$*
 .~lock.*
 
-# Temp files
+# Temp files (debug probe scripts like _probe_*.py)
 _*.py
 !__init__.py
+!__main__.py
 *.tmp
 
 # Personal documents (templates)

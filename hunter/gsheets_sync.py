@@ -3,16 +3,18 @@ hunter/gsheets_sync.py — High-level Google Sheets mirror logic.
 
 Responsibilities:
   - Mirror writes (new rows, status updates, EXPIRED stamps) to Sheets best-effort.
-  - Mark rows dirty in cache when Sheets write fails.
-  - Retry dirty rows via resync_dirty().
+  - Mark rows dirty in DB when Sheets write fails; retry via resync_dirty().
   - Validate credentials and sheet reachability on startup.
   - Bootstrap: create or load spreadsheet (Phase 6).
 
 All public mirror_* functions are async and safe to call even when GSHEETS_ENABLED=False
 (they become no-ops). The caller never needs to check the flag.
 
-Pull logic (Sheets → Excel) is in pull_full_snapshot().
+Pull logic (Sheets → DB) is in pull_full_snapshot().
 Bootstrap logic (create/load spreadsheet) is in init_or_load_spreadsheet().
+
+Sheets metadata (sheets_row, sheets_dirty) is stored in the SQLite DB via
+hunter.tracker.{set_sheets_row, get_sheets_row, mark_sheets_dirty, ...}.
 """
 
 import asyncio
@@ -27,7 +29,17 @@ from hunter.config import (
     GSHEETS_TOKEN_FILE,
     GSHEETS_STATE_FILE,
 )
-from hunter.tracker_cache import cache
+from hunter.tracker import (
+    set_sheets_row,
+    get_sheets_row,
+    mark_sheets_dirty,
+    mark_sheets_clean,
+    get_dirty_rows_for_sheets,
+    get_dirty_sheets_count,
+    lookup_url,
+    read_all_tracker_rows,
+    apply_pull_updates,
+)
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +52,13 @@ _state: dict = {}   # {"sheet_id": "..."}
 
 def _read_state() -> dict:
     """Load gsheets_state.json. Returns {} if missing or malformed."""
+    if GSHEETS_STATE_FILE.is_dir():
+        log.error(
+            "gsheets_sync: %s is a directory, not a file — Docker Volume misconfiguration. "
+            "Fix on server: stop container, run `rm -rf %s && echo '{}' > %s`, restart.",
+            GSHEETS_STATE_FILE, GSHEETS_STATE_FILE, GSHEETS_STATE_FILE,
+        )
+        return {}
     try:
         if GSHEETS_STATE_FILE.exists():
             return json.loads(GSHEETS_STATE_FILE.read_text(encoding="utf-8"))
@@ -50,6 +69,8 @@ def _read_state() -> dict:
 
 def _write_state(data: dict) -> None:
     """Persist runtime state to gsheets_state.json (atomic-ish via write+rename)."""
+    if GSHEETS_STATE_FILE.is_dir():
+        return  # already logged in _read_state
     try:
         tmp = GSHEETS_STATE_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -93,7 +114,7 @@ def _ready() -> bool:
 # ---------------------------------------------------------------------------
 
 async def mirror_new_row(row: dict) -> None:
-    """Append a new row to Sheets. On success, store sheet_row_index in cache.
+    """Append a new row to Sheets.  On success, stores sheets_row in DB.
 
     Called after: add_applied, add_skipped, add_manual_jobleads_pending.
     """
@@ -110,12 +131,12 @@ async def mirror_new_row(row: dict) -> None:
             append_rows, _get_service(), _sheet_id(), [row]
         )
         if indices:
-            await cache.set_sheet_row_index(row_id, indices[0])
-        await cache.mark_clean(row_id)
+            set_sheets_row(row_id, indices[0])
+        mark_sheets_clean(row_id)
         log.debug("gsheets mirror_new_row: %s → row %s", row_id, indices[0] if indices else "?")
     except Exception as e:
         log.error("gsheets mirror_new_row failed for %s: %s", row_id, e)
-        await cache.mark_dirty(row_id)
+        mark_sheets_dirty(row_id)
 
 
 # ---------------------------------------------------------------------------
@@ -123,30 +144,30 @@ async def mirror_new_row(row: dict) -> None:
 # ---------------------------------------------------------------------------
 
 async def mirror_cell_update(row_id: str, col: str, value: str) -> None:
-    """Update a single cell in Sheets using cached sheet_row_index.
+    """Update a single cell in Sheets using the sheets_row stored in DB.
 
     Called after: skip, fail, EXPIRED, manual status changes.
-    If sheet_row_index is unknown, marks dirty for later resync.
+    If sheets_row is unknown, marks dirty for later resync.
     """
     if not _ready() or not row_id:
         return
 
     from hunter.gsheets_client import update_cell
 
-    sheet_row = cache.sheet_row_index.get(row_id)
+    sheet_row = get_sheets_row(row_id)
     if sheet_row is None:
-        log.debug("gsheets mirror_cell_update: no sheet_row for %s — marking dirty", row_id)
-        await cache.mark_dirty(row_id)
+        log.debug("gsheets mirror_cell_update: no sheets_row for %s — marking dirty", row_id)
+        mark_sheets_dirty(row_id)
         return
 
     try:
         await asyncio.to_thread(
             update_cell, _get_service(), _sheet_id(), sheet_row, col, value
         )
-        await cache.mark_clean(row_id)
+        mark_sheets_clean(row_id)
     except Exception as e:
         log.error("gsheets mirror_cell_update(%s, %s) failed: %s", row_id, col, e)
-        await cache.mark_dirty(row_id)
+        mark_sheets_dirty(row_id)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +177,7 @@ async def mirror_cell_update(row_id: str, col: str, value: str) -> None:
 async def mirror_expired_batch(row_ids: set[str]) -> None:
     """Write EXPIRED to Sheets Sent column for all given row IDs.
 
-    Called by expired_marker.py after tracker.xlsx is updated.
+    Called by expired_marker.py after tracker DB is updated.
     """
     if not _ready() or not row_ids:
         return
@@ -175,7 +196,7 @@ async def resync_dirty() -> int:
 
     from hunter.gsheets_client import append_rows, update_row
 
-    dirty = await cache.dirty_rows()
+    dirty = await asyncio.to_thread(get_dirty_rows_for_sheets)
     if not dirty:
         return 0
 
@@ -191,13 +212,13 @@ async def resync_dirty() -> int:
                     append_rows, svc, sheet_id, [row]
                 )
                 if indices:
-                    await cache.set_sheet_row_index(row_id, indices[0])
+                    set_sheets_row(row_id, indices[0])
             else:
                 # Row exists in Sheets — overwrite it
                 await asyncio.to_thread(
                     update_row, svc, sheet_id, sheet_row, row
                 )
-            await cache.mark_clean(row_id)
+            mark_sheets_clean(row_id)
             synced += 1
             log.debug("gsheets resync_dirty: synced %s", row_id)
         except Exception as e:
@@ -208,16 +229,135 @@ async def resync_dirty() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Pull — Sheets → tracker.xlsx
+# Push Sent column — DB → Sheets
+# ---------------------------------------------------------------------------
+
+async def push_sent_column() -> dict:
+    """Push the Sent column from DB to Sheets for rows that differ.
+
+    Unlike resync_dirty() (which relies on the DB dirty flag and loses
+    state on restart), this function reads the DB directly and compares
+    against live Sheets data — so it works reliably after any bot restart.
+
+    Useful for:
+    - EXPIRED stamps that were written to DB but never reached Sheets
+    - Any Sent value mismatch between DB and Sheets
+
+    Returns: {"checked": int, "updated": int, "errors": int}
+    """
+    if not _ready():
+        return {"checked": 0, "updated": 0, "errors": 0}
+
+    from hunter.gsheets_client import read_all, update_cell
+
+    svc = _get_service()
+    sid = _sheet_id()
+
+    # Read Sheets: build ID → (sheet_row_index, current_sent) map
+    sheets_rows = await asyncio.to_thread(read_all, svc, sid)
+    sheets_map: dict[str, tuple[int, str]] = {}
+    for row_idx, row_dict in sheets_rows:
+        row_id = row_dict.get("ID", "").strip()
+        if row_id:
+            sheets_map[row_id] = (row_idx, row_dict.get("Sent", "").strip())
+
+    # Read tracker rows that have a non-empty Sent value
+    tracker_rows = await asyncio.to_thread(read_all_tracker_rows)
+
+    checked = updated = errors = 0
+    for row in tracker_rows:
+        tracker_sent = row.get("Sent", "").strip()
+        if not tracker_sent:
+            continue
+        row_id = row.get("ID", "").strip()
+        if not row_id or row_id not in sheets_map:
+            continue
+        sheet_row_idx, sheets_sent = sheets_map[row_id]
+        checked += 1
+        if tracker_sent == sheets_sent:
+            continue  # already in sync
+        try:
+            await asyncio.to_thread(
+                update_cell, svc, sid, sheet_row_idx, "Sent", tracker_sent
+            )
+            updated += 1
+            log.info("push_sent_column: %s → Sent=%s (was %r)", row_id[:8], tracker_sent, sheets_sent)
+        except Exception as e:
+            errors += 1
+            log.warning("push_sent_column: failed for %s: %s", row_id[:8], e)
+
+    log.info("push_sent_column: checked=%d updated=%d errors=%d", checked, updated, errors)
+    return {"checked": checked, "updated": updated, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Pull delta helper (Sheets → DB conflict matrix)
+# ---------------------------------------------------------------------------
+
+def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
+    """Synchronous: apply Sheets conflict matrix against DB; persist sheets_row.
+
+    For each Sheets row that matches a DB row by ID:
+    - Stores the Sheets row index in the DB (sheets_row column).
+    - Applies the conflict matrix for Sent, To Learn, Re-application.
+
+    Returns list of row dicts (with 'ID') that need to be written back to DB.
+    Intended to be called via asyncio.to_thread.
+
+    Conflict matrix:
+      Sent:              EXPIRED (DB) + empty (Sheets)  → keep EXPIRED (Sheets will be fixed by resync)
+                         anything else differs           → trust Sheets
+      To Learn:          always trust Sheets
+      Re-application:    always trust Sheets
+    """
+    tracker_rows = {r["ID"]: r for r in read_all_tracker_rows() if r.get("ID")}
+    sheets_by_id = {r.get("ID", ""): (idx, r) for idx, r in sheets_rows if r.get("ID")}
+
+    to_write: list[dict] = []
+    for row_id, db_row in tracker_rows.items():
+        if row_id not in sheets_by_id:
+            continue
+
+        sheet_idx, sheet_row = sheets_by_id[row_id]
+        # Persist Sheets row index to DB
+        set_sheets_row(row_id, sheet_idx)
+
+        changed = False
+        updated = dict(db_row)
+
+        db_sent = db_row.get("Sent", "").strip()
+        sheet_sent = sheet_row.get("Sent", "").strip()
+
+        if db_sent != sheet_sent:
+            if not (db_sent == "EXPIRED" and not sheet_sent):
+                updated["Sent"] = sheet_sent
+                changed = True
+
+        for field in ("To Learn", "Re-application"):
+            sv = sheet_row.get(field, "").strip()
+            if db_row.get(field, "").strip() != sv:
+                updated[field] = sv
+                changed = True
+
+        if changed:
+            to_write.append(updated)
+
+    return to_write
+
+
+# ---------------------------------------------------------------------------
+# Pull — Sheets → DB
 # ---------------------------------------------------------------------------
 
 async def pull_full_snapshot() -> dict:
     """
-    Pull all rows from Google Sheets and merge into cache + tracker.xlsx.
+    Pull all rows from Google Sheets and merge into DB.
 
-    Conflict matrix (applied in tracker_cache.apply_pull_delta):
+    Conflict matrix (applied in _apply_pull_delta_db):
       - Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
       - To Learn, Re-application: always trust Sheets (user edits there).
+
+    Also persists sheets_row in DB for all matched rows.
 
     Returns: {"pulled": int, "updated": int, "errors": list[str]}
     """
@@ -225,8 +365,6 @@ async def pull_full_snapshot() -> dict:
         return {"pulled": 0, "updated": 0, "errors": []}
 
     from hunter.gsheets_client import read_all
-    from hunter.tracker import apply_pull_updates
-    from hunter.config import TRACKER_PATH
 
     errors: list[str] = []
 
@@ -238,24 +376,22 @@ async def pull_full_snapshot() -> dict:
         log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
         return {"pulled": 0, "updated": 0, "errors": [str(e)]}
 
-    # Update sheet_row_index for all rows we see in Sheets
-    for sheet_row_num, row in sheets_rows:
-        row_id = row.get("ID", "").strip()
-        if row_id:
-            await cache.set_sheet_row_index(row_id, sheet_row_num)
-
-    # Apply conflict matrix — get rows that need Excel update
-    to_write = await cache.apply_pull_delta(sheets_rows)
+    # Apply conflict matrix + persist sheets_row indices in DB
+    try:
+        to_write = await asyncio.to_thread(_apply_pull_delta_db, sheets_rows)
+    except Exception as e:
+        log.error("gsheets pull_full_snapshot: _apply_pull_delta_db failed: %s", e)
+        return {"pulled": len(sheets_rows), "updated": 0, "errors": [str(e)]}
 
     if to_write:
         try:
             written = await asyncio.to_thread(apply_pull_updates, to_write)
-            log.info("gsheets pull_full_snapshot: updated %d/%d rows in Excel", written, len(to_write))
+            log.info("gsheets pull_full_snapshot: updated %d/%d rows in DB", written, len(to_write))
         except Exception as e:
             log.error("gsheets pull_full_snapshot: apply_pull_updates failed: %s", e)
             errors.append(str(e))
 
-    log.info("gsheets pull_full_snapshot: pulled %d rows, %d Excel updates", len(sheets_rows), len(to_write))
+    log.info("gsheets pull_full_snapshot: pulled %d rows, %d DB updates", len(sheets_rows), len(to_write))
     return {"pulled": len(sheets_rows), "updated": len(to_write), "errors": errors}
 
 
@@ -325,14 +461,14 @@ async def init_or_load_spreadsheet(
     if notify_cb:
         try:
             await notify_cb(
-                "📊 <b>Google Sheets tracker создан!</b>\n\n"
-                f'🔗 <a href="{sheet_url}">Открыть таблицу</a>\n\n'
-                "Сохрани ID в .env:\n"
+                "📊 <b>Google Sheets tracker created!</b>\n\n"
+                f'🔗 <a href="{sheet_url}">Open spreadsheet</a>\n\n'
+                "Save the ID in .env:\n"
                 f"<code>GSHEETS_TRACKER_ID={sheet_id}</code>\n\n"
-                "💡 <b>Фильтр-вид для отправки:</b>\n"
-                "1. Данные → Создать фильтр-вид\n"
-                "2. Столбец «Sent» → Фильтровать: пусто\n"
-                "3. Сохрани вид — будет показывать только неотосланные."
+                "💡 <b>Filter view for sending:</b>\n"
+                "1. Data → Create filter view\n"
+                "2. Column «Sent» → Filter: empty\n"
+                "3. Save the view — shows only unsent applications."
             )
         except Exception as e:
             log.warning("gsheets_sync: notify_cb failed: %s", e)
@@ -393,11 +529,48 @@ def validate_startup() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Push missing rows (tracker.xlsx → Sheets, skipping rows already there)
+# Delete row by URL (used by /force cleanup)
+# ---------------------------------------------------------------------------
+
+async def delete_row_by_url(url: str) -> bool:
+    """Delete the Sheets row that corresponds to this URL (best-effort).
+
+    Looks up the row in the tracker DB, reads sheets_row from DB.
+
+    Returns True if a row was deleted, False if not found or Sheets is disabled.
+    """
+    if not _ready():
+        return False
+
+    from hunter.gsheets_client import delete_sheet_row
+
+    # Find row_id via DB lookup
+    candidates = await asyncio.to_thread(lookup_url, url)
+    if not candidates:
+        log.debug("gsheets delete_row_by_url: URL not in tracker: %s", url)
+        return False
+
+    row_id = candidates[0]["id"]
+    sheet_row = get_sheets_row(row_id)
+    if sheet_row is None:
+        log.debug("gsheets delete_row_by_url: no sheets_row for %s — row may never have been pushed", row_id[:8])
+        return False
+
+    try:
+        await asyncio.to_thread(delete_sheet_row, _get_service(), _sheet_id(), sheet_row)
+        log.info("gsheets delete_row_by_url: deleted sheet row %d for id=%s", sheet_row, row_id[:8])
+        return True
+    except Exception as e:
+        log.warning("gsheets delete_row_by_url: failed for id=%s: %s", row_id[:8], e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Push missing rows (DB → Sheets, skipping rows already there)
 # ---------------------------------------------------------------------------
 
 async def push_missing_rows() -> dict:
-    """Append tracker.xlsx rows that are absent from Google Sheets (by ID).
+    """Append DB rows that are absent from Google Sheets (by ID).
 
     Returns: {"pushed": int, "already_present": int, "errors": list[str]}
     Used by /gsheets_push_missing command.
@@ -406,7 +579,6 @@ async def push_missing_rows() -> dict:
         return {"pushed": 0, "already_present": 0, "errors": ["Sheets not ready"]}
 
     from hunter.gsheets_client import read_all, append_rows
-    from hunter.tracker import read_all_tracker_rows
 
     errors: list[str] = []
 
@@ -422,13 +594,13 @@ async def push_missing_rows() -> dict:
         for _, r in sheets_rows
         if r.get("ID", "").strip()
     }
-    # Update sheet_row_index cache while we have the data
+    # Persist sheets_row for rows we already know about
     for sheet_row_num, row in sheets_rows:
         row_id = row.get("ID", "").strip()
         if row_id:
-            await cache.set_sheet_row_index(row_id, sheet_row_num)
+            set_sheets_row(row_id, sheet_row_num)
 
-    # 2. Find tracker rows absent from Sheets
+    # 2. Find DB rows absent from Sheets
     try:
         tracker_rows = await asyncio.to_thread(read_all_tracker_rows)
     except Exception as e:
@@ -450,8 +622,8 @@ async def push_missing_rows() -> dict:
         for row_dict, sheet_row in zip(missing, indices):
             row_id = row_dict.get("ID", "").strip()
             if row_id and sheet_row > 0:
-                await cache.set_sheet_row_index(row_id, sheet_row)
-                await cache.mark_clean(row_id)
+                set_sheets_row(row_id, sheet_row)
+                mark_sheets_clean(row_id)
         log.info("push_missing_rows: pushed %d rows", len(missing))
     except Exception as e:
         log.error("push_missing_rows: append_rows failed: %s", e)
@@ -467,13 +639,13 @@ async def push_missing_rows() -> dict:
 
 async def status_report() -> dict:
     """Return a dict summarising gsheets integration state for the status command."""
-    dirty_rows = await cache.dirty_rows()
+    dirty_count = await asyncio.to_thread(get_dirty_sheets_count)
     sid = _sheet_id()
     sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}" if sid else None
     return {
         "enabled": GSHEETS_ENABLED,
         "sheet_id": sid or None,
         "sheet_url": sheet_url,
-        "dirty_count": len(dirty_rows),
+        "dirty_count": dirty_count,
         "service_ok": _service is not None,
     }

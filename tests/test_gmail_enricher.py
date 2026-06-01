@@ -90,7 +90,7 @@ NFJ_TEXT = (
 def test_enrich_via_text_happy_path():
     job = _stub("https://nofluffjobs.com/job/frontend-developer-beta-ltd-waw")
 
-    with patch("job_fetch.fetch_job_text", return_value=NFJ_TEXT):
+    with patch("hunter.sources.fetch_job_text", return_value=NFJ_TEXT):
         result = _enrich_via_text(job)
 
     assert result.title == "Frontend Developer"
@@ -102,7 +102,7 @@ def test_enrich_via_text_happy_path():
 def test_enrich_via_text_missing_fields_keeps_stub():
     job = _stub("https://nofluffjobs.com/job/some-job")
 
-    with patch("job_fetch.fetch_job_text", return_value="No structured headers here"):
+    with patch("hunter.sources.fetch_job_text", return_value="No structured headers here"):
         result = _enrich_via_text(job)
 
     # title and company unchanged → original stub returned
@@ -112,7 +112,7 @@ def test_enrich_via_text_missing_fields_keeps_stub():
 def test_enrich_via_text_exception_propagates():
     job = _stub("https://nofluffjobs.com/job/some-job")
 
-    with patch("job_fetch.fetch_job_text", side_effect=RuntimeError("network error")):
+    with patch("hunter.sources.fetch_job_text", side_effect=RuntimeError("network error")):
         with pytest.raises(RuntimeError):
             _enrich_via_text(job)
 

@@ -1,35 +1,35 @@
 # Job Hunter — Deployment Plan V2
 
-**Цель:** бот крутится на VPS 24/7, файлы зеркалируются на Google Drive,
-обновление кода = push в master → CI/CD → автоперезапуск. В будущем — Angular сайт поверх.
+**Goal:** bot runs on a VPS 24/7, files mirrored to Google Drive,
+code updates = push to master → CI/CD → auto-restart. Future: Angular site on top.
 
 ---
 
-## Статус
+## Status
 
-- [x] Фаза 0 — GitHub репо готов, develop → master структура
-- [ ] Фаза 1 — Dockerfile исправлен для продакшна
-- [ ] Фаза 2 — VPS на Hetzner
-- [ ] Фаза 3 — Google Drive интеграция
-- [ ] Фаза 4 — CI/CD пайплайн (GitHub Actions → GHCR → VPS)
-- [ ] Фаза 5 — Первый живой деплой
-- [ ] Фаза 6 — Сайт (Angular + FastAPI) [будущее]
+- [x] Phase 0 — GitHub repo ready, develop → master structure
+- [ ] Phase 1 — Dockerfile hardened for production
+- [ ] Phase 2 — VPS on Hetzner
+- [ ] Phase 3 — Google Drive integration
+- [ ] Phase 4 — CI/CD pipeline (GitHub Actions → GHCR → VPS)
+- [ ] Phase 5 — First live deploy
+- [ ] Phase 6 — Website (Angular + FastAPI) [future]
 
 ---
 
-## Фаза 1 — Dockerfile для продакшна
+## Phase 1 — Production Dockerfile
 
-### 1.1 — Исправить Dockerfile
+### 1.1 — Fix Dockerfile
 
-Текущий черновик в DEPLOY.md неполный. Продакшн-версия:
+The draft in DEPLOY.md is incomplete. Production version:
 
 ```dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# LibreOffice нужен для generate_docs.py (DOCX → PDF конвертация)
-# gcc нужен для некоторых Python пакетов
+# LibreOffice needed by generate_docs.py (DOCX → PDF conversion).
+# gcc needed for some Python packages.
 RUN apt-get update && apt-get install -y \
     gcc \
     libreoffice \
@@ -45,7 +45,7 @@ RUN mkdir -p Applications backups
 CMD ["python", "hunter.py"]
 ```
 
-### 1.2 — Добавить Google API пакеты в requirements.txt
+### 1.2 — Add Google API packages to requirements.txt
 
 ```
 google-api-python-client==2.131.0
@@ -54,7 +54,7 @@ google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 ```
 
-### 1.3 — Создать .dockerignore
+### 1.3 — Create .dockerignore
 
 ```
 .env
@@ -77,7 +77,7 @@ gmail_credentials.json
 drive_credentials.json
 ```
 
-### 1.4 — Создать docker-compose.yml
+### 1.4 — Create docker-compose.yml
 
 ```yaml
 version: "3.9"
@@ -90,13 +90,13 @@ services:
     env_file:
       - .env
     volumes:
-      # Персистентные данные — живут на диске сервера
+      # Persistent data — lives on the server disk.
       - ./tracker.xlsx:/app/tracker.xlsx
       - ./to_send.xlsx:/app/to_send.xlsx
       - ./Applications:/app/Applications
       - ./backups:/app/backups
       - ./.secrets:/app/.secrets
-      # Google токены — никогда не в образе
+      # Google tokens — never baked into the image.
       - ./gmail_credentials.json:/app/gmail_credentials.json
       - ./gmail_token.json:/app/gmail_token.json
       - ./drive_credentials.json:/app/drive_credentials.json
@@ -108,31 +108,31 @@ services:
         max-file: "5"
 ```
 
-### 1.5 — Переменные окружения для сервера
+### 1.5 — Server environment variables
 
-Добавить в `.env` на сервере (не коммитить!):
+Add to `.env` on the server (do not commit!):
 
 ```
-# Существующие переменные — те же что локально
+# Existing variables — same as local
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 LLM_API_KEY=...
 LLM_PROVIDER=anthropic
 LLM_MODEL=claude-3-5-haiku-20241022
 
-# Отключить на сервере
+# Disable on server
 INHIRE_ENABLED=false
 APPLY_USE_CLI=false
 
-# Google Drive (новые)
+# Google Drive (new)
 GDRIVE_ENABLED=true
-GDRIVE_FOLDER_ID=...        # ID корневой папки JobHunter на Drive
+GDRIVE_FOLDER_ID=...        # Root JobHunter folder ID on Drive
 GDRIVE_CREDENTIALS=drive_credentials.json
 GDRIVE_TOKEN=drive_token.json
-GDRIVE_SYNC_TRACKER=true    # загружать tracker.xlsx на Drive
+GDRIVE_SYNC_TRACKER=true    # upload tracker.xlsx to Drive
 ```
 
-### 1.6 — Закоммитить
+### 1.6 — Commit
 
 ```bash
 git add Dockerfile .dockerignore docker-compose.yml
@@ -142,45 +142,45 @@ git push origin develop
 
 ---
 
-## Фаза 2 — VPS на Hetzner
+## Phase 2 — VPS on Hetzner
 
-### 2.1 — SSH ключ (если нет)
+### 2.1 — SSH key (if you don't have one)
 
 ```powershell
 ssh-keygen -t ed25519 -C "job-hunter-vps"
-cat ~/.ssh/id_ed25519.pub   # скопировать — нужен при создании сервера
+cat ~/.ssh/id_ed25519.pub   # copy — needed when creating the server
 ```
 
-### 2.2 — Создать сервер
+### 2.2 — Create server
 
 1. console.hetzner.com → New Project → "job-hunter"
 2. Add Server:
    - Location: **Nuremberg**
    - Image: **Ubuntu 22.04**
-   - Type: **Shared vCPU → x86 → CX22** (2 CPU, 4 GB RAM, €4.35/мес)
-   - SSH Keys → Add → вставить публичный ключ из 2.1
+   - Type: **Shared vCPU → x86 → CX22** (2 CPU, 4 GB RAM, €4.35/month)
+   - SSH Keys → Add → paste public key from 2.1
    - Name: `job-hunter`
-3. Create & Buy → **записать IP адрес**
+3. Create & Buy → **write down the IP address**
 
-### 2.3 — Подключиться и настроить
+### 2.3 — Connect and configure
 
 ```bash
-ssh root@ТВОЙ_IP
+ssh root@YOUR_IP
 
-# Обновить систему
+# Update system
 apt update && apt upgrade -y
 
-# Установить Docker
+# Install Docker
 curl -fsSL https://get.docker.com | sh
 apt install docker-compose-plugin -y
 
-# Создать пользователя deploy
+# Create deploy user
 useradd -m -s /bin/bash deploy
 usermod -aG docker deploy
 mkdir -p /home/deploy/job-hunter
 chown deploy:deploy /home/deploy/job-hunter
 
-# Скопировать SSH ключ для deploy
+# Copy SSH key for deploy user
 mkdir -p /home/deploy/.ssh
 cp ~/.ssh/authorized_keys /home/deploy/.ssh/
 chown -R deploy:deploy /home/deploy/.ssh
@@ -188,75 +188,75 @@ chmod 700 /home/deploy/.ssh
 chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-### 2.4 — Подключить Hetzner Volume (бэкапы)
+### 2.4 — Attach Hetzner Volume (backups)
 
-В панели Hetzner → Volumes → Create Volume:
-- Size: **10 GB** (~€0.50/мес)
-- Location: Nuremberg (тот же что сервер)
+In the Hetzner panel → Volumes → Create Volume:
+- Size: **10 GB** (~€0.50/month)
+- Location: Nuremberg (same as the server)
 - Name: `job-hunter-backups`
-- Attach to сервер `job-hunter`
+- Attach to server `job-hunter`
 
-На сервере:
+On the server:
 
 ```bash
-# Отформатировать и смонтировать
-mkfs.ext4 /dev/disk/by-id/scsi-0HC_Volume_XXXXX   # ID из панели Hetzner
+# Format and mount
+mkfs.ext4 /dev/disk/by-id/scsi-0HC_Volume_XXXXX   # ID from Hetzner panel
 mkdir -p /mnt/backups
 mount /dev/disk/by-id/scsi-0HC_Volume_XXXXX /mnt/backups
 chown deploy:deploy /mnt/backups
 
-# Автомонтирование при перезагрузке
+# Auto-mount on reboot
 echo "/dev/disk/by-id/scsi-0HC_Volume_XXXXX /mnt/backups ext4 defaults 0 0" >> /etc/fstab
 ```
 
-Обновить `docker-compose.yml` — добавить volume для бэкапов с Volume:
+Update `docker-compose.yml` — replace local backups folder with Volume:
 
 ```yaml
 volumes:
-  - /mnt/backups:/app/backups   # Hetzner Volume вместо локальной папки
+  - /mnt/backups:/app/backups   # Hetzner Volume instead of local folder
 ```
 
-### 2.5 — Загрузить файлы на сервер
+### 2.5 — Upload files to the server
 
-С твоего компьютера (PowerShell):
+From your computer (PowerShell):
 
 ```powershell
-$VPS = "deploy@ТВОЙ_IP"
+$VPS = "deploy@YOUR_IP"
 $SRC = "D:\LearningProject\Claude"
 $DST = "/home/deploy/job-hunter"
 
-# Секреты и данные
-scp "$SRC\.env"                  "${VPS}:${DST}/"
-scp "$SRC\tracker.xlsx"          "${VPS}:${DST}/"
+# Secrets and data
+scp "$SRC\.env"                   "${VPS}:${DST}/"
+scp "$SRC\tracker.xlsx"           "${VPS}:${DST}/"
 scp "$SRC\gmail_credentials.json" "${VPS}:${DST}/"
-scp "$SRC\gmail_token.json"      "${VPS}:${DST}/"
-scp "$SRC\drive_credentials.json" "${VPS}:${DST}/"   # после Фазы 3
-scp "$SRC\drive_token.json"      "${VPS}:${DST}/"    # после Фазы 3
-scp -r "$SRC\.secrets"           "${VPS}:${DST}/"
+scp "$SRC\gmail_token.json"       "${VPS}:${DST}/"
+scp "$SRC\drive_credentials.json" "${VPS}:${DST}/"   # after Phase 3
+scp "$SRC\drive_token.json"       "${VPS}:${DST}/"   # after Phase 3
+scp -r "$SRC\.secrets"            "${VPS}:${DST}/"
 
-# Создать папки
+# Create folders
 ssh $VPS "mkdir -p ${DST}/Applications ${DST}/backups"
 ```
 
 ---
 
-## Фаза 3 — Google Drive интеграция
+## Phase 3 — Google Drive integration
 
-### 3.1 — Создать отдельный OAuth клиент для Drive
+### 3.1 — Create a separate OAuth client for Drive
 
-Drive использует **отдельные credentials** (не трогаем Gmail OAuth):
+Drive uses **separate credentials** (do not touch the Gmail OAuth):
 
-1. Зайти на console.cloud.google.com → открыть существующий проект (тот же где Gmail)
-2. APIs & Services → Enable APIs → найти **Google Drive API** → Enable
+1. Go to console.cloud.google.com → open the existing project (same as Gmail)
+2. APIs & Services → Enable APIs → find **Google Drive API** → Enable
 3. APIs & Services → Credentials → **Create Credentials → OAuth client ID**
    - Application type: **Desktop app**
    - Name: `job-hunter-drive`
-4. Download JSON → сохранить как `drive_credentials.json` в корне проекта
-5. **Никогда не коммитить** (уже в .gitignore)
+4. Download JSON → save as `drive_credentials.json` in the project root
+5. **Never commit** (already in .gitignore)
 
-### 3.2 — Авторизовать Drive (локально, один раз)
+### 3.2 — Authorize Drive (locally, once)
 
-Создать `tools/drive_auth.py`:
+Create `tools/drive_auth.py`:
 
 ```python
 """Authorize Google Drive OAuth and save drive_token.json. Run once locally."""
@@ -275,23 +275,23 @@ TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
 print(f"Saved: {TOKEN_FILE}")
 ```
 
-Запустить локально:
+Run locally:
 
 ```bash
 python tools/drive_auth.py
-# Откроется браузер → войти в Google аккаунт → разрешить доступ
-# Сохранится drive_token.json
+# Browser opens → sign in to Google account → allow access
+# drive_token.json is saved
 ```
 
-### 3.3 — Создать папку JobHunter на Drive
+### 3.3 — Create the JobHunter folder on Drive
 
-1. Открыть drive.google.com
-2. Создать папку `JobHunter` → внутри создать `Applications` и `Tracker`
-3. Открыть папку `JobHunter` → скопировать ID из URL:
+1. Open drive.google.com
+2. Create folder `JobHunter` → inside it create `Applications` and `Tracker`
+3. Open the `JobHunter` folder → copy the ID from the URL:
    `https://drive.google.com/drive/folders/`**`1ABC123xyz`**
-4. Записать этот ID → вставить в `.env` как `GDRIVE_FOLDER_ID=1ABC123xyz`
+4. Write down this ID → add to `.env` as `GDRIVE_FOLDER_ID=1ABC123xyz`
 
-### 3.4 — Создать hunter/drive_client.py
+### 3.4 — Create hunter/drive_client.py
 
 ```python
 """
@@ -409,7 +409,7 @@ def upload_tracker(tracker_path: Path, root_folder_id: str) -> None:
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         media = MediaFileUpload(str(tracker_path), mimetype=mime, resumable=False)
 
-        # Overwrite existing file if it exists
+        # Overwrite existing file if it exists.
         q = f"name='tracker.xlsx' and '{tracker_id}' in parents and trashed=false"
         existing = service.files().list(q=q, fields="files(id)").execute().get("files", [])
         if existing:
@@ -427,7 +427,7 @@ def upload_tracker(tracker_path: Path, root_folder_id: str) -> None:
         logger.error("[drive] tracker sync failed: %s", e)
 ```
 
-### 3.5 — Добавить GDRIVE_ENABLED и GDRIVE_FOLDER_ID в config.py
+### 3.5 — Add GDRIVE_ENABLED and GDRIVE_FOLDER_ID to config.py
 
 ```python
 # Google Drive
@@ -435,9 +435,9 @@ GDRIVE_ENABLED: bool = os.getenv("GDRIVE_ENABLED", "false").lower() in ("true", 
 GDRIVE_FOLDER_ID: str = os.getenv("GDRIVE_FOLDER_ID", "")
 ```
 
-### 3.6 — Подключить Drive upload в apply_agent.py
+### 3.6 — Wire Drive upload into apply_agent.py
 
-В конце успешного apply (после generate_docs, перед Telegram отправкой):
+At the end of a successful apply (after generate_docs, before Telegram send):
 
 ```python
 # Google Drive upload
@@ -449,46 +449,48 @@ if GDRIVE_ENABLED and GDRIVE_FOLDER_ID:
         upload_tracker(TRACKER_PATH, GDRIVE_FOLDER_ID)
 ```
 
-Включить Drive folder URL в Telegram-сообщение:
+Include the Drive folder URL in the Telegram message:
 
 ```python
 if drive_url:
-    msg += f"\n📁 <a href='{drive_url}'>Drive папка</a>"
+    msg += f"\n📁 <a href='{drive_url}'>Drive folder</a>"
 ```
 
-### 3.7 — Ночная досинхронизация (cron через JobQueue)
+### 3.7 — Nightly re-sync (cron via JobQueue)
 
-Новый файл `tools/sync_to_drive.py` — сканирует `Applications/` и загружает всё что ещё не на Drive (по отсутствию файла с тем же именем в папке на Drive). Запускается как scheduled task в telegram_bot.py раз в сутки в 03:00.
+New file `tools/sync_to_drive.py` — scans `Applications/` and uploads anything not yet
+on Drive (by checking whether a file with the same name exists in the Drive folder).
+Scheduled as a daily task in telegram_bot.py at 03:00.
 
 ---
 
-## Фаза 4 — CI/CD пайплайн
+## Phase 4 — CI/CD pipeline
 
 ### 4.1 — GitHub Secrets
 
-Зайти: github.com/igrdevelop/job-hunter → Settings → Secrets → Actions
+Go to: github.com/igrdevelop/job-hunter → Settings → Secrets → Actions
 
-| Secret | Значение |
-|--------|----------|
-| `VPS_HOST` | IP сервера |
+| Secret | Value |
+|--------|-------|
+| `VPS_HOST` | Server IP |
 | `VPS_USER` | `deploy` |
-| `VPS_SSH_KEY` | содержимое `~/.ssh/id_ed25519` (приватный ключ) |
+| `VPS_SSH_KEY` | Contents of `~/.ssh/id_ed25519` (private key) |
 | `VPS_WORK_DIR` | `/home/deploy/job-hunter` |
 | `GHCR_TOKEN` | GitHub PAT (write:packages, read:packages) |
-| `TELEGRAM_BOT_TOKEN` | токен бота (для алертов на сбой) |
-| `TELEGRAM_CHAT_ID` | твой chat ID |
+| `TELEGRAM_BOT_TOKEN` | Bot token (for failure alerts) |
+| `TELEGRAM_CHAT_ID` | Your chat ID |
 
-### 4.2 — GitHub Container Registry токен
+### 4.2 — GitHub Container Registry token
 
-GitHub профиль → Settings → Developer settings → Personal access tokens → Tokens (classic):
+GitHub profile → Settings → Developer settings → Personal access tokens → Tokens (classic):
 - Note: `job-hunter-ghcr`
 - Expiration: No expiration
 - Scopes: `write:packages`, `read:packages`, `delete:packages`
-- Сохранить как секрет `GHCR_TOKEN`
+- Save as secret `GHCR_TOKEN`
 
-### 4.3 — Workflow файл
+### 4.3 — Workflow file
 
-Создать `.github/workflows/deploy.yml`:
+Create `.github/workflows/deploy.yml`:
 
 ```yaml
 name: Deploy Job Hunter
@@ -557,13 +559,13 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ❌ Job Hunter deploy FAILED
+            Deploy FAILED
             Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 ```
 
-### 4.4 — Закоммитить
+### 4.4 — Commit
 
 ```bash
 git add .github/ Dockerfile .dockerignore docker-compose.yml requirements.txt hunter/drive_client.py hunter/config.py tools/drive_auth.py
@@ -573,101 +575,101 @@ git push origin develop
 
 ---
 
-## Фаза 5 — Первый живой деплой
+## Phase 5 — First live deploy
 
-### 5.1 — Залогиниться в GHCR на сервере (один раз)
+### 5.1 — Log in to GHCR on the server (once)
 
 ```bash
-ssh deploy@ТВОЙ_IP
+ssh deploy@YOUR_IP
 cd /home/deploy/job-hunter
-echo ТУТ_GHCR_TOKEN | docker login ghcr.io -u igrdevelop --password-stdin
+echo YOUR_GHCR_TOKEN | docker login ghcr.io -u igrdevelop --password-stdin
 ```
 
-### 5.2 — Смержить в master → запустить CI/CD
+### 5.2 — Merge into master → trigger CI/CD
 
 ```bash
-# Локально
+# Locally
 git checkout master
 git merge develop
 git push origin master
 ```
 
-Открыть github.com/igrdevelop/job-hunter → вкладка **Actions** — ждём зелёную галочку (~3-5 мин).
+Open github.com/igrdevelop/job-hunter → **Actions** tab — wait for the green checkmark (~3–5 min).
 
-### 5.3 — Проверить
+### 5.3 — Verify
 
 ```bash
-ssh deploy@ТВОЙ_IP
+ssh deploy@YOUR_IP
 cd /home/deploy/job-hunter
-docker compose ps             # статус: Up
-docker compose logs -f        # логи в реальном времени
+docker compose ps             # status: Up
+docker compose logs -f        # live logs
 ```
 
-В Telegram: `/start` → должен ответить. `/hunt` → должны прийти вакансии.
+In Telegram: `/start` → should reply. `/hunt` → jobs should arrive.
 
-### 5.4 — Проверить Drive
+### 5.4 — Verify Drive
 
-После первого apply через бот:
-- Telegram прислал PDF и ссылку на Drive папку
-- На Drive появилась `JobHunter/Applications/{date}/{company}/` с файлами
-- `JobHunter/Tracker/tracker.xlsx` обновился
+After the first apply via the bot:
+- Telegram sent a PDF and a Drive folder link
+- On Drive: `JobHunter/Applications/{date}/{company}/` with the generated files
+- `JobHunter/Tracker/tracker.xlsx` updated
 
 ---
 
-## Рабочий процесс после деплоя
+## Workflow after deploy
 
 ```
-Разработка локально (develop ветка)
+Develop locally (develop branch)
   → git push origin develop
-  → PR или прямой merge в master
+  → PR or direct merge into master
   → git push origin master
-  → GitHub Actions: тесты → Docker образ → деплой на VPS (~4 мин)
-  → Бот перезапустился с новым кодом
+  → GitHub Actions: tests → Docker image → deploy to VPS (~4 min)
+  → Bot restarts with the new code
 ```
 
-Никакого ручного SSH после первого деплоя.
+No manual SSH needed after the first deploy.
 
 ---
 
-## Фаза 6 — Сайт (Angular + FastAPI) [будущее]
+## Phase 6 — Website (Angular + FastAPI) [future]
 
-### Концепция
+### Concept
 
 ```
 Angular SPA (frontend)
     ↕ HTTP API
-FastAPI (backend) ← читает tracker.xlsx, Applications/
+FastAPI (backend) ← reads tracker.xlsx, Applications/
     ↕ shared volume
-Job Hunter Bot (уже работает)
+Job Hunter Bot (already running)
 ```
 
-### Что нужно будет сделать
+### What needs to be done
 
-**6.1 — Домен и HTTPS**
-- Проверить DNS: привязать домен к IP сервера (A-запись)
-- Установить Nginx + Certbot:
+**6.1 — Domain and HTTPS**
+- Set DNS: point domain to server IP (A record)
+- Install Nginx + Certbot:
   ```bash
   apt install nginx certbot python3-certbot-nginx -y
-  certbot --nginx -d твой-домен.com
+  certbot --nginx -d your-domain.com
   ```
 
-**6.2 — FastAPI бэкенд (`website/api/`)**
-- `GET /api/applications` — список всех применений из tracker.xlsx
-- `GET /api/applications/{id}/files` — список файлов в папке
-- `GET /api/applications/{id}/files/{filename}` — скачать файл
-- `POST /api/hunt` — запустить hunt вручную (прокси к боту)
-- Auth: простой Bearer токен в `.env`
+**6.2 — FastAPI backend (`website/api/`)**
+- `GET /api/applications` — list all applications from tracker.xlsx
+- `GET /api/applications/{id}/files` — list files in folder
+- `GET /api/applications/{id}/files/{filename}` — download file
+- `POST /api/hunt` — trigger hunt manually (proxy to bot)
+- Auth: simple Bearer token in `.env`
 
-**6.3 — Angular фронтенд (`website/frontend/`)**
-- Таблица вакансий с фильтрами (статус, дата, стек)
-- Предпросмотр PDF прямо в браузере
-- Кнопки Apply / Skip / Force
-- Дашборд: статистика по источникам, по стеку, по дням
+**6.3 — Angular frontend (`website/frontend/`)**
+- Applications table with filters (status, date, stack)
+- PDF preview in browser
+- Apply / Skip / Force buttons
+- Dashboard: stats by source, stack, day
 
-**6.4 — docker-compose.yml расширенный**
+**6.4 — Extended docker-compose.yml**
 ```yaml
 services:
-  job-hunter:        # уже есть
+  job-hunter:        # already exists
     ...
   api:
     build: ./website/api
@@ -681,10 +683,10 @@ services:
       - "443:443"
 ```
 
-**6.5 — Nginx конфиг**
+**6.5 — Nginx config**
 ```nginx
 server {
-    server_name твой-домен.com;
+    server_name your-domain.com;
     location /api/ { proxy_pass http://api:8000/; }
     location /     { root /usr/share/nginx/html; try_files $uri /index.html; }
 }
@@ -692,32 +694,32 @@ server {
 
 ---
 
-## Справочник команд на сервере
+## Server command reference
 
 ```bash
-# Логи
+# Logs
 docker compose logs -f job-hunter
 
-# Перезапустить без обновления образа
+# Restart without pulling a new image
 docker compose restart job-hunter
 
-# Ручное обновление (обычно делает CI/CD)
+# Manual update (normally done by CI/CD)
 docker compose pull && docker compose up -d
 
-# Зайти внутрь контейнера
+# Shell into the container
 docker exec -it job-hunter bash
 
-# Ресурсы
+# Resource usage
 docker stats job-hunter
 
-# Статус
+# Status
 docker compose ps
 ```
 
 ---
 
-## Прогресс лог
+## Progress log
 
-| Дата | Кто | Что |
-|------|-----|-----|
-| 2026-05-13 | sonnet-4-6 | План создан на основе ответов на 11 вопросов |
+| Date | Who | What |
+|------|-----|------|
+| 2026-05-13 | sonnet-4-6 | Plan created based on answers to 11 questions |

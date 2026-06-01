@@ -1,114 +1,54 @@
-import openpyxl
-
+"""Tests for tracker.get_url_status_flags."""
 from hunter import tracker
+from hunter.models import Job
 
 
-def _append_row(ws, *, company: str, title: str, ats: str, url: str, sent: str = "") -> None:
-    row = [
-        "2026-04-16",  # Date
-        company,       # Company
-        title,         # Job Title
-        "Angular",     # Stack
-        ats,           # ATS % / status
-        url,           # URL
-        "",            # Folder
-        sent,          # Sent
-        "",            # Re-application
-        "",            # To Learn
-    ]
-    ws.append(row)
+def _add_row_direct(tracker_db, *, url: str, ats: str, sent: str = "") -> None:
+    """Insert a minimal row directly into the SQLite DB for test setup."""
+    from hunter.db import get_db
+    import uuid
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, stack, ats_status, url, url_norm, sent)
+            VALUES (?, '2026-04-16', 'Acme', 'Dev', 'Angular', ?, ?, ?, ?)
+            """,
+            (uuid.uuid4().hex[:8], ats, url, tracker.normalize_url(url), sent),
+        )
 
 
-def test_get_url_status_flags_detects_success(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
-    wb, ws = tracker._load_or_create()
-    _append_row(
-        ws,
-        company="Acme",
-        title="Senior Frontend Developer",
-        ats="82%",
+def test_get_url_status_flags_detects_success(tracker_db) -> None:
+    _add_row_direct(
+        tracker_db,
         url="https://example.com/jobs/1?utm_source=mail",
+        ats="82%",
     )
-    wb.save(tracker_path)
-    wb.close()
-
     flags = tracker.get_url_status_flags("https://example.com/jobs/1")
     assert flags == {"has_success": True, "is_react_skip": False}
 
 
-def test_get_url_status_flags_detects_react_skip(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
-    wb, ws = tracker._load_or_create()
-    _append_row(
-        ws,
-        company="Acme",
-        title="Frontend Developer",
-        ats="SKIP",
+def test_get_url_status_flags_detects_react_skip(tracker_db) -> None:
+    _add_row_direct(
+        tracker_db,
         url="https://example.com/jobs/2",
+        ats="SKIP",
         sent="—",
     )
-    wb.save(tracker_path)
-    wb.close()
-
     flags = tracker.get_url_status_flags("https://example.com/jobs/2")
     assert flags == {"has_success": False, "is_react_skip": True}
 
 
-def test_get_url_status_flags_ignores_fail_and_plain_skip(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
-    wb, ws = tracker._load_or_create()
-    _append_row(
-        ws,
-        company="Acme",
-        title="Frontend Developer",
-        ats="FAIL",
-        url="https://example.com/jobs/3",
-    )
-    _append_row(
-        ws,
-        company="Acme",
-        title="Frontend Developer",
-        ats="SKIP",
-        url="https://example.com/jobs/3",
-        sent="",
-    )
-    wb.save(tracker_path)
-    wb.close()
-
+def test_get_url_status_flags_ignores_fail_and_plain_skip(tracker_db) -> None:
+    _add_row_direct(tracker_db, url="https://example.com/jobs/3", ats="FAIL")
+    _add_row_direct(tracker_db, url="https://example.com/jobs/3", ats="SKIP", sent="")
     flags = tracker.get_url_status_flags("https://example.com/jobs/3")
     assert flags == {"has_success": False, "is_react_skip": False}
 
 
-def test_get_url_status_flags_is_case_insensitive_for_status_values(tmp_path, monkeypatch) -> None:
-    tracker_path = tmp_path / "tracker.xlsx"
-    monkeypatch.setattr(tracker, "TRACKER_PATH", tracker_path)
-
-    wb, ws = tracker._load_or_create()
-    _append_row(
-        ws,
-        company="Acme",
-        title="Frontend Developer",
-        ats="skip",
-        url="https://example.com/jobs/4",
-        sent="—",
-    )
-    _append_row(
-        ws,
-        company="Acme",
-        title="Frontend Developer",
-        ats="fail",
-        url="https://example.com/jobs/5",
-        sent="",
-    )
-    wb.save(tracker_path)
-    wb.close()
-
+def test_get_url_status_flags_is_case_insensitive_for_status_values(tracker_db) -> None:
+    _add_row_direct(tracker_db, url="https://example.com/jobs/4", ats="skip", sent="—")
+    _add_row_direct(tracker_db, url="https://example.com/jobs/5", ats="fail")
     flags_skip = tracker.get_url_status_flags("https://example.com/jobs/4")
     flags_fail = tracker.get_url_status_flags("https://example.com/jobs/5")
     assert flags_skip == {"has_success": False, "is_react_skip": True}

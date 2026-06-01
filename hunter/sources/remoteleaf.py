@@ -13,7 +13,7 @@ import logging
 import time
 from html import unescape
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -46,6 +46,10 @@ REQUEST_DELAY_SEC = 0.55
 
 class RemoteleafSource(BaseSource):
     name = "remoteleaf"
+
+    def matches_url(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return "remoteleaf.com" in host
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()
