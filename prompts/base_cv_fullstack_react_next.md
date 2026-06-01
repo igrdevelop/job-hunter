@@ -4,7 +4,7 @@ Pre-optimized React/Next.js full-stack bullets and skills for use as a generatio
 LLM must use these as a starting point and adapt keywords/framing to the specific job posting.
 Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as needed, adjust metrics emphasis.
 
-NOTE: Do NOT write "Angular" in any role title. Use "Senior Full-Stack Developer" or "Senior Software Engineer".
+NOTE: Do NOT write "Angular" in any role title. Use plain "Senior Frontend Developer" / "Frontend Developer" everywhere.
 React and Next.js are positioned as primary stack; Angular appears only as background context.
 
 ---
@@ -23,7 +23,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 ## Experience
 
 ### Role 1 — Alten Poland (Apr 2026 - May 2026)
-**title**: Full-Stack Developer (part-time contract)
+**title**: Frontend Developer (part-time contract)
 **company**: Alten Poland
 **period**: Apr 2026 - May 2026
 **subtitle**: Intel (client) | LLM Evaluation Tooling for OpenVINO | Wroclaw, Poland
@@ -38,7 +38,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 ---
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Fairmarkit (via contractor)
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
@@ -54,7 +54,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 ---
 
 ### Role 3 — Venture Labs (Jul 2023 - Apr 2025)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Venture Labs
 **period**: Jul 2023 - Apr 2025
 **subtitle**: Banking Platform | Client: Atruvia AG (300+ German cooperative banks) | Poland
@@ -85,7 +85,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 ---
 
 ### Role 5 — Altoros (Apr 2018 - Nov 2022)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Altoros
 **period**: Apr 2018 - Nov 2022
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
