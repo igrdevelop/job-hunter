@@ -53,9 +53,10 @@ ssh.txt
 ~$*
 .~lock.*
 
-# Temp files
+# Temp files (debug probe scripts like _probe_*.py)
 _*.py
 !__init__.py
+!__main__.py
 *.tmp
 
 # Personal documents (templates)

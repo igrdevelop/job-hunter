@@ -1,5 +1,5 @@
 """
-Tests for П-1.2: TrackerCache.is_fuzzy_ct() — fuzzy title similarity dedup.
+Tests for P-1.2: TrackerCache.is_fuzzy_ct() — fuzzy title similarity dedup.
 
 Catches Gmail-enriched title variants that pass exact dedup_key but
 describe the same job at the same company.

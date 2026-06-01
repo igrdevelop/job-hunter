@@ -1,5 +1,5 @@
 """
-Tests for П-2.x: expired_check.py + iter_unsent_rows dash-marker fix.
+Tests for P-2.x: expired_check.py + iter_unsent_rows dash-marker fix.
 """
 import uuid
 import pytest
@@ -11,7 +11,7 @@ from hunter.db import get_db
 
 
 # ---------------------------------------------------------------------------
-# _is_unsent — П-2.3 helper
+# _is_unsent — P-2.3 helper
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("sent, expected", [
@@ -28,7 +28,7 @@ def test_is_unsent(sent: str, expected: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# iter_unsent_rows — dash-marked rows are included (П-2.3)
+# iter_unsent_rows — dash-marked rows are included (P-2.3)
 # ---------------------------------------------------------------------------
 
 def _insert_row(tracker_db, *, company, title, ats, url, sent, rid=None):
@@ -46,7 +46,7 @@ def _insert_row(tracker_db, *, company, title, ats, url, sent, rid=None):
 
 
 def test_iter_unsent_includes_em_dash_sent(tracker_db) -> None:
-    """Rows with Sent=— must appear in iter_unsent_rows (П-2.3 fix)."""
+    """Rows with Sent=— must appear in iter_unsent_rows (P-2.3 fix)."""
     _insert_row(tracker_db, company="Acme", title="Angular Dev", ats="87%",
                 url="https://example.com/1", sent="—", rid="aaa00001")
     rows = iter_unsent_rows()
@@ -97,7 +97,7 @@ def test_is_job_expired_empty_text() -> None:
 
 
 # ---------------------------------------------------------------------------
-# is_expired_by_html — new domains (П-2.1)
+# is_expired_by_html — new domains (P-2.1)
 # ---------------------------------------------------------------------------
 
 def test_html_expired_smartrecruiters() -> None:

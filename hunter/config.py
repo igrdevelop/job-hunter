@@ -108,7 +108,7 @@ FILTER = {
         "stażysta",
         "praktykant",
         "staz",
-        # П-8.1: management / leadership / non-IC roles
+        # P-8.1: management / leadership / non-IC roles
         "tech lead",
         "tech-lead",
         "techlead",
@@ -151,10 +151,10 @@ FILTER = {
         r"\bnuxt\b",
         r"\bmagento\b",
         r"\bruby\b",
-        # П-3.3: React Native — mobile-only, not FE web
+        # P-3.3: React Native — mobile-only, not FE web
         r"\breact\s+native\b",
         r"\breact[- ]native\b",
-        # П-4.1: eCommerce/CMS platforms — not web-FE stack
+        # P-4.1: eCommerce/CMS platforms — not web-FE stack
         r"\bhyv[äa]\b",           # Hyva (Magento theme) — Finnish spelling variants
         r"\badobe\s+commerce\b",   # Adobe Commerce = Magento rebranded
         r"\bpwa\s+studio\b",       # Magento PWA Studio
@@ -166,7 +166,7 @@ FILTER = {
         r"\bwordpress\b",
         r"\bsharepoint\b",
         r"\bsap\b",
-        # П-7.1: Salesforce / DevOps / SRE / mobile / test-automation roles
+        # P-7.1: Salesforce / DevOps / SRE / mobile / test-automation roles
         r"\bsalesforce\b",
         r"\bdevops\b",
         r"\bdev-ops\b",
@@ -181,7 +181,7 @@ FILTER = {
         r"\bflutter\b",
         r"\bautomation\s+engineer\b",
         r"\btesting\s+engineer\b",
-        # П-8.1: management / non-IC roles (regex for mixed-case not caught by exclude_levels)
+        # P-8.1: management / non-IC roles (regex for mixed-case not caught by exclude_levels)
         r"\btech\s+lead\b",
         r"\bproject\s+lead\b",
         r"\bpart[- ]?time\b",

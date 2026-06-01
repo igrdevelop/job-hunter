@@ -11,7 +11,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 _GERMAN_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
-        # П-9.1: Job title signals — "Frontend Developer with German", "(German)", etc.
+        # P-9.1: Job title signals — "Frontend Developer with German", "(German)", etc.
         # These appear in the title itself when German is a hard requirement.
         r"\bwith\s+german\b",
         r"\(german\)",
@@ -337,7 +337,7 @@ _ANTI_HYBRID_CITIES: frozenset[str] = frozenset({
 def _matches_location(job: Job) -> bool:
     """Check if job location matches allowed locations.
 
-    Anti-hybrid-city logic (П-6.1): if the location or title contains a city
+    Anti-hybrid-city logic (P-6.1): if the location or title contains a city
     in _ANTI_HYBRID_CITIES with no allowed location token (remote/wroclaw), the
     job is rejected even if the top-level location field says just 'Poland'.
     This catches LinkedIn listings where city appears only in the title.
@@ -432,12 +432,12 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
             reasons["level"] += 1
             continue
 
-        # Title-only React check (П-3.1) — catches "React Developer" from any source
+        # Title-only React check (P-3.1) — catches "React Developer" from any source
         if _is_react_only_title(job.title):
             reasons["react_no_angular"] += 1
             continue
 
-        # Node.js backend title check (П-5.1) — catches "TypeScript/Node.js Developer"
+        # Node.js backend title check (P-5.1) — catches "TypeScript/Node.js Developer"
         # where 'backend' is absent but the role is clearly BE
         if _is_node_only_title(job.title):
             reasons["exclude_pattern"] += 1

@@ -1,4 +1,4 @@
-"""Tests for Gmail location check — no bypass after П-3.2 follow-up.
+"""Tests for Gmail location check — no bypass after P-3.2 follow-up.
 
 Gmail-sourced jobs used to skip _matches_location entirely.
 After the fix they go through the standard whitelist check — the same

@@ -1,12 +1,12 @@
 """
-Tests for П-4.1 through П-9.1: config and filter patches.
+Tests for P-4.1 through P-9.1: config and filter patches.
 
-П-4.1: eCommerce/CMS platform exclude_patterns
-П-5.1: Node.js backend title check
-П-6.1: Anti-hybrid cities in _matches_location
-П-7.1: Salesforce/DevOps/SRE/mobile exclude_patterns
-П-8.1: Tech Lead / Project Lead / part-time exclusions
-П-9.1: German-speaking title patterns
+P-4.1: eCommerce/CMS platform exclude_patterns
+P-5.1: Node.js backend title check
+P-6.1: Anti-hybrid cities in _matches_location
+P-7.1: Salesforce/DevOps/SRE/mobile exclude_patterns
+P-8.1: Tech Lead / Project Lead / part-time exclusions
+P-9.1: German-speaking title patterns
 """
 import pytest
 from hunter.filters import (
@@ -31,7 +31,7 @@ def _gmail(*, title: str, location: str = "remote") -> Job:
 
 
 # ---------------------------------------------------------------------------
-# П-4.1 — eCommerce/CMS blocked via exclude_pattern (gmail, so title_kw bypassed)
+# P-4.1 — eCommerce/CMS blocked via exclude_pattern (gmail, so title_kw bypassed)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("title", [
@@ -55,7 +55,7 @@ def test_ecommerce_cms_blocked(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-5.1 — Node.js backend title check
+# P-5.1 — Node.js backend title check
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("title", [
@@ -93,7 +93,7 @@ def test_frontend_node_passes_filter() -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-6.1 — Anti-hybrid cities
+# P-6.1 — Anti-hybrid cities
 # ---------------------------------------------------------------------------
 
 def test_location_wroclaw_passes() -> None:
@@ -135,7 +135,7 @@ def test_location_wroclaw_in_title_and_poland_passes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-7.1 — Salesforce/DevOps/SRE/mobile blocked (via gmail to bypass title_kw)
+# P-7.1 — Salesforce/DevOps/SRE/mobile blocked (via gmail to bypass title_kw)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("title", [
@@ -156,7 +156,7 @@ def test_devops_mobile_blocked(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-8.1 — Tech Lead / Project Lead / part-time excluded
+# P-8.1 — Tech Lead / Project Lead / part-time excluded
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("title", [
@@ -183,7 +183,7 @@ def test_senior_frontend_not_affected_by_lead_patterns() -> None:
 
 
 # ---------------------------------------------------------------------------
-# П-9.1 — German-speaking title patterns
+# P-9.1 — German-speaking title patterns
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("raw_text", [
@@ -193,7 +193,7 @@ def test_senior_frontend_not_affected_by_lead_patterns() -> None:
     "Angular Dev German speaking",
 ])
 def test_german_title_patterns(raw_text: str) -> None:
-    """П-9.1 title patterns should trigger German filter via _GERMAN_REQUIRED_RES."""
+    """P-9.1 title patterns should trigger German filter via _GERMAN_REQUIRED_RES."""
     from hunter.filters import _GERMAN_REQUIRED_RES
     assert any(p.search(raw_text) for p in _GERMAN_REQUIRED_RES), (
         f"No German pattern matched: {raw_text!r}"
