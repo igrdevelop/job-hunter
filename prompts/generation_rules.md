@@ -64,8 +64,19 @@ Rules:
 RED LINES (never cross):
 - NEVER mention iGaming, gambling, or gaming in experience. The candidate never worked in these domains - this is a red flag for recruiters.
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
-- NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
-- NEVER omit ANY role. ALL 7 roles MUST appear in the experience array, in this exact reverse-chronological order: Alten Poland → Fairmarkit → Venture Labs → SII → Altoros → SolbegSoft → Staronka. Omitting roles to fit 2 pages is FORBIDDEN — compress bullets instead (1 line each for old roles). Missing even one role makes the output invalid.
+- NEVER add, rename, merge, or invent a company. The ONLY allowed companies are the 7 listed below — use these exact names and orders. The `company`, `period`, `title`, and `subtitle` fields for each role MUST match the table verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
+
+  | # | company (exact) | title (exact) | period |
+  |---|----------------|---------------|--------|
+  | 1 | Alten Poland | Frontend Developer (Angular, part-time contract) | Apr 2026 - May 2026 |
+  | 2 | Fairmarkit | Senior Frontend Developer (Angular) | Jun 2025 - Mar 2026 |
+  | 3 | Venture Labs | Senior Frontend Developer (Angular) | Jul 2023 - Apr 2025 |
+  | 4 | SII | Senior Frontend Developer (Angular) | Nov 2022 - Jul 2023 |
+  | 5 | Altoros | Senior Frontend Developer | Apr 2018 - Nov 2022 |
+  | 6 | SolbegSoft | Frontend Developer (Angular) | Apr 2016 - Apr 2018 |
+  | 7 | Staronka | Frontend Developer | Nov 2015 - Mar 2016 |
+
+- NEVER omit ANY role. ALL 7 roles MUST appear in the experience array in the exact order above. Omitting roles to fit 2 pages is FORBIDDEN — compress bullets instead (1 line each for old roles). Missing even one role makes the output invalid.
 - NEVER change the `title` field of any experience entry. The `title` for each role MUST be taken verbatim from the base CV or candidate profile. The ONLY allowed variation is a framework swap: replace "(Angular)" with "(React)" when generating a React-track CV, or with "(Angular / React)" for fullstack. Do NOT apply the job posting's domain label (e.g., "AI Integration", "Fullstack", "Freelance", "Team Lead", "Engineering Manager") to any experience `title`. AI-flavoured or fullstack titles in the resume headline are fine — but they MUST NOT bleed into individual role `title` fields.
 - NEVER add a frontend framework (Angular, React, Vue) to a project's `stack_line` if that framework was not the actual frontend used in that role. Each project has EXACTLY ONE primary frontend framework — do not list two frameworks for the same role.
 - NEVER add backend technologies (NestJS, PostgreSQL, Redis, TypeORM, MongoDB, Prisma, Spring, .NET, Django) to a `stack_line` if the candidate profile says the backend was different. Specifically: Venture Labs backend was Java, SII backend was Java, SolbegSoft backend was .NET, Altoros (Insurance + Healthcare) backend was .NET. Only the Altoros e-commerce sub-project had Node.js backend.
@@ -81,7 +92,7 @@ RED LINES (never cross):
   Polish diacritics (ą ę ó ś ź ż ć ń ł) must NEVER appear in resume_en or cover_letter_en.
 - NEVER write cover_letter_en in Polish. The `cover_letter_en` field must always be written in English, even when the job posting language is Polish (lang=PL). Use `cover_letter_pl` for the Polish version.
 - NEVER describe any role as "freelance", "independent", "self-employed", or "contractor" in a `title` or `subtitle` field unless that exact wording appears in the candidate profile. Employment type is not a title modifier.
-- NEVER list Angular more than once in the skills `frontend` field. "Angular (2-XX)" and "Angular 2+" are the same technology — if "Angular (2-XX)" is already present, do NOT add a separate "Angular 2+" or plain "Angular" entry alongside it.
+- NEVER list Angular more than once in the skills `frontend` field. "Angular (2-XX)" and "Angular 2+" are the same technology — if "Angular (2-XX)" is already present, do NOT add a separate "Angular 2+", "Angular 14+", or plain "Angular" entry alongside it. If the job mentions "Angular 14+" in context of unit testing or a specific feature, reflect that in the relevant bullet or stack_line — NOT as a separate skills entry.
 
 ### Step 3 - Generate Content
 
