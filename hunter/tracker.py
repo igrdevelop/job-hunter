@@ -601,11 +601,20 @@ def add_applied(content: dict, force: bool = False) -> bool:
                     return False  # already has a successful entry
 
         # Is this a re-application (same URL exists with any status)?
+        # Check BEFORE the force-mode delete below so the flag is accurate.
         is_reapply = bool(
             norm_url and conn.execute(
                 "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm_url,)
             ).fetchone()
         )
+
+        # Force mode: delete any stale rows before inserting the fresh one.
+        # _force_cleanup should have already done this, but if it missed the row
+        # (e.g. URL normalisation mismatch) we'd end up with duplicate rows and
+        # get_folder_by_url would return the OLD folder path (yesterday's date).
+        if force and norm_url:
+            conn.execute("DELETE FROM applications WHERE url_norm=?", (norm_url,))
+
         conn.execute(
             """
             INSERT INTO applications
@@ -811,7 +820,7 @@ def get_folder_by_url(url: str) -> str | None:
         return None
     with get_db(DB_PATH) as conn:
         row = conn.execute(
-            "SELECT folder FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+            "SELECT folder FROM applications WHERE url_norm=? ORDER BY rowid DESC LIMIT 1", (norm,)
         ).fetchone()
     if row and row["folder"]:
         return row["folder"]
