@@ -358,6 +358,17 @@ def main_api(
     print("[apply_agent] Step 4.8: Reviewing cover letter...")
     content = _cover_letter_review(content)
 
+    # Step 4.9 — Content QA sanity check
+    print("[apply_agent] Step 4.9: Running content QA checks...")
+    try:
+        from hunter.content_qa import run_qa
+        qa = run_qa(content)
+        print(qa.summary())
+        if not qa.passed:
+            notify(qa.telegram_summary(url))
+    except Exception as _qa_err:
+        print(f"[apply_agent] Warning: QA check failed (continuing): {_qa_err}")
+
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")
 

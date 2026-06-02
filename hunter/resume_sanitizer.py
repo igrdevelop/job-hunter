@@ -3,13 +3,18 @@ hunter/resume_sanitizer.py — Resume integrity guard.
 
 Runs after the LLM returns content.json, before rendering.
 
-Two responsibilities:
+Responsibilities:
   1. Company whitelist enforcement — if the LLM invented / renamed a company,
      replace it with the nearest real role from candidate_profile.md (matched by
      period overlap; positional fallback when dates can't be parsed).
      Bullets and stack_line are kept intact (tailoring is allowed).
-  2. Education & courses fallback — if the LLM omitted or left empty the
+  2. Title enforcement — if the LLM renamed an experience title for a real company,
+     restore it verbatim from the profile.
+  3. Education & courses fallback — if the LLM omitted or left empty the
      `education` / `courses` fields, fill them verbatim from the profile.
+     Also detects education stored as stringified Python dict.
+  4. Language mixing guard (EN resumes only) — flags Polish diacritics / function
+     words in resume_en summary and experience bullets.
 """
 
 from __future__ import annotations
@@ -18,6 +23,28 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# Polish diacritics / function words that should never appear in an EN resume.
+# Note: "jest" excluded — it matches the Jest testing framework (false positive).
+_PL_IN_EN_RESUME_RE = re.compile(
+    r"[ąęóśźżćńł]"
+    r"|\b(się|przez|oraz|który|która|które|tego|czy|już"
+    r"|jestem|moje|mojej|moich|swoim|swoją|swoje|gdzie|będę|będzie|chciałbym"
+    r"|chciałabym|doświadczenie|specjalizuję|zajmuję|pracowałem|pracowałam"
+    r"|zbudowałem|przeprowadziłem|posiadam|poszukuję|szukam|pisanie|pokrywanie"
+    r"|projektowanie|programowaniu|programowanie|rozwiązań|rozwiązania"
+    r"|frontendowych|jednostkowych|podobnymi|kontroli|wersji|systemu|wiedzy"
+    r"|technicznej|wymiany|doświadczenia)\b",
+    re.IGNORECASE,
+)
+# IT terms to strip before Polish checks (avoid false positives like "Jest")
+_IT_TERMS_STRIP_RE = re.compile(
+    r"\b(Jest|Angular|React|TypeScript|JavaScript|NgRx|RxJS|Nx|Node\.?js"
+    r"|Jasmine|Karma|Jenkins|Webpack|Docker|GitHub|GitLab|SCSS|Bootstrap"
+    r"|AG\s*Grid|Signals|Agile|Scrum|SAFe|REST|API|JSON|HTML|CSS|WCAG"
+    r"|Cypress|Playwright|Next\.?js|NestJS|Redux|SonarQube)\b",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -260,7 +287,12 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         resume["courses"] = _coerce_str(resume.get("courses"))
         fixes.append(f"[{lang}] courses coerced to string")
 
-    if not (resume.get("education") or "").strip():
+    # Detect education that is a stringified Python dict — LLM hallucinated a structured object
+    edu_val = (resume.get("education") or "").strip()
+    if edu_val.startswith("{") and ("degree" in edu_val or "school" in edu_val):
+        resume["education"] = edu_en
+        fixes.append(f"[{lang}] education was dict-as-string (hallucinated) → replaced with profile education")
+    elif not edu_val:
         if edu_en:
             resume["education"] = edu_en
             fixes.append(f"[{lang}] education filled from profile")
@@ -287,11 +319,28 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
                     used_indices.add(i)
                     break
 
-    # Second pass: fix hallucinated entries
+    # Second pass: fix hallucinated entries; enforce title for real ones
+    roles = _load_profile_roles()
     for entry in experience:
         company = (entry.get("company") or "").strip()
         if _is_real_company(company):
-            continue  # already correct
+            # Title enforcement: restore profile title if LLM renamed it
+            if lang == "EN":
+                for role in roles:
+                    if (role["company"].lower() in company.lower()
+                            or company.lower() in role["company"].lower()):
+                        profile_title = role["title"]
+                        entry_title = (entry.get("title") or "").strip()
+                        # Normalise for comparison: lowercase, strip (Angular)/(React) suffix
+                        def _norm(t: str) -> str:
+                            return re.sub(r"\s*\([^)]+\)", "", t).lower().strip()
+                        if _norm(entry_title) != _norm(profile_title):
+                            fixes.append(
+                                f"[EN] title '{entry_title}' for '{company}' → '{profile_title}' (verbatim from profile)"
+                            )
+                            entry["title"] = profile_title
+                        break
+            continue  # company is real, skip hallucination fix
 
         fake_period = (entry.get("period") or "").strip()
         match = _best_match_role(fake_period, used_indices)
@@ -308,6 +357,42 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         fixes.append(
             f"[{lang}] '{old_company}' ({fake_period}) → '{match['company']}' ({match['period']})"
         )
+
+    # -- 3. Language unity guard (EN only) --
+    # resume_en must be entirely in English — check summary, skills, and bullets.
+    # Skills are the most common injection point for raw Polish job-posting keywords.
+    if lang == "EN":
+        summary = resume.get("summary") or ""
+        cleaned_summary = _IT_TERMS_STRIP_RE.sub("", summary)
+        if _PL_IN_EN_RESUME_RE.search(cleaned_summary):
+            m = _PL_IN_EN_RESUME_RE.search(cleaned_summary)
+            fixes.append(
+                f"[EN] WARNING: Polish in summary: '{m.group()[:40]}' — "
+                "translate job-posting keywords to English before inserting."
+            )
+
+        skills = resume.get("skills") or {}
+        for skill_key, skill_val in skills.items():
+            if skill_key == "languages":
+                continue  # "Polish (B2)" etc. are expected
+            cleaned_skill = _IT_TERMS_STRIP_RE.sub("", str(skill_val or ""))
+            if _PL_IN_EN_RESUME_RE.search(cleaned_skill):
+                m = _PL_IN_EN_RESUME_RE.search(cleaned_skill)
+                fixes.append(
+                    f"[EN] WARNING: Polish in skills.{skill_key}: '{m.group()[:40]}' — "
+                    "LLM pasted PL job-posting keywords into skills verbatim."
+                )
+
+        for entry in experience:
+            for bullet in (entry.get("bullets") or []):
+                cleaned_bullet = _IT_TERMS_STRIP_RE.sub("", bullet)
+                if _PL_IN_EN_RESUME_RE.search(cleaned_bullet):
+                    m = _PL_IN_EN_RESUME_RE.search(cleaned_bullet)
+                    fixes.append(
+                        f"[EN] WARNING: Polish in bullet "
+                        f"({entry.get('company','')}): '{m.group()[:40]}'"
+                    )
+                    break  # one warning per role is enough
 
     return resume, fixes
 
