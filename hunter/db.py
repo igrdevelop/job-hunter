@@ -128,6 +128,63 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             log.info("db: added missing column '%s' to applications", col)
 
 
+def _dedup_url_norm(conn: sqlite3.Connection) -> int:
+    """Remove duplicate url_norm rows keeping the best entry per URL.
+
+    Priority for 'best': successful ATS score > MANUAL > FAIL > SKIP > empty.
+    Returns number of rows deleted.
+    """
+    _STATUS_RANK = {
+        "fail": 0, "skip": 0, "": 0, "?": 0,
+        "manual": 1, "expired": 1,
+    }
+
+    def _rank(ats: str) -> int:
+        key = (ats or "").lower().strip()
+        # Real ATS scores (e.g. "97%") rank highest
+        if key.endswith("%"):
+            return 10
+        return _STATUS_RANK.get(key, 5)
+
+    dups = conn.execute(
+        """
+        SELECT url_norm, COUNT(*) as cnt
+        FROM applications
+        WHERE url_norm != ''
+        GROUP BY url_norm
+        HAVING cnt > 1
+        """
+    ).fetchall()
+
+    deleted = 0
+    for dup in dups:
+        url_norm = dup["url_norm"]
+        rows = conn.execute(
+            "SELECT id, ats_status, date FROM applications WHERE url_norm=?",
+            (url_norm,),
+        ).fetchall()
+        # Sort: best status first, then latest date
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: (_rank(r["ats_status"] or ""), r["date"] or ""),
+            reverse=True,
+        )
+        keep_id = rows_sorted[0]["id"]
+        ids_to_delete = [r["id"] for r in rows_sorted[1:]]
+        if ids_to_delete:
+            conn.execute(
+                f"DELETE FROM applications WHERE id IN ({','.join('?' * len(ids_to_delete))})",
+                ids_to_delete,
+            )
+            deleted += len(ids_to_delete)
+            log.info(
+                "db.dedup: removed %d duplicate(s) for url_norm=%s (kept %s)",
+                len(ids_to_delete), url_norm[:60], keep_id,
+            )
+
+    return deleted
+
+
 def init_db(
     path: Path = TRACKER_DB_PATH,
     *,
@@ -151,6 +208,10 @@ def init_db(
     with get_db(path) as conn:
         conn.executescript(_DDL)
         _ensure_columns(conn)
+        # Deduplicate existing rows before applying any unique constraints
+        n_dedup = _dedup_url_norm(conn)
+        if n_dedup:
+            log.info("db.init_db: removed %d duplicate url_norm rows", n_dedup)
 
     if need_migration:
         n = migrate_from_excel(_xlsx, path)

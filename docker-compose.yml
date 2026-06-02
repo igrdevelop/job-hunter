@@ -8,6 +8,10 @@ services:
     env_file:
       - .env
     volumes:
+      # tracker.db must exist on the host before first run.
+      # If it doesn't exist Docker will auto-create a directory, breaking the tracker.
+      # Fix: touch ./tracker.db  (the bot will initialise the schema on first start)
+      - ./tracker.db:/app/tracker.db
       - ./tracker.xlsx:/app/tracker.xlsx
       - ./Applications:/app/Applications
       - ./backups:/app/backups
