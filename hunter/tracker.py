@@ -587,10 +587,19 @@ def add_applied(content: dict, force: bool = False) -> bool:
     today = date.today().strftime("%Y-%m-%d")
     norm_url = normalize_url(apply_url) if apply_url else ""
 
-    if norm_url and has_successful_entry(apply_url) and not force:
-        return False
-
     with get_db(DB_PATH) as conn:
+        # Atomic dedup: check + insert inside ONE transaction so concurrent
+        # processes cannot both pass the check before either writes.
+        if norm_url and not force:
+            existing = conn.execute(
+                "SELECT ats_status, sent FROM applications WHERE url_norm=?",
+                (norm_url,),
+            ).fetchall()
+            for row in existing:
+                ats = (row["ats_status"] or "").strip().upper()
+                if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
+                    return False  # already has a successful entry
+
         # Is this a re-application (same URL exists with any status)?
         is_reapply = bool(
             norm_url and conn.execute(
