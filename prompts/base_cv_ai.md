@@ -38,7 +38,7 @@ NOTE: Do NOT write "Angular" in any role title. Use "AI Frontend Developer", "Se
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
 **title**: Senior Frontend Engineer (AI Integration)
-**company**: Fairmarkit (via contractor)
+**company**: Fairmarkit
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
 

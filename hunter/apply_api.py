@@ -30,7 +30,7 @@ from hunter.apply_shared import (
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     _ats_check_loop,
-    _cover_letter_review_loop,
+    _cover_letter_review,
     _handle_jobleads_fetch_blocked,
     compute_output_folder,
     is_backend_only_job_text,
@@ -298,13 +298,13 @@ def main_api(
             try:
                 _boost_msg = (
                     f"The resume currently scores {_ats_num}% ATS against the job posting. "
-                    "Rewrite 'resume_en' and 'cover_letter_en' to reach 95%+:\n"
+                    "Rewrite 'resume_en' to reach 95%+:\n"
                     "- Add more matching keywords from the job description to the summary, "
                     "skills, and experience bullet points.\n"
                     "- Strengthen alignment with the required and preferred qualifications.\n"
                     "- Update the resume summary to reflect the exact job title and key requirements.\n"
                     "Return the same JSON schema with updated fields "
-                    "('resume_en', 'cover_letter_en', 'cover_letter_pl', 'ats_score', 'stack', 'to_learn'). "
+                    "('resume_en', 'resume_pl', 'ats_score', 'stack', 'to_learn'). "
                     "You may also update other fields if needed.\n\n"
                     f"Job posting:\n{job_text}\n\n"
                     f"Current resume content (JSON):\n{json.dumps(content, ensure_ascii=False)}"
@@ -317,7 +317,7 @@ def main_api(
                     model=LLM_MODEL,
                     api_key=LLM_API_KEY,
                 )
-                for _key in ("resume_en", "cover_letter_en", "cover_letter_pl", "ats_score", "stack", "to_learn"):
+                for _key in ("resume_en", "resume_pl", "ats_score", "stack", "to_learn"):
                     if _boosted.get(_key):
                         content[_key] = _boosted[_key]
                 _, _new_ats = _parse_ats_score(str(content.get("ats_score", "") or ""))
@@ -342,21 +342,21 @@ def main_api(
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
         return
 
-    # Step 4.6 — Review and optionally rewrite cover letter (up to 3 rounds)
-    print("[apply_agent] Step 4.6: Reviewing cover letter for AI-language patterns...")
-    content = _cover_letter_review_loop(content)
-
-    # Step 4.7 — Independent ATS check + rewrite loop (target ≥ 95%)
-    print("[apply_agent] Step 4.7: Running independent ATS check...")
+    # Step 4.6 — Independent ATS check + rewrite loop for resume (target ≥ 95%)
+    print("[apply_agent] Step 4.6: Running independent ATS check on resume...")
     content = _ats_check_loop(content, job_text)
 
-    # Step 4.8 — Sanitize resume
-    print("[apply_agent] Step 4.8: Sanitizing resume content...")
+    # Step 4.7 — Sanitize resume
+    print("[apply_agent] Step 4.7: Sanitizing resume content...")
     try:
         from hunter.resume_sanitizer import sanitize_content
         content = sanitize_content(content)
     except Exception as _san_err:
         print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
+
+    # Step 4.8 — Single-pass cover letter review
+    print("[apply_agent] Step 4.8: Reviewing cover letter...")
+    content = _cover_letter_review(content)
 
     # Step 5 — Compute output folder and finalize JSON
     company = content.get("company_name", "Unknown")

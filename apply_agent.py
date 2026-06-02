@@ -45,6 +45,7 @@ from hunter.apply_shared import (  # noqa: F401
     ApplyError,
     _already_processed,
     _body_banlist_hits,
+    _cover_letter_review,
     _cover_letter_review_loop,
     _opener_banlist_hits,
     compute_output_folder,

@@ -23,7 +23,7 @@ Intel (client) | OpenVINO LLM Evaluation Tooling | Wrocław, Poland
 - Frontend tooling supporting OpenVINO - Intel's open-source AI inference framework for LLM optimization across CPU/GPU/NPU backends.
 Stack: Angular, TypeScript, RxJS, SCSS. AI dev tools: GitHub Copilot, Claude Opus (spec-driven agentic refactor).
 
-**Senior Frontend Developer (Angular) | Fairmarkit (via contractor)** - Jun 2025 - March 2026
+**Senior Frontend Developer (Angular) | Fairmarkit** - Jun 2025 - March 2026
 AI-powered Enterprise Procurement Platform | USA (Global)
 - Contributed to frontend development of an AI-powered procurement platform serving enterprise clients globally, built with Angular 21 in an Nx monorepo.
 - Built an AI decision-support feature: Angular frontend consumed LLM-generated recommendations helping procurement teams select optimal supplier options from large datasets of historical and real-time data.

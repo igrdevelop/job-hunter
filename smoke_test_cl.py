@@ -138,8 +138,8 @@ def main():
     # run the actual apply_agent review loop
     print("\n[smoke] Running apply_agent review loop...")
     sys.path.insert(0, str(Path(__file__).parent))
-    from apply_agent import _cover_letter_review_loop
-    reviewed = _cover_letter_review_loop(content)
+    from apply_agent import _cover_letter_review
+    reviewed = _cover_letter_review(content)
     reviewed_cl = reviewed.get("cover_letter_en", cl_en)
 
     if reviewed_cl != cl_en:

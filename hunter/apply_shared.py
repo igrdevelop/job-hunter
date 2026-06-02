@@ -273,6 +273,23 @@ _BANNED_CTA_PHRASES: tuple[re.Pattern, ...] = (
 _CL_WORD_MIN, _CL_WORD_MAX = 220, 280
 _CL_BODY_PARA_MIN, _CL_BODY_PARA_MAX = 3, 5
 
+# Gate 8 — language mixing detection
+# Polish diacritics / common Polish function words that never appear in English IT text
+_PL_IN_EN_RE = re.compile(
+    r"[ąęóśźżćńł]"
+    r"|\b(się|jest|nie|przez|oraz|który|która|które|tego|jak|czy|przy|dla|już"
+    r"|jestem|moje|mojej|moich|swoim|swoją|swoje|gdzie|będę|będzie|chciałbym"
+    r"|chciałabym|doświadczenie|specjalizuję|zajmuję|pracowałem|pracowałam"
+    r"|zbudowałem|przeprowadziłem|posiadam|poszukuję|szukam)\b",
+    re.IGNORECASE,
+)
+# English sentence starters that don't belong inside a Polish letter
+_EN_IN_PL_RE = re.compile(
+    r"\b(I am writing|I would like|I have been|As a Senior|I look forward"
+    r"|I bring|I have worked|In my previous|Dear Hiring|With over)\b",
+    re.IGNORECASE,
+)
+
 _METRIC_RE = re.compile(
     r"\b\d+\s*%"
     r"|\b\d{3,}\b"
@@ -344,7 +361,43 @@ def _count_metrics(letter: str) -> int:
     return len(_METRIC_RE.findall(cleaned))
 
 
-def _review_cover_letter(letter: str) -> tuple[str, int]:
+def _detect_language_mixing(letter: str, expected_lang: str) -> list[str]:
+    """Gate 8 — detect language mixing in the cover letter.
+
+    Returns a list of violation descriptions (empty = clean).
+    IT anglicisms (Angular, TypeScript, NgRx, etc.) are always allowed in PL letters.
+    """
+    if not letter:
+        return []
+    lang = (expected_lang or "EN").upper()
+    hits: list[str] = []
+    if lang == "EN":
+        # Strip known IT terms before checking for Polish diacritics/words
+        it_terms = re.compile(
+            r"\b(Angular|React|TypeScript|JavaScript|NgRx|RxJS|Nx|SonarQube"
+            r"|Node\.?js|Jenkins|Webpack|Docker|GitHub|GitLab|CI/CD|SCSS|Bootstrap"
+            r"|AG\s*Grid|Signals|Agile|Scrum|SAFe|REST|API|JSON|HTML|CSS|WCAG"
+            r"|Cypress|Jest|Jasmine|Playwright|Next\.?js|NestJS|Redux)\b",
+            re.IGNORECASE,
+        )
+        cleaned = it_terms.sub("", letter)
+        if _PL_IN_EN_RE.search(cleaned):
+            sample = _PL_IN_EN_RE.search(cleaned)
+            hits.append(
+                f"Gate 8 — Polish words/diacritics found in EN letter "
+                f"(e.g. '{sample.group()[:30]}')"
+            )
+    elif lang == "PL":
+        if _EN_IN_PL_RE.search(letter):
+            sample = _EN_IN_PL_RE.search(letter)
+            hits.append(
+                f"Gate 8 — English sentence patterns found in PL letter "
+                f"(e.g. '{sample.group()[:40]}')"
+            )
+    return hits
+
+
+def _review_cover_letter(letter: str, expected_lang: str = "EN") -> tuple[str, int]:
     """Review cover letter against quality gates; rewrite if any gate fails.
 
     Gate 1: word count (_CL_WORD_MIN–_CL_WORD_MAX)
@@ -354,6 +407,8 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
     Gate 5: unfamiliar tech uses only safe verbs (checked by LLM)
     Gate 6: CTA — no banned fluff phrases in final paragraph
     Gate 7: 3–5 body paragraphs after Dear …
+    Gate 8: no language mixing (EN letter must not contain Polish words/diacritics;
+            PL letter must not contain English sentence patterns)
 
     Returns (rewritten_or_original, score_1_to_10). Score > 6 = acceptable.
     Skips if no API key available.
@@ -364,6 +419,7 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
     opener_hits = _opener_banlist_hits(letter)
     body_hits = _body_banlist_hits(letter)
     cta_hits = _cta_banlist_hits(letter)
+    lang_hits = _detect_language_mixing(letter, expected_lang)
     wc = _count_words(letter)
     metric_count = _count_metrics(letter)
     body_paras = _count_body_paragraphs(letter)
@@ -383,11 +439,14 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         forced_fails.append(
             f"Gate 7 — body paragraphs {body_paras} (target {_CL_BODY_PARA_MIN}-{_CL_BODY_PARA_MAX} after salutation)",
         )
+    if lang_hits:
+        forced_fails.extend(lang_hits)
 
     for msg in forced_fails:
         print(f"[apply_agent] Pre-check FAIL: {msg}")
 
     gate6_line = f"FAIL — {cta_hits[0][:60]}" if cta_hits else "PASS"
+    gate8_line = f"FAIL — {lang_hits[0][:80]}" if lang_hits else f"PASS (expected: {expected_lang})"
 
     gate_summary = (
         f"Gate 1 (word count {_CL_WORD_MIN}-{_CL_WORD_MAX}): "
@@ -397,7 +456,8 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         f"Gate 4 (body banned phrases): {'FAIL — ' + body_hits[0][:60] if body_hits else 'PASS'}\n"
         f"Gate 6 (CTA): {gate6_line}\n"
         f"Gate 7 (body paragraphs {_CL_BODY_PARA_MIN}-{_CL_BODY_PARA_MAX}): "
-        f"{'PASS' if _CL_BODY_PARA_MIN <= body_paras <= _CL_BODY_PARA_MAX else f'FAIL ({body_paras})'}"
+        f"{'PASS' if _CL_BODY_PARA_MIN <= body_paras <= _CL_BODY_PARA_MAX else f'FAIL ({body_paras})'}\n"
+        f"Gate 8 (language consistency — expected {expected_lang}): {gate8_line}"
     )
 
     critical_note = ""
@@ -416,6 +476,12 @@ def _review_cover_letter(letter: str) -> tuple[str, int]:
         "'familiar with', 'exposure to', 'adjacent to', 'ramping up on', 'transferable from'. "
         "DANGER verbs for unfamiliar tech ('spent N years on', 'led X', 'architected X', "
         "'built X from scratch', 'owned X') → Gate 5 FAIL.\n\n"
+        f"Gate 8 (language consistency — expected language: {expected_lang}): "
+        "The letter MUST be written entirely in one language. "
+        "For EN: no Polish words, no Polish diacritics (ą ę ó ś ź ż ć ń ł), no Polish grammar. "
+        "For PL: no English sentence-level constructs (full English sentences are forbidden; "
+        "IT anglicisms like Angular, TypeScript, NgRx, CI/CD are allowed). "
+        "Language mixing → Gate 8 FAIL.\n\n"
         "Score 1-10:\n"
         "  1-4: one or more gates fail\n"
         "  5-6: borderline\n"
@@ -658,7 +724,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 model=LLM_MODEL,
                 api_key=LLM_API_KEY,
             )
-            for key in ("resume_en", "resume_pl", "cover_letter_en", "cover_letter_pl",
+            for key in ("resume_en", "resume_pl",
                         "ats_score", "stack", "to_learn", "skills"):
                 if boosted.get(key):
                     content[key] = boosted[key]
@@ -674,35 +740,30 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     return content
 
 
-def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
-    """Review and optionally rewrite cover_letter_en up to max_rounds times.
-
-    Updates cover_letter_pl if EN was changed.
-    """
+def _cover_letter_review(content: dict) -> dict:
+    """Review cover_letter_en once; rewrite if quality gates fail. Accept result as-is."""
     letter = content.get("cover_letter_en", "")
     if not letter:
         return content
 
+    expected_lang = (content.get("lang") or "EN").upper()
     original_en = letter
-    final_score = 10
+    new_letter, score = _review_cover_letter(letter, expected_lang=expected_lang)
+    print(f"[apply_agent] Cover letter review: score={score}/10")
 
-    for attempt in range(1, max_rounds + 1):
-        new_letter, score = _review_cover_letter(letter)
-        final_score = score
-        print(f"[apply_agent] Cover letter review round {attempt}/{max_rounds}: score={score}")
-        letter = new_letter
-        if score > 6:
-            break
-
-    content["cover_letter_en"] = letter
-    if letter != original_en:
-        print(f"[apply_agent] Cover letter rewritten (final score={final_score}), updating PL translation…")
-        notify(f"✍️ Cover letter rewritten after review (score was {final_score}/10)")
-        pl = _translate_cover_letter_pl(letter)
+    content["cover_letter_en"] = new_letter
+    if new_letter != original_en:
+        notify(f"✍️ Cover letter rewritten after review (score was {score}/10)")
+        pl = _translate_cover_letter_pl(new_letter)
         if pl:
             content["cover_letter_pl"] = pl
 
     return content
+
+
+def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
+    """Deprecated: use _cover_letter_review. Kept for backward compat."""
+    return _cover_letter_review(content)
 
 
 # ── Output folder logic ───────────────────────────────────────────────────────
