@@ -24,16 +24,25 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# Polish diacritics / function words that should never appear in an EN resume
+# Polish diacritics / function words that should never appear in an EN resume.
+# Note: "jest" excluded — it matches the Jest testing framework (false positive).
 _PL_IN_EN_RESUME_RE = re.compile(
     r"[ąęóśźżćńł]"
-    r"|\b(się|jest|nie|przez|oraz|który|która|które|tego|jak|czy|przy|dla|już"
+    r"|\b(się|przez|oraz|który|która|które|tego|czy|już"
     r"|jestem|moje|mojej|moich|swoim|swoją|swoje|gdzie|będę|będzie|chciałbym"
     r"|chciałabym|doświadczenie|specjalizuję|zajmuję|pracowałem|pracowałam"
     r"|zbudowałem|przeprowadziłem|posiadam|poszukuję|szukam|pisanie|pokrywanie"
     r"|projektowanie|programowaniu|programowanie|rozwiązań|rozwiązania"
     r"|frontendowych|jednostkowych|podobnymi|kontroli|wersji|systemu|wiedzy"
-    r"|technicznej|wymiany|lat\b|doświadczenia)\b",
+    r"|technicznej|wymiany|doświadczenia)\b",
+    re.IGNORECASE,
+)
+# IT terms to strip before Polish checks (avoid false positives like "Jest")
+_IT_TERMS_STRIP_RE = re.compile(
+    r"\b(Jest|Angular|React|TypeScript|JavaScript|NgRx|RxJS|Nx|Node\.?js"
+    r"|Jasmine|Karma|Jenkins|Webpack|Docker|GitHub|GitLab|SCSS|Bootstrap"
+    r"|AG\s*Grid|Signals|Agile|Scrum|SAFe|REST|API|JSON|HTML|CSS|WCAG"
+    r"|Cypress|Playwright|Next\.?js|NestJS|Redux|SonarQube)\b",
     re.IGNORECASE,
 )
 
@@ -352,16 +361,18 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
     # -- 3. Language mixing guard (EN only) --
     if lang == "EN":
         summary = resume.get("summary") or ""
-        if _PL_IN_EN_RESUME_RE.search(summary):
-            m = _PL_IN_EN_RESUME_RE.search(summary)
+        cleaned_summary = _IT_TERMS_STRIP_RE.sub("", summary)
+        if _PL_IN_EN_RESUME_RE.search(cleaned_summary):
+            m = _PL_IN_EN_RESUME_RE.search(cleaned_summary)
             fixes.append(
                 f"[EN] WARNING: Polish word/diacritic in summary: '{m.group()[:40]}' — "
                 "LLM inserted PL job-posting keywords verbatim. Review generation_rules."
             )
         for entry in experience:
             for bullet in (entry.get("bullets") or []):
-                if _PL_IN_EN_RESUME_RE.search(bullet):
-                    m = _PL_IN_EN_RESUME_RE.search(bullet)
+                cleaned_bullet = _IT_TERMS_STRIP_RE.sub("", bullet)
+                if _PL_IN_EN_RESUME_RE.search(cleaned_bullet):
+                    m = _PL_IN_EN_RESUME_RE.search(cleaned_bullet)
                     fixes.append(
                         f"[EN] WARNING: Polish word/diacritic in bullet "
                         f"({entry.get('company','')}): '{m.group()[:40]}'"
