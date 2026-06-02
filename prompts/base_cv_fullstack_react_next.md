@@ -39,7 +39,7 @@ React and Next.js are positioned as primary stack; Angular appears only as backg
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
 **title**: Senior Frontend Developer
-**company**: Fairmarkit (via contractor)
+**company**: Fairmarkit
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
 

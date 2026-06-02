@@ -66,13 +66,15 @@ RED LINES (never cross):
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
 - NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
 - NEVER omit ANY role. ALL 7 roles MUST appear in the experience array, in this exact reverse-chronological order: Alten Poland → Fairmarkit → Venture Labs → SII → Altoros → SolbegSoft → Staronka. Omitting roles to fit 2 pages is FORBIDDEN — compress bullets instead (1 line each for old roles). Missing even one role makes the output invalid.
-- NEVER change a job title to something that did not exist. Allowed title patterns per track: Angular track — "(Angular)" suffix allowed; React/Next/Nest tracks — plain "Senior Frontend Developer" / "Frontend Developer"; AI track — AI-flavoured titles ("Senior Frontend Engineer (AI Integration)" etc.). NEVER invent titles like "Team Lead", "Fullstack Developer", "Engineering Manager" unless explicitly in the candidate profile.
+- NEVER change the `title` field of any experience entry. The `title` for each role MUST be taken verbatim from the base CV or candidate profile. The ONLY allowed variation is a framework swap: replace "(Angular)" with "(React)" when generating a React-track CV, or with "(Angular / React)" for fullstack. Do NOT apply the job posting's domain label (e.g., "AI Integration", "Fullstack", "Freelance", "Team Lead", "Engineering Manager") to any experience `title`. AI-flavoured or fullstack titles in the resume headline are fine — but they MUST NOT bleed into individual role `title` fields.
 - NEVER add a frontend framework (Angular, React, Vue) to a project's `stack_line` if that framework was not the actual frontend used in that role. Each project has EXACTLY ONE primary frontend framework — do not list two frameworks for the same role.
 - NEVER add backend technologies (NestJS, PostgreSQL, Redis, TypeORM, MongoDB, Prisma, Spring, .NET, Django) to a `stack_line` if the candidate profile says the backend was different. Specifically: Venture Labs backend was Java, SII backend was Java, SolbegSoft backend was .NET, Altoros (Insurance + Healthcare) backend was .NET. Only the Altoros e-commerce sub-project had Node.js backend.
 - NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
 - NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-22)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
 - NEVER invent client scale or prestige. Do not write "Fortune 500", "top-tier clients", "enterprise at scale", or similar claims unless explicitly stated in the job posting or candidate profile.
 - NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text.
+- NEVER describe any role as "freelance", "independent", "self-employed", or "contractor" in a `title` or `subtitle` field unless that exact wording appears in the candidate profile. Employment type is not a title modifier.
+- NEVER list Angular more than once in the skills `frontend` field. "Angular (2-XX)" and "Angular 2+" are the same technology — if "Angular (2-XX)" is already present, do NOT add a separate "Angular 2+" or plain "Angular" entry alongside it.
 
 ### Step 3 - Generate Content
 
@@ -216,7 +218,7 @@ Return ONLY a valid JSON object with this exact structure:
     "experience": [
       {
         "title": "Senior Frontend Developer (Angular)",
-        "company": "Fairmarkit (via contractor)",
+        "company": "Fairmarkit",
         "period": "Jun 2025 - March 2026",
         "subtitle": "AI-powered Enterprise Procurement Platform | USA (Global)",
         "bullets": ["reframed bullet 1", "reframed bullet 2", "..."],
