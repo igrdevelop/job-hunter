@@ -56,6 +56,62 @@ _REACT_SKIP_FORCE_HINT = (
 )
 
 
+# ── Pre-LLM text-based stack screening ───────────────────────────────────────
+
+# Minimum number of React mentions (no Angular present) to auto-skip pre-LLM.
+_REACT_SKIP_MIN_MENTIONS: int = 3
+
+# BE-required signal patterns: language/framework + hard-requirement qualifier.
+# Fires only when a clear "required/must/mandatory" is combined with a BE marker,
+# AND no frontend framework (Angular / React / Vue) is mentioned in the posting.
+_BE_REQUIRED_LANG_RE = re.compile(
+    r"\b(?:python|django|flask|fastapi|ruby|rails|php|laravel|symfony|golang|go\s+lang"
+    r"|java(?!script)|spring\s+boot|\.net\s+core|c\s*#)\b",
+    re.IGNORECASE,
+)
+_BE_REQUIRED_QUALIFIER_RE = re.compile(
+    r"\b(?:required|mandatory|essential|must\s+have|must[-\s]have|must\s+know"
+    r"|you\s+(?:will\s+)?(?:need|must)|we\s+require|minimum\s+requirement)\b",
+    re.IGNORECASE,
+)
+_FE_FRAMEWORK_RE = re.compile(
+    r"\b(?:angular|react(?:\.?js)?|vue(?:\.?js)?|next\.?js|nuxt(?:\.?js)?)\b",
+    re.IGNORECASE,
+)
+
+
+def is_react_only_job_text(text: str) -> bool:
+    """Return True if job text is clearly React-only before calling the LLM.
+
+    Conservative heuristic — only fires when:
+    1. The word "angular" does NOT appear anywhere in the text, AND
+    2. "react" appears at least _REACT_SKIP_MIN_MENTIONS (3) times.
+
+    Skipping early saves the LLM call; Step 4.5 in apply_api.py remains as a
+    fallback for edge cases (e.g. Angular mentioned once, React dominates).
+    """
+    t = text.lower()
+    if "angular" in t:
+        return False
+    return len(re.findall(r"\breact\b", t)) >= _REACT_SKIP_MIN_MENTIONS
+
+
+def is_backend_only_job_text(text: str) -> bool:
+    """Return True if job text explicitly requires a backend language/framework
+    AND mentions no frontend framework at all — saving the LLM call.
+
+    Very conservative: requires BOTH a hard-requirement qualifier AND a BE
+    language signal, with zero FE framework mentions.  False-positive risk is
+    kept low by requiring the absence of all FE framework names.
+    """
+    if _FE_FRAMEWORK_RE.search(text):
+        # Any Angular / React / Vue / Next / Nuxt mention → let LLM decide
+        return False
+    if not _BE_REQUIRED_LANG_RE.search(text):
+        return False
+    return bool(_BE_REQUIRED_QUALIFIER_RE.search(text))
+
+
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 class ApplyError(RuntimeError):

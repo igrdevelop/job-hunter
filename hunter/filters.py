@@ -318,20 +318,88 @@ def _is_german_language_required(job: Job) -> bool:
 # allowed location token (remote/wroclaw) is rejected.
 # LinkedIn often returns "Poland" as location with the city in the title (e.g.
 # "Jlabs Angular Dev Kraków - Zabłocie"), so we check BOTH location and title.
-_ANTI_HYBRID_CITIES: frozenset[str] = frozenset({
-    "kraków", "krakow", "cracow",
-    "warszawa", "warsaw",
-    "gdańsk", "gdansk", "gdynia", "trójmiasto", "trojmiasto",
-    "poznań", "poznan",
-    "łódź", "lodz",
-    "katowice", "silesia", "śląsk", "slask",
-    "rzeszów", "rzeszow",
-    "lublin",
-    "szczecin",
-    "bydgoszcz",
-    "toruń", "torun",
-    "białystok", "bialystok",
-})
+# Extra cities from FILTER["extra_anti_hybrid_cities"] (config.py) are merged in
+# at module load time so the set is computed once and stays O(1) per lookup.
+_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
+    {
+        "kraków", "krakow", "cracow",
+        "warszawa", "warsaw",
+        "gdańsk", "gdansk", "gdynia", "trójmiasto", "trojmiasto",
+        "poznań", "poznan",
+        "łódź", "lodz",
+        "katowice", "silesia", "śląsk", "slask",
+        "rzeszów", "rzeszow",
+        "lublin",
+        "szczecin",
+        "bydgoszcz",
+        "toruń", "torun",
+        "białystok", "bialystok",
+    }
+    | {c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])}
+)
+
+# ── Contract / part-time patterns (checked against full job text blob) ────────
+# Catches "part-time" buried in the description rather than the title.
+_CONTRACT_EXCLUDED_RES: tuple[re.Pattern, ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        # Part-time — English
+        r"\bpart[-\s]?time\b",
+        # Part-time — Polish (0.5 etatu, pół etatu)
+        r"\bpół\s+etatu\b",
+        r"\b0[.,]5\s*(?:etatu|etat|fte)\b",
+        # Very short contracts — 1-month engagements
+        r"\b(?:1|one)\s*-?\s*month\s+(?:contract|project|engagement|assignment)\b",
+        r"\bcontract\s+(?:for\s+)?(?:1|one)\s+month\b",
+        r"\bduration\s*:?\s*1\s+month\b",
+        r"\b1\s*[–-]\s*month\s+(?:contract|project)\b",
+    )
+)
+
+# ── Relocation-required patterns (checked against full job text blob) ─────────
+# Catches offers where location field says "remote/Poland" but the body demands
+# physical relocation to a city outside the Wrocław area.
+_RELOCATION_REQUIRED_RES: tuple[re.Pattern, ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\brelocation\s+(?:is\s+)?(?:required|necessary|mandatory|expected)\b",
+        r"\bmust\s+(?:be\s+)?(?:willing\s+to\s+)?relocate\b",
+        r"\bwilling\s+to\s+relocate\s+(?:is\s+a?\s*)?(?:required|must|necessary)\b",
+        # Polish
+        r"\brelokacja\s+(?:jest\s+)?wymagana\b",
+        r"\bwymagana\s+relokacja\b",
+    )
+)
+
+
+def _is_unacceptable_contract(job: Job) -> bool:
+    """True → skip (part-time or very short contract detected in full job text).
+
+    Catches cases where "part-time" appears in the description but not the title
+    — title-only exclude_levels / exclude_patterns miss these.
+    """
+    if not FILTER.get("exclude_unacceptable_contract", False):
+        return False
+    blob = _job_plain_text_blob(job)
+    if not blob.strip():
+        return False
+    return any(p.search(blob) for p in _CONTRACT_EXCLUDED_RES)
+
+
+def _requires_relocation(job: Job) -> bool:
+    """True → skip (job explicitly requires relocation).
+
+    Catches offers that show location='remote' or 'Poland' in the listing field
+    but state in the description that the candidate must relocate.
+    Works in tandem with _ANTI_HYBRID_CITIES (which blocks city mentions in
+    location/title); this catches the rarer explicit relocation-required phrasing.
+    """
+    if not FILTER.get("exclude_relocation_required", False):
+        return False
+    blob = _job_plain_text_blob(job)
+    if not blob.strip():
+        return False
+    return any(p.search(blob) for p in _RELOCATION_REQUIRED_RES)
 
 
 def _matches_location(job: Job) -> bool:
@@ -398,9 +466,11 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
       - raw-skills React check  (_is_react_without_angular)
       - location check  (_matches_location — same whitelist as all sources)
       - German language requirement
+      - unacceptable contract  (_is_unacceptable_contract — part-time / 1-month)
+      - relocation required  (_requires_relocation — explicit relocation demand)
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
-                        react_no_angular, location, german
+                        react_no_angular, location, german, contract, relocation
     """
     result = []
     reasons: dict[str, int] = {
@@ -411,6 +481,8 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
         "react_no_angular": 0,
         "location": 0,
         "german": 0,
+        "contract": 0,
+        "relocation": 0,
     }
 
     for job in jobs:
@@ -467,6 +539,16 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
         # German language requirement — check full text blob for all sources
         if _is_german_language_required(job):
             reasons["german"] += 1
+            continue
+
+        # Part-time / very short contract — check full text blob
+        if _is_unacceptable_contract(job):
+            reasons["contract"] += 1
+            continue
+
+        # Explicit relocation requirement — check full text blob
+        if _requires_relocation(job):
+            reasons["relocation"] += 1
             continue
 
         result.append(job)

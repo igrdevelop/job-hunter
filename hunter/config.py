@@ -193,6 +193,37 @@ FILTER = {
     # Drop roles that require German (checked in title + location + raw description-like fields).
     # Set false if you speak German or use boards where this produces false positives.
     "exclude_german_language_required": True,
+
+    # Drop part-time / very short contract roles (checked in full job text, not only title).
+    # Catches cases where "part-time" appears in the description but not the job title.
+    "exclude_unacceptable_contract": True,
+
+    # Drop jobs that explicitly require relocation outside Poland / outside Wrocław region.
+    # Catches "hybrid Helsinki", "relocation to Barcelona required", etc. in the full text.
+    "exclude_relocation_required": True,
+
+    # Extra anti-hybrid cities appended to _ANTI_HYBRID_CITIES in filters.py.
+    # These are non-Polish cities that appeared as hybrid requirements in the tracker.
+    "extra_anti_hybrid_cities": [
+        # EU cities outside Poland that appeared in hybrid job descriptions
+        "helsinki", "helsingfors",
+        "barcelona", "madrid", "lisbon", "lisboa",
+        "berlin", "munich", "münchen", "hamburg", "frankfurt",
+        "amsterdam", "rotterdam",
+        "prague", "brno",
+        "bratislava",
+        "budapest",
+        "bucharest",
+        "sofia",
+        "zagreb",
+        # Non-EU / remote-but-actually-not regions
+        "islamabad", "karachi", "lahore",   # Pakistan
+        "bangalore", "mumbai", "delhi",     # India
+        "singapore",
+        "dubai", "abu dhabi",
+        "hong kong",
+        "tokyo",
+    ],
 }
 
 # ── JustJoin.it source config ────────────────────────────────────────────────

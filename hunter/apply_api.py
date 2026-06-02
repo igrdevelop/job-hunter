@@ -33,6 +33,8 @@ from hunter.apply_shared import (
     _cover_letter_review_loop,
     _handle_jobleads_fetch_blocked,
     compute_output_folder,
+    is_backend_only_job_text,
+    is_react_only_job_text,
     notify,
     send_telegram_documents,
     validate_content,
@@ -175,6 +177,32 @@ def main_api(
             add_expired(url)
         except Exception as e:
             print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+        return
+
+    # Step 1.5c — Pre-LLM React-only text check (saves LLM call for obvious React jobs)
+    # Skip only when skip_dedup is False (force mode bypasses all stack filters).
+    if not skip_dedup and is_react_only_job_text(job_text):
+        notify(
+            f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n"
+            f"🔗 {url}"
+            f"{_REACT_SKIP_FORCE_HINT}"
+        )
+        print(f"[apply_agent] SKIP (pre-LLM) — React-only job text: {url}")
+        try:
+            from hunter.tracker import add_react_skipped
+            add_react_skipped({"stack": "React (pre-LLM)", "company_name": "", "job_title": ""}, url)
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+        return
+
+    # Step 1.5d — Pre-LLM backend-only text check (no FE framework + explicit BE required)
+    if not skip_dedup and is_backend_only_job_text(job_text):
+        notify(
+            f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n"
+            f"🔗 {url}"
+            f"{_REACT_SKIP_FORCE_HINT}"
+        )
+        print(f"[apply_agent] SKIP (pre-LLM) — backend-only job text: {url}")
         return
 
     # Step 2 — Read system prompt (instructions + candidate profile)

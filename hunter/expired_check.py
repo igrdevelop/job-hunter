@@ -28,6 +28,21 @@ EXPIRED_PATTERNS: tuple[re.Pattern, ...] = tuple(
         r"\bpracodawca\s+zakończy[łl]\s+zbieranie\s+zgłosze",
         r"\bzakończy[łl]\s+zbieranie\s+zgłosze",
         r"\bzgłoszenia\s+(?:na\s+tę\s+ofertę\s+)?(?:zostały\s+)?zamknięte\b",
+        # Polish — NoFluffJobs / JustJoin "offer not found / not available"
+        r"\bta\s+oferta\s+nie\s+jest\s+już\s+dostępna\b",
+        r"\boferta\s+pracy\s+nie\s+została\s+odnaleziona\b",
+        r"\boferta\s+nie\s+jest\s+już\s+dostępna\b",
+        # English — generic 404 / "not found" page content
+        # Require a page/job/position object after "find" to avoid matching job-description prose
+        r"\bwe\s+(?:didn.t|could\s+not|couldn.t)\s+find\s+(?:the\s+|this\s+)?(?:page|job|position|offer|listing|posting|what\s+you\s+were\s+looking\s+for)\b",
+        r"\bpage\s+(?:not\s+found|does\s+not\s+exist|no\s+longer\s+exists)\b",
+        r"\b404\b.{0,30}\bnot\s+found\b",
+        # SmartRecruiters deactivated form
+        r"\brequested\s+application\s+form\s+is\s+inactive\b",
+        # Workable / Greenhouse / generic ATS — job closed
+        r"\bthis\s+job\s+(?:is\s+)?(?:has\s+been\s+)?closed\b",
+        r"\bthis\s+position\s+is\s+(?:now\s+)?closed\b",
+        r"\bsorry[,.]?\s+this\s+(?:job|position|role)\s+(?:is\s+)?no\s+longer\s+available\b",
     )
 )
 
@@ -50,6 +65,8 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "nofluffjobs.com": (
         "This offer is no longer available",
         "oferta nie jest już dostępna",
+        "ta oferta nie jest już dostępna",
+        "oferta pracy nie została odnaleziona",
     ),
     "justjoin.it": (
         '"isExpired":true',
