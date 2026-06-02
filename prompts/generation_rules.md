@@ -48,11 +48,12 @@ For each gap:
   - "Storybook" → natural for any Angular/React dev
   - "GitHub Copilot" / "AI tools" → plausible for any modern developer
   - "Playwright" → natural for a developer with Cypress/Jest experience
+  - "jQuery" → add to skills as "jQuery (familiar)" ONLY IF the job explicitly requires it. When adding to a stack_line, restrict to pre-2022 roles (SolbegSoft, Altoros) where jQuery was realistic. NEVER add jQuery to Fairmarkit, Venture Labs, SII, or Alten Poland — these are modern Angular apps (2022-2026) that do not use jQuery.
 - **Reframe existing experience** if the concept was used under a different name:
   - "micro-frontends" → rephrase Nx monorepo as "micro-frontend architecture (Nx monorepo)"
   - "web performance optimization" → already done, add explicit keyword to bullet
-- **Enrich experience stack lines**: you MAY add 1-2 plausible technologies to a "Stack:" line if they fit that role's timeframe and domain. Do NOT add 5+ techs to a single stack line.
-- **Rewrite experience bullets** to weave in job keywords naturally. Keep the core facts true - only adjust framing and wording, do not fabricate achievements or metrics.
+- **Enrich experience stack lines**: you MAY add 1-2 plausible technologies to a "Stack:" line if they fit that role's **timeframe and domain**. Do NOT add 5+ techs to a single stack line. Era matters: do not add 2010s-era tech (jQuery, Backbone, AngularJS) to roles from 2022 onwards.
+- **Rewrite experience bullets** to weave in job keywords naturally. Keep the core facts true — only adjust framing and wording. NEVER fabricate achievements, migrations, or project narratives that are not grounded in the candidate profile. If a technology is not mentioned in the profile for a given role, do not invent a story about using it there.
 - **Achievement formula**: every bullet MUST follow "Verb + task/action + measurable result". Draw from the candidate profile's source details selectively — use what's most relevant to this specific job, not all details at once. Prefer numbers, %, timeframes, or scale (team size, client count, app count, migration scope). Bad: "Contributed to frontend development". Good: "Optimized inherited app by parallelizing queries and adding lazy loading — delivered to final client sale".
 - **Skip** only if completely foreign (mobile native, data science, embedded systems)
 
