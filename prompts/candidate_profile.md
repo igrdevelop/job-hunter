@@ -68,12 +68,12 @@ E-commerce | Insurance | Healthcare | Grant Management
 Maintenance Services Management
 - Developed a work-order management platform for service engineers: field managers photograph issues → WO created on server → task table assigns workers → mobile/web app delivers WO to engineers.
 - Collaborated with BE and QA in Agile. Team: 10 members (2 FE, 5 BE, 2 QA, 1 PM).
-Stack: Angular 2-6, TypeScript, SCSS, Bootstrap. Backend: .NET.
+Stack: Angular 2-6, TypeScript, JavaScript, jQuery, SCSS, Bootstrap. Backend: .NET.
 
 **Frontend Developer | Staronka** - November 2015 - March 2016
 Startup | Website Builder
 - Worked on the core website-building tool; focused on responsive layouts and UI fixes.
-Stack: AngularJS, JavaScript, SCSS.
+Stack: AngularJS, JavaScript, jQuery, SCSS.
 
 ---
 

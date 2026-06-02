@@ -139,6 +139,7 @@ def _make_valid_content() -> dict:
             "experience": [
                 {"company": "A"}, {"company": "B"}, {"company": "C"},
                 {"company": "D"}, {"company": "E"}, {"company": "F"},
+                {"company": "G"},
             ],
             "education": [{"degree": "BSc"}],
         },

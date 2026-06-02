@@ -106,7 +106,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 - Developed a work-order management platform for field service engineers in Angular 2-6: field managers logged issues → server created WOs → web/mobile app delivered tasks to engineers in real time.
 - Built responsive Angular UI components with Bootstrap; collaborated with 5 backend and 2 QA engineers in Agile (team of 10).
 
-**stack_line**: Stack: Angular 2-6, TypeScript, SCSS, Bootstrap.
+**stack_line**: Stack: Angular 2-6, TypeScript, JavaScript, jQuery, SCSS, Bootstrap.
 
 ---
 
@@ -119,7 +119,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 **bullets**:
 - Built UI components for a website-builder tool using AngularJS; implemented responsive layouts and resolved cross-browser rendering issues.
 
-**stack_line**: Stack: AngularJS, JavaScript, SCSS.
+**stack_line**: Stack: AngularJS, JavaScript, jQuery, SCSS.
 
 ---
 

@@ -746,9 +746,9 @@ def _cover_letter_review(content: dict) -> dict:
     if not letter:
         return content
 
-    expected_lang = (content.get("lang") or "EN").upper()
+    # cover_letter_en must ALWAYS be in English regardless of job posting language
     original_en = letter
-    new_letter, score = _review_cover_letter(letter, expected_lang=expected_lang)
+    new_letter, score = _review_cover_letter(letter, expected_lang="EN")
     print(f"[apply_agent] Cover letter review: score={score}/10")
 
     content["cover_letter_en"] = new_letter
@@ -882,8 +882,8 @@ def validate_content(data: dict) -> list[str]:
         for sub in ("summary", "skills", "experience", "education"):
             if sub not in resume:
                 errors.append(f"resume_en missing: {sub}")
-        if isinstance(resume.get("experience"), list) and len(resume["experience"]) < 3:
-            errors.append(f"resume_en.experience has only {len(resume['experience'])} jobs (expected 6)")
+        if isinstance(resume.get("experience"), list) and len(resume["experience"]) < 7:
+            errors.append(f"resume_en.experience has only {len(resume['experience'])} jobs (expected 7 — ALL roles required)")
     else:
         errors.append("resume_en is not a dict")
 

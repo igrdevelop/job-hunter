@@ -276,7 +276,7 @@ def test_sanitize_replaces_livechat_with_solbegsoft():
 
 
 def test_sanitize_leaves_real_companies_untouched():
-    """Real companies must not be modified."""
+    """Real companies must not be replaced; titles are corrected to match profile."""
     import hunter.resume_sanitizer as s
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
@@ -286,17 +286,20 @@ def test_sanitize_leaves_real_companies_untouched():
             "education": REAL_EDUCATION,
             "courses": REAL_COURSES,
             "experience": [
-                _make_fake_entry("Fairmarkit (via contractor)", "Jun 2025 - March 2026"),
+                _make_fake_entry("Fairmarkit", "Jun 2025 - March 2026"),
                 _make_fake_entry("Venture Labs", "July 2023 - April 2025"),
                 _make_fake_entry("SII", "November 2022 - July 2023"),
             ],
         }
         result, fixes = s.sanitize_resume(resume, lang="EN")
         companies = [e["company"] for e in result["experience"]]
-        assert "Fairmarkit (via contractor)" in companies
+        # Companies must be preserved
+        assert "Fairmarkit" in companies
         assert "Venture Labs" in companies
         assert "SII" in companies
-        assert not fixes
+        # No company replacements should occur — only title fixes are allowed
+        company_replacement_fixes = [f for f in fixes if "→" in f and "title" not in f]
+        assert not company_replacement_fixes
 
 
 def test_sanitize_real_case_emagine():
@@ -335,4 +338,5 @@ def test_sanitize_real_case_emagine():
         assert result["education"] == REAL_EDUCATION
         assert result["courses"] == REAL_COURSES
         # 4 company fixes + 2 education/courses fills + 1 courses coerce (None→str)
-        assert len(fixes) == 7
+        # + 3 title fixes for real companies (Alten Poland, Fairmarkit, Venture Labs)
+        assert len(fixes) == 10

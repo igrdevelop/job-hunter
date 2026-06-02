@@ -109,7 +109,7 @@ NOTE: Do NOT write "Angular" in any role title. Use "AI Frontend Developer", "Se
 - Developed a work-order management platform for field service engineers: field managers logged issues → Node.js server created WOs → web/mobile app delivered tasks to engineers in real time.
 - Built responsive TypeScript UI components with Bootstrap; collaborated with 5 backend and 2 QA engineers in Agile (team of 10).
 
-**stack_line**: Stack: TypeScript, JavaScript, Angular 2-6, Node.js, SCSS, Bootstrap.
+**stack_line**: Stack: TypeScript, JavaScript, Angular 2-6, jQuery, Node.js, SCSS, Bootstrap.
 
 ---
 
