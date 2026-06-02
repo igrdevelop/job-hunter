@@ -30,7 +30,6 @@ from hunter.apply_shared import (
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     _ats_check_loop,
-    _cover_letter_review,
     _handle_jobleads_fetch_blocked,
     compute_output_folder,
     is_backend_only_job_text,
@@ -354,11 +353,7 @@ def main_api(
     except Exception as _san_err:
         print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
 
-    # Step 4.8 — Single-pass cover letter review
-    print("[apply_agent] Step 4.8: Reviewing cover letter...")
-    content = _cover_letter_review(content)
-
-    # Step 4.9 — Content QA sanity check
+    # Step 4.8 — Content QA sanity check
     print("[apply_agent] Step 4.9: Running content QA checks...")
     try:
         from hunter.content_qa import run_qa

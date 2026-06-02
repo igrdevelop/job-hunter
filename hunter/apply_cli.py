@@ -24,7 +24,6 @@ from hunter.apply_shared import (
     ApplyError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
-    _cover_letter_review,
     notify,
     send_telegram_documents,
 )
@@ -298,23 +297,6 @@ def main_cli(
                         print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
                     return
 
-                # Cover letter review — rewrite if too AI-sounding, then regenerate docs
-                print("[apply_agent] Cover letter review (CLI mode)...")
-                _cli_content_reviewed = _cover_letter_review(_cli_content)
-                if _cli_content_reviewed.get("cover_letter_en") != _cli_content.get("cover_letter_en"):
-                    content_json_path.write_text(
-                        json.dumps(_cli_content_reviewed, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    print("[apply_agent] Regenerating docs with rewritten cover letter...")
-                    gen_cmd = build_generate_docs_cmd(
-                        generate_docs_script=GENERATE_DOCS_PATH,
-                        content_json_path=content_json_path,
-                        use_full=full_mode,
-                        force=skip_dedup,
-                        python_executable=sys.executable,
-                    )
-                    subprocess.run(gen_cmd, cwd=str(PROJECT_DIR), check=False)
 
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")
