@@ -39,13 +39,12 @@ If input is plain text: use it directly.
 
 ## Step 3 - Create output folder
 
-First, determine the base applications directory:
+Determine the base directory and create the output folder in ONE bash command — do NOT skip this step:
 ```bash
-echo $APPLICATIONS_DIR
+BASE_DIR="${APPLICATIONS_DIR:-$(pwd)/Applications}" && echo "Using: $BASE_DIR"
 ```
 
-- If `APPLICATIONS_DIR` is set and non-empty → use it as the base
-- Otherwise → use `D:/LearningProject/Claude/Applications`
+Use the value printed above as `{base_dir}` for all subsequent steps.
 
 Then create: `{base_dir}/{YYYY-MM-DD}/{CompanyName}/`
 
@@ -56,7 +55,7 @@ If a folder for this company already exists today, append `_2`, `_3`, etc.:
 
 Create the folder:
 ```bash
-mkdir -p "{base_dir}/{date}/{CompanyName}"
+mkdir -p "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}"
 ```
 
 ---
@@ -85,16 +84,16 @@ The JSON schema is defined in `generation_rules.md`. Additionally include these 
 }
 ```
 
-Then run the generator:
+Then run the generator (use the same `{base_dir}` determined in Step 3):
 
 **Default (short mode)** — PDF only, EN CV only:
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "{base_dir}/{YYYY-MM-DD}/{CompanyName}/content.json"
+python D:/LearningProject/Claude/generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json"
 ```
 
 **Full mode** (only when `--full` is explicitly passed):
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "{base_dir}/{YYYY-MM-DD}/{CompanyName}/content.json" --full
+python D:/LearningProject/Claude/generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json" --full
 ```
 
 ---
