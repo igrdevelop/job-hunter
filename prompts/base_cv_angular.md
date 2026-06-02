@@ -8,7 +8,7 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 
 ## Skills (Angular-ordered — reorder by job relevance, add missing from posting)
 
-**frontend**: Angular (2-21), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, TypeScript, JavaScript, HTML, SCSS, Bootstrap
+**frontend**: Angular (2-22), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, TypeScript, JavaScript, HTML, SCSS, Bootstrap
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack, Node.js
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD

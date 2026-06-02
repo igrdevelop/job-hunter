@@ -3,7 +3,7 @@
 **Name**: Ihar Petrasheuski (also known as Igor Pietraszewski)
 **Contact**: +48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland
 
-**Core Stack**: Angular (2-21), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS, React, Next.js
+**Core Stack**: Angular (2-22), NgRx, RxJS, Signals, Nx Monorepo, AG Grid, TypeScript, JavaScript, HTML, Bootstrap, SCSS, React, Next.js
 **Tools**: Jest, Jasmine, Cypress, Git, Jenkins, Webpack, Node.js
 **AI Dev Tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API, Claude Opus / Sonnet (spec-driven agentic workflows)
 **Methodologies**: Agile (Scrum, SAFe), Frontend Architecture, Code Reviews, Performance Optimization, CI/CD
