@@ -155,9 +155,9 @@ def _regen_covers_for_folder(folder_abs: Path, system_prompt: str, url: str) -> 
     if pl:
         work["cover_letter_pl"] = pl.strip()
 
-    from apply_agent import _cover_letter_review_loop  # noqa: E402
+    from apply_agent import _cover_letter_review  # noqa: E402
 
-    work = _cover_letter_review_loop(work)
+    work = _cover_letter_review(work)
 
     from docx import Document  # noqa: E402
     from generate_docs import build_cover_letter, set_margins, set_author  # noqa: E402

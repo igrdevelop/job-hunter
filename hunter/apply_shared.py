@@ -658,7 +658,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 model=LLM_MODEL,
                 api_key=LLM_API_KEY,
             )
-            for key in ("resume_en", "resume_pl", "cover_letter_en", "cover_letter_pl",
+            for key in ("resume_en", "resume_pl",
                         "ats_score", "stack", "to_learn", "skills"):
                 if boosted.get(key):
                     content[key] = boosted[key]
@@ -674,35 +674,29 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     return content
 
 
-def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
-    """Review and optionally rewrite cover_letter_en up to max_rounds times.
-
-    Updates cover_letter_pl if EN was changed.
-    """
+def _cover_letter_review(content: dict) -> dict:
+    """Review cover_letter_en once; rewrite if quality gates fail. Accept result as-is."""
     letter = content.get("cover_letter_en", "")
     if not letter:
         return content
 
     original_en = letter
-    final_score = 10
+    new_letter, score = _review_cover_letter(letter)
+    print(f"[apply_agent] Cover letter review: score={score}/10")
 
-    for attempt in range(1, max_rounds + 1):
-        new_letter, score = _review_cover_letter(letter)
-        final_score = score
-        print(f"[apply_agent] Cover letter review round {attempt}/{max_rounds}: score={score}")
-        letter = new_letter
-        if score > 6:
-            break
-
-    content["cover_letter_en"] = letter
-    if letter != original_en:
-        print(f"[apply_agent] Cover letter rewritten (final score={final_score}), updating PL translation…")
-        notify(f"✍️ Cover letter rewritten after review (score was {final_score}/10)")
-        pl = _translate_cover_letter_pl(letter)
+    content["cover_letter_en"] = new_letter
+    if new_letter != original_en:
+        notify(f"✍️ Cover letter rewritten after review (score was {score}/10)")
+        pl = _translate_cover_letter_pl(new_letter)
         if pl:
             content["cover_letter_pl"] = pl
 
     return content
+
+
+def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
+    """Deprecated: use _cover_letter_review. Kept for backward compat."""
+    return _cover_letter_review(content)
 
 
 # ── Output folder logic ───────────────────────────────────────────────────────

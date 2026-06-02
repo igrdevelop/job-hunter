@@ -24,7 +24,7 @@ from hunter.apply_shared import (
     ApplyError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
-    _cover_letter_review_loop,
+    _cover_letter_review,
     notify,
     send_telegram_documents,
 )
@@ -300,7 +300,7 @@ def main_cli(
 
                 # Cover letter review — rewrite if too AI-sounding, then regenerate docs
                 print("[apply_agent] Cover letter review (CLI mode)...")
-                _cli_content_reviewed = _cover_letter_review_loop(_cli_content)
+                _cli_content_reviewed = _cover_letter_review(_cli_content)
                 if _cli_content_reviewed.get("cover_letter_en") != _cli_content.get("cover_letter_en"):
                     content_json_path.write_text(
                         json.dumps(_cli_content_reviewed, ensure_ascii=False, indent=2),
