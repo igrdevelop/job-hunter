@@ -3,13 +3,18 @@ hunter/resume_sanitizer.py — Resume integrity guard.
 
 Runs after the LLM returns content.json, before rendering.
 
-Two responsibilities:
+Responsibilities:
   1. Company whitelist enforcement — if the LLM invented / renamed a company,
      replace it with the nearest real role from candidate_profile.md (matched by
      period overlap; positional fallback when dates can't be parsed).
      Bullets and stack_line are kept intact (tailoring is allowed).
-  2. Education & courses fallback — if the LLM omitted or left empty the
+  2. Title enforcement — if the LLM renamed an experience title for a real company,
+     restore it verbatim from the profile.
+  3. Education & courses fallback — if the LLM omitted or left empty the
      `education` / `courses` fields, fill them verbatim from the profile.
+     Also detects education stored as stringified Python dict.
+  4. Language mixing guard (EN resumes only) — flags Polish diacritics / function
+     words in resume_en summary and experience bullets.
 """
 
 from __future__ import annotations
@@ -18,6 +23,19 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# Polish diacritics / function words that should never appear in an EN resume
+_PL_IN_EN_RESUME_RE = re.compile(
+    r"[ąęóśźżćńł]"
+    r"|\b(się|jest|nie|przez|oraz|który|która|które|tego|jak|czy|przy|dla|już"
+    r"|jestem|moje|mojej|moich|swoim|swoją|swoje|gdzie|będę|będzie|chciałbym"
+    r"|chciałabym|doświadczenie|specjalizuję|zajmuję|pracowałem|pracowałam"
+    r"|zbudowałem|przeprowadziłem|posiadam|poszukuję|szukam|pisanie|pokrywanie"
+    r"|projektowanie|programowaniu|programowanie|rozwiązań|rozwiązania"
+    r"|frontendowych|jednostkowych|podobnymi|kontroli|wersji|systemu|wiedzy"
+    r"|technicznej|wymiany|lat\b|doświadczenia)\b",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -260,7 +278,12 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         resume["courses"] = _coerce_str(resume.get("courses"))
         fixes.append(f"[{lang}] courses coerced to string")
 
-    if not (resume.get("education") or "").strip():
+    # Detect education that is a stringified Python dict — LLM hallucinated a structured object
+    edu_val = (resume.get("education") or "").strip()
+    if edu_val.startswith("{") and ("degree" in edu_val or "school" in edu_val):
+        resume["education"] = edu_en
+        fixes.append(f"[{lang}] education was dict-as-string (hallucinated) → replaced with profile education")
+    elif not edu_val:
         if edu_en:
             resume["education"] = edu_en
             fixes.append(f"[{lang}] education filled from profile")
@@ -287,11 +310,28 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
                     used_indices.add(i)
                     break
 
-    # Second pass: fix hallucinated entries
+    # Second pass: fix hallucinated entries; enforce title for real ones
+    roles = _load_profile_roles()
     for entry in experience:
         company = (entry.get("company") or "").strip()
         if _is_real_company(company):
-            continue  # already correct
+            # Title enforcement: restore profile title if LLM renamed it
+            if lang == "EN":
+                for role in roles:
+                    if (role["company"].lower() in company.lower()
+                            or company.lower() in role["company"].lower()):
+                        profile_title = role["title"]
+                        entry_title = (entry.get("title") or "").strip()
+                        # Normalise for comparison: lowercase, strip (Angular)/(React) suffix
+                        def _norm(t: str) -> str:
+                            return re.sub(r"\s*\([^)]+\)", "", t).lower().strip()
+                        if _norm(entry_title) != _norm(profile_title):
+                            fixes.append(
+                                f"[EN] title '{entry_title}' for '{company}' → '{profile_title}' (verbatim from profile)"
+                            )
+                            entry["title"] = profile_title
+                        break
+            continue  # company is real, skip hallucination fix
 
         fake_period = (entry.get("period") or "").strip()
         match = _best_match_role(fake_period, used_indices)
@@ -308,6 +348,25 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         fixes.append(
             f"[{lang}] '{old_company}' ({fake_period}) → '{match['company']}' ({match['period']})"
         )
+
+    # -- 3. Language mixing guard (EN only) --
+    if lang == "EN":
+        summary = resume.get("summary") or ""
+        if _PL_IN_EN_RESUME_RE.search(summary):
+            m = _PL_IN_EN_RESUME_RE.search(summary)
+            fixes.append(
+                f"[EN] WARNING: Polish word/diacritic in summary: '{m.group()[:40]}' — "
+                "LLM inserted PL job-posting keywords verbatim. Review generation_rules."
+            )
+        for entry in experience:
+            for bullet in (entry.get("bullets") or []):
+                if _PL_IN_EN_RESUME_RE.search(bullet):
+                    m = _PL_IN_EN_RESUME_RE.search(bullet)
+                    fixes.append(
+                        f"[EN] WARNING: Polish word/diacritic in bullet "
+                        f"({entry.get('company','')}): '{m.group()[:40]}'"
+                    )
+                    break  # one warning per role is enough
 
     return resume, fixes
 

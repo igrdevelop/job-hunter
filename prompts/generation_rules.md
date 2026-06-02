@@ -72,7 +72,14 @@ RED LINES (never cross):
 - NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
 - NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-22)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
 - NEVER invent client scale or prestige. Do not write "Fortune 500", "top-tier clients", "enterprise at scale", or similar claims unless explicitly stated in the job posting or candidate profile.
-- NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text.
+- NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text. CONCRETE EXAMPLES of correct translation:
+  - "pisanie testów jednostkowych" → "unit testing"
+  - "doświadczenie z systemem kontroli wersji Git" → "Git version control"
+  - "projektowanie i rozwój rozwiązań frontendowych z wykorzystaniem JavaScript" → "JavaScript frontend architecture"
+  - "minimum 5 lat doświadczenia zawodowego" → DO NOT include — this is a job requirement, not a candidate attribute
+  - "jQuery i podobnymi technologiami" → "jQuery" (just the tech name, no Polish fluff)
+  Polish diacritics (ą ę ó ś ź ż ć ń ł) must NEVER appear in resume_en or cover_letter_en.
+- NEVER write cover_letter_en in Polish. The `cover_letter_en` field must always be written in English, even when the job posting language is Polish (lang=PL). Use `cover_letter_pl` for the Polish version.
 - NEVER describe any role as "freelance", "independent", "self-employed", or "contractor" in a `title` or `subtitle` field unless that exact wording appears in the candidate profile. Employment type is not a title modifier.
 - NEVER list Angular more than once in the skills `frontend` field. "Angular (2-XX)" and "Angular 2+" are the same technology — if "Angular (2-XX)" is already present, do NOT add a separate "Angular 2+" or plain "Angular" entry alongside it.
 
