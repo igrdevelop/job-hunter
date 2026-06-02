@@ -142,14 +142,31 @@ def _has_polish(text: str) -> re.Match | None:
 
 
 def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
-    """Check summary and bullets for Polish diacritics or keywords."""
+    """Check summary, skills, and bullets for Polish diacritics or keywords.
+
+    Language unity: resume_en must be entirely in English.
+    Skills fields are the most common injection point for Polish job-posting
+    keywords (e.g. 'Git / system kontroli wersji Git').
+    """
     hits: list[str] = []
 
+    # Summary
     summary = resume_en.get("summary") or ""
     m = _has_polish(summary)
     if m:
         hits.append(f"summary: '{m.group()[:30]}'")
 
+    # Skills — all skill fields concatenated
+    skills = resume_en.get("skills") or {}
+    for skill_key, skill_val in skills.items():
+        if skill_key == "languages":
+            continue  # language names like "Polish (B2)" are expected
+        text = str(skill_val) if skill_val else ""
+        m = _has_polish(text)
+        if m:
+            hits.append(f"skills.{skill_key}: '{m.group()[:40]}'")
+
+    # Experience bullets
     for entry in (resume_en.get("experience") or []):
         company = entry.get("company", "?")
         for bullet in (entry.get("bullets") or []):
@@ -162,7 +179,7 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
     return QACheck(
         name="No Polish in EN resume",
         passed=ok,
-        detail="; ".join(hits[:3]) if hits else "",
+        detail="; ".join(hits[:4]) if hits else "",
     )
 
 

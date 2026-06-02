@@ -358,23 +358,38 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
             f"[{lang}] '{old_company}' ({fake_period}) → '{match['company']}' ({match['period']})"
         )
 
-    # -- 3. Language mixing guard (EN only) --
+    # -- 3. Language unity guard (EN only) --
+    # resume_en must be entirely in English — check summary, skills, and bullets.
+    # Skills are the most common injection point for raw Polish job-posting keywords.
     if lang == "EN":
         summary = resume.get("summary") or ""
         cleaned_summary = _IT_TERMS_STRIP_RE.sub("", summary)
         if _PL_IN_EN_RESUME_RE.search(cleaned_summary):
             m = _PL_IN_EN_RESUME_RE.search(cleaned_summary)
             fixes.append(
-                f"[EN] WARNING: Polish word/diacritic in summary: '{m.group()[:40]}' — "
-                "LLM inserted PL job-posting keywords verbatim. Review generation_rules."
+                f"[EN] WARNING: Polish in summary: '{m.group()[:40]}' — "
+                "translate job-posting keywords to English before inserting."
             )
+
+        skills = resume.get("skills") or {}
+        for skill_key, skill_val in skills.items():
+            if skill_key == "languages":
+                continue  # "Polish (B2)" etc. are expected
+            cleaned_skill = _IT_TERMS_STRIP_RE.sub("", str(skill_val or ""))
+            if _PL_IN_EN_RESUME_RE.search(cleaned_skill):
+                m = _PL_IN_EN_RESUME_RE.search(cleaned_skill)
+                fixes.append(
+                    f"[EN] WARNING: Polish in skills.{skill_key}: '{m.group()[:40]}' — "
+                    "LLM pasted PL job-posting keywords into skills verbatim."
+                )
+
         for entry in experience:
             for bullet in (entry.get("bullets") or []):
                 cleaned_bullet = _IT_TERMS_STRIP_RE.sub("", bullet)
                 if _PL_IN_EN_RESUME_RE.search(cleaned_bullet):
                     m = _PL_IN_EN_RESUME_RE.search(cleaned_bullet)
                     fixes.append(
-                        f"[EN] WARNING: Polish word/diacritic in bullet "
+                        f"[EN] WARNING: Polish in bullet "
                         f"({entry.get('company','')}): '{m.group()[:40]}'"
                     )
                     break  # one warning per role is enough
