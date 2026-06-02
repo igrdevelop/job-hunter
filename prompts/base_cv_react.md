@@ -15,7 +15,7 @@ Angular is present in the background but this track positions Ihar as a JavaScri
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack, Node.js
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
@@ -48,7 +48,7 @@ Angular is present in the background but this track positions Ihar as a JavaScri
 - Delivered an automation dashboard with reactive state management, improving procurement workflow visibility across a platform serving enterprise clients globally.
 - Drove frontend architecture decisions in a cross-functional team of ~10 within a ~200-person engineering org; enforced code quality through systematic JavaScript/TypeScript code reviews in Agile (Scrum).
 
-**stack_line**: Stack: TypeScript, JavaScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS, Node.js.
+**stack_line**: Stack: Angular 21, TypeScript, JavaScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS, Node.js.
 
 ---
 
@@ -90,12 +90,12 @@ Angular is present in the background but this track positions Ihar as a JavaScri
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform with React component prototypes and a full Node.js backend — merchants managed independent shops with separate databases via a custom admin panel.
+- Built and scaled a multi-tenant e-commerce platform with React component prototypes and a Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; evaluated Nest.js as the backend ecosystem matured during the engagement.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization using JavaScript, AG Grid, and SignalR as sole frontend developer (team: 1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: JavaScript, TypeScript, React, Node.js, AG Grid, SignalR, SCSS.
+**stack_line**: Stack: JavaScript, TypeScript, React, Node.js, Nest.js (familiar), AG Grid, SignalR, SCSS.
 
 ---
 

@@ -36,7 +36,7 @@ Extract from the provided job text:
 Map every requirement against the candidate's background.
 
 **Version bumping**: if the job mentions a newer version of a technology the candidate already uses, update the version to match or exceed by 1:
-- Job says "Angular 21" → update skills to "Angular (2-21)" and update the latest experience stack line accordingly
+- Job says "Angular 21" → update skills to "Angular (2-22)" and update the latest experience stack line accordingly
 - Job says "Node 20" → update to "Node.js 20" in tools
 - Job says "TypeScript 5.x" → add version number
 
@@ -65,8 +65,12 @@ RED LINES (never cross):
 - NEVER mention iGaming, gambling, or gaming in experience. The candidate never worked in these domains - this is a red flag for recruiters.
 - NEVER reduce experience years. The candidate has 10+ years (since 2015). Always say "10+" - never "9+", "8+", "7+".
 - NEVER add, rename, merge, or invent a company. The allowed companies are exactly those listed under `## Work Experience` in the candidate profile. The `company`, `period`, and `subtitle` (industry/client) fields for each role MUST match the profile verbatim. Only `stack_line` and `bullets` may be tailored to the job posting.
+- NEVER omit ANY role. ALL 7 roles MUST appear in the experience array, in this exact reverse-chronological order: Alten Poland → Fairmarkit → Venture Labs → SII → Altoros → SolbegSoft → Staronka. Omitting roles to fit 2 pages is FORBIDDEN — compress bullets instead (1 line each for old roles). Missing even one role makes the output invalid.
+- NEVER change a job title to something that did not exist. Allowed title patterns per track: Angular track — "(Angular)" suffix allowed; React/Next/Nest tracks — plain "Senior Frontend Developer" / "Frontend Developer"; AI track — AI-flavoured titles ("Senior Frontend Engineer (AI Integration)" etc.). NEVER invent titles like "Team Lead", "Fullstack Developer", "Engineering Manager" unless explicitly in the candidate profile.
+- NEVER add a frontend framework (Angular, React, Vue) to a project's `stack_line` if that framework was not the actual frontend used in that role. Each project has EXACTLY ONE primary frontend framework — do not list two frameworks for the same role.
+- NEVER add backend technologies (NestJS, PostgreSQL, Redis, TypeORM, MongoDB, Prisma, Spring, .NET, Django) to a `stack_line` if the candidate profile says the backend was different. Specifically: Venture Labs backend was Java, SII backend was Java, SolbegSoft backend was .NET, Altoros (Insurance + Healthcare) backend was .NET. Only the Altoros e-commerce sub-project had Node.js backend.
 - NEVER omit the `education` or `courses` fields. Both MUST be present and non-empty in `resume_en` AND `resume_pl`, copied verbatim from the candidate profile (translate `courses` to Polish for `resume_pl`).
-- NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-21)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
+- NEVER write a specific Angular version number in the resume summary or cover letter. Use "modern Angular" or "Angular (2-22)" — version numbers belong only in experience `stack_line` fields where they document actual project context.
 - NEVER invent client scale or prestige. Do not write "Fortune 500", "top-tier clients", "enterprise at scale", or similar claims unless explicitly stated in the job posting or candidate profile.
 - NEVER insert foreign-language keywords into an English resume or cover letter. If the job posting is in Polish, translate any Polish-only keywords to English before using them. Do not copy Polish words (e.g. "analitykami", "zespołami") into English text.
 
@@ -76,9 +80,11 @@ RED LINES (never cross):
 - Headline: `Senior Frontend Developer ({stack})`
 - Summary (3-4 sentences): mirror job posting language, include "10+ years" + primary stack, 1-2 achievements, domain match.
 - Skills: reorder - job-relevant first, keep all existing skills, add all plausible skills from the job posting
-- Experience: include ALL roles from the candidate profile in reverse chronological order (currently 7; the most recent role MUST be first). Aggressively reframe bullets to emphasize relevance to THIS job. You may enrich "Stack:" lines with plausible technologies. You may rewrite bullets to naturally include job keywords. Do NOT invent entire roles.
+- Experience: include ALL 7 roles in strict reverse-chronological order: Alten Poland → Fairmarkit → Venture Labs → SII → Altoros → SolbegSoft → Staronka. Compress older roles (SolbegSoft, Staronka: 1-2 bullets; Altoros: 3-4 bullets picking the most relevant sub-project) to fit 2 pages — but NEVER drop a role entirely.
+- Per-role framework rule: each `stack_line` must contain EXACTLY ONE primary frontend framework. Do not list "Angular 21, React" or "Angular, Vue" in the same role stack. The Altoros e-commerce sub-project may show React OR Angular depending on track — never both.
+- Backend accuracy: enrich `stack_line` with backend tech only where plausible. Venture Labs/SII had Java backend (not Node.js/NestJS). SolbegSoft/Altoros Insurance+Healthcare had .NET (not Node.js/NestJS). Only Altoros e-commerce had Node.js backend.
 - ATS rules: single column, no tables/graphics/icons, standard section names (SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, ADDITIONAL COURSES), contact info in body
-- Max 2 pages: keep bullets concise (1-2 lines each), limit to 3-4 bullets per role
+- Max 2 pages: compress old roles aggressively (SolbegSoft 1-2 bullets, Staronka 1 bullet) — but ALL 7 must appear
 - No first-person pronouns (I, we, my) anywhere in resume body
 - No weak verbs ("responsible for", "helped with", "worked on", "participated in") — open every bullet with a strong action verb: Built, Delivered, Led, Migrated, Designed, Implemented, Optimized, Automated, Integrated, Scaled, Conducted, Maintained, Reduced, Architected
 

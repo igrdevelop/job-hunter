@@ -12,10 +12,10 @@ NOTE: Do NOT write "Angular" in any role title. Use "AI Frontend Developer", "Se
 ## Skills (AI/tooling-ordered — reorder by job relevance, add missing from posting)
 
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API, Claude Opus / Sonnet (spec-driven agentic workflows), LLM integration, prompt engineering
-**frontend**: TypeScript, JavaScript, Angular (2-21), RxJS, Nx Monorepo, NgRx, Signals, AG Grid, Node.js, HTML, SCSS
+**frontend**: TypeScript, JavaScript, Angular (2-22), RxJS, Nx Monorepo, NgRx, Signals, AG Grid, Node.js, HTML, SCSS
 **tools**: Jest, Cypress, SonarQube, Git, Jenkins, Webpack
 **methodologies**: Agentic Development Workflows, Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
@@ -90,12 +90,12 @@ NOTE: Do NOT write "Angular" in any role title. Use "AI Frontend Developer", "Se
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — prototyped key admin-panel modules in React during early platform exploration; merchants managed independent shops with separate databases.
+- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — prototyped key admin-panel modules in React during early platform exploration; evaluated Nest.js as the backend ecosystem matured during the engagement; merchants managed independent shops with separate databases.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization using TypeScript, AG Grid, and WebSockets (SignalR) as sole frontend developer (team: 1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, AG Grid, SignalR, SCSS.
+**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, Nest.js (familiar), AG Grid, SignalR, SCSS.
 
 ---
 

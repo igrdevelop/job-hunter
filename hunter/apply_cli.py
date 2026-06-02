@@ -12,6 +12,7 @@ Public entry points:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -212,6 +213,7 @@ def main_cli(
                 encoding="utf-8",
                 errors="replace",
                 timeout=600,
+                env=os.environ,
             )
         except subprocess.TimeoutExpired:
             new_folder_on_timeout = _find_new_folder(folders_before, timeout=0)

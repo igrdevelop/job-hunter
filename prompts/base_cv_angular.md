@@ -8,11 +8,11 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 
 ## Skills (Angular-ordered — reorder by job relevance, add missing from posting)
 
-**frontend**: Angular (2-21), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, TypeScript, JavaScript, HTML, SCSS, Bootstrap
+**frontend**: Angular (2-22), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, TypeScript, JavaScript, HTML, SCSS, Bootstrap
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack, Node.js
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Frontend Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
@@ -81,18 +81,18 @@ Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as n
 ---
 
 ### Role 5 — Altoros (Apr 2018 - Nov 2022)
-**title**: Senior Frontend Developer (Angular)
+**title**: Senior Frontend Developer
 **company**: Altoros
 **period**: Apr 2018 - Nov 2022
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform in Angular 11-14 with Node.js backend — merchants managed independent shops with separate databases via a custom admin panel.
+- Built and scaled a multi-tenant e-commerce platform in Angular 11-14 with Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; evaluated Nest.js as the backend ecosystem matured during the engagement.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization in Angular 6-8, AG Grid, and SignalR as sole frontend developer (1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with mandatory unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: Angular 6-14, TypeScript, RxJS, AG Grid, SignalR, Node.js, SCSS.
+**stack_line**: Stack: Angular 6-14, TypeScript, RxJS, AG Grid, SignalR, Node.js, Nest.js (familiar), SCSS.
 
 ---
 

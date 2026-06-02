@@ -4,26 +4,26 @@ Pre-optimized full-stack bullets and skills for use as a generation baseline.
 LLM must use these as a starting point and adapt keywords/framing to the specific job posting.
 Do NOT copy bullets verbatim — enrich with job-specific keywords, reorder as needed, adjust metrics emphasis.
 
-NOTE: Do NOT write "Angular" in any role title. Use "Senior Full-Stack Developer" or "Senior Frontend Developer".
+NOTE: Do NOT write "Angular" in any role title. Use plain "Senior Frontend Developer" / "Frontend Developer" everywhere.
 Node.js and backend exposure are woven into every role where plausible.
 
 ---
 
 ## Skills (Full-stack ordered — reorder by job relevance, add missing from posting)
 
-**frontend**: TypeScript, JavaScript, Angular (2-21), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, HTML, SCSS, Bootstrap
+**frontend**: TypeScript, JavaScript, Angular (2-22), Nx Monorepo, NgRx, RxJS, Signals, AG Grid, HTML, SCSS, Bootstrap
 **backend**: Node.js, NestJS, REST API, WebSockets (SignalR)
 **tools**: Jest, Jasmine, Cypress, SonarQube, Git, Jenkins, Webpack
 **ai_tools**: GitHub Copilot, Cursor, Claude Code, Anthropic API
 **methodologies**: Full-Stack Architecture, Agile (Scrum, SAFe), Code Reviews, Performance Optimization, CI/CD
-**languages**: English (Fluent), Polish (B2), Russian (Native)
+**languages**: English (Fluent), Polish (B2), Russian (Native), Belarusian (Native)
 
 ---
 
 ## Experience
 
 ### Role 1 — Alten Poland (Apr 2026 - May 2026)
-**title**: Full-Stack Developer (part-time contract)
+**title**: Frontend Developer (part-time contract)
 **company**: Alten Poland
 **period**: Apr 2026 - May 2026
 **subtitle**: Intel (client) | LLM Evaluation Tooling for OpenVINO | Wroclaw, Poland
@@ -38,7 +38,7 @@ Node.js and backend exposure are woven into every role where plausible.
 ---
 
 ### Role 2 — Fairmarkit (Jun 2025 - Mar 2026)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Fairmarkit (via contractor)
 **period**: Jun 2025 - Mar 2026
 **subtitle**: AI-powered Enterprise Procurement Platform | USA (Global)
@@ -54,7 +54,7 @@ Node.js and backend exposure are woven into every role where plausible.
 ---
 
 ### Role 3 — Venture Labs (Jul 2023 - Apr 2025)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Venture Labs
 **period**: Jul 2023 - Apr 2025
 **subtitle**: Banking Platform | Client: Atruvia AG (300+ German cooperative banks) | Poland
@@ -85,18 +85,18 @@ Node.js and backend exposure are woven into every role where plausible.
 ---
 
 ### Role 5 — Altoros (Apr 2018 - Nov 2022)
-**title**: Senior Full-Stack Developer
+**title**: Senior Frontend Developer
 **company**: Altoros
 **period**: Apr 2018 - Nov 2022
 **subtitle**: E-commerce | Healthcare | Insurance | Grant Management
 
 **bullets**:
-- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; prototyped key modules in React.
+- Built and scaled a multi-tenant e-commerce platform with TypeScript frontend and Node.js backend — merchants managed independent shops with separate databases via a custom admin panel; prototyped key modules in React; evaluated Nest.js as the backend ecosystem matured during the engagement.
 - Inherited an incomplete healthcare app (British Hospital), parallelized N+1 REST API queries, implemented lazy loading and pagination — optimized performance and delivered the application to final client sale.
 - Architected a real-time incident management system with live map visualization using TypeScript, AG Grid, WebSockets (SignalR) and a .NET backend, as sole frontend developer (team: 1 FE + 2 BE + 1 QA + 1 PM).
-- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement.
+- Contributed to a grants-distribution platform with extensive unit test coverage — most test-disciplined project in the engagement; also handled a short Node.js backend rotation covering a small set of backend endpoints and integration tasks.
 
-**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, AG Grid, SignalR, SCSS.
+**stack_line**: Stack: TypeScript, JavaScript, Angular 6-14, React, Node.js, Nest.js (familiar), AG Grid, SignalR, SCSS.
 
 ---
 
