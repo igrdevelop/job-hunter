@@ -28,7 +28,21 @@ async def _force_cleanup(url: str, update: Update) -> str:
 
     lines: list[str] = []
 
-    # 1. Read folder + drive_url from tracker before deletion
+    # 1. Delete stale Sheets row FIRST — while the tracker row still exists.
+    # delete_row_by_url reads sheets_row from the DB via lookup_url; if we
+    # delete from the DB first the lookup returns nothing and Sheets is never cleaned.
+    try:
+        from hunter import gsheets_sync
+        sheets_deleted = await gsheets_sync.delete_row_by_url(url)
+        if sheets_deleted:
+            lines.append("🗑 Sheets: old row deleted")
+        else:
+            lines.append("ℹ️ Sheets: row not in Sheets (or Sheets disabled)")
+    except Exception as e:
+        lines.append(f"⚠️ Sheets row delete failed: <code>{e}</code>")
+        logger.warning("[force_cleanup] gsheets delete_row_by_url failed: %s", e)
+
+    # 2. Delete from tracker DB (also retrieves folder + drive_url for steps below)
     tracker_result = await asyncio.to_thread(delete_all_by_url, url)
     deleted_rows = tracker_result.get("deleted", 0)
     folder_str = tracker_result.get("folder") or ""
@@ -39,26 +53,13 @@ async def _force_cleanup(url: str, update: Update) -> str:
     else:
         lines.append("ℹ️ Tracker: no existing rows found")
 
-    # 2. Delete stale Sheets row BEFORE cache invalidation
-    if deleted_rows:
-        try:
-            from hunter import gsheets_sync
-            sheets_deleted = await gsheets_sync.delete_row_by_url(url)
-            if sheets_deleted:
-                lines.append("🗑 Sheets: old row deleted")
-            else:
-                lines.append("ℹ️ Sheets: row not in Sheets (or Sheets disabled)")
-        except Exception as e:
-            lines.append(f"⚠️ Sheets row delete failed: <code>{e}</code>")
-            logger.warning("[force_cleanup] gsheets delete_row_by_url failed: %s", e)
-
-    # 2b. Invalidate in-memory cache
+    # 3. Invalidate in-memory cache
     try:
         await cache.invalidate_url(url)
     except Exception as e:
         logger.warning("[force_cleanup] cache invalidate failed: %s", e)
 
-    # 3. Delete server folder
+    # 4. Delete server folder
     if folder_str:
         folder_path = Path(folder_str)
         if not folder_path.is_absolute():
@@ -74,7 +75,7 @@ async def _force_cleanup(url: str, update: Update) -> str:
         else:
             lines.append(f"ℹ️ Server folder not found: <code>{folder_str}</code>")
 
-    # 4. Delete Google Drive folder
+    # 5. Delete Google Drive folder
     if drive_url and drive_url not in ("-", "—"):
         try:
             from hunter import gdrive_sync
