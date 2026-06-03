@@ -14,6 +14,21 @@ from hunter import tracker as tracker_module
 from hunter.db import init_db
 
 
+@pytest.fixture(autouse=True)
+def _no_telegram(monkeypatch) -> None:
+    """Guarantee no test ever sends a real Telegram message.
+
+    The apply pipeline's ``notify()`` / ``send_telegram_documents()`` short-circuit
+    when the bot token / chat id are empty. Several tests drive the real pipeline
+    (main_api / main_cli) without mocking ``notify``; with a populated ``.env`` those
+    calls would hit api.telegram.org and spam the live chat. Blank the module-level
+    constants for the duration of every test. monkeypatch restores them afterwards,
+    so the real bot is unaffected.
+    """
+    monkeypatch.setattr("hunter.apply_shared.TELEGRAM_BOT_TOKEN", "", raising=False)
+    monkeypatch.setattr("hunter.apply_shared.TELEGRAM_CHAT_ID", "", raising=False)
+
+
 @pytest.fixture()
 def tracker_db(tmp_path: Path, monkeypatch) -> Path:
     """Return a path to a fresh, isolated SQLite tracker DB.
