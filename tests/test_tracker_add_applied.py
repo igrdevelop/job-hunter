@@ -47,6 +47,9 @@ def test_add_applied_skips_duplicate_success_when_not_forced(tracker_db) -> None
 
 
 def test_add_applied_marks_reapplication_when_forced(tracker_db) -> None:
+    # force=True replaces the old row (DELETE + INSERT) to prevent duplicates.
+    # The reapplication flag is still set because is_reapply is checked before
+    # the delete, so we correctly detect the prior entry.
     content = _build_content(
         "https://example.com/jobs/3",
         Path("/tmp") / "Applications" / "2026-04-16" / "Acme",
@@ -54,13 +57,13 @@ def test_add_applied_marks_reapplication_when_forced(tracker_db) -> None:
     assert tracker.add_applied(content, force=False) is True
     assert tracker.add_applied(content, force=True) is True
 
-    from hunter.db import get_db, TRACKER_DB_PATH
+    from hunter.db import get_db
     with get_db(tracker_db) as conn:
         rows = conn.execute(
             "SELECT reapplication FROM applications WHERE url_norm LIKE '%example.com/jobs/3%'"
         ).fetchall()
-    assert len(rows) == 2
-    assert rows[1]["reapplication"] == "+"
+    assert len(rows) == 1
+    assert rows[0]["reapplication"] == "+"
 
 
 def test_add_applied_accepts_non_numeric_ats_score(tracker_db) -> None:

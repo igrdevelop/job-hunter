@@ -375,8 +375,13 @@ def test_force_cleanup_calls_sheets_delete():
     run(_run())
 
 
-def test_force_cleanup_sheets_delete_skipped_when_nothing_deleted():
-    """_force_cleanup does NOT call delete_row_by_url when tracker had 0 rows."""
+def test_force_cleanup_sheets_delete_always_called():
+    """_force_cleanup calls delete_row_by_url unconditionally (even when tracker had 0 rows).
+
+    Sheets cleanup must run BEFORE the tracker delete so that delete_row_by_url
+    can still find sheets_row in the DB.  It is therefore always attempted
+    regardless of how many local rows were deleted.
+    """
     import hunter.telegram_bot as bot
 
     async def _run():
@@ -385,10 +390,10 @@ def test_force_cleanup_sheets_delete_skipped_when_nothing_deleted():
 
         with patch("hunter.tracker.delete_all_by_url", return_value=tracker_result), \
              patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock), \
-             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock) as mock_sheets:
+             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=False) as mock_sheets:
 
             await bot._force_cleanup("https://new-vacancy.com/job/99", update)
 
-        mock_sheets.assert_not_called()
+        mock_sheets.assert_called_once_with("https://new-vacancy.com/job/99")
 
     run(_run())
