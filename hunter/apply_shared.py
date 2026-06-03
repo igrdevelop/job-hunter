@@ -562,6 +562,138 @@ def _translate_cover_letter_pl(letter_en: str) -> str:
 _ATS_THRESHOLD = 95.0
 _ATS_MAX_ROUNDS = 2   # honest rounds; after this: soft → aggressive → final check
 
+# Regulatory / compliance terms that job postings list as the EMPLOYER's own
+# credentials ("we work in accordance with DORA, RODO"). The ATS keyword extractor
+# picks them up as job keywords, and the aggressive rewrite would inject them into
+# the candidate's Skills as if they were personal expertise — a fabrication. These
+# are stripped from the ATS "missing keywords" so the rewrite never adds them.
+# (Mirrors the RED LINE in prompts/generation_rules.md.)
+_ATS_KEYWORD_BLOCKLIST = frozenset({
+    "dora", "rodo", "gdpr", "iso", "iso 27001", "iso27001", "soc2", "soc 2",
+    "hipaa", "pci", "pci-dss", "pci dss",
+})
+
+
+def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
+    """Drop employer-credential / regulatory terms that must not be claimed as
+    the candidate's own skills (see _ATS_KEYWORD_BLOCKLIST)."""
+    return [k for k in keywords if k.strip().lower() not in _ATS_KEYWORD_BLOCKLIST]
+
+
+# Word-boundary matcher for regulatory/compliance terms that an employer lists as
+# its own credentials. Used to scrub fabricated claims the LLM may still write into
+# the summary / skills / about-me despite the generation_rules.md RED LINE.
+_COMPLIANCE_CLAIM_RE = re.compile(
+    r"\b(?:DORA|RODO|GDPR|ISO(?:\s?\d{4,5})?|SOC\s?2|HIPAA|PCI(?:[-\s]?DSS)?)\b",
+    re.IGNORECASE,
+)
+
+# Removes a connector + compliance phrase embedded in a bullet/stack_line, e.g.
+# " with DORA compliance", " following ISO standards", " and GDPR compliance".
+_COMPLIANCE_CLAUSE_RE = re.compile(
+    r"\s*(?:[,;]|\b(?:with|following|and|including|under|per|ensuring|maintaining"
+    r"|adhering to|in line with|compliant with|aligned with)\b)\s+[^,.;]*?"
+    r"\b(?:DORA|RODO|GDPR|ISO(?:\s?\d{4,5})?|SOC\s?2|HIPAA|PCI(?:[-\s]?DSS)?)\b"
+    r"(?:\s+(?:compliance|standards?|adherence|certification|requirements?))?",
+    re.IGNORECASE,
+)
+
+
+def _scrub_compliance_clause(text: str) -> str:
+    """Remove embedded compliance clauses from a bullet/stack_line while keeping
+    the rest of the sentence intact. Loops until stable to catch chained clauses
+    ('following ISO standards and DORA compliance')."""
+    if not isinstance(text, str):
+        return text
+    prev = None
+    cur = text
+    while prev != cur and _COMPLIANCE_CLAIM_RE.search(cur):
+        prev = cur
+        cur = _COMPLIANCE_CLAUSE_RE.sub("", cur, count=1)
+    # Tidy leftovers: double spaces, dangling connectors/punctuation before end.
+    cur = re.sub(r"\s{2,}", " ", cur)
+    cur = re.sub(r"\s+(?:and|with|following|including)\s*$", "", cur, flags=re.IGNORECASE)
+    cur = re.sub(r"\s*[,;]\s*$", "", cur)
+    return cur.strip()
+
+
+def _strip_compliance_claims(content: dict) -> tuple[dict, list[str]]:
+    """Remove fabricated regulatory/compliance claims (DORA, RODO, GDPR, ISO,
+    SOC2, HIPAA, PCI) from summary / skills / about-me text. These come from the
+    employer's self-description and must never be claimed as the candidate's own
+    expertise. Returns (content, list_of_fixes)."""
+    fixes: list[str] = []
+
+    def _scrub_sentences(text: str, label: str) -> str:
+        if not isinstance(text, str) or not _COMPLIANCE_CLAIM_RE.search(text):
+            return text
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        kept = [s for s in parts if not _COMPLIANCE_CLAIM_RE.search(s)]
+        new = " ".join(kept).strip()
+        if new != text:
+            fixes.append(f"[{label}] removed compliance-claim sentence(s)")
+        return new
+
+    def _scrub_skills(skills: object, label: str) -> object:
+        if isinstance(skills, dict):
+            for cat, val in list(skills.items()):
+                if isinstance(val, str) and _COMPLIANCE_CLAIM_RE.search(val):
+                    items = [i for i in val.split(",") if not _COMPLIANCE_CLAIM_RE.search(i)]
+                    new = ", ".join(s.strip() for s in items if s.strip())
+                    if new != val:
+                        skills[cat] = new
+                        fixes.append(f"[{label}] removed compliance terms from skills.{cat}")
+                elif isinstance(val, list) and any(_COMPLIANCE_CLAIM_RE.search(str(i)) for i in val):
+                    skills[cat] = [i for i in val if not _COMPLIANCE_CLAIM_RE.search(str(i))]
+                    fixes.append(f"[{label}] removed compliance terms from skills.{cat}")
+        return skills
+
+    def _scrub_experience(exp: object, label: str) -> None:
+        if not isinstance(exp, list):
+            return
+        for role in exp:
+            if not isinstance(role, dict):
+                continue
+            bullets = role.get("bullets")
+            if isinstance(bullets, list):
+                new_bullets = []
+                for b in bullets:
+                    nb = _scrub_compliance_clause(b) if isinstance(b, str) else b
+                    if isinstance(b, str) and nb != b:
+                        fixes.append(f"[{label}] scrubbed compliance clause from a bullet")
+                    # Drop a bullet that was ONLY a compliance claim (now empty)
+                    if isinstance(nb, str) and not nb.strip():
+                        continue
+                    new_bullets.append(nb)
+                role["bullets"] = new_bullets
+            for fld in ("stack_line", "subtitle"):
+                if isinstance(role.get(fld), str) and _COMPLIANCE_CLAIM_RE.search(role[fld]):
+                    new = _scrub_compliance_clause(role[fld])
+                    if new != role[fld]:
+                        role[fld] = new
+                        fixes.append(f"[{label}] scrubbed compliance from {fld}")
+
+    for rk, lang in (("resume_en", "EN"), ("resume_pl", "PL")):
+        r = content.get(rk)
+        if isinstance(r, dict):
+            if "summary" in r:
+                r["summary"] = _scrub_sentences(r["summary"], f"{lang} summary")
+            if "skills" in r:
+                r["skills"] = _scrub_skills(r["skills"], lang)
+            _scrub_experience(r.get("experience"), lang)
+            # Courses: comma-separated; drop any item naming a compliance framework.
+            if isinstance(r.get("courses"), str) and _COMPLIANCE_CLAIM_RE.search(r["courses"]):
+                items = [i for i in r["courses"].split(",") if not _COMPLIANCE_CLAIM_RE.search(i)]
+                new = ", ".join(s.strip() for s in items if s.strip())
+                if new != r["courses"]:
+                    r["courses"] = new
+                    fixes.append(f"[{lang}] removed compliance item from courses")
+    for ak, lang in (("about_me_en", "EN"), ("about_me_pl", "PL")):
+        if ak in content:
+            content[ak] = _scrub_sentences(content[ak], f"{lang} about_me")
+
+    return content, fixes
+
 _ATS_REWRITE_PROMPT = """\
 The resume scored {score:.1f}% on an independent ATS check (target: {threshold}%).
 
@@ -665,6 +797,12 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     _orig_exp_en = copy.deepcopy(_exp_of(content.get("resume_en")))
     _orig_exp_pl = copy.deepcopy(_exp_of(content.get("resume_pl")))
 
+    # Job text shown to the rewrite passes, with employer self-description /
+    # regulatory terms removed so the LLM can't lift DORA/RODO/ISO from the posting
+    # and inject them into the candidate's bullets. The ATS *checker* above still
+    # gets the full, unmodified job_text.
+    _rewrite_job_text = _COMPLIANCE_CLAIM_RE.sub("", job_text)[:3000]
+
     for attempt in range(1, _TOTAL_ROUNDS + 2):
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
@@ -684,7 +822,8 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         if attempt > _TOTAL_ROUNDS:
             break
 
-        missing_str = "\n".join(f"  - {k}" for k in result.missing_keywords[:20]) or "  (none identified)"
+        _missing_kw = _filter_self_description_keywords(result.missing_keywords)
+        missing_str = "\n".join(f"  - {k}" for k in _missing_kw[:20]) or "  (none identified)"
         recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
         # The ATS check only scores the English resume, so only resume_en is sent
         # for rewriting (resume_pl is untouched here). The cap must comfortably fit
@@ -705,7 +844,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 missing=missing_str,
                 recs=recs_str,
                 gap=result.llm_gap_report or "N/A",
-                job_text=job_text[:3000],
+                job_text=_rewrite_job_text,
                 content_json=content_json_str,
             )
         elif attempt == _ATS_MAX_ROUNDS + 1:
@@ -715,7 +854,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 threshold=_ATS_THRESHOLD,
                 rounds=attempt - 1,
                 missing=missing_str,
-                job_text=job_text[:3000],
+                job_text=_rewrite_job_text,
                 content_json=content_json_str,
             )
         else:
@@ -725,7 +864,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 threshold=_ATS_THRESHOLD,
                 rounds=attempt - 1,
                 missing=missing_str,
-                job_text=job_text[:3000],
+                job_text=_rewrite_job_text,
                 content_json=content_json_str,
             )
 

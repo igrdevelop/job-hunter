@@ -391,6 +391,16 @@ def main_api(
     except Exception as _san_err:
         print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
 
+    # Strip fabricated regulatory/compliance claims (DORA/RODO/GDPR/ISO/...) that
+    # belong to the employer's self-description, not the candidate's expertise.
+    try:
+        from hunter.apply_shared import _strip_compliance_claims
+        content, _compliance_fixes = _strip_compliance_claims(content)
+        for _fix in _compliance_fixes:
+            print(f"[apply_agent] compliance-scrub: {_fix}")
+    except Exception as _cc_err:
+        print(f"[apply_agent] Warning: compliance scrub failed (continuing): {_cc_err}")
+
     # Step 4.8 — Content QA sanity check
     print("[apply_agent] Step 4.9: Running content QA checks...")
     try:

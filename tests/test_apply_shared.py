@@ -234,6 +234,89 @@ def test_ats_loop_restores_dropped_roles() -> None:
     assert out["resume_en"]["summary"] == "s2"
 
 
+# ── Compliance-claim scrubbing ────────────────────────────────────────────────
+
+def test_filter_self_description_keywords_drops_regulatory() -> None:
+    from hunter.apply_shared import _filter_self_description_keywords
+    out = _filter_self_description_keywords(["Angular", "DORA", "RxJS", "RODO", "GDPR", "ISO"])
+    assert out == ["Angular", "RxJS"]
+
+
+def test_strip_compliance_claims_summary_and_skills() -> None:
+    from hunter.apply_shared import _strip_compliance_claims
+    content = {
+        "resume_en": {
+            "summary": "Senior Angular dev with 10+ years. Proven DORA compliance and ISO "
+                       "standards adherence for financial institutions. Expert in RxJS.",
+            "skills": {
+                "frontend": "Angular, TypeScript, RxJS",
+                "methodologies": "Agile, Code Reviews, DORA compliance, RODO compliance, GDPR compliance",
+            },
+        },
+        "about_me_en": "Frontend developer. Deep GDPR and DORA expertise. Builds Angular apps.",
+    }
+    out, fixes = _strip_compliance_claims(content)
+    blob = " ".join([
+        out["resume_en"]["summary"],
+        out["resume_en"]["skills"]["methodologies"],
+        out["about_me_en"],
+    ]).lower()
+    for term in ("dora", "rodo", "gdpr", "iso"):
+        assert term not in blob, f"{term} should be scrubbed"
+    # Legit content survives
+    assert "rxjs" in out["resume_en"]["summary"].lower()
+    assert "Agile" in out["resume_en"]["skills"]["methodologies"]
+    assert fixes  # something was reported
+
+
+def test_strip_compliance_claims_keeps_clean_content() -> None:
+    from hunter.apply_shared import _strip_compliance_claims
+    content = {"resume_en": {"summary": "Senior Angular developer.", "skills": {"frontend": "Angular"}}}
+    out, fixes = _strip_compliance_claims(content)
+    assert out["resume_en"]["summary"] == "Senior Angular developer."
+    assert fixes == []
+
+
+def test_strip_compliance_clause_from_bullets() -> None:
+    """ATS aggressive rewrite appends compliance clauses to bullets — strip them,
+    keep the real achievement."""
+    from hunter.apply_shared import _strip_compliance_claims
+    content = {
+        "resume_en": {
+            "summary": "Senior Angular developer.",
+            "skills": {},
+            "experience": [
+                {"company": "Fairmarkit", "bullets": [
+                    "Built AI decision-support feature with DORA compliance",
+                    "Optimized healthcare app following ISO standards and DORA compliance",
+                    "Led Angular migration projects",
+                ], "stack_line": "Stack: Angular 21, TypeScript following ISO standards"},
+            ],
+            "courses": "RxJS Course, ISO Standards Certification, Node.js Course",
+        },
+    }
+    out, fixes = _strip_compliance_claims(content)
+    b = out["resume_en"]["experience"][0]["bullets"]
+    blob = " ".join(b + [out["resume_en"]["experience"][0]["stack_line"], out["resume_en"]["courses"]]).lower()
+    for term in ("dora", "iso", "gdpr"):
+        assert term not in blob, f"{term} survived: {blob}"
+    assert "Built AI decision-support feature" in b[0]
+    assert "Optimized healthcare app" in b[1]
+    assert "Led Angular migration projects" in b[2]
+    assert "RxJS Course" in out["resume_en"]["courses"]
+    assert "Node.js Course" in out["resume_en"]["courses"]
+    assert fixes
+
+
+def test_strip_compliance_does_not_match_isolated() -> None:
+    """Word-boundary: 'ISO' must not match inside 'isolated' / 'isolation'."""
+    from hunter.apply_shared import _strip_compliance_claims
+    content = {"resume_en": {"summary": "Built isolated micro-frontends with strong isolation.", "skills": {}}}
+    out, fixes = _strip_compliance_claims(content)
+    assert "isolated" in out["resume_en"]["summary"]
+    assert fixes == []
+
+
 # ── Cover letter review helpers ───────────────────────────────────────────────
 
 def test_count_words_empty() -> None:
