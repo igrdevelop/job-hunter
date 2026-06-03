@@ -281,8 +281,46 @@ def main_api(
     errors = validate_content(content)
     if errors:
         print(f"[apply_agent] Validation errors: {errors}")
+        # Repair pass: structural errors (e.g. a dropped role) make the resume
+        # unusable, so ask the LLM once to return a complete, fixed JSON rather
+        # than silently generating a broken PDF.
+        try:
+            _repair_msg = (
+                "The JSON you returned has structural problems that make the resume "
+                "invalid. Fix ALL of the issues below and return the COMPLETE JSON "
+                "again (same schema, every field), not just the changed parts:\n"
+                + "\n".join(f"- {e}" for e in errors)
+                + "\n\nCRITICAL: resume_en.experience MUST contain ALL 7 roles in this "
+                "exact order: Alten Poland, Fairmarkit, Venture Labs, SII, Altoros, "
+                "SolbegSoft, Staronka. Never drop a role to fit 2 pages — compress "
+                "older roles to 1-2 bullets instead. Keep company, period, title, "
+                "subtitle verbatim per the rules.\n\n"
+                f"Previous JSON to fix:\n{json.dumps(content, ensure_ascii=False)}"
+            )
+            from llm_client import call_llm as _repair_call_llm
+            _repaired = _repair_call_llm(
+                system_prompt=system_prompt,
+                user_message=_repair_msg,
+                provider=LLM_PROVIDER,
+                model=LLM_MODEL,
+                api_key=LLM_API_KEY,
+            )
+            _repaired_errors = validate_content(_repaired)
+            if len(_repaired_errors) < len(errors):
+                print(
+                    f"[apply_agent] Repair pass improved validation: "
+                    f"{len(errors)} -> {len(_repaired_errors)} errors"
+                )
+                content = _repaired
+                errors = _repaired_errors
+            else:
+                print("[apply_agent] Repair pass did not improve output; keeping first pass")
+        except Exception as _repair_err:
+            print(f"[apply_agent] Repair pass failed (using first pass): {_repair_err}")
+
+    if errors:
         notify(
-            f"⚠️ <b>LLM output validation issues</b>\n"
+            f"⚠️ <b>LLM output validation issues (after repair)</b>\n"
             f"URL: {url}\n\n"
             + "\n".join(f"• {e}" for e in errors[:10])
         )
@@ -352,6 +390,16 @@ def main_api(
         content = sanitize_content(content)
     except Exception as _san_err:
         print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
+
+    # Strip fabricated regulatory/compliance claims (DORA/RODO/GDPR/ISO/...) that
+    # belong to the employer's self-description, not the candidate's expertise.
+    try:
+        from hunter.apply_shared import _strip_compliance_claims
+        content, _compliance_fixes = _strip_compliance_claims(content)
+        for _fix in _compliance_fixes:
+            print(f"[apply_agent] compliance-scrub: {_fix}")
+    except Exception as _cc_err:
+        print(f"[apply_agent] Warning: compliance scrub failed (continuing): {_cc_err}")
 
     # Step 4.8 — Content QA sanity check
     print("[apply_agent] Step 4.9: Running content QA checks...")
