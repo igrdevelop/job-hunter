@@ -303,10 +303,19 @@ Replaces `to_send.xlsx`. tracker.xlsx rows are mirrored live to a Google Sheets 
 1. Successful apply / skip → `gsheets_sync.mirror_new_row(row)` appends to Sheets
 2. EXPIRED stamp → `gsheets_sync.mirror_expired_batch()` updates Sent column
 3. User edits Sent date / To Learn / Re-application in Sheets
-4. `/sync_sent` → `pull_full_snapshot()` → conflict matrix → tracker.xlsx updated
+4. `/sync_sent` → `pull_full_snapshot()` → insert missing rows + conflict matrix → tracker.db updated
 5. Automatic pull every `GSHEETS_REFRESH_INTERVAL_MIN` (default 30 min)
 6. `/unsent` shows count from in-memory cache (O(1), no Excel read)
 7. `/gsheets_status` — integration health; `/gsheets_resync` — push dirty rows
+
+### Pull = insert + update (dedup self-heal)
+`pull_full_snapshot()` does two things, in order:
+1. `tracker.insert_pulled_rows()` — inserts Sheet rows absent from `tracker.db`
+   (matched by neither `ID` nor `url_norm`; blank-ID rows skipped). This self-heals
+   dedup after a fresh/empty DB (container restart, broken volume mount) so the bot
+   doesn't re-process live vacancies. Also runs once at startup in `_post_init`.
+2. `_apply_pull_delta_db()` — conflict matrix for `Sent`/`To Learn`/`Re-application`
+   on rows matched by `ID` (existing rows are never overwritten by the insert step).
 
 ### Conflict matrix (Sent column)
 - Bot wrote EXPIRED, Sheets is empty → keep EXPIRED (Sheets will be fixed by resync)
@@ -508,3 +517,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-27 | sonnet | Drive log upload: upload_log_file() in gdrive_sync.py uploads hunter_errors.log to Job Hunter/Logs/ on Drive daily at 06:10 (scheduled_gdrive_upload_logs). 5 new tests (942 total). |
 | 2026-05-31 | sonnet | Phase 6 complete: pyproject.toml (metadata + mypy + pytest config), hunter/__main__.py (main() moved from hunter.py), hunter.py → thin shim, pytest.ini deleted, Dockerfile updated with pip install -e . --no-deps. |
 | 2026-05-29 | sonnet | CV generation quality: 5 base CVs per track (angular/react/ai/fullstack_angular_nest/fullstack_react_next), stack detection in apply_api.py (31 tests), generation_rules.md renamed + strengthened RED LINES (no Angular version in summary, no invented client scale, no foreign-language keywords in EN), CLI paste-file support via Pro subscription, APPLICATIONS_DIR env var in apply.md, preview_apply.py tool, real job fixtures in tests/fixtures/sample_jobs/. 976 tests total. |
+| 2026-06-03 | opus | Bootstrap dedup self-heal (BOOTSTRAP_DEDUP_PLAN.md): `tracker.insert_pulled_rows()` inserts Sheet rows missing from tracker.db (dedup by id+url_norm, skips blank ID, intra-batch dedup); `pull_full_snapshot()` now inserts-then-updates and returns `inserted` count; `_post_init` pulls once at startup so a fresh/empty DB self-heals after container restart. Fixes re-processing of live vacancies. 9 new tests in test_bootstrap_dedup.py (1040 total). |

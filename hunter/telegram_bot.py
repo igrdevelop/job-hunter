@@ -178,6 +178,19 @@ async def _post_init(app: Application) -> None:
     except Exception as e:
         logger.warning("[gsheets] startup init failed: %s", e)
 
+    # Self-heal dedup state: pull Sheets → DB once at startup. This inserts rows
+    # present in the shared Sheet but missing from a fresh/empty tracker.db, so
+    # dedup is not "blind" after a container restart (see BOOTSTRAP_DEDUP_PLAN.md).
+    # Runs before cache.load_from_db() so the cache sees the restored rows.
+    try:
+        pull_res = await gsheets_sync.pull_full_snapshot()
+        logger.info(
+            "[startup] gsheets pull: pulled=%s inserted=%s updated=%s",
+            pull_res.get("pulled"), pull_res.get("inserted"), pull_res.get("updated"),
+        )
+    except Exception as e:
+        logger.warning("[startup] gsheets pull failed: %s", e)
+
     # Load tracker cache so /unsent, /sync_sent, and scheduled reports are
     # correct immediately after startup (not only after the first /hunt).
     try:

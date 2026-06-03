@@ -375,7 +375,7 @@ def test_pull_full_snapshot_noop_when_not_ready():
     with patch("hunter.gsheets_sync._ready", return_value=False):
         from hunter import gsheets_sync
         result = run(gsheets_sync.pull_full_snapshot())
-    assert result == {"pulled": 0, "updated": 0, "errors": []}
+    assert result == {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
 
 
 def test_pull_full_snapshot_read_all_error():
@@ -399,12 +399,14 @@ def test_pull_full_snapshot_no_changes():
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
+        patch("hunter.gsheets_sync.insert_pulled_rows", return_value=0),
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[]) as mock_delta,
     ):
         from hunter import gsheets_sync
         result = run(gsheets_sync.pull_full_snapshot())
 
     assert result["pulled"] == 1
+    assert result["inserted"] == 0
     assert result["updated"] == 0
     assert result["errors"] == []
     mock_delta.assert_called_once_with(sheets_rows)
@@ -420,6 +422,7 @@ def test_pull_full_snapshot_writes_db_on_changes():
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
+        patch("hunter.gsheets_sync.insert_pulled_rows", return_value=0),
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[changed_row]),
         patch("hunter.gsheets_sync.apply_pull_updates", return_value=1),
     ):

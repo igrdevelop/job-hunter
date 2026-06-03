@@ -811,6 +811,78 @@ def apply_pull_updates(rows: list[dict]) -> int:
     return updated
 
 
+def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
+    """Insert Sheets rows that are absent from the DB (dedup self-heal).
+
+    rows: list of (sheet_row_index, row_dict) as returned by gsheets_client.read_all.
+    For each row whose ID is non-empty AND neither its ID nor its url_norm already
+    exists in the DB, insert a fresh applications row (sheets_row set, sheets_dirty=0).
+    Returns count inserted.
+
+    Existing rows (matched by id OR url_norm) are never touched — field updates are
+    the job of the conflict matrix in gsheets_sync._apply_pull_delta_db. Rows sharing
+    the same url_norm within the batch collapse to the first one (historical dupes).
+    """
+    if not rows:
+        return 0
+
+    inserted = 0
+    with get_db(DB_PATH) as conn:
+        existing = conn.execute("SELECT id, url_norm FROM applications").fetchall()
+        existing_ids = {r["id"] for r in existing}
+        existing_norms = {r["url_norm"] for r in existing if r["url_norm"]}
+
+        for sheet_idx, row in rows:
+            row_id = (row.get("ID") or "").strip()
+            if not row_id:
+                continue  # non-syncable row — skip (counted by caller via len delta)
+            if row_id in existing_ids:
+                continue
+            raw_url = (row.get("URL") or "").strip()
+            url_norm = normalize_url(raw_url) if raw_url else ""
+            if url_norm and url_norm in existing_norms:
+                continue
+
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO applications
+                (id, date, company, title, stack, ats_status, url, url_norm,
+                 folder, sent, reapplication, to_learn, drive_url,
+                 confirmation, answer, sheets_row, sheets_dirty)
+                VALUES
+                (:id, :date, :company, :title, :stack, :ats_status, :url, :url_norm,
+                 :folder, :sent, :reapplication, :to_learn, :drive_url,
+                 :confirmation, :answer, :sheets_row, :sheets_dirty)
+                """,
+                {
+                    "id":            row_id,
+                    "date":          row.get("Date", ""),
+                    "company":       row.get("Company", ""),
+                    "title":         row.get("Job Title", ""),
+                    "stack":         row.get("Stack", ""),
+                    "ats_status":    row.get("ATS %", ""),
+                    "url":           raw_url,
+                    "url_norm":      url_norm,
+                    "folder":        row.get("Folder", ""),
+                    "sent":          row.get("Sent", ""),
+                    "reapplication": row.get("Re-application", ""),
+                    "to_learn":      row.get("To Learn", ""),
+                    "drive_url":     row.get("Drive URL", ""),
+                    "confirmation":  row.get("Confirmation", ""),
+                    "answer":        row.get("Answer", ""),
+                    "sheets_row":    sheet_idx,
+                    "sheets_dirty":  0,
+                },
+            )
+            if conn.execute("SELECT changes()").fetchone()[0]:
+                inserted += 1
+                existing_ids.add(row_id)
+                if url_norm:
+                    existing_norms.add(url_norm)
+
+    return inserted
+
+
 # ── Folder / Drive URL ────────────────────────────────────────────────────────
 
 def get_folder_by_url(url: str) -> str | None:
