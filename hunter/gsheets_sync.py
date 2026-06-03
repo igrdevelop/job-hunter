@@ -39,6 +39,7 @@ from hunter.tracker import (
     lookup_url,
     read_all_tracker_rows,
     apply_pull_updates,
+    insert_pulled_rows,
 )
 
 log = logging.getLogger(__name__)
@@ -357,12 +358,13 @@ async def pull_full_snapshot() -> dict:
       - Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
       - To Learn, Re-application: always trust Sheets (user edits there).
 
-    Also persists sheets_row in DB for all matched rows.
+    Also persists sheets_row in DB for all matched rows, and inserts Sheets rows
+    that are absent from the DB (dedup self-heal after a fresh/empty tracker.db).
 
-    Returns: {"pulled": int, "updated": int, "errors": list[str]}
+    Returns: {"pulled": int, "inserted": int, "updated": int, "errors": list[str]}
     """
     if not _ready():
-        return {"pulled": 0, "updated": 0, "errors": []}
+        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
 
     from hunter.gsheets_client import read_all
 
@@ -374,14 +376,25 @@ async def pull_full_snapshot() -> dict:
         )
     except Exception as e:
         log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
-        return {"pulled": 0, "updated": 0, "errors": [str(e)]}
+        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": [str(e)]}
+
+    # Self-heal dedup: insert Sheets rows missing from the DB (must run before the
+    # conflict matrix so freshly inserted rows also get their Sent/To Learn applied).
+    inserted = 0
+    try:
+        inserted = await asyncio.to_thread(insert_pulled_rows, sheets_rows)
+        if inserted:
+            log.info("gsheets pull_full_snapshot: inserted %d missing rows into DB", inserted)
+    except Exception as e:
+        log.error("gsheets pull_full_snapshot: insert_pulled_rows failed: %s", e)
+        errors.append(str(e))
 
     # Apply conflict matrix + persist sheets_row indices in DB
     try:
         to_write = await asyncio.to_thread(_apply_pull_delta_db, sheets_rows)
     except Exception as e:
         log.error("gsheets pull_full_snapshot: _apply_pull_delta_db failed: %s", e)
-        return {"pulled": len(sheets_rows), "updated": 0, "errors": [str(e)]}
+        return {"pulled": len(sheets_rows), "inserted": inserted, "updated": 0, "errors": [str(e)]}
 
     if to_write:
         try:
@@ -391,8 +404,11 @@ async def pull_full_snapshot() -> dict:
             log.error("gsheets pull_full_snapshot: apply_pull_updates failed: %s", e)
             errors.append(str(e))
 
-    log.info("gsheets pull_full_snapshot: pulled %d rows, %d DB updates", len(sheets_rows), len(to_write))
-    return {"pulled": len(sheets_rows), "updated": len(to_write), "errors": errors}
+    log.info(
+        "gsheets pull_full_snapshot: pulled %d rows, %d inserted, %d DB updates",
+        len(sheets_rows), inserted, len(to_write),
+    )
+    return {"pulled": len(sheets_rows), "inserted": inserted, "updated": len(to_write), "errors": errors}
 
 
 # ---------------------------------------------------------------------------

@@ -28,11 +28,14 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     pulled = result["pulled"]
+    inserted = result.get("inserted", 0)
     updated = result["updated"]
     errors = result["errors"]
 
     lines = ["✅ <b>sync_sent done</b>"]
     lines.append(f"  Rows from Sheets: {pulled}")
+    if inserted:
+        lines.append(f"  Inserted (self-heal): {inserted}")
     lines.append(f"  Updated in tracker.xlsx: {updated}")
     if errors:
         lines.append(f"⚠️ Errors: {'; '.join(errors[:2])}")
