@@ -340,3 +340,42 @@ def test_sanitize_real_case_emagine():
         # 4 company fixes + 2 education/courses fills + 1 courses coerce (None→str)
         # + 3 title fixes for real companies (Alten Poland, Fairmarkit, Venture Labs)
         assert len(fixes) == 10
+
+
+def test_sanitize_collapses_duplicate_angular_versions():
+    import hunter.resume_sanitizer as s
+    s._load_profile_roles.cache_clear()
+    s._load_profile_education_courses.cache_clear()
+    p1, p2 = _patch_profile()
+    with p1, p2:
+        resume = {
+            "experience": [],
+            "education": REAL_EDUCATION,
+            "courses": REAL_COURSES,
+            "skills": {"frontend": "Angular (latest versions), Angular 2-22, Angular Material, TypeScript, RxJS"},
+        }
+        result, fixes = s.sanitize_resume(resume, lang="EN")
+        fe = result["skills"]["frontend"]
+        # Exactly one bare Angular version entry remains, canonical form
+        assert "Angular (2-22)" in fe
+        assert "Angular 2-22," not in fe and "latest versions" not in fe
+        # Family skill preserved
+        assert "Angular Material" in fe
+        assert any("collapsed" in f and "Angular" in f for f in fixes)
+
+
+def test_sanitize_keeps_single_angular_and_material():
+    import hunter.resume_sanitizer as s
+    s._load_profile_roles.cache_clear()
+    s._load_profile_education_courses.cache_clear()
+    p1, p2 = _patch_profile()
+    with p1, p2:
+        resume = {
+            "experience": [],
+            "education": REAL_EDUCATION,
+            "courses": REAL_COURSES,
+            "skills": {"frontend": "Angular (2-22), Angular Material, TypeScript"},
+        }
+        result, fixes = s.sanitize_resume(resume, lang="EN")
+        assert result["skills"]["frontend"] == "Angular (2-22), Angular Material, TypeScript"
+        assert not any("collapsed" in f for f in fixes)

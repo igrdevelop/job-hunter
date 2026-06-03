@@ -302,6 +302,26 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
             resume["courses"] = courses_en
             fixes.append(f"[{lang}] courses filled from profile")
 
+    # -- 1b. Collapse duplicate Angular version entries in skills.frontend --
+    # The LLM/ATS rewrite sometimes lists two version forms ("Angular (2-22)" +
+    # "Angular (latest versions)"). Keep ONE canonical entry; distinct family
+    # skills ("Angular Material", "Angular CLI") are left untouched.
+    skills = resume.get("skills")
+    if isinstance(skills, dict) and isinstance(skills.get("frontend"), str):
+        from hunter.content_qa import CANONICAL_ANGULAR_SKILL, is_angular_version_entry
+        items = [i.strip() for i in skills["frontend"].split(",") if i.strip()]
+        version_idx = [n for n, it in enumerate(items) if is_angular_version_entry(it)]
+        if len(version_idx) > 1:
+            keep = version_idx[0]
+            items[keep] = CANONICAL_ANGULAR_SKILL
+            drop = set(version_idx[1:])
+            new_items = [it for n, it in enumerate(items) if n not in drop]
+            skills["frontend"] = ", ".join(new_items)
+            fixes.append(
+                f"[{lang}] collapsed {len(version_idx)} Angular version entries → "
+                f"'{CANONICAL_ANGULAR_SKILL}'"
+            )
+
     # -- 2. Company whitelist enforcement --
     experience = resume.get("experience")
     if not experience:
