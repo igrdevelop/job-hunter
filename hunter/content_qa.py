@@ -226,17 +226,37 @@ def _check_education(resume_en: dict[str, Any]) -> QACheck:
     return QACheck(name="Education matches profile", passed=True)
 
 
+# Canonical form for the bare Angular version skill (see generation_rules.md).
+CANONICAL_ANGULAR_SKILL = "Angular (2-22)"
+
+
+def is_angular_version_entry(item: str) -> bool:
+    """True if a skills item is the bare Angular *version* entry (e.g. "Angular",
+    "Angular (2-22)", "Angular 2+", "Angular (latest versions)") — NOT a distinct
+    Angular-family skill like "Angular Material", "Angular CLI", "Angular development".
+
+    Only version entries are deduplicated; family skills are legitimate and kept.
+    """
+    s = (item or "").strip()
+    if not re.match(r"(?i)^angular\b", s):
+        return False
+    rest = s[len("angular"):]
+    rest = re.sub(r"\([^)]*\)", "", rest)          # drop "(2-22)", "(latest versions)"
+    rest = re.sub(r"(?i)[\d.+\-–x\s]", "", rest)   # drop version chars
+    return rest == ""
+
+
 def _check_no_duplicate_angular(resume_en: dict[str, Any]) -> QACheck:
     frontend = (resume_en.get("skills") or {}).get("frontend") or ""
-    # Count Angular-like entries: "Angular (2-XX)", "Angular 2+", plain "Angular"
-    angular_entries = re.findall(r"\bAngular\b[^,]*", frontend, re.IGNORECASE)
-    # Deduplicate by normalising
-    unique = {re.sub(r"\s*\(.*?\)", "", e).strip().lower() for e in angular_entries}
-    ok = len(unique) <= 1
+    # Only flag duplicate *version* entries; "Angular Material" etc. are fine.
+    version_entries = [
+        e.strip() for e in frontend.split(",") if is_angular_version_entry(e)
+    ]
+    ok = len(version_entries) <= 1
     return QACheck(
         name="No duplicate Angular in skills",
         passed=ok,
-        detail=f"Found: {angular_entries}" if not ok else "",
+        detail=f"Found: {version_entries}" if not ok else "",
     )
 
 
