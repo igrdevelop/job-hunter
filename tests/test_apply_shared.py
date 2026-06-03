@@ -190,6 +190,50 @@ def test_validate_content_experience_too_short() -> None:
     assert any("experience" in e for e in errors)
 
 
+# ── ATS loop role-preservation guard ──────────────────────────────────────────
+
+def test_ats_loop_restores_dropped_roles() -> None:
+    """The ATS rewrite must never shrink the experience array (Altkom bug).
+
+    Root cause: the rewrite sends a truncated resume to the LLM, which can return
+    fewer roles; the guard restores the original experience while keeping other
+    keyword/summary improvements.
+    """
+    from hunter.apply_shared import _ats_check_loop
+
+    full_exp = [{"company": f"C{i}", "bullets": ["x"]} for i in range(7)]
+    content = {
+        "resume_en": {"summary": "s", "skills": {}, "experience": [dict(e) for e in full_exp]},
+        "resume_pl": {"summary": "s", "skills": {}, "experience": [dict(e) for e in full_exp]},
+    }
+
+    # ATS check always below threshold → forces rewrite rounds
+    fake_result = MagicMock()
+    fake_result.summary.return_value = "ATS 50%"
+    fake_result.to_dict.return_value = {"score": 50.0}
+    fake_result.passed.return_value = False
+    fake_result.missing_keywords = ["Kubernetes"]
+    fake_result.recommendations = []
+    fake_result.score = 50.0
+    fake_result.llm_gap_report = ""
+
+    # The boost returns a TRUNCATED resume with only 2 roles (the bug condition)
+    boosted = {
+        "resume_en": {"summary": "s2", "skills": {}, "experience": full_exp[:2]},
+        "resume_pl": {"summary": "s2", "skills": {}, "experience": full_exp[:2]},
+        "ats_score": 50,
+    }
+
+    with patch("hunter.ats_checker.check", return_value=fake_result), \
+         patch("llm_client.call_llm", return_value=boosted):
+        out = _ats_check_loop(content, "job text")
+
+    assert len(out["resume_en"]["experience"]) == 7
+    assert len(out["resume_pl"]["experience"]) == 7
+    # Non-experience improvements (summary) are still accepted
+    assert out["resume_en"]["summary"] == "s2"
+
+
 # ── Cover letter review helpers ───────────────────────────────────────────────
 
 def test_count_words_empty() -> None:

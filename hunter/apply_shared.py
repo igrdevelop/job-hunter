@@ -653,6 +653,18 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     else:
         resume_text_for_ats = str(resume_en)
 
+    # Snapshot the full experience arrays before any rewrite. The ATS rewrite
+    # passes send a truncated resume to the LLM (content_json is capped), so the
+    # model can silently return fewer roles. Dropping a role violates a hard
+    # RED LINE, so we restore the original experience whenever a boost shrinks it.
+    import copy
+
+    def _exp_of(r: object) -> list:
+        return r.get("experience") if isinstance(r, dict) and isinstance(r.get("experience"), list) else []
+
+    _orig_exp_en = copy.deepcopy(_exp_of(content.get("resume_en")))
+    _orig_exp_pl = copy.deepcopy(_exp_of(content.get("resume_pl")))
+
     for attempt in range(1, _TOTAL_ROUNDS + 2):
         run_llm = attempt == 1 and bool(LLM_API_KEY)
         result = ats_checker.check(
@@ -674,10 +686,16 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
 
         missing_str = "\n".join(f"  - {k}" for k in result.missing_keywords[:20]) or "  (none identified)"
         recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
+        # The ATS check only scores the English resume, so only resume_en is sent
+        # for rewriting (resume_pl is untouched here). The cap must comfortably fit
+        # a full 7-role resume (~7k chars) so the LLM never sees a truncated
+        # experience array and silently drops roles — the old 4000 cap cut the
+        # array mid-way and caused exactly that. The role-preservation guard below
+        # is the hard backstop; this just stops triggering it in the first place.
         content_json_str = json.dumps(
-            {k: content[k] for k in ("resume_en", "resume_pl", "skills", "stack", "ats_score") if k in content},
+            {k: content[k] for k in ("resume_en", "stack", "ats_score") if k in content},
             ensure_ascii=False,
-        )[:4000]
+        )[:16000]
 
         if attempt <= _ATS_MAX_ROUNDS:
             mode = "honest"
@@ -728,6 +746,16 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                         "ats_score", "stack", "to_learn", "skills"):
                 if boosted.get(key):
                     content[key] = boosted[key]
+            # Guard: the rewrite must never drop roles (truncated input can make
+            # the LLM return a shorter experience array). Restore the originals.
+            for _key, _orig_exp in (("resume_en", _orig_exp_en), ("resume_pl", _orig_exp_pl)):
+                _r = content.get(_key)
+                if isinstance(_r, dict) and _orig_exp and len(_exp_of(_r)) < len(_orig_exp):
+                    print(
+                        f"[apply_agent] ATS rewrite dropped roles in {_key} "
+                        f"({len(_exp_of(_r))} < {len(_orig_exp)}) — restoring full experience"
+                    )
+                    _r["experience"] = copy.deepcopy(_orig_exp)
             resume_en = content.get("resume_en", resume_en)
             if isinstance(resume_en, dict):
                 resume_text_for_ats = json.dumps(resume_en, ensure_ascii=False)
