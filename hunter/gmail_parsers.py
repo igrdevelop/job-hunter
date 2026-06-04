@@ -15,6 +15,8 @@ To add a new aggregator:
 """
 
 import re
+from urllib.parse import urlparse
+
 from hunter.models import Job
 
 # domain → parser function
@@ -28,10 +30,34 @@ def register(domain: str):
     return decorator
 
 
+def _title_from_url(url: str) -> str:
+    """Best-effort human title from a job URL slug.
+
+    A digest email's subject describes one job, but its body often links to several
+    (incl. "recommended for you"), so using the subject as the stub title can pair a
+    title with the wrong URL. The URL slug always belongs to its own URL, so deriving
+    the stub title from it keeps title and URL consistent. Returns "" when the slug is
+    just an id (e.g. LinkedIn /jobs/view/12345), so the caller can fall back.
+    """
+    # pracuj: /praca/<slug>,oferta,<id>
+    m = re.search(r"/praca/([^,/?]+),oferta,", url)
+    if m:
+        slug = m.group(1)
+    else:
+        path = urlparse(url).path.rstrip("/")
+        seg = path.rsplit("/", 1)[-1] if path else ""
+        # bulldogjob: <hexid>-<slug> → drop the leading id
+        id_prefixed = re.match(r"^[0-9a-f]{6,}-(.+)$", seg)
+        slug = id_prefixed.group(1) if id_prefixed else seg
+
+    words = [w for w in re.split(r"[-_]", slug) if w and not w.isdigit()]
+    return " ".join(w.capitalize() for w in words)
+
+
 def _jobs_from_urls(urls: list[str], source: str, subject: str) -> list[Job]:
     return [
         Job(
-            title=subject,
+            title=_title_from_url(url) or subject,
             company=f"[{source}]",
             location="",
             salary=None,
