@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 _hunt_lock = asyncio.Lock()
 
+# Stop a batch after this many failures in a row. Protects a rate-limited or
+# down host (e.g. pracuj.pl returning 429) from being hammered job after job.
+_CONSECUTIVE_FAIL_LIMIT = 3
+
 
 async def run_hunt(
     context: ContextTypes.DEFAULT_TYPE,
@@ -368,11 +372,11 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             await asyncio.to_thread(add_failed, job)
             await send_text(context, f"❌ [{i}/{total}] Failed: {job.company} — {job.title}")
 
-        if consecutive_fails >= 3:
+        if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
             remaining = total - i
             await send_text(
                 context,
-                f"🛑 3 consecutive failures — stopping batch.\n"
+                f"🛑 {_CONSECUTIVE_FAIL_LIMIT} consecutive failures — stopping batch.\n"
                 f"Skipped {remaining} remaining jobs.",
             )
             break
@@ -406,7 +410,10 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     ok = 0
     manual = 0
+    consecutive_fails = 0
+    processed = 0
     for i, job in enumerate(capped, 1):
+        processed = i
         await send_text(
             context,
             f"🔄 [{i}/{len(capped)}] Retry: {job.company} - {job.title}",
@@ -415,18 +422,21 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
         outcome = await _run_apply_agent(job)
         if outcome == "ok":
             ok += 1
+            consecutive_fails = 0
             await asyncio.to_thread(remove_failed, job.url)
             await _sync_to_sheets(job.url)
             await _upload_to_drive(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1
+            consecutive_fails = 0
             await send_text(
                 context,
                 f"📋 Retry → MANUAL: {job.company} — {job.title}\n"
                 "(JobLeads: see apply_agent message about job_posting.txt)",
             )
         else:
+            consecutive_fails += 1
             new_count = await asyncio.to_thread(increment_fail_count, job.url)
             if new_count >= MAX_FAIL_RETRIES:
                 logger.warning(
@@ -444,10 +454,20 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                     new_count, MAX_FAIL_RETRIES, job.company, job.title,
                 )
 
+        # Stop hammering a rate-limited/down host after N failures in a row.
+        if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
+            remaining = len(capped) - i
+            await send_text(
+                context,
+                f"🛑 {_CONSECUTIVE_FAIL_LIMIT} consecutive failures — stopping retries.\n"
+                f"Skipped {remaining} remaining.",
+            )
+            break
+
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)
 
-    still_failed = len(capped) - ok - manual
+    still_failed = processed - ok - manual
     await send_text(
         context,
         f"🔄 <b>Retry done</b>: ✅ {ok} fixed / 📋 {manual} manual / ❌ {still_failed} still failing",
