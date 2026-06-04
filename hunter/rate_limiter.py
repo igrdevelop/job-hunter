@@ -13,10 +13,12 @@ host hard while keeping the rest fast.
 
 import asyncio
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 def domain_of(url: str) -> str:
@@ -69,13 +71,14 @@ class DomainLimiter:
         self,
         url: str,
         global_sem: asyncio.Semaphore,
-        fetch_fn: Callable[[str], str],
+        fetch_fn: Callable[[str], T],
         timeout: Optional[float] = None,
-    ) -> str:
-        """Fetch `url` via `fetch_fn` (run in a thread) under global + per-domain caps.
+    ) -> T:
+        """Run `fetch_fn(url)` (in a thread) under global + per-domain caps.
 
-        `fetch_fn` is a blocking callable taking the URL and returning text.
-        `timeout` (seconds) bounds a single fetch; None disables the bound.
+        `fetch_fn` is a blocking callable taking the URL and returning any value
+        (job text, an enriched Job, etc.). `timeout` (seconds) bounds a single
+        call; None disables the bound. The per-domain key is derived from `url`.
         """
         dom = domain_of(url)
         dom_sem, dom_lock, delay = self._get(dom)

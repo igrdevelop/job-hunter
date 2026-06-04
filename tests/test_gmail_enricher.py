@@ -162,6 +162,44 @@ def test_enrich_jobs_preserves_order():
     assert [r.url for r in result] == urls
 
 
+def test_enrich_jobs_keeps_stub_on_error():
+    """An enricher that raises leaves the original stub job in place."""
+    jobs = [_stub("https://www.pracuj.pl/praca/x,oferta,1")]
+
+    def boom(job):
+        raise RuntimeError("429 Too Many Requests")
+
+    with patch("hunter.gmail_enricher._enrich_one", side_effect=boom):
+        result = enrich_jobs(jobs)
+
+    assert result[0] is jobs[0]
+
+
+def test_enrich_jobs_throttles_pracuj_host(monkeypatch):
+    """Bursts of pracuj URLs never exceed PRACUJ_HOST_CONCURRENCY in flight."""
+    import time
+
+    monkeypatch.setattr("hunter.gmail_enricher.PRACUJ_HOST_CONCURRENCY", 2)
+    monkeypatch.setattr("hunter.gmail_enricher.PRACUJ_HOST_DELAY_SEC", 0.0)
+    monkeypatch.setattr("hunter.gmail_enricher.GMAIL_ENRICH_CONCURRENCY", 10)
+
+    state = {"active": 0, "peak": 0}
+
+    def slow_enrich(job):
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.02)
+        state["active"] -= 1
+        return job
+
+    jobs = [_stub(f"https://www.pracuj.pl/praca/x,oferta,{i}") for i in range(8)]
+    with patch("hunter.gmail_enricher._enrich_one", side_effect=slow_enrich):
+        result = enrich_jobs(jobs)
+
+    assert state["peak"] <= 2
+    assert [r.url for r in result] == [j.url for j in jobs]
+
+
 def test_enrich_jobs_disabled_via_gmail_source(monkeypatch):
     """When GMAIL_ENRICH_ENABLED=false, enrich_jobs is never called from gmail.py."""
     monkeypatch.setattr("hunter.sources.gmail.GMAIL_ENRICH_ENABLED", False)
