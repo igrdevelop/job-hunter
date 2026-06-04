@@ -141,6 +141,26 @@ def test_run_apply_agent_subprocess_returns_false_on_oserror(monkeypatch) -> Non
     assert result == "fail"
 
 
+def test_run_apply_agent_subprocess_returns_rate_limited_on_exit_45(monkeypatch) -> None:
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return _FakeProc(returncode=45)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            _job("https://www.pracuj.pl/praca/x,oferta,1"),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result == "rate_limited"
+
+
 def test_run_apply_agent_subprocess_returns_manual_on_exit_44(monkeypatch) -> None:
     async def _fake_create_subprocess_exec(program, *args, **kwargs):  # noqa: ANN002, ANN003
         assert "--company" in args

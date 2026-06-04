@@ -12,8 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Must match apply_agent.APPLY_MANUAL_EXIT_CODE (JobLeads MANUAL tracker flow)
 _APPLY_MANUAL_EXIT_CODE = 44
+# Must match apply_shared.APPLY_RATE_LIMITED_EXIT_CODE (transient 429 during fetch)
+_APPLY_RATE_LIMITED_EXIT_CODE = 45
 
-ApplyOutcome = Literal["ok", "fail", "manual"]
+ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited"]
 
 # Second element: human-readable error snippet for Telegram (empty string on success).
 ApplyResult = tuple[ApplyOutcome, str]
@@ -74,6 +76,10 @@ async def run_apply_agent_subprocess(
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
         return "manual"
+
+    if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
+        logger.warning(f"[auto-apply] RATE-LIMITED (429) {job.company} — {job.title}")
+        return "rate_limited"
 
     if proc.returncode != 0:
         logger.error(

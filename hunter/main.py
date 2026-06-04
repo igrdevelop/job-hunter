@@ -370,7 +370,14 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             failed += 1
             consecutive_fails += 1
             await asyncio.to_thread(add_failed, job)
-            await send_text(context, f"❌ [{i}/{total}] Failed: {job.company} — {job.title}")
+            if outcome == "rate_limited":
+                await send_text(
+                    context,
+                    f"⏳ [{i}/{total}] Rate-limited (429): {job.company} — {job.title} "
+                    "— will retry later.",
+                )
+            else:
+                await send_text(context, f"❌ [{i}/{total}] Failed: {job.company} — {job.title}")
 
         if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
             remaining = total - i
@@ -434,6 +441,19 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context,
                 f"📋 Retry → MANUAL: {job.company} — {job.title}\n"
                 "(JobLeads: see apply_agent message about job_posting.txt)",
+            )
+        elif outcome == "rate_limited":
+            # Transient 429 — count it for the breaker but do NOT escalate the
+            # permanent fail counter; the offer itself is likely fine.
+            consecutive_fails += 1
+            logger.warning(
+                "[retry] Rate-limited (429), not escalating: %s - %s",
+                job.company, job.title,
+            )
+            await send_text(
+                context,
+                f"⏳ Retry rate-limited (429): {job.company} — {job.title} "
+                "— will retry next cycle.",
             )
         else:
             consecutive_fails += 1
