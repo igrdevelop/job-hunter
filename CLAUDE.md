@@ -139,6 +139,8 @@ hunter/
   gdrive_client.py          Low-level Drive API v3 wrapper
   gmail_client.py           Gmail API wrapper
   gmail_parsers.py          Parse job alert emails from various boards
+  sent_parse.py             Parse the messy Sent column into a real date (parse_sent_date/classify)
+  sent_normalizer.py        Build/write the clean "Applied Date" Sheets column L from Sent
   bot/
     state.py                Shared mutable state (_pending_jobs, _active_apply_urls, _force_waiting)
     keyboards.py            _make_keyboard() — InlineKeyboardMarkup factory
@@ -161,6 +163,7 @@ hunter/
     gsheets.py              /gsheets_status + /gsheets_push_missing + /gsheets_push_sent
     gdrive.py               /gdrive_upload_missing
     check_responses.py      /check_responses
+    normalize.py            /normalize — rebuild Sheets column L (Applied Date) from Sent
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   schedules/                One file per JobQueue callback
     hunt.py                 scheduled_hunt
@@ -171,6 +174,7 @@ hunter/
     pending_report.py       scheduled_pending_report
     email_responses.py      scheduled_check_email_responses
     daily_summary.py        scheduled_daily_summary
+    normalize_sent.py       scheduled_normalize_sent (daily 00:20, refreshes Sheets column L)
     __init__.py             register(app, tz) — wires all callbacks into the Application
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
@@ -199,6 +203,8 @@ tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullst
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
 tools/dedup_sheet.py        One-time cleanup of duplicate rows in the Sheets tracker (--apply to delete)
+tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
+tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
 
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
@@ -294,6 +300,14 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 ## Google Sheets — Sending Workflow
 
 Replaces `to_send.xlsx`. tracker.xlsx rows are mirrored live to a Google Sheets spreadsheet.
+
+> **Sheet column L "Applied Date" (Sheet-only, not in tracker.db).** The bot syncs only
+> columns A–K (`gsheets_client.COLUMNS`). The `Sent` column (H) doubles as a free-text
+> scratchpad (dates *and* notes like "выгасла"/"повторка"). `hunter.sent_normalizer`
+> parses a real application date out of `Sent` and writes it into the untouched column L,
+> so a Stats tab can `COUNT`/`QUERY` clean dates. Refreshed daily (00:20) and on demand
+> via `/normalize`. Never written by the normal A–K push/pull. Local `tracker.db` is not
+> involved.
 
 ### Setup (one-time)
 1. `python tools/gsheets_auth.py` — OAuth2 consent → writes `gsheets_token.json`
@@ -520,3 +534,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-05-29 | sonnet | CV generation quality: 5 base CVs per track (angular/react/ai/fullstack_angular_nest/fullstack_react_next), stack detection in apply_api.py (31 tests), generation_rules.md renamed + strengthened RED LINES (no Angular version in summary, no invented client scale, no foreign-language keywords in EN), CLI paste-file support via Pro subscription, APPLICATIONS_DIR env var in apply.md, preview_apply.py tool, real job fixtures in tests/fixtures/sample_jobs/. 976 tests total. |
 | 2026-06-03 | opus | Bootstrap dedup self-heal (BOOTSTRAP_DEDUP_PLAN.md): `tracker.insert_pulled_rows()` inserts Sheet rows missing from tracker.db (dedup by id+url_norm, skips blank ID, intra-batch dedup); `pull_full_snapshot()` now inserts-then-updates and returns `inserted` count; `_post_init` pulls once at startup so a fresh/empty DB self-heals after container restart. Fixes re-processing of live vacancies. 9 new tests in test_bootstrap_dedup.py (1040 total). Verified in prod: startup pull inserted 23 rows. |
 | 2026-06-03 | opus | `tools/dedup_sheet.py`: one-time cleanup of historical duplicate rows in the Sheets tracker. Groups by normalize_url, keeps best row (filled Sent, else earliest), deletes rest via delete_sheet_row (high→low). Dry-run by default, `--apply` to delete; local tracker.db untouched. 10 new tests (1050 total). |
+| 2026-06-04 | opus | Sent → clean-date normalizer. `hunter/sent_parse.py` parses the messy Sent column (DD MM YY, ISO, `1305`, Polish/English "applied", EXPIRED markers) into a real date; `hunter/sent_normalizer.py` writes it into Sheet-only column L "Applied Date" (A–K sync never touches L). Wired as `/normalize` command + daily `scheduled_normalize_sent` (00:20, GSHEETS_ENABLED). CLI `tools/normalize_sent.py` (dry-run/`--apply`) + read-only `tools/stats_sheet.py`. Third Sheet tab uses COUNT + QUERY(YYYY-MM) over column L for totals/monthly. Verified on prod sheet: 511 rows → 103 dates. 59 new tests (1109 total). |

@@ -29,6 +29,7 @@ from hunter.schedules.gsheets import scheduled_gsheets_resync, scheduled_gsheets
 from hunter.schedules.pending_report import scheduled_pending_report
 from hunter.schedules.email_responses import scheduled_check_email_responses
 from hunter.schedules.daily_summary import scheduled_daily_summary
+from hunter.schedules.normalize_sent import scheduled_normalize_sent
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ __all__ = [
     "scheduled_pending_report",
     "scheduled_check_email_responses",
     "scheduled_daily_summary",
+    "scheduled_normalize_sent",
 ]
 
 
@@ -175,3 +177,12 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             name="gsheets_pull",
         )
         logger.info("[Schedule] gsheets_pull every %d min", GSHEETS_REFRESH_INTERVAL_MIN)
+
+    # ── Daily Sent → clean date (column L) refresh at 00:20 ──────────────────
+    if GSHEETS_ENABLED:
+        app.job_queue.run_daily(
+            callback=scheduled_normalize_sent,
+            time=dt_time(0, 20, tzinfo=tz),
+            name="normalize_sent_daily",
+        )
+        logger.info("[Schedule] normalize_sent at 00:20 %s", TIMEZONE)
