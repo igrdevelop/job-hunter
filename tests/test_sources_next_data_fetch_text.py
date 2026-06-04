@@ -278,3 +278,77 @@ def test_pracuj_fetch_text_falls_back_through_all_strategies() -> None:
         out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
     assert out == "fallback ok"
     m.assert_called_once()
+
+
+# ── Pracuj 429 backoff ────────────────────────────────────────────────────────
+
+def _http_error(status: int, retry_after: str | None = None) -> Exception:
+    """Build a requests-style HTTPError carrying a response with a status code."""
+    import requests as _req
+
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = {"Retry-After": retry_after} if retry_after else {}
+    return _req.exceptions.HTTPError(f"HTTP {status}", response=resp)
+
+
+def test_pracuj_429_retries_then_raises_without_fallback() -> None:
+    """Persistent 429 retries the cloudscraper session, then raises (no html_fallback)."""
+    from hunter.sources.pracuj import _RATE_LIMIT_MAX_RETRIES
+
+    scraper_get = MagicMock(side_effect=_http_error(429))
+    with patch("hunter.sources.pracuj._scraper.get", scraper_get), patch(
+        "hunter.sources.pracuj.time.sleep"
+    ) as sleep_mock, patch(
+        "requests.get", side_effect=AssertionError("plain requests must not run on 429")
+    ), patch(
+        "hunter.sources.html_fallback.fetch_html",
+        side_effect=AssertionError("html_fallback must not run on 429"),
+    ):
+        with pytest.raises(Exception) as exc_info:
+            PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
+
+    assert getattr(exc_info.value.response, "status_code", None) == 429
+    assert scraper_get.call_count == _RATE_LIMIT_MAX_RETRIES + 1
+    assert sleep_mock.call_count == _RATE_LIMIT_MAX_RETRIES
+
+
+def test_pracuj_429_then_success_returns_text() -> None:
+    """A transient 429 that clears on retry yields the recovered page."""
+    ld = {
+        "@type": "JobPosting",
+        "title": "Recovered Role",
+        "hiringOrganization": {"name": "Co"},
+        "description": "<p>" + ("Body. " * 12) + "</p>",
+    }
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
+    scraper_get = MagicMock(
+        side_effect=[_http_error(429), _mk_html_response(html)]
+    )
+    with patch("hunter.sources.pracuj._scraper.get", scraper_get), patch(
+        "hunter.sources.pracuj.time.sleep"
+    ):
+        out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
+
+    assert "Recovered Role" in out
+    assert scraper_get.call_count == 2
+
+
+def test_pracuj_non_429_error_still_falls_back() -> None:
+    """A non-429 cloudscraper failure keeps the existing plain-requests/html_fallback path."""
+    with patch(
+        "hunter.sources.pracuj._scraper.get", side_effect=Exception("blocked")
+    ), patch("requests.get", side_effect=Exception("plain blocked too")), patch(
+        "hunter.sources.html_fallback.fetch_html", return_value="fallback ok"
+    ) as m:
+        out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
+    assert out == "fallback ok"
+    m.assert_called_once()
+
+
+def test_pracuj_retry_after_header_honored() -> None:
+    """Retry-After header drives the backoff delay."""
+    from hunter.sources.pracuj import _retry_after_delay
+
+    err = _http_error(429, retry_after="7")
+    assert _retry_after_delay(err, attempt=0) == 7.0
