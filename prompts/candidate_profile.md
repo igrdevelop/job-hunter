@@ -15,7 +15,7 @@
 
 ### Work Experience
 
-**Frontend Developer (Angular, part-time contract) | Alten Poland** - Apr 2026 - May 2026
+**Senior Frontend Developer (Angular, part-time contract) | Alten Poland** - Apr 2026 - May 2026
 Intel (client) | OpenVINO LLM Evaluation Tooling | Wrocław, Poland
 - Refactored 20+ heterogeneous LLM evaluation report pages into 2 unified Angular page templates, enabling ~10 new composable reports without per-report frontend rework.
 - Built daily-diff dashboards comparing LLM inference performance across releases (latency, throughput, runtime parameters), letting engineers spot regressions vs. prior day and prior release at a glance.
@@ -64,11 +64,11 @@ E-commerce | Insurance | Healthcare | Grant Management
 
 - Grant Management: Joined an existing large team working on a grants distribution platform (Bill Gates-style applicant/proposal workflow). The only project where unit tests were used extensively. Did a short Node.js backend rotation alongside the frontend work — handled a small set of backend endpoints and integration tasks before returning to full-time frontend on other Altoros projects. Stack: Angular, TypeScript, Node.js.
 
-**Frontend Developer (Angular) | SolbegSoft** - April 2016 - April 2018
-Maintenance Services Management
-- Developed a work-order management platform for service engineers: field managers photograph issues → WO created on server → task table assigns workers → mobile/web app delivers WO to engineers.
-- Collaborated with BE and QA in Agile. Team: 10 members (2 FE, 5 BE, 2 QA, 1 PM).
-Stack: Angular 2-6, TypeScript, JavaScript, jQuery, SCSS, Bootstrap. Backend: .NET.
+**Frontend Developer | SolbegSoft** - April 2016 - April 2018
+Maintenance Services Management. Developed a task management platform for service engineers.
+- Delivered high-quality, maintainable layouts and robust business logic.
+- Collaborated with backend developers and QA teams in Agile workflows.
+Stack: Angular, React, TypeScript, JavaScript, jQuery, SCSS, Bootstrap. Backend: .NET.
 
 **Frontend Developer | Staronka** - November 2015 - March 2016
 Startup | Website Builder
