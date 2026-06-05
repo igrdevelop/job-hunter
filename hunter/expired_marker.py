@@ -10,7 +10,6 @@ Used by /check_expired (Telegram) and the daily scheduled check.
 import asyncio
 import logging
 from typing import Callable, Awaitable
-from urllib.parse import urlparse
 
 import requests
 
@@ -21,6 +20,7 @@ from hunter.config import (
     EXPIRED_CHECK_FETCH_TIMEOUT,
 )
 from hunter.expired_check import is_job_expired, is_expired_by_html
+from hunter.rate_limiter import DomainLimiter, domain_of
 from hunter.tracker import apply_sent_updates, iter_unsent_rows as _iter_unsent
 
 logger = logging.getLogger(__name__)
@@ -132,41 +132,6 @@ def _is_cloudflare_challenge(html: str) -> bool:
     )
 
 
-# ── Per-domain rate limiting ──────────────────────────────────────────────────
-
-def _domain(url: str) -> str:
-    return urlparse(url).hostname or url
-
-
-class _DomainLimiter:
-    def __init__(self, domain_limit: int, domain_delay: float) -> None:
-        self._limit = domain_limit
-        self._delay = domain_delay
-        self._sems: dict[str, asyncio.Semaphore] = {}
-        self._delays: dict[str, asyncio.Lock] = {}
-
-    def _get(self, dom: str):
-        if dom not in self._sems:
-            self._sems[dom] = asyncio.Semaphore(self._limit)
-            self._delays[dom] = asyncio.Lock()
-        return self._sems[dom], self._delays[dom]
-
-    async def fetch(self, url: str, global_sem: asyncio.Semaphore) -> str:
-        from hunter.sources import fetch_job_text
-        dom = _domain(url)
-        dom_sem, dom_lock = self._get(dom)
-        async with global_sem:
-            async with dom_sem:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(fetch_job_text, url),
-                    timeout=EXPIRED_CHECK_FETCH_TIMEOUT,
-                )
-        # Rate-limit delay runs outside semaphores so slots are freed immediately.
-        async with dom_lock:
-            await asyncio.sleep(self._delay)
-        return result
-
-
 # ── Core check ────────────────────────────────────────────────────────────────
 
 async def run_check(
@@ -192,14 +157,16 @@ async def run_check(
     done = 0
     expired_count = 0
 
+    from hunter.sources import fetch_job_text
+
     global_sem = asyncio.Semaphore(EXPIRED_CHECK_CONCURRENCY)
-    limiter = _DomainLimiter(EXPIRED_CHECK_DOMAIN_LIMIT, EXPIRED_CHECK_DOMAIN_DELAY)
+    limiter = DomainLimiter(EXPIRED_CHECK_DOMAIN_LIMIT, EXPIRED_CHECK_DOMAIN_DELAY)
 
     async def _check_one(item: dict) -> dict:
         nonlocal done, expired_count
 
         url = item["url"]
-        dom = _domain(url)
+        dom = domain_of(url)
 
         # Fast path: lightweight raw-HTML check for Pracuj / LinkedIn.
         # Avoids full cloudscraper/Playwright fetch when the archived marker
@@ -220,7 +187,9 @@ async def run_check(
                 return {**item, "status": "skipped", "reason": "linkedin-login-wall"}
 
         try:
-            text = await limiter.fetch(url, global_sem)
+            text = await limiter.fetch(
+                url, global_sem, fetch_job_text, timeout=EXPIRED_CHECK_FETCH_TIMEOUT
+            )
             status = "expired" if is_job_expired(text) else "alive"
         except asyncio.TimeoutError:
             status = "error"

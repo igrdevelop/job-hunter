@@ -17,6 +17,7 @@ Listing URLs:
 import json
 import logging
 import re
+import time
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -40,7 +41,33 @@ LISTING_URLS = [
 
 TIMEOUT = 25
 
+# 429 backoff: retry the same (cookie-bearing) cloudscraper session a few times with
+# a growing delay instead of cascading to other strategies, which only deepen the limit.
+_RATE_LIMIT_MAX_RETRIES = 2
+_RATE_LIMIT_BASE_DELAY = 2.0
+_RATE_LIMIT_MAX_DELAY = 30.0
+
 _scraper = cloudscraper.create_scraper()
+
+
+def _status_of(exc: Exception) -> Optional[int]:
+    """HTTP status code carried by a requests/cloudscraper exception, or None."""
+    resp = getattr(exc, "response", None)
+    return getattr(resp, "status_code", None) if resp is not None else None
+
+
+def _retry_after_delay(exc: Exception, attempt: int) -> float:
+    """Seconds to wait before the next retry: honor Retry-After, else exp. backoff."""
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None) if resp is not None else None
+    if headers:
+        ra = headers.get("Retry-After")
+        if ra:
+            try:
+                return min(float(ra), _RATE_LIMIT_MAX_DELAY)
+            except (TypeError, ValueError):
+                pass
+    return min(_RATE_LIMIT_BASE_DELAY * (2 ** attempt), _RATE_LIMIT_MAX_DELAY)
 
 
 def _playwright_available() -> bool:
@@ -290,18 +317,39 @@ def _try_bs4_detail(html: str) -> str:
 
 
 def _fetch_detail_html(url: str) -> str:
-    """Try cloudscraper first, fall back to plain requests. Returns raw HTML or raises."""
-    try:
-        resp = _scraper.get(url, timeout=TIMEOUT)
-        resp.raise_for_status()
-        return resp.text
-    except Exception as cs_err:
-        logger.warning(f"[pracuj] cloudscraper failed ({cs_err}), trying plain requests")
-        import requests as _req
-        from hunter.sources.html_fallback import HEADERS as _FB_HEADERS
-        resp = _req.get(url, headers=_FB_HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        return resp.text
+    """Fetch raw HTML. cloudscraper first, plain requests on a non-429 failure.
+
+    On HTTP 429 we back off and retry the *same* cloudscraper session (it carries
+    the Cloudflare clearance cookies) rather than cascading to other strategies —
+    extra hits to a rate-limited host only deepen the limit. Once the retry budget
+    is spent the 429 is raised so the caller can mark the job FAILED.
+    Returns raw HTML or raises.
+    """
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            resp = _scraper.get(url, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp.text
+        except Exception as cs_err:
+            if _status_of(cs_err) == 429:
+                if attempt < _RATE_LIMIT_MAX_RETRIES:
+                    delay = _retry_after_delay(cs_err, attempt)
+                    logger.warning(
+                        "[pracuj] 429 (attempt %d/%d) — backing off %.1fs",
+                        attempt + 1, _RATE_LIMIT_MAX_RETRIES + 1, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.warning("[pracuj] 429 persists after %d attempts — giving up", attempt + 1)
+                raise
+            logger.warning(f"[pracuj] cloudscraper failed ({cs_err}), trying plain requests")
+            break
+
+    import requests as _req
+    from hunter.sources.html_fallback import HEADERS as _FB_HEADERS
+    resp = _req.get(url, headers=_FB_HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.text
 
 
 class PracujSource(BaseSource):
@@ -320,6 +368,11 @@ class PracujSource(BaseSource):
         try:
             html = _fetch_detail_html(url)
         except Exception as e:
+            if _status_of(e) == 429:
+                # Rate-limited: html_fallback would hit the same host again, so
+                # propagate and let the caller mark this job FAILED for retry later.
+                logger.warning(f"[pracuj] rate-limited (429) for {url} — not using html_fallback")
+                raise
             logger.warning(f"[pracuj] all HTTP strategies failed ({e}), using html_fallback")
             return fetch_html(url)
 

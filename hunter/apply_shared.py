@@ -43,8 +43,25 @@ if GENERATE_PL_RESUME:
 # Exit code: JobLeads fetch blocked — MANUAL tracker row + stub job_posting.txt written
 APPLY_MANUAL_EXIT_CODE = 44
 
+# Exit code: fetch hit a transient rate limit (HTTP 429). The caller should retry
+# later WITHOUT escalating the permanent fail counter — the offer is likely fine.
+APPLY_RATE_LIMITED_EXIT_CODE = 45
+
 # Placeholder URL used when user pastes job text into Telegram without any link.
 PASTE_NO_URL_PLACEHOLDER = "paste://no-url"
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """True if an exception represents an HTTP 429 / rate-limit response.
+
+    Checks a requests/cloudscraper-style ``exc.response.status_code`` first, then
+    falls back to scanning the message for a 429 / "too many requests" signal.
+    """
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    msg = str(exc).lower()
+    return "429" in msg or "too many requests" in msg
 
 # Shown after React-only auto-skip.
 _REACT_SKIP_FORCE_HINT = (

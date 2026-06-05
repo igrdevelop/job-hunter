@@ -13,16 +13,24 @@ Fallback: on any error the original stub Job is returned unchanged.
 Dedup still works because URL is the canonical key regardless of stub title.
 """
 
+import asyncio
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 
-from hunter.config import GMAIL_ENRICH_CONCURRENCY, GMAIL_ENRICH_TIMEOUT
+from hunter.config import (
+    GMAIL_ENRICH_CONCURRENCY,
+    GMAIL_ENRICH_DOMAIN_DELAY,
+    GMAIL_ENRICH_DOMAIN_LIMIT,
+    GMAIL_ENRICH_TIMEOUT,
+    PRACUJ_HOST_CONCURRENCY,
+    PRACUJ_HOST_DELAY_SEC,
+)
 from hunter.models import Job
+from hunter.rate_limiter import DomainLimiter
 from hunter.sources.justjoin import JustJoinSource
 
 logger = logging.getLogger(__name__)
@@ -128,28 +136,51 @@ def _enrich_one(job: Job) -> Job:
         return job
 
 
+async def _enrich_jobs_async(jobs: list[Job]) -> list[Job]:
+    """Enrich jobs concurrently under global + per-host rate limits.
+
+    pracuj.pl is throttled harder than other hosts so a burst of detail fetches
+    doesn't trip Cloudflare's HTTP 429. On any error/timeout the original stub is kept.
+    """
+    global_sem = asyncio.Semaphore(GMAIL_ENRICH_CONCURRENCY)
+    limiter = DomainLimiter(
+        GMAIL_ENRICH_DOMAIN_LIMIT,
+        GMAIL_ENRICH_DOMAIN_DELAY,
+        overrides={"pracuj.pl": (PRACUJ_HOST_CONCURRENCY, PRACUJ_HOST_DELAY_SEC)},
+    )
+
+    async def _one(job: Job) -> Job:
+        try:
+            return await limiter.fetch(
+                job.url,
+                global_sem,
+                lambda _url: _enrich_one(job),
+                timeout=GMAIL_ENRICH_TIMEOUT,
+            )
+        except Exception as e:
+            logger.warning("[gmail_enricher] timeout/error for %s — %s", job.url, e)
+            return job
+
+    return await asyncio.gather(*[_one(job) for job in jobs])
+
+
 def enrich_jobs(jobs: list[Job]) -> list[Job]:
-    """Enrich Gmail stub jobs with real metadata. Thread-parallel, best-effort."""
+    """Enrich Gmail stub jobs with real metadata. Per-host throttled, best-effort.
+
+    Runs the async enrichment to completion. `enrich_jobs` is invoked from
+    `GmailSource.search()`, which the hunt loop runs in a worker thread
+    (`asyncio.to_thread`), so a fresh event loop here is safe.
+    """
     if not jobs:
         return jobs
 
     logger.info("[gmail_enricher] starting enrichment for %d job(s)", len(jobs))
 
-    enriched: dict[str, Job] = {}
-    with ThreadPoolExecutor(max_workers=GMAIL_ENRICH_CONCURRENCY) as pool:
-        future_to_url = {pool.submit(_enrich_one, job): job.url for job in jobs}
-        for future in as_completed(future_to_url, timeout=GMAIL_ENRICH_TIMEOUT * 3):
-            url = future_to_url[future]
-            try:
-                result = future.result(timeout=GMAIL_ENRICH_TIMEOUT)
-                enriched[url] = result
-            except Exception as e:
-                logger.warning("[gmail_enricher] timeout/error for %s — %s", url, e)
-                for j in jobs:
-                    if j.url == url:
-                        enriched[url] = j
-                        break
+    enriched = asyncio.run(_enrich_jobs_async(jobs))
 
-    ok = sum(1 for j in jobs if enriched.get(j.url, j) is not j)
-    logger.info("[gmail_enricher] done: %d/%d enriched, %d kept as stub", ok, len(jobs), len(jobs) - ok)
-    return [enriched.get(j.url, j) for j in jobs]
+    ok = sum(1 for orig, res in zip(jobs, enriched) if res is not orig)
+    logger.info(
+        "[gmail_enricher] done: %d/%d enriched, %d kept as stub",
+        ok, len(jobs), len(jobs) - ok,
+    )
+    return enriched

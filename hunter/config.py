@@ -310,10 +310,17 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
 # Fetch real title/company/location/salary for each URL extracted from alert emails.
 GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
-# Max parallel HTTP requests during enrichment
+# Max parallel HTTP requests during enrichment (global cap, across all hosts)
 GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches
 GMAIL_ENRICH_TIMEOUT: int = int(os.getenv("GMAIL_ENRICH_TIMEOUT", "15"))
+# Default per-host caps during enrichment (avoids hammering one board with a burst).
+GMAIL_ENRICH_DOMAIN_LIMIT: int = int(os.getenv("GMAIL_ENRICH_DOMAIN_LIMIT", "2"))
+GMAIL_ENRICH_DOMAIN_DELAY: float = float(os.getenv("GMAIL_ENRICH_DOMAIN_DELAY", "0.0"))
+# pracuj.pl is Cloudflare-rate-limited: a burst of parallel detail fetches returns
+# HTTP 429. Throttle it harder than other hosts (override on top of the defaults).
+PRACUJ_HOST_CONCURRENCY: int = int(os.getenv("PRACUJ_HOST_CONCURRENCY", "2"))
+PRACUJ_HOST_DELAY_SEC: float = float(os.getenv("PRACUJ_HOST_DELAY_SEC", "1.0"))
 
 # ── Email response checker ────────────────────────────────────────────────────
 # Default look-back window for /check_responses (and the daily scheduled run).

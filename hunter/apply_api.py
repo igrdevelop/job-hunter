@@ -25,12 +25,14 @@ from hunter.config import (
 )
 from hunter.apply_shared import (
     APPLY_MANUAL_EXIT_CODE,
+    APPLY_RATE_LIMITED_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     PROMPTS_DIR,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     _ats_check_loop,
     _handle_jobleads_fetch_blocked,
+    is_rate_limit_error,
     compute_output_folder,
     is_backend_only_job_text,
     is_react_only_job_text,
@@ -152,6 +154,11 @@ def main_api(
                     url, str(e), company=jobleads_company, title=jobleads_title
                 )
             notify(f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>")
+            if is_rate_limit_error(e):
+                # Transient 429 — signal the caller to retry later without escalating
+                # the permanent fail counter (the offer itself is likely fine).
+                print(f"[apply_agent] FETCH RATE-LIMITED (429): {e}")
+                sys.exit(APPLY_RATE_LIMITED_EXIT_CODE)
             print(f"[apply_agent] FETCH ERROR: {e}")
             sys.exit(1)
 
