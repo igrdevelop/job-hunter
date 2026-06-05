@@ -99,7 +99,21 @@ def add_horizontal_line(paragraph):
     pPr.append(pBdr)
 
 
-def set_paragraph_spacing(paragraph, before=0, after=4, line_spacing=1.15):
+def keep_with_next(paragraph, keep_lines=True):
+    """Prevent the paragraph from being split from what follows across a page break.
+
+    w:keepNext  -> stay on the same page as the next paragraph (no orphaned heading)
+    w:keepLines -> do not break the paragraph's own lines across pages
+    """
+    pPr = paragraph._p.get_or_add_pPr()
+    keep_next = OxmlElement("w:keepNext")
+    pPr.append(keep_next)
+    if keep_lines:
+        keep_lines_el = OxmlElement("w:keepLines")
+        pPr.append(keep_lines_el)
+
+
+def set_paragraph_spacing(paragraph, before=0, after=4, line_spacing=1.08):
     from docx.shared import Pt
     from docx.oxml.ns import qn
     pPr = paragraph._p.get_or_add_pPr()
@@ -116,7 +130,8 @@ def add_section_heading(doc, text):
     run = p.add_run(text.upper())
     set_font(run, size=11, bold=True)
     add_horizontal_line(p)
-    set_paragraph_spacing(p, before=8, after=3)
+    set_paragraph_spacing(p, before=6, after=3)
+    keep_with_next(p)
     return p
 
 
@@ -179,8 +194,6 @@ def build_resume(doc, data, stack):
             set_font(run_value, size=11)
             set_paragraph_spacing(p, before=1, after=1)
 
-    doc.add_paragraph()  # small gap
-
     # WORK EXPERIENCE
     add_section_heading(doc, "WORK EXPERIENCE")
     for job in data["experience"]:
@@ -191,7 +204,8 @@ def build_resume(doc, data, stack):
         # Period — right aligned via tab or just appended
         run_period = p.add_run(f"   {job['period']}")
         set_font(run_period, size=10, italic=True)
-        set_paragraph_spacing(p, before=6, after=1)
+        set_paragraph_spacing(p, before=4, after=1)
+        keep_with_next(p)
 
         # Subtitle / context line
         if job.get("subtitle"):
@@ -199,6 +213,7 @@ def build_resume(doc, data, stack):
             run = p.add_run(job["subtitle"])
             set_font(run, size=10, italic=True)
             set_paragraph_spacing(p, before=0, after=2)
+            keep_with_next(p)
 
         # Bullets
         for bullet in job.get("bullets", []):
@@ -243,12 +258,12 @@ def build_cover_letter(doc, text):
         set_paragraph_spacing(p, before=0, after=6)
 
 
-def set_margins(doc, margin_cm=2.0):
+def set_margins(doc, top_cm=0.8, bottom_cm=0.5, left_cm=1.0, right_cm=1.0):
     for section in doc.sections:
-        section.top_margin = Cm(margin_cm)
-        section.bottom_margin = Cm(margin_cm)
-        section.left_margin = Cm(margin_cm)
-        section.right_margin = Cm(margin_cm)
+        section.top_margin = Cm(top_cm)
+        section.bottom_margin = Cm(bottom_cm)
+        section.left_margin = Cm(left_cm)
+        section.right_margin = Cm(right_cm)
 
 
 def set_author(doc, name="Ihar Petrasheuski"):
