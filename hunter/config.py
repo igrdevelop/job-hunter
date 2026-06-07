@@ -26,6 +26,9 @@ APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
+# GDPR/RODO consent clause appended at the bottom of the CV body (not in a footer,
+# so ATS parsers still read it). "both" = PL + EN CVs, "pl" = PL CV only, "none" = off.
+CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
