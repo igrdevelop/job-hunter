@@ -811,6 +811,35 @@ def apply_pull_updates(rows: list[dict]) -> int:
     return updated
 
 
+def mark_orphans_expired(row_ids: list[str]) -> int:
+    """Mark rows whose ID vanished from Sheets as EXPIRED (orphan reconcile).
+
+    Called by gsheets_sync when the user (or a cleanup tool) deletes rows from the
+    Sheet that still linger in the DB with a blank Sent. Sets Sent='EXPIRED' so the
+    row drops out of unsent/active counts, and clears sheets_dirty + the now-stale
+    sheets_row so the bot never tries to push it back to a wrong Sheet position.
+
+    The row itself is kept (not deleted) so URL/company+title dedup still protects
+    against re-applying. Guarded with TRIM(sent)='' so an existing Sent value is
+    never overwritten. Returns count actually changed.
+    """
+    if not row_ids:
+        return 0
+    updated = 0
+    with get_db(DB_PATH) as conn:
+        for row_id in row_ids:
+            rid = (row_id or "").strip()
+            if not rid:
+                continue
+            cur = conn.execute(
+                "UPDATE applications SET sent='EXPIRED', sheets_dirty=0, sheets_row=NULL "
+                "WHERE id=? AND TRIM(COALESCE(sent,''))=''",
+                (rid,),
+            )
+            updated += cur.rowcount
+    return updated
+
+
 def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
     """Insert Sheets rows that are absent from the DB (dedup self-heal).
 
