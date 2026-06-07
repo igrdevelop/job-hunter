@@ -270,6 +270,14 @@ ARBEITNOW_ENABLED: bool = os.getenv("ARBEITNOW_ENABLED", "true").lower() in ("tr
 # ── Remotive source config ────────────────────────────────────────────────────
 REMOTIVE_ENABLED: bool = os.getenv("REMOTIVE_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── Working Nomads source config ──────────────────────────────────────────────
+# Public Elasticsearch index (jobsapi/_search); JSON, no auth.
+WORKINGNOMADS_ENABLED: bool = os.getenv("WORKINGNOMADS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# ── Jobspresso source config ──────────────────────────────────────────────────
+# WP Job Manager RSS feed (~10 most recent listings, no pagination).
+JOBSPRESSO_ENABLED: bool = os.getenv("JOBSPRESSO_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── Remote OK source config ───────────────────────────────────────────────────
 REMOTEOK_ENABLED: bool = os.getenv("REMOTEOK_ENABLED", "true").lower() in ("true", "1", "yes")
 

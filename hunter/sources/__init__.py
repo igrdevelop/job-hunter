@@ -10,6 +10,8 @@ from hunter.config import (
     JOBLEADS_ENABLED,
     ARBEITNOW_ENABLED,
     REMOTIVE_ENABLED,
+    WORKINGNOMADS_ENABLED,
+    JOBSPRESSO_ENABLED,
     REMOTEOK_ENABLED,
     HIMALAYAS_ENABLED,
     FOURDAYWEEK_ENABLED,
@@ -65,6 +67,14 @@ if ARBEITNOW_ENABLED:
 if REMOTIVE_ENABLED:
     from hunter.sources.remotive import RemotiveSource
     ALL_SOURCES.append(RemotiveSource())
+
+if WORKINGNOMADS_ENABLED:
+    from hunter.sources.workingnomads import WorkingNomadsSource
+    ALL_SOURCES.append(WorkingNomadsSource())
+
+if JOBSPRESSO_ENABLED:
+    from hunter.sources.jobspresso import JobspressoSource
+    ALL_SOURCES.append(JobspressoSource())
 
 if REMOTEOK_ENABLED:
     from hunter.sources.remoteok import RemoteOkSource
@@ -132,6 +142,8 @@ def _fetch_roster() -> list:
     from hunter.sources.solidjobs import SolidJobsSource
     from hunter.sources.theprotocol import TheProtocolSource
     from hunter.sources.weworkremotely import WeworkremotelySource
+    from hunter.sources.workingnomads import WorkingNomadsSource
+    from hunter.sources.jobspresso import JobspressoSource
 
     _FETCH_ROSTER = [
         JustJoinSource(),
@@ -145,6 +157,8 @@ def _fetch_roster() -> list:
         JobLeadsSource(),
         ArbeitnowSource(),
         RemotiveSource(),
+        WorkingNomadsSource(),
+        JobspressoSource(),
         RemoteOkSource(),
         HimalayasSource(),
         FourdayweekSource(),
