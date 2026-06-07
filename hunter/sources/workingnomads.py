@@ -40,9 +40,11 @@ HEADERS = {
 TIMEOUT = 30
 MAX_RESULTS = 100
 
-# Terms OR-matched across title/description/tags. Coarse net; the central filter
-# and matches_coarse_prefilter trim the rest.
-SEARCH_TERMS = "frontend front-end angular react vue javascript typescript fullstack"
+# OR-matched against the job TITLE. Mirrors FILTER["title_keywords"] so the rows
+# we pull are the ones the central filter will actually keep (it requires a
+# frontend keyword in the title). A broad multi_match over the description pulled
+# mostly generic "Software Engineer" rows that the central title filter dropped.
+TITLE_TERMS = "angular frontend front-end javascript typescript"
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 _REMOTE_ANY = {"anywhere", "worldwide", "global", "anywhere in the world", "remote"}
@@ -84,13 +86,7 @@ class WorkingNomadsSource(BaseSource):
             "query": {
                 "bool": {
                     "must": [
-                        {
-                            "multi_match": {
-                                "query": SEARCH_TERMS,
-                                "fields": ["title^3", "description", "tags", "all_tags"],
-                                "operator": "or",
-                            }
-                        }
+                        {"match": {"title": {"query": TITLE_TERMS, "operator": "or"}}}
                     ],
                     "filter": [{"term": {"expired": False}}],
                 }

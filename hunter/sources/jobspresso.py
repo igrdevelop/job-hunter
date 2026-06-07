@@ -36,6 +36,7 @@ HEADERS = {
 TIMEOUT = 30
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
+_REMOTE_ANY = {"anywhere", "worldwide", "global", "anywhere in the world", "remote"}
 
 
 class JobspressoSource(BaseSource):
@@ -78,11 +79,10 @@ class JobspressoSource(BaseSource):
         if not title or not url:
             return None
         company = (raw.get("company") or "").strip() or "Unknown"
-        location = (raw.get("location") or "").strip() or "Remote"
         return Job(
             title=title,
             company=company,
-            location=location,
+            location=_format_location(raw.get("location")),
             salary=None,
             url=url,
             source=self.name,
@@ -129,6 +129,15 @@ def parse_jobspresso_rss_xml(xml_text: str) -> list[dict]:
         )
 
     return results
+
+
+def _format_location(loc: Optional[str]) -> str:
+    """Jobspresso is remote-only; ensure the 'remote' token survives the central
+    location whitelist while keeping the geographic restriction as a hint."""
+    loc = (loc or "").strip()
+    if not loc or loc.lower() in _REMOTE_ANY:
+        return "Remote"
+    return f"{loc} (Remote)"
 
 
 def _html_to_plain(html_fragment: str, max_len: int) -> str:
