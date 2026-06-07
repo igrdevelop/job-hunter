@@ -230,6 +230,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_API_KEY` | — | API key for LLM provider |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
+| `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
@@ -280,6 +281,12 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 - **Short** (default): PDF only, EN CV only (3 files)
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
 - **Force** (`--force`): skip dedup, bypass React-only skip
+
+A GDPR/RODO consent clause is auto-appended as the **last body paragraph** of the CV
+(small italic grey text, in the document body so ATS parsers read it — NOT a footer).
+Static legal text in `generate_docs.py` (`GDPR_CLAUSE_PL` / `GDPR_CLAUSE_EN`), never
+LLM-generated. PL CV gets the Polish clause, EN CV the English one. Controlled by
+`CV_GDPR_CLAUSE` (`both` / `pl` / `none`). Do NOT add this to prompts/profile.
 
 ---
 

@@ -52,6 +52,24 @@ from hunter.services.tracker_service import record_successful_apply
 # Polish boards (e.g. Pracuj.pl) often reject uploads when the filename exceeds ~50 characters.
 MAX_ATTACHMENT_BASENAME_LEN = 50
 
+# GDPR/RODO consent clause. Static legal text — never LLM-generated. Rendered as the
+# last paragraph of the resume BODY (not a docx footer) so ATS parsers still read it.
+# Controlled by CV_GDPR_CLAUSE in hunter.config ("both" / "pl" / "none").
+GDPR_CLAUSE_PL = (
+    "Wyrażam zgodę na przetwarzanie danych osobowych zawartych w niniejszym "
+    "dokumencie do realizacji obecnego oraz przyszłych procesów rekrutacji zgodnie "
+    "z ustawą z dnia 10 maja 2018 roku o ochronie danych osobowych (Dz.U. 2018 poz. "
+    "1000) oraz zgodnie z art. 6 ust. 1 lit. a RODO (Rozporządzenie Parlamentu "
+    "Europejskiego i Rady (UE) 2016/679 z dnia 27 kwietnia 2016 r.)."
+)
+GDPR_CLAUSE_EN = (
+    "I hereby consent to the processing of my personal data for the purposes "
+    "necessary to carry out the current and future recruitment processes, in "
+    "accordance with the Act of 10 May 2018 on the Protection of Personal Data "
+    "(Journal of Laws 2018, item 1000) and Article 6(1)(a) of Regulation (EU) "
+    "2016/679 of the European Parliament and of the Council of 27 April 2016 (GDPR)."
+)
+
 
 def _safe_stack_segment(stack: str, max_len: int = 22) -> str:
     s = (stack or "FE").strip()
@@ -135,7 +153,30 @@ def add_section_heading(doc, text):
     return p
 
 
-def build_resume(doc, data, stack):
+def add_gdpr_clause(doc, lang):
+    """Append the GDPR/RODO consent clause as the last body paragraph.
+
+    Small italic grey text. Gated by CV_GDPR_CLAUSE ("both" / "pl" / "none").
+    lang is "EN" or "PL"; EN CVs are skipped unless mode is "both".
+    """
+    try:
+        from hunter.config import CV_GDPR_CLAUSE
+    except Exception:
+        CV_GDPR_CLAUSE = "both"
+    mode = (CV_GDPR_CLAUSE or "both").strip().lower()
+    lang_u = (lang or "EN").strip().upper()[:2]
+    if mode == "none":
+        return
+    if mode == "pl" and lang_u != "PL":
+        return
+    text = GDPR_CLAUSE_PL if lang_u == "PL" else GDPR_CLAUSE_EN
+    p = doc.add_paragraph()
+    run = p.add_run(text)
+    set_font(run, size=7.5, italic=True, color=(120, 120, 120))
+    set_paragraph_spacing(p, before=8, after=0)
+
+
+def build_resume(doc, data, stack, lang="EN"):
     name = "Ihar Petrasheuski"
     subtitle = "also known as Igor Pietraszewski"
     headline = f"Senior Frontend Developer ({stack})"
@@ -249,6 +290,9 @@ def build_resume(doc, data, stack):
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
 
+    # GDPR/RODO consent clause — last body paragraph (ATS-readable, not a footer)
+    add_gdpr_clause(doc, lang)
+
 
 def build_cover_letter(doc, text):
     for line in text.split("\n"):
@@ -348,7 +392,7 @@ def main():
     if content.get("resume_en"):
         doc = Document()
         set_margins(doc)
-        build_resume(doc, content["resume_en"], stack)
+        build_resume(doc, content["resume_en"], stack, "EN")
         fname = resume_docx_basename(stack, "EN")
         save_docx(doc, Path(output_folder) / fname)
 
@@ -356,7 +400,7 @@ def main():
     if full_mode and content.get("resume_pl"):
         doc = Document()
         set_margins(doc)
-        build_resume(doc, content["resume_pl"], stack)
+        build_resume(doc, content["resume_pl"], stack, "PL")
         fname = resume_docx_basename(stack, "PL")
         save_docx(doc, Path(output_folder) / fname)
 
