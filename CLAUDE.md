@@ -22,6 +22,31 @@ Read it fully before making changes. Update it when you learn something new.
 
 ---
 
+## Future Direction — Public Multi-Tenant Service (planned, not started)
+
+> Long-term goal: turn this single-owner bot into a **public multi-tenant service**
+> (many users register, upload their CV, set a "dream job" search, receive tailored
+> CV+CL + notifications). See [BOT_MULTIUSER_PLAN.md](BOT_MULTIUSER_PLAN.md) (near-term,
+> bot-first) and [SAAS_PLAN.md](SAAS_PLAN.md) (later website over the same data).
+
+**Confirmed architecture decisions:**
+- **Polyglot, not a rewrite.** Keep the Python moat — the 17 scrapers (`hunter/sources/`,
+  `ats/`) and the apply/LLM/CV-generation core (`apply_*`, `generate_docs`, `prompts/`,
+  ~20k LOC, 1150 tests) — as background **workers**. Add a **NestJS (TypeScript) API** on
+  top for auth/billing/serving. Both talk to one shared **PostgreSQL**. Do NOT rewrite the
+  scrapers or apply-core in TS (site-specific parsing + prompt engineering = hard-won value).
+- **Postgres** replaces `tracker.db` + Google Sheets + Drive. Multi-tenant: `user_id` on all
+  per-user tables, one **shared `jobs` pool** scraped once (not per-user → avoids bans/429).
+- **Telegram is the UI for MVP** (free auth via `chat_id`, onboarding, doc delivery, notify);
+  a **website is optional/later**, a second client over the same Postgres. Frontend
+  framework (Angular vs React) not yet chosen.
+- **Apply model = assist** (generate docs, user applies himself — lower legal risk).
+- **Monetization = free tier + paid tier.**
+- The dies-anyway parts in migration: `tracker.py`, `gsheets_*`, `gdrive_*`, global `FILTER`,
+  single `candidate_profile.md` → replaced by Postgres + per-user `profiles`/`search_queries`.
+
+---
+
 ## Architecture Overview
 
 ```
