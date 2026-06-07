@@ -330,14 +330,26 @@ Replaces `to_send.xlsx`. tracker.xlsx rows are mirrored live to a Google Sheets 
 6. `/unsent` shows count from in-memory cache (O(1), no Excel read)
 7. `/gsheets_status` — integration health; `/gsheets_resync` — push dirty rows
 
-### Pull = insert + update (dedup self-heal)
-`pull_full_snapshot()` does two things, in order:
+### Pull = insert + update + reconcile (dedup self-heal)
+`pull_full_snapshot()` does three things, in order:
 1. `tracker.insert_pulled_rows()` — inserts Sheet rows absent from `tracker.db`
    (matched by neither `ID` nor `url_norm`; blank-ID rows skipped). This self-heals
    dedup after a fresh/empty DB (container restart, broken volume mount) so the bot
    doesn't re-process live vacancies. Also runs once at startup in `_post_init`.
 2. `_apply_pull_delta_db()` — conflict matrix for `Sent`/`To Learn`/`Re-application`
    on rows matched by `ID` (existing rows are never overwritten by the insert step).
+3. `_reconcile_deleted_rows()` — rows that exist in `tracker.db` with a **blank Sent**
+   but whose `ID` is gone from the Sheet (user/`dedup_sheet.py` deleted them) are
+   stamped `Sent='EXPIRED'` via `tracker.mark_orphans_expired()` (clears `sheets_dirty`
+   + stale `sheets_row`, keeps the row for dedup, never overwrites an existing Sent).
+   **Safety:** skipped if the Sheets read returns < `_RECONCILE_MIN_RATIO` (0.8) of the
+   DB's ID-bearing rows, so a partial/failed read can't mass-EXPIRE live vacancies.
+   Closes the gap where deletions in Sheets never propagated to the DB (orphans
+   polluted the `/unsent` count forever).
+
+After a pull that changed anything (`updated`/`inserted`/`reconciled` > 0),
+`scheduled_gsheets_pull` calls `cache.load_from_db()` so `/unsent`, `/status` and
+dedup reflect the new state without a bot restart.
 
 ### Conflict matrix (Sent column)
 - Bot wrote EXPIRED, Sheets is empty → keep EXPIRED (Sheets will be fixed by resync)
@@ -542,4 +554,5 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-06-03 | opus | Bootstrap dedup self-heal (BOOTSTRAP_DEDUP_PLAN.md): `tracker.insert_pulled_rows()` inserts Sheet rows missing from tracker.db (dedup by id+url_norm, skips blank ID, intra-batch dedup); `pull_full_snapshot()` now inserts-then-updates and returns `inserted` count; `_post_init` pulls once at startup so a fresh/empty DB self-heals after container restart. Fixes re-processing of live vacancies. 9 new tests in test_bootstrap_dedup.py (1040 total). Verified in prod: startup pull inserted 23 rows. |
 | 2026-06-03 | opus | `tools/dedup_sheet.py`: one-time cleanup of historical duplicate rows in the Sheets tracker. Groups by normalize_url, keeps best row (filled Sent, else earliest), deletes rest via delete_sheet_row (high→low). Dry-run by default, `--apply` to delete; local tracker.db untouched. 10 new tests (1050 total). |
 | 2026-06-05 | opus | pracuj 429 fix (PRACUJ_RATE_LIMIT_FIX.md, branch fix/pracuj-rate-limit). Root cause of /hunt gmail mass-429: gmail_enricher fired up to 5 parallel detail fetches at one Cloudflare host. (1) Extracted reusable hunter/rate_limiter.py DomainLimiter (global+per-host concurrency + per-host delay + per-host overrides) out of expired_marker. (2) Rewrote enrich_jobs on it (async, pracuj override 2 conc/1.0s). (3) pracuj _fetch_detail_html backs off on 429 (Retry-After/exp, 2 retries) instead of cascading; fetch_text re-raises 429 instead of html_fallback. (4) Circuit breaker in _retry_failed (shared _CONSECUTIVE_FAIL_LIMIT). (5) APPLY_RATE_LIMITED_EXIT_CODE 45 + is_rate_limit_error → ApplyOutcome "rate_limited"; retry no longer escalates increment_fail_count on transient 429. (7) gmail stub title derived from URL slug (_title_from_url) not email subject, so title↔URL always agree. 26 new tests (1142 total). |
+| 2026-06-07 | opus | Pull deletion-reconcile + cache refresh. Root cause of `/unsent` showing rows that look sent in Sheets: pull only inserted+updated by ID, never reacted to rows *deleted* from the Sheet → orphans lingered in tracker.db with blank Sent. Added `tracker.mark_orphans_expired()` + `gsheets_sync._reconcile_deleted_rows()` (stamps EXPIRED, clears sheets_dirty + stale sheets_row, keeps row for dedup, never overwrites existing Sent; guarded by `_RECONCILE_MIN_RATIO=0.8` against partial reads). Wired as step 3 of `pull_full_snapshot()`. Second fix: `scheduled_gsheets_pull` now calls `cache.load_from_db()` after any pull change so `/unsent`+`/status` aren't stale until restart. Manually reconciled 14 existing orphans in prod tracker.db. 8 new tests (1150 total). |
 | 2026-06-04 | opus | Sent → clean-date normalizer. `hunter/sent_parse.py` parses the messy Sent column (DD MM YY, ISO, `1305`, Polish/English "applied", EXPIRED markers) into a real date; `hunter/sent_normalizer.py` writes it into Sheet-only column L "Applied Date" (A–K sync never touches L). Wired as `/normalize` command + daily `scheduled_normalize_sent` (00:20, GSHEETS_ENABLED). CLI `tools/normalize_sent.py` (dry-run/`--apply`) + read-only `tools/stats_sheet.py`. Third Sheet tab uses COUNT + QUERY(YYYY-MM) over column L for totals/monthly. Verified on prod sheet: 511 rows → 103 dates. 59 new tests (1109 total). |

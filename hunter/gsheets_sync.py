@@ -40,7 +40,13 @@ from hunter.tracker import (
     read_all_tracker_rows,
     apply_pull_updates,
     insert_pulled_rows,
+    mark_orphans_expired,
 )
+
+# Reconciliation safety: skip marking orphans if the Sheets read returned fewer
+# than this fraction of the DB's ID-bearing rows (guards against a partial/failed
+# read wrongly EXPIRING live vacancies).
+_RECONCILE_MIN_RATIO = 0.8
 
 log = logging.getLogger(__name__)
 
@@ -350,6 +356,56 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
 # Pull — Sheets → DB
 # ---------------------------------------------------------------------------
 
+def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
+    """Synchronous: mark DB rows whose ID is gone from Sheets as EXPIRED.
+
+    The pull conflict matrix only inserts + updates rows matched by ID; it never
+    reacts to *deletions*. When the user (or tools/dedup_sheet.py) removes a row
+    from the Sheet, the DB keeps an orphan with a blank Sent that pollutes the
+    unsent count forever. This closes that gap.
+
+    Only rows with a non-blank ID and a *blank* Sent are touched — rows the user
+    already annotated keep their value, and dedup is preserved (row is kept, just
+    stamped EXPIRED). See tracker.mark_orphans_expired.
+
+    Safety: if the Sheets read looks partial (fewer IDs than _RECONCILE_MIN_RATIO
+    of the DB's ID-bearing rows), skip entirely rather than mass-EXPIRE live rows.
+    Intended to be called via asyncio.to_thread. Returns count marked.
+    """
+    sheet_ids = {
+        (r.get("ID") or "").strip()
+        for _, r in sheets_rows
+        if (r.get("ID") or "").strip()
+    }
+    if not sheet_ids:
+        return 0
+
+    db_rows = [r for r in read_all_tracker_rows() if (r.get("ID") or "").strip()]
+    if not db_rows:
+        return 0
+
+    if len(sheet_ids) < _RECONCILE_MIN_RATIO * len(db_rows):
+        log.warning(
+            "gsheets reconcile: Sheets returned %d IDs vs %d DB rows (<%.0f%%) — "
+            "skipping orphan reconcile (looks partial)",
+            len(sheet_ids), len(db_rows), _RECONCILE_MIN_RATIO * 100,
+        )
+        return 0
+
+    orphan_ids = [
+        r["ID"].strip()
+        for r in db_rows
+        if r["ID"].strip() not in sheet_ids and not (r.get("Sent") or "").strip()
+    ]
+    if not orphan_ids:
+        return 0
+
+    marked = mark_orphans_expired(orphan_ids)
+    if marked:
+        log.info("gsheets reconcile: marked %d orphan row(s) EXPIRED (deleted from Sheets)", marked)
+    return marked
+
+
 async def pull_full_snapshot() -> dict:
     """
     Pull all rows from Google Sheets and merge into DB.
@@ -404,11 +460,27 @@ async def pull_full_snapshot() -> dict:
             log.error("gsheets pull_full_snapshot: apply_pull_updates failed: %s", e)
             errors.append(str(e))
 
+    # Reconcile deletions: rows removed from the Sheet but still lingering in the DB
+    # with a blank Sent (guarded against partial reads). Runs last so inserts above
+    # are already in the DB and not mistaken for orphans.
+    reconciled = 0
+    try:
+        reconciled = await asyncio.to_thread(_reconcile_deleted_rows, sheets_rows)
+    except Exception as e:
+        log.error("gsheets pull_full_snapshot: _reconcile_deleted_rows failed: %s", e)
+        errors.append(str(e))
+
     log.info(
-        "gsheets pull_full_snapshot: pulled %d rows, %d inserted, %d DB updates",
-        len(sheets_rows), inserted, len(to_write),
+        "gsheets pull_full_snapshot: pulled %d rows, %d inserted, %d DB updates, %d reconciled",
+        len(sheets_rows), inserted, len(to_write), reconciled,
     )
-    return {"pulled": len(sheets_rows), "inserted": inserted, "updated": len(to_write), "errors": errors}
+    return {
+        "pulled": len(sheets_rows),
+        "inserted": inserted,
+        "updated": len(to_write),
+        "reconciled": reconciled,
+        "errors": errors,
+    }
 
 
 # ---------------------------------------------------------------------------

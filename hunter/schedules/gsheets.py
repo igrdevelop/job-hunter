@@ -27,8 +27,16 @@ async def scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
         from hunter import gsheets_sync
         result = await gsheets_sync.pull_full_snapshot()
         updated = result.get("updated", 0)
-        if updated:
-            logger.info("[scheduled_gsheets_pull] updated %d row(s) from Sheets", updated)
+        inserted = result.get("inserted", 0)
+        reconciled = result.get("reconciled", 0)
+        if updated or inserted or reconciled:
+            logger.info(
+                "[scheduled_gsheets_pull] %d updated, %d inserted, %d reconciled from Sheets",
+                updated, inserted, reconciled,
+            )
+            # Pull wrote directly to the DB; refresh the in-memory cache so /unsent,
+            # /status and dedup reflect the new state without a bot restart.
+            await cache.load_from_db()
         if result.get("errors"):
             logger.warning("[scheduled_gsheets_pull] errors: %s", result["errors"])
     except Exception as e:

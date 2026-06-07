@@ -188,8 +188,9 @@ async def _post_init(app: Application) -> None:
     try:
         pull_res = await gsheets_sync.pull_full_snapshot()
         logger.info(
-            "[startup] gsheets pull: pulled=%s inserted=%s updated=%s",
-            pull_res.get("pulled"), pull_res.get("inserted"), pull_res.get("updated"),
+            "[startup] gsheets pull: pulled=%s inserted=%s updated=%s reconciled=%s",
+            pull_res.get("pulled"), pull_res.get("inserted"),
+            pull_res.get("updated"), pull_res.get("reconciled"),
         )
     except Exception as e:
         logger.warning("[startup] gsheets pull failed: %s", e)
