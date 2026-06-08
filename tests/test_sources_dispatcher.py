@@ -11,8 +11,9 @@ def test_fetch_roster_includes_all_detail_sources() -> None:
     expected = {
         "justjoin", "nofluffjobs", "linkedin", "bulldogjob", "pracuj",
         "theprotocol", "solidjobs", "inhire", "jobleads", "arbeitnow",
-        "remotive", "workingnomads", "jobspresso", "remoteok", "himalayas",
-        "fourdayweek", "weworkremotely", "remoteleaf", "ats_aggregator",
+        "remotive", "workingnomads", "jobspresso", "builtin", "remoteok",
+        "himalayas", "fourdayweek", "weworkremotely", "remoteleaf",
+        "ats_aggregator",
     }
     assert names == expected, f"missing or extra sources: {expected ^ names}"
 
@@ -26,7 +27,7 @@ def test_fetch_roster_is_independent_of_enabled_flags() -> None:
     """
     roster = _fetch_roster()
     # Construct call should not throw even if every *_ENABLED flag is False.
-    assert len(roster) == 19
+    assert len(roster) == 20
 
 
 def test_fetch_job_text_routes_to_matching_source() -> None:
