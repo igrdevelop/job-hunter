@@ -91,6 +91,19 @@ def test_mark_orphans_expired_empty_and_blank_ids(tracker_db):
     assert tracker.mark_orphans_expired(["", "   "]) == 0
 
 
+def test_mark_orphans_expired_skips_never_mirrored(tracker_db):
+    # Row that was never pushed to the Sheet (sheets_row NULL) — e.g. the Sheets
+    # token was down at apply time. It is absent from the Sheet because it was
+    # never mirrored, NOT because the user deleted it → must NOT be expired.
+    _insert_db_row(tracker_db, row_id="never001", url="https://example.com/n",
+                   sent="", sheets_dirty=1)  # sheets_row left NULL
+    marked = tracker.mark_orphans_expired(["never001"])
+    assert marked == 0
+    r = _get(tracker_db, "never001")
+    assert r["sent"] == ""               # still live/unsent
+    assert r["sheets_row"] is None
+
+
 # ── _reconcile_deleted_rows ───────────────────────────────────────────────────
 
 def test_reconcile_marks_blank_orphan(tracker_db):
@@ -99,7 +112,9 @@ def test_reconcile_marks_blank_orphan(tracker_db):
     kept = [f"keep{i:04d}" for i in range(5)]
     for i, rid in enumerate(kept):
         _insert_db_row(tracker_db, row_id=rid, url=f"https://example.com/k{i}", sent="")
-    _insert_db_row(tracker_db, row_id="gone0001", url="https://example.com/gone", sent="")
+    # A genuinely deleted-from-Sheet row WAS mirrored before (sheets_row set).
+    _insert_db_row(tracker_db, row_id="gone0001", url="https://example.com/gone",
+                   sent="", sheets_row=777)
 
     sheets_rows = [(i + 2, _sheet_row(rid, f"https://example.com/k{i}"))
                    for i, rid in enumerate(kept)]
@@ -109,6 +124,28 @@ def test_reconcile_marks_blank_orphan(tracker_db):
     assert marked == 1
     assert _get(tracker_db, "gone0001")["sent"] == "EXPIRED"
     assert _get(tracker_db, "keep0000")["sent"] == ""   # in sheet → untouched
+
+
+def test_reconcile_skips_never_mirrored_orphan(tracker_db):
+    # Reproduces the prod bug: while the Sheets token was down, a batch of new
+    # rows were inserted but never mirrored (sheets_row NULL). A later successful
+    # pull must NOT mass-EXPIRE them just because their IDs aren't in the Sheet.
+    kept = [f"keep{i:04d}" for i in range(5)]
+    for i, rid in enumerate(kept):
+        _insert_db_row(tracker_db, row_id=rid, url=f"https://example.com/k{i}", sent="")
+    # never-mirrored newcomers (sheets_row NULL) absent from the Sheet read
+    for i in range(3):
+        _insert_db_row(tracker_db, row_id=f"new{i:05d}",
+                       url=f"https://example.com/new{i}", sent="", sheets_dirty=1)
+
+    sheets_rows = [(i + 2, _sheet_row(rid, f"https://example.com/k{i}"))
+                   for i, rid in enumerate(kept)]
+
+    from hunter import gsheets_sync
+    marked = gsheets_sync._reconcile_deleted_rows(sheets_rows)
+    assert marked == 0
+    for i in range(3):
+        assert _get(tracker_db, f"new{i:05d}")["sent"] == ""   # all stay live
 
 
 def test_reconcile_leaves_annotated_orphan(tracker_db):
@@ -159,7 +196,8 @@ def test_pull_reconciles_and_reports_count(tracker_db):
     kept = [f"keep{i:04d}" for i in range(5)]
     for i, rid in enumerate(kept):
         _insert_db_row(tracker_db, row_id=rid, url=f"https://example.com/k{i}", sent="")
-    _insert_db_row(tracker_db, row_id="gone0001", url="https://example.com/gone", sent="")
+    _insert_db_row(tracker_db, row_id="gone0001", url="https://example.com/gone",
+                   sent="", sheets_row=777)
 
     sheets_rows = [(i + 2, _sheet_row(rid, f"https://example.com/k{i}"))
                    for i, rid in enumerate(kept)]
