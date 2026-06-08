@@ -820,8 +820,17 @@ def mark_orphans_expired(row_ids: list[str]) -> int:
     sheets_row so the bot never tries to push it back to a wrong Sheet position.
 
     The row itself is kept (not deleted) so URL/company+title dedup still protects
-    against re-applying. Guarded with TRIM(sent)='' so an existing Sent value is
-    never overwritten. Returns count actually changed.
+    against re-applying. Returns count actually changed.
+
+    Guards (a row is expired only when BOTH hold):
+    - ``TRIM(sent)=''`` — never overwrite an existing Sent value.
+    - ``sheets_row IS NOT NULL`` — the row must have been mirrored to the Sheet
+      before (``set_sheets_row`` only runs on a successful append/match). This
+      distinguishes a genuine *deletion from the Sheet* from a row that was simply
+      *never pushed* — e.g. while the Sheets token was down, ``mirror_new_row``
+      returned early and left ``sheets_row`` NULL. Without this guard a
+      never-mirrored row looks identical to a user deletion ("ID in DB, absent
+      from the Sheet") and gets falsely stamped EXPIRED on the next pull.
     """
     if not row_ids:
         return 0
@@ -833,7 +842,8 @@ def mark_orphans_expired(row_ids: list[str]) -> int:
                 continue
             cur = conn.execute(
                 "UPDATE applications SET sent='EXPIRED', sheets_dirty=0, sheets_row=NULL "
-                "WHERE id=? AND TRIM(COALESCE(sent,''))=''",
+                "WHERE id=? AND TRIM(COALESCE(sent,''))='' "
+                "AND sheets_row IS NOT NULL",
                 (rid,),
             )
             updated += cur.rowcount
