@@ -8,7 +8,7 @@ Read it fully before making changes. Update it when you learn something new.
 ## What This Project Is
 
 **Job Hunter Bot** — an autonomous system that:
-1. Scrapes 19 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
+1. Scrapes 20 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
 2. Filters by location, seniority, stack, language requirements
 3. Deduplicates against tracker.xlsx (URL + company+title)
 4. Sends new jobs to Telegram for review (Apply/Skip buttons)
@@ -85,11 +85,11 @@ Job Boards --scrape--> list[Job] --filter--> list[Job] --dedup--> list[Job] (new
 
 Base times: 08:00, 13:00, 19:00 (Europe/Warsaw).
 Each source offset by `SCHEDULE_SOURCE_OFFSET_MIN` (default 40 min).
-With 19 sources, a full cycle spans ~12 hours from the base time.
+With 20 sources, a full cycle spans ~12 hours from the base time.
 
 ---
 
-## Job Sources (19 active)
+## Job Sources (20 active)
 
 | Source | Module | Strategy | Notes |
 |--------|--------|----------|-------|
@@ -104,6 +104,7 @@ With 19 sources, a full cycle spans ~12 hours from the base time.
 | Remotive | remotive.py | JSON API | Remote only |
 | Working Nomads | workingnomads.py | Elasticsearch `/jobsapi/_search` | Remote, worldwide |
 | Jobspresso | jobspresso.py | RSS feed (`?feed=job_feed`) | Remote; ~10 latest only |
+| Built In | builtin.py | cloudscraper + BeautifulSoup DOM | US/remote tech; Cloudflare |
 | RemoteOK | remoteok.py | JSON API | Remote only |
 | Himalayas | himalayas.py | JSON API | Remote only |
 | 4dayweek.io | fourdayweek.py | JSON API v2 | |
@@ -183,7 +184,7 @@ hunter/
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
-  sources/                  19 scrapers (see table above) + per-site detail-page fetchers
+  sources/                  20 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
     __init__.py             ALL_SOURCES registry + fetch_job_text() URL dispatcher
     html_fallback.py        Generic HTML -> text fallback + clean_url() helper
@@ -253,8 +254,8 @@ Applications/               Generated documents (gitignored)
 Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
 `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`,
-`REMOTIVE_ENABLED`, `WORKINGNOMADS_ENABLED`, `JOBSPRESSO_ENABLED`, `REMOTEOK_ENABLED`,
-`HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`, `WEWORKREMOTELY_ENABLED`,
+`REMOTIVE_ENABLED`, `WORKINGNOMADS_ENABLED`, `JOBSPRESSO_ENABLED`, `BUILTIN_ENABLED`,
+`REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`, `WEWORKREMOTELY_ENABLED`,
 `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`.
 
 ---
@@ -514,6 +515,7 @@ apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 | Remotive | 2026-04 | OK | JSON API |
 | Working Nomads | 2026-06 | OK | Public Elasticsearch `/jobsapi/_search` (5400+ jobs) |
 | Jobspresso | 2026-06 | OK | RSS `?feed=job_feed`; only ~10 latest, no pagination |
+| Built In | 2026-06 | OK | cloudscraper + BS4 DOM (`data-id="job-card"`); detail via html_fallback |
 | RemoteOK | 2026-04 | OK | JSON API |
 | Himalayas | 2026-04 | OK | JSON API |
 | 4dayweek.io | 2026-04 | OK | JSON API v2 |
@@ -569,3 +571,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-06-07 | opus | Pull deletion-reconcile + cache refresh. Root cause of `/unsent` showing rows that look sent in Sheets: pull only inserted+updated by ID, never reacted to rows *deleted* from the Sheet → orphans lingered in tracker.db with blank Sent. Added `tracker.mark_orphans_expired()` + `gsheets_sync._reconcile_deleted_rows()` (stamps EXPIRED, clears sheets_dirty + stale sheets_row, keeps row for dedup, never overwrites existing Sent; guarded by `_RECONCILE_MIN_RATIO=0.8` against partial reads). Wired as step 3 of `pull_full_snapshot()`. Second fix: `scheduled_gsheets_pull` now calls `cache.load_from_db()` after any pull change so `/unsent`+`/status` aren't stale until restart. Manually reconciled 14 existing orphans in prod tracker.db. 8 new tests (1150 total). |
 | 2026-06-04 | opus | Sent → clean-date normalizer. `hunter/sent_parse.py` parses the messy Sent column (DD MM YY, ISO, `1305`, Polish/English "applied", EXPIRED markers) into a real date; `hunter/sent_normalizer.py` writes it into Sheet-only column L "Applied Date" (A–K sync never touches L). Wired as `/normalize` command + daily `scheduled_normalize_sent` (00:20, GSHEETS_ENABLED). CLI `tools/normalize_sent.py` (dry-run/`--apply`) + read-only `tools/stats_sheet.py`. Third Sheet tab uses COUNT + QUERY(YYYY-MM) over column L for totals/monthly. Verified on prod sheet: 511 rows → 103 dates. 59 new tests (1109 total). |
 | 2026-06-08 | opus | New remote sources Queue 1 (docs/new-sources/, from "13 sites" PDF). Working Nomads (`workingnomads.py`, public Elasticsearch `/jobsapi/_search`, 5400+ jobs, description in `_source`, `fetch_text` re-queries by slug) + Jobspresso (`jobspresso.py`, WP Job Manager RSS `?feed=job_feed`, ~10 latest only). Both wired into config toggles + ALL_SOURCES + `_fetch_roster`. 17→19 sources. Live-verified: WN 30 frontend hits, JP trickle. |
+| 2026-06-08 | opus | New remote sources Queue 2 — Built In (`builtin.py`). Cloudflare-fronted, no JSON API / NEXT_DATA / JSON-LD on listings → cloudscraper + BeautifulSoup DOM via stable `data-id` markers (`job-card`/`company-title`/`job-card-title`). Queries `/jobs/remote/dev-engineering?search={angular,frontend,react}`; arrangement label parsed by fullmatch (avoids title "…- Remote" false hits), location defaults Remote. `fetch_text` uses html_fallback. 19→20 sources. Live-verified: 23 search → 17 pass central filter. |
