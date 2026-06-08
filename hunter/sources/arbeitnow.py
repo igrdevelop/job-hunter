@@ -10,9 +10,7 @@ Paginate until a page returns no jobs or MAX_PAGES is reached.
 from __future__ import annotations
 
 import logging
-import re
 import time
-from html import unescape
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -20,6 +18,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,6 @@ HEADERS = {
 TIMEOUT = 30
 MAX_PAGES = 12
 PAGE_DELAY_SEC = 0.45
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 class ArbeitnowSource(BaseSource):
@@ -67,7 +64,7 @@ class ArbeitnowSource(BaseSource):
                 job = self._parse(raw)
                 if not job or job.url in seen_urls:
                     continue
-                ctx = _text_preview(raw.get("description"), 600)
+                ctx = strip_html(raw.get("description"), 600)
                 if not self.matches_coarse_prefilter(job.title, ctx):
                     continue
                 seen_urls.add(job.url)
@@ -115,11 +112,3 @@ def _format_location(raw: dict) -> str:
             return f"{loc} (Remote)"
         return "Remote"
     return loc or "Unknown"
-
-
-def _text_preview(html_fragment: Optional[str], max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]

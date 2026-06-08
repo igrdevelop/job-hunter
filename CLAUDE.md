@@ -8,7 +8,7 @@ Read it fully before making changes. Update it when you learn something new.
 ## What This Project Is
 
 **Job Hunter Bot** — an autonomous system that:
-1. Scrapes 17 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
+1. Scrapes 21 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
 2. Filters by location, seniority, stack, language requirements
 3. Deduplicates against tracker.xlsx (URL + company+title)
 4. Sends new jobs to Telegram for review (Apply/Skip buttons)
@@ -85,11 +85,11 @@ Job Boards --scrape--> list[Job] --filter--> list[Job] --dedup--> list[Job] (new
 
 Base times: 08:00, 13:00, 19:00 (Europe/Warsaw).
 Each source offset by `SCHEDULE_SOURCE_OFFSET_MIN` (default 40 min).
-With 17 sources, a full cycle spans ~11 hours from the base time.
+With 21 sources, a full cycle spans ~12 hours from the base time.
 
 ---
 
-## Job Sources (17 active)
+## Job Sources (21 active)
 
 | Source | Module | Strategy | Notes |
 |--------|--------|----------|-------|
@@ -102,6 +102,10 @@ With 17 sources, a full cycle spans ~11 hours from the base time.
 | SolidJobs | solidjobs.py | RSS feed | |
 | Arbeitnow | arbeitnow.py | JSON API | EU/remote |
 | Remotive | remotive.py | JSON API | Remote only |
+| Working Nomads | workingnomads.py | Elasticsearch `/jobsapi/_search` | Remote, worldwide |
+| Jobspresso | jobspresso.py | RSS feed (`?feed=job_feed`) | Remote; ~10 latest only |
+| Built In | builtin.py | cloudscraper + BeautifulSoup DOM | US/remote tech; Cloudflare |
+| JustRemote | justremote.py | JSON API (Heroku backend) | Remote; ~10 newest dev only |
 | RemoteOK | remoteok.py | JSON API | Remote only |
 | Himalayas | himalayas.py | JSON API | Remote only |
 | 4dayweek.io | fourdayweek.py | JSON API v2 | |
@@ -181,10 +185,14 @@ hunter/
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
-  sources/                  17 scrapers (see table above) + per-site detail-page fetchers
+  sources/                  21 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
     __init__.py             ALL_SOURCES registry + fetch_job_text() URL dispatcher
     html_fallback.py        Generic HTML -> text fallback + clean_url() helper
+    text_utils.py           Shared helpers: strip_html() (HTML fragment -> plain text),
+                            REMOTE_ANY + ensure_remote_token() (guarantee a "remote" token
+                            survives the central location whitelist). Used by the JSON/RSS
+                            sources; each keeps its own _format_location wrapper that delegates.
   ats/                      ATS provider adapters
     base.py                 ATSProvider ABC: fetch(slug, company_name) -> list[Job]
     workable.py / greenhouse.py / lever.py / recruitee.py / ashby.py
@@ -251,7 +259,8 @@ Applications/               Generated documents (gitignored)
 Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
 `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`,
-`REMOTIVE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`,
+`REMOTIVE_ENABLED`, `WORKINGNOMADS_ENABLED`, `JOBSPRESSO_ENABLED`, `BUILTIN_ENABLED`,
+`JUSTREMOTE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`,
 `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`.
 
 ---
@@ -430,7 +439,7 @@ GSHEETS_ENABLED=true
 
 ### Infrastructure
 
-4. **Playwright not installed in Docker — Inhire source always returns [].** `inhire.py` is a full SPA that requires Playwright. To enable: uncomment `playwright` in `requirements.txt` and add `RUN playwright install chromium --with-deps` to `Dockerfile` (adds ~500MB to image). Without Playwright, `LinkedInSource.fetch_text` falls back to `html_fallback` and gets lower-quality text.
+4. ~~**Playwright not installed in Docker — Inhire source always returns [].**~~ ✅ Resolved: `playwright` is active in `requirements.txt` and the `Dockerfile` runs `playwright install chromium --with-deps` (adds ~500MB to image, ~seconds/page at runtime). Inhire is live (verified 2026-06-08: 25 jobs incl. Angular roles). **Ops note:** Inhire only works in prod once the deploy image is rebuilt with the current Dockerfile. Playwright does NOT unblock Wellfound — real headless Chromium still gets HTTP 403 (anti-bot needs a logged-in session + stealth; see `docs/new-sources/QUEUE-3-hard.md`).
 
 ### Code Quality
 
@@ -509,12 +518,16 @@ apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 | SolidJobs | 2026-04 | OK | RSS feed |
 | Arbeitnow | 2026-04 | OK | JSON API |
 | Remotive | 2026-04 | OK | JSON API |
+| Working Nomads | 2026-06 | OK | Public Elasticsearch `/jobsapi/_search` (5400+ jobs) |
+| Jobspresso | 2026-06 | OK | RSS `?feed=job_feed`; only ~10 latest, no pagination |
+| Built In | 2026-06 | OK | cloudscraper + BS4 DOM (`data-id="job-card"`); detail via html_fallback |
+| JustRemote | 2026-06 | OK | JSON API `justremote-api.herokuapp.com/api/v1/jobs?category=developer` (~10 newest); detail via single-job API |
 | RemoteOK | 2026-04 | OK | JSON API |
 | Himalayas | 2026-04 | OK | JSON API |
 | 4dayweek.io | 2026-04 | OK | JSON API v2 |
 | WeWorkRemotely | 2026-04 | OK | RSS feed |
 | RemoteLeaf | 2026-04 | OK | HTML listing |
-| Inhire.io | 2026-04 | OK | Playwright + Vuex |
+| Inhire.io | 2026-06 | OK | Playwright + Vuex; live-verified 25 jobs (Angular roles). Needs prod image rebuilt with current Dockerfile |
 | JobLeads | 2026-04 | PARTIAL | Detail pages Cloudflare-blocked; MANUAL flow |
 | ATS Aggregator | 2026-04 | OK | Workable/Greenhouse/Lever/Recruitee/Ashby |
 | Gmail | 2026-05 | OK | Gmail API alerts |
@@ -563,3 +576,9 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-06-05 | opus | pracuj 429 fix (PRACUJ_RATE_LIMIT_FIX.md, branch fix/pracuj-rate-limit). Root cause of /hunt gmail mass-429: gmail_enricher fired up to 5 parallel detail fetches at one Cloudflare host. (1) Extracted reusable hunter/rate_limiter.py DomainLimiter (global+per-host concurrency + per-host delay + per-host overrides) out of expired_marker. (2) Rewrote enrich_jobs on it (async, pracuj override 2 conc/1.0s). (3) pracuj _fetch_detail_html backs off on 429 (Retry-After/exp, 2 retries) instead of cascading; fetch_text re-raises 429 instead of html_fallback. (4) Circuit breaker in _retry_failed (shared _CONSECUTIVE_FAIL_LIMIT). (5) APPLY_RATE_LIMITED_EXIT_CODE 45 + is_rate_limit_error → ApplyOutcome "rate_limited"; retry no longer escalates increment_fail_count on transient 429. (7) gmail stub title derived from URL slug (_title_from_url) not email subject, so title↔URL always agree. 26 new tests (1142 total). |
 | 2026-06-07 | opus | Pull deletion-reconcile + cache refresh. Root cause of `/unsent` showing rows that look sent in Sheets: pull only inserted+updated by ID, never reacted to rows *deleted* from the Sheet → orphans lingered in tracker.db with blank Sent. Added `tracker.mark_orphans_expired()` + `gsheets_sync._reconcile_deleted_rows()` (stamps EXPIRED, clears sheets_dirty + stale sheets_row, keeps row for dedup, never overwrites existing Sent; guarded by `_RECONCILE_MIN_RATIO=0.8` against partial reads). Wired as step 3 of `pull_full_snapshot()`. Second fix: `scheduled_gsheets_pull` now calls `cache.load_from_db()` after any pull change so `/unsent`+`/status` aren't stale until restart. Manually reconciled 14 existing orphans in prod tracker.db. 8 new tests (1150 total). |
 | 2026-06-04 | opus | Sent → clean-date normalizer. `hunter/sent_parse.py` parses the messy Sent column (DD MM YY, ISO, `1305`, Polish/English "applied", EXPIRED markers) into a real date; `hunter/sent_normalizer.py` writes it into Sheet-only column L "Applied Date" (A–K sync never touches L). Wired as `/normalize` command + daily `scheduled_normalize_sent` (00:20, GSHEETS_ENABLED). CLI `tools/normalize_sent.py` (dry-run/`--apply`) + read-only `tools/stats_sheet.py`. Third Sheet tab uses COUNT + QUERY(YYYY-MM) over column L for totals/monthly. Verified on prod sheet: 511 rows → 103 dates. 59 new tests (1109 total). |
+| 2026-06-08 | opus | New remote sources Queue 1 (docs/new-sources/, from "13 sites" PDF). Working Nomads (`workingnomads.py`, public Elasticsearch `/jobsapi/_search`, 5400+ jobs, description in `_source`, `fetch_text` re-queries by slug) + Jobspresso (`jobspresso.py`, WP Job Manager RSS `?feed=job_feed`, ~10 latest only). Both wired into config toggles + ALL_SOURCES + `_fetch_roster`. 17→19 sources. Live-verified: WN 30 frontend hits, JP trickle. |
+| 2026-06-08 | opus | New remote sources Queue 2 — Built In (`builtin.py`). Cloudflare-fronted, no JSON API / NEXT_DATA / JSON-LD on listings → cloudscraper + BeautifulSoup DOM via stable `data-id` markers (`job-card`/`company-title`/`job-card-title`). Queries `/jobs/remote/dev-engineering?search={angular,frontend,react}`; arrangement label parsed by fullmatch (avoids title "…- Remote" false hits), location defaults Remote. `fetch_text` uses html_fallback. 19→20 sources. Live-verified: 23 search → 17 pass central filter. |
+| 2026-06-08 | opus | Playwright status clarified (no code). Found Known Issue #4 stale: `playwright` is already active in requirements.txt + Dockerfile (`playwright install chromium --with-deps`) on master. Live-verified Inhire now returns 25 jobs incl. Angular roles. Empirically confirmed Playwright does NOT unblock Wellfound (real headless Chromium → HTTP 403; needs login session + stealth) and is irrelevant to Jobgether (its problem is 0 frontend yield, not access). Updated Known Issue #4 + Inhire health note. |
+| 2026-06-08 | opus | New remote sources Queue 3 — recon only, both DEFERRED (no code). Wellfound: hard 403 on every request (1692-byte challenge), unbypassed by requests *and* cloudscraper → needs Playwright+login (Docker-blocked), realises plan variant C (decline). Jobgether: reachable but no clean listing JSON (`/feed/remote-jobs.json` is an 82-byte summary; Algolia creds not extractable; data only in detail-page JSON-LD), fragile Tailwind DOM with no stable data-id/testid, no server-side frontend filter (`?search=` ignored), and 0 title-filter hits in the 50-job dev category. Confirms plan's "low ROI — don't start unless needed". Findings documented in docs/new-sources/QUEUE-3-hard.md + OVERVIEW.md. |
+| 2026-06-08 | opus | New remote sources Queue 2 — JustRemote (`justremote.py`). SPA backed by a public JSON API on a separate host (`justremote-api.herokuapp.com/api/v1/jobs`); listing `?category=developer` returns ~10 newest dev roles (skill filter is client-side, API ignores it → low-volume trickle like Jobspresso). `fetch_text` uses the single-job API `/jobs/{slug}` (about_role/who_looking_for/our_offer/about_company) instead of scraping the SPA. Canonical URL `justremote.co/{href}`; `_format_location` guarantees a remote token. No pagination (page 1==2). 20→21 sources. Live-verified: API + single-job fetch work; momentary 0 frontend in the newest-10. |
+| 2026-06-08 | opus | Source helper consolidation (deferred from PR #83 review). New `hunter/sources/text_utils.py`: `strip_html(html, max_len)` (HTML fragment → plain text, unescape + whitespace-collapse + truncate) replaces 8 local `_text_preview`/`_html_to_plain` copies (arbeitnow, himalayas, remoteok, remotive, weworkremotely, workingnomads, jobspresso, justremote); `REMOTE_ANY` frozenset + `ensure_remote_token(base, geo=None)` replace the duplicated `_REMOTE_ANY` set (workingnomads, jobspresso) and justremote's substring remote-token logic. Each source keeps its own `_format_location` wrapper (input shapes differ) but delegates the core. remotive's `_format_location` left untouched — its synonym set intentionally excludes "remote". No behaviour change (location strings + stripped text identical). 11 new tests in test_text_utils.py (1198 total). |

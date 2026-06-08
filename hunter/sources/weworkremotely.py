@@ -10,7 +10,6 @@ from the HTML description plus category and skills.
 from __future__ import annotations
 
 import logging
-import re
 from html import unescape
 from typing import Optional
 from urllib.parse import urlparse
@@ -20,6 +19,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,6 @@ HEADERS = {
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 TIMEOUT = 60
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 
 class WeworkremotelySource(BaseSource):
@@ -157,14 +155,6 @@ def _format_location(region: str, state: str, country: str) -> str:
     return ", ".join(parts)
 
 
-def _html_to_plain(html_fragment: str, max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]
-
-
 def _prefilter_context(raw: dict) -> str:
     parts: list[str] = []
     cat = raw.get("category")
@@ -175,5 +165,5 @@ def _prefilter_context(raw: dict) -> str:
         parts.append(skills.strip())
     desc = raw.get("description_html")
     if isinstance(desc, str) and desc:
-        parts.append(_html_to_plain(desc, 1200))
+        parts.append(strip_html(desc, 1200))
     return " ".join(parts)
