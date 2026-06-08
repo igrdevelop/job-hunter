@@ -11,9 +11,7 @@ Terms: credit Himalayas when presenting results (see API terms).
 from __future__ import annotations
 
 import logging
-import re
 import time
-from html import unescape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -21,6 +19,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +40,6 @@ RATE_LIMIT_RETRY_WAIT_SEC = 60
 
 # Complementary queries; merged and deduped by application URL.
 SEARCH_QUERIES: tuple[str, ...] = ("frontend", "typescript", "angular")
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 
 class HimalayasSource(BaseSource):
@@ -193,7 +190,5 @@ def _prefilter_context(raw: dict) -> str:
             parts.append(" ".join(str(x) for x in val))
     desc = raw.get("description")
     if isinstance(desc, str) and desc:
-        text = unescape(_HTML_TAG_RE.sub(" ", desc))
-        text = re.sub(r"\s+", " ", text).strip()
-        parts.append(text[:800])
+        parts.append(strip_html(desc, 800))
     return " ".join(parts)

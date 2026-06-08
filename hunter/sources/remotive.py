@@ -11,8 +11,6 @@ Terms: link back to job URL on Remotive, credit source; do not hammer the API
 from __future__ import annotations
 
 import logging
-import re
-from html import unescape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +18,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,6 @@ SEARCH_PARAMS: tuple[dict[str, str], ...] = (
     {"category": "software-dev"},
     {"search": "frontend"},
 )
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 
 class RemotiveSource(BaseSource):
@@ -64,7 +61,7 @@ class RemotiveSource(BaseSource):
                 job = self._parse(raw)
                 if not job or job.url in seen_urls:
                     continue
-                ctx = _text_preview(raw.get("description"), 800)
+                ctx = strip_html(raw.get("description"), 800)
                 tags = raw.get("tags")
                 if isinstance(tags, list):
                     ctx = f"{ctx} {' '.join(str(t) for t in tags)}"
@@ -113,11 +110,3 @@ def _format_location(raw: dict) -> str:
     if low in ("worldwide", "anywhere", "anywhere in the world", "global"):
         return "Remote"
     return f"{loc} (Remote)"
-
-
-def _text_preview(html_fragment: Optional[str], max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]

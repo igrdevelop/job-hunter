@@ -10,8 +10,6 @@ Terms: link back to Remote OK and credit the source (see `legal` in API).
 from __future__ import annotations
 
 import logging
-import re
-from html import unescape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -19,6 +17,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +31,6 @@ HEADERS = {
     "Referer": "https://remoteok.com/",
 }
 TIMEOUT = 45
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 
 def _extract_job_rows(data: list[Any]) -> list[dict[str, Any]]:
@@ -70,7 +67,7 @@ class RemoteOkSource(BaseSource):
             job = self._parse(raw)
             if not job or job.url in seen_urls:
                 continue
-            ctx = _text_preview(raw.get("description"), 800)
+            ctx = strip_html(raw.get("description"), 800)
             tags = raw.get("tags")
             if isinstance(tags, list):
                 ctx = f"{ctx} {' '.join(str(t) for t in tags)}"
@@ -124,11 +121,3 @@ def _format_salary(raw: dict) -> Optional[str]:
     if lo:
         return f"${lo:,}+ USD/yr".replace(",", " ")
     return f"up to ${hi:,} USD/yr".replace(",", " ")
-
-
-def _text_preview(html_fragment: Optional[str], max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]

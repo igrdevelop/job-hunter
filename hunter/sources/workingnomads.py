@@ -15,8 +15,6 @@ the Working Nomads page as the canonical URL so dedup stays inside one domain.
 from __future__ import annotations
 
 import logging
-import re
-from html import unescape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -24,6 +22,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import REMOTE_ANY, ensure_remote_token, strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +44,6 @@ MAX_RESULTS = 100
 # frontend keyword in the title). A broad multi_match over the description pulled
 # mostly generic "Software Engineer" rows that the central title filter dropped.
 TITLE_TERMS = "angular frontend front-end javascript typescript"
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
-_REMOTE_ANY = {"anywhere", "worldwide", "global", "anywhere in the world", "remote"}
 
 
 class WorkingNomadsSource(BaseSource):
@@ -141,7 +137,7 @@ class WorkingNomadsSource(BaseSource):
         for hit in resp.json().get("hits", {}).get("hits", []):
             src = hit.get("_source", {})
             if (src.get("slug") or "").strip() == slug:
-                return _html_to_plain(src.get("description"), 20000)
+                return strip_html(src.get("description"), 20000)
         return ""
 
 
@@ -158,17 +154,9 @@ def _format_location(locations: Any) -> str:
     parts = [str(p).strip() for p in locations if p and str(p).strip()]
     if not parts:
         return "Remote"
-    if all(p.lower() in _REMOTE_ANY for p in parts):
+    if all(p.lower() in REMOTE_ANY for p in parts):
         return "Remote"
-    return f"{', '.join(parts)} (Remote)"
-
-
-def _html_to_plain(html_fragment: Optional[str], max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]
+    return ensure_remote_token(", ".join(parts))
 
 
 def _prefilter_context(raw: dict) -> str:
@@ -182,5 +170,5 @@ def _prefilter_context(raw: dict) -> str:
             parts.extend(str(v) for v in vals if v)
     desc = raw.get("description")
     if isinstance(desc, str) and desc:
-        parts.append(_html_to_plain(desc, 1200))
+        parts.append(strip_html(desc, 1200))
     return " ".join(parts)

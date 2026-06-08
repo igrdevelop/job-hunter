@@ -12,7 +12,6 @@ to the standard title/link/description. We pre-filter on title + those fields.
 from __future__ import annotations
 
 import logging
-import re
 from html import unescape
 from typing import Optional
 from urllib.parse import urlparse
@@ -22,6 +21,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import REMOTE_ANY, ensure_remote_token, strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,6 @@ HEADERS = {
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 TIMEOUT = 30
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
-_REMOTE_ANY = {"anywhere", "worldwide", "global", "anywhere in the world", "remote"}
 
 
 class JobspressoSource(BaseSource):
@@ -135,17 +132,9 @@ def _format_location(loc: Optional[str]) -> str:
     """Jobspresso is remote-only; ensure the 'remote' token survives the central
     location whitelist while keeping the geographic restriction as a hint."""
     loc = (loc or "").strip()
-    if not loc or loc.lower() in _REMOTE_ANY:
+    if not loc or loc.lower() in REMOTE_ANY:
         return "Remote"
-    return f"{loc} (Remote)"
-
-
-def _html_to_plain(html_fragment: str, max_len: int) -> str:
-    if not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]
+    return ensure_remote_token(loc)
 
 
 def _prefilter_context(raw: dict) -> str:
@@ -156,5 +145,5 @@ def _prefilter_context(raw: dict) -> str:
             parts.append(val.strip())
     desc = raw.get("description_html")
     if isinstance(desc, str) and desc:
-        parts.append(_html_to_plain(desc, 1200))
+        parts.append(strip_html(desc, 1200))
     return " ".join(parts)

@@ -17,8 +17,6 @@ Detail API: https://justremote-api.herokuapp.com/api/v1/jobs/{slug}
 from __future__ import annotations
 
 import logging
-import re
-from html import unescape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -26,6 +24,7 @@ import requests
 
 from hunter.models import Job
 from hunter.sources.base import BaseSource
+from hunter.sources.text_utils import ensure_remote_token, strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,6 @@ HEADERS = {
 TIMEOUT = 30
 LISTING_PARAMS = {"category": "developer"}
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 # Sections of the single-job payload concatenated into the LLM job text.
 _DETAIL_SECTIONS = ("about_role", "who_looking_for", "our_offer", "about_company")
 
@@ -126,7 +124,7 @@ class JustRemoteSource(BaseSource):
         if title:
             parts.append(title)
         for key in _DETAIL_SECTIONS:
-            section = _html_to_plain(data.get(key), 8000)
+            section = strip_html(data.get(key), 8000)
             if section:
                 parts.append(section)
         return "\n\n".join(parts).strip()
@@ -139,19 +137,8 @@ def _slug_from_url(url: str) -> str:
 def _format_location(remote_type: Any, restrictions: Any) -> str:
     """Build a location string that always carries a 'remote' token so the central
     location whitelist keeps it, while preserving any geographic restriction hint."""
-    base = (str(remote_type).strip() if remote_type else "") or "Remote"
-    if "remote" not in base.lower():
-        base = f"{base} (Remote)"
+    base = str(remote_type).strip() if remote_type else ""
+    geo = ""
     if isinstance(restrictions, list):
         geo = ", ".join(str(r).strip() for r in restrictions if r and str(r).strip())
-        if geo:
-            return f"{base} — {geo}"
-    return base
-
-
-def _html_to_plain(html_fragment: Any, max_len: int) -> str:
-    if not isinstance(html_fragment, str) or not html_fragment:
-        return ""
-    text = unescape(_HTML_TAG_RE.sub(" ", html_fragment))
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:max_len]
+    return ensure_remote_token(base, geo)
