@@ -39,10 +39,11 @@
 
 Минимальный риск, та же механика, что Remotive/SolidJobs/WWR. Деталь см. `QUEUE-1-easy.md`.
 
-### Очередь 2 — средний effort (HTML-скрейп, возможен Cloudflare)
-- **Built In** — максимум frontend-объёма; HTML + JSON-LD
-- **JustRemote** — remote-dev; HTML, возможен `cloudscraper`
-- **Remote.co** — небольшой, чистый; HTML/листинг
+### Очередь 2 — средний effort (HTML-скрейп, возможен Cloudflare) — ✅ закрыта
+- **Built In** ✅ — cloudscraper + BeautifulSoup DOM (`data-id` маркеры)
+- **JustRemote** ✅ — публичный JSON API (`justremote-api.herokuapp.com`)
+- **Remote.co** ⛔ ОТЛОЖЕН — активный anti-bot, хрупкий DOM, дубль WWR/Remotive,
+  низкий ROI (см. `QUEUE-2-medium.md` §2.3)
 
 Деталь см. `QUEUE-2-medium.md`.
 
