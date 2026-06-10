@@ -547,33 +547,13 @@ def _review_cover_letter(letter: str, expected_lang: str = "EN") -> tuple[str, i
 
 
 def _translate_cover_letter_pl(letter_en: str) -> str:
-    """Re-translate rewritten EN cover letter to Polish."""
-    if not LLM_API_KEY:
-        return ""
-    try:
-        from llm_client import call_llm
-        result = call_llm(
-            system_prompt="You are a professional translator. Respond ONLY with JSON.",
-            user_message=(
-                "Re-write this cover letter in natural, professional Polish — "
-                "do NOT translate word-by-word. Use Polish idioms and collocations; "
-                "avoid English calques (use 'zainteresowała mnie oferta' not "
-                "'przyciągnęło mnie do oferty'; use 'chętnie omówię' not 'chętnie przyczynię się'). "
-                "Keep the same structure (Dear Hiring Manager + 3-5 body paragraphs, \\n\\n between paragraphs), "
-                "same specific facts and metrics, same tone. "
-                'Respond with JSON only: {"cover_letter_pl": "<rewritten Polish text>"}\n\n'
-                f"Letter:\n{letter_en}"
-            ),
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
-            max_tokens=2000,
-        )
-        pl = result.get("cover_letter_pl", "")
-        return pl if isinstance(pl, str) and len(pl) > 50 else ""
-    except Exception as e:
-        print(f"[apply_agent] PL re-translation error: {e}")
-        return ""
+    """Re-translate a rewritten EN cover letter to Polish.
+
+    Thin wrapper over the shared `_translate_plain` translator (same call_llm
+    scaffolding, same no-calque / structure-preserving prompt) so the two no longer
+    duplicate translation logic.
+    """
+    return _translate_plain(letter_en, "PL", "cover letter")
 
 
 # ── Language enforce-gate ─────────────────────────────────────────────────────
