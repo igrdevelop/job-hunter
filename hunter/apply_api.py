@@ -417,7 +417,7 @@ def main_api(
     print(f"[apply_agent] Step 4.75: Language gate (posting language: {posting_lang})...")
     try:
         from hunter.apply_shared import enforce_language_separation
-        content, _lang_blocked, _lang_report = enforce_language_separation(content, posting_lang)
+        content, _lang_blocked, _lang_report = enforce_language_separation(content)
         for _line in _lang_report:
             print(f"[apply_agent] lang-gate: {_line}")
         if _lang_blocked:

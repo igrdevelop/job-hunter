@@ -703,13 +703,16 @@ def _is_unit_clean(scan: dict, unit_prefix: str, side: str) -> bool:
     return True
 
 
-def enforce_language_separation(content: dict, posting_lang: str = "EN") -> tuple[dict, bool, list[str]]:
+def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
     """Enforce-gate: each `_en` field must be clean English, each `_pl` field clean Polish.
 
     Repair strategy (language routing): when a contaminated field has a CLEAN
     opposite-language counterpart, regenerate it by translating the clean one — far
     more reliable than patching, with no re-fabrication or ATS keyword re-stuffing.
     Falls back to in-place cleanup translation when both sides are dirty.
+
+    The repair direction is driven entirely by which side is actually contaminated
+    (not by the posting language), so no posting-language argument is needed.
 
     Returns (content, blocked, report). `blocked=True` means strong Polish survived
     in an English field after repair — the caller must NOT ship the documents.

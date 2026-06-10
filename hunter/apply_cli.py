@@ -306,9 +306,7 @@ def main_cli(
                     from hunter.lang_guard import detect_posting_language
                     from hunter.apply_shared import enforce_language_separation
                     _posting_lang = detect_posting_language(job_text or "")
-                    _cli_content, _blocked, _report = enforce_language_separation(
-                        _cli_content, _posting_lang
-                    )
+                    _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:
                         print(f"[apply_agent] lang-gate: {_line}")
                     if _report:  # gate repaired something and/or blocked

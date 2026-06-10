@@ -53,7 +53,7 @@ def test_clean_content_no_llm_call(monkeypatch, with_api_key):
 
     monkeypatch.setattr(llm_client, "call_llm", _fake)
     content = {"resume_en": _CLEAN_EN_RESUME, "cover_letter_en": "Dear Hiring Manager, I apply."}
-    out, blocked, report = apply_shared.enforce_language_separation(content, "EN")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     assert blocked is False
     assert report == []
     assert called["n"] == 0
@@ -75,7 +75,7 @@ def test_contaminated_en_retranslated_from_clean_pl(monkeypatch, with_api_key):
     )
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}
 
-    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     assert blocked is False
     assert "doświadczenia" not in json.dumps(out["resume_en"], ensure_ascii=False)
     assert any("re-translated from clean resume_pl" in r for r in report)
@@ -96,7 +96,7 @@ def test_block_when_contamination_survives(monkeypatch, with_api_key):
     contaminated_en["summary"] = "Senior Developer (7+ lat doświadczenia)."
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}
 
-    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     assert blocked is True
     assert any("BLOCKED" in r for r in report)
 
@@ -116,7 +116,7 @@ def test_role_drop_rejected(monkeypatch, with_api_key):
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}
 
     # Translation rejected → resume_en unchanged → strong Polish survives → blocked.
-    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     assert len(out["resume_en"]["experience"]) == 7  # never shipped a 3-role resume
     assert blocked is True
 
@@ -140,7 +140,7 @@ def test_inplace_cleanup_translates_unit_once_not_per_field(monkeypatch, with_ap
     dirty["experience"][0]["bullets"] = ["Built projekty wewnętrzne dashboards"]
     content = {"resume_en": dirty}  # no resume_pl
 
-    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     assert blocked is False
     assert calls["n"] == 1  # one translation for the whole resume_en, not three
 
@@ -151,6 +151,6 @@ def test_no_api_key_no_repair(monkeypatch):
     contaminated_en = json.loads(json.dumps(_CLEAN_EN_RESUME))
     contaminated_en["summary"] = "Senior Developer (7+ lat doświadczenia)."
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}
-    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    out, blocked, report = apply_shared.enforce_language_separation(content)
     # Strong contamination remains and could not be repaired → blocked.
     assert blocked is True
