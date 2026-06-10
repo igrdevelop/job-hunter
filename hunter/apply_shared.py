@@ -576,6 +576,219 @@ def _translate_cover_letter_pl(letter_en: str) -> str:
         return ""
 
 
+# ── Language enforce-gate ─────────────────────────────────────────────────────
+# After generation + ATS rewrites, English fields can still contain Polish keywords
+# (the ATS loop mirrors a Polish posting's keywords verbatim into resume_en). This
+# gate detects contamination (hunter.lang_guard), repairs it by *translating* from
+# the clean opposite-language counterpart, and — if strong contamination survives —
+# signals the caller to BLOCK delivery rather than ship a broken document.
+
+_RESUME_TRANSLATE_SYS = (
+    "You are a professional bilingual (Polish/English) resume translator. "
+    "You translate resume content between Polish and English. "
+    "Respond ONLY with a valid JSON object — no markdown, no commentary."
+)
+
+
+def _expected_role_count(content: dict) -> int:
+    """Best estimate of how many experience entries a resume must keep."""
+    counts = []
+    for k in ("resume_en", "resume_pl"):
+        r = content.get(k)
+        if isinstance(r, dict) and isinstance(r.get("experience"), list):
+            counts.append(len(r["experience"]))
+    return max(counts) if counts else 0
+
+
+def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: int) -> dict | None:
+    """Translate a resume dict into `target_lang` ('EN'/'PL'). Returns dict or None.
+
+    Pure translation: keeps company names, periods, titles, tech names, numbers and
+    array structure identical; only natural-language values are translated. Guards
+    against role drop — returns None if the translation loses experience entries.
+    """
+    if not LLM_API_KEY or not isinstance(source_resume, dict):
+        return None
+    lang_name = "English" if target_lang.upper() == "EN" else "Polish"
+    try:
+        from llm_client import call_llm
+        result = call_llm(
+            system_prompt=_RESUME_TRANSLATE_SYS,
+            user_message=(
+                f"Translate this resume JSON into {lang_name}. STRICT RULES:\n"
+                f"- Output MUST be entirely in {lang_name}. Translate EVERY foreign word, "
+                "including skill keywords, to its standard professional equivalent "
+                "(e.g. 'responsywne interfejsy' -> 'responsive interfaces', "
+                "'testy jednostkowe' -> 'unit tests', 'doświadczenie' -> 'experience').\n"
+                "- Do NOT keep any source-language word and do NOT add parenthetical "
+                "glosses like 'X (Y)'. Standard IT anglicisms (Angular, TypeScript, "
+                "frontend, backend, code review, CI/CD, deployment) stay as-is.\n"
+                f"- Keep company, period, title, subtitle, numbers, metrics, versions and "
+                "tech names IDENTICAL. Translate only natural-language text.\n"
+                f"- Return ALL {expected_roles} experience entries in the SAME order. "
+                "Never drop, merge, summarise or reorder an entry.\n"
+                "- Return the SAME JSON keys/structure as the input.\n\n"
+                'Respond with JSON only: {"resume": <translated resume object>}\n\n'
+                f"Resume to translate:\n{json.dumps(source_resume, ensure_ascii=False)}"
+            ),
+            provider=LLM_PROVIDER,
+            model=LLM_MODEL,
+            api_key=LLM_API_KEY,
+            max_tokens=4000,
+        )
+        out = result.get("resume") if isinstance(result, dict) else None
+        if not isinstance(out, dict):
+            # Some models return the resume object directly without the wrapper.
+            out = result if isinstance(result, dict) and result.get("experience") else None
+        if not isinstance(out, dict):
+            return None
+        exp = out.get("experience")
+        if expected_roles and (not isinstance(exp, list) or len(exp) < expected_roles):
+            print(
+                f"[apply_agent] lang-gate: translation dropped roles "
+                f"({len(exp) if isinstance(exp, list) else 0} < {expected_roles}) — rejecting"
+            )
+            return None
+        return out
+    except Exception as e:
+        print(f"[apply_agent] lang-gate resume translation error: {e}")
+        return None
+
+
+def _translate_plain(text: str, target_lang: str, kind: str) -> str:
+    """Translate a cover letter / about-me string into target_lang. '' on failure."""
+    if not LLM_API_KEY or not isinstance(text, str) or not text.strip():
+        return ""
+    lang_name = "English" if target_lang.upper() == "EN" else "Polish"
+    try:
+        from llm_client import call_llm
+        result = call_llm(
+            system_prompt="You are a professional translator. Respond ONLY with JSON.",
+            user_message=(
+                f"Rewrite this {kind} in natural, professional {lang_name}. "
+                f"Output MUST be entirely in {lang_name} — translate every foreign word "
+                "to its standard professional equivalent, INCLUDING any quoted text "
+                "(translate the words inside quotation marks too; do not preserve a "
+                "foreign-language quote verbatim). Keep standard IT anglicisms. "
+                "Do NOT add parenthetical glosses. Keep the same structure, facts, "
+                "metrics and tone; avoid word-for-word calques. The result must contain "
+                f"zero non-{lang_name} words other than proper nouns and tech names.\n\n"
+                'Respond with JSON only: {"text": "<translated text>"}\n\n'
+                f"Text:\n{text}"
+            ),
+            provider=LLM_PROVIDER,
+            model=LLM_MODEL,
+            api_key=LLM_API_KEY,
+            max_tokens=2000,
+        )
+        out = result.get("text", "") if isinstance(result, dict) else ""
+        return out if isinstance(out, str) and len(out) > 30 else ""
+    except Exception as e:
+        print(f"[apply_agent] lang-gate {kind} translation error: {e}")
+        return ""
+
+
+def _is_unit_clean(scan: dict, unit_prefix: str, side: str) -> bool:
+    """True if no contamination paths for `unit_prefix` on the given side.
+
+    side='en' → check Polish-in-English maps; side='pl' → English-in-Polish map.
+    """
+    if side == "en":
+        buckets = (scan.get("en_strong", {}), scan.get("en_soft", {}))
+    else:
+        buckets = (scan.get("pl_english", {}),)
+    for bucket in buckets:
+        if any(p == unit_prefix or p.startswith(unit_prefix + ".") for p in bucket):
+            return False
+    return True
+
+
+def enforce_language_separation(content: dict, posting_lang: str = "EN") -> tuple[dict, bool, list[str]]:
+    """Enforce-gate: each `_en` field must be clean English, each `_pl` field clean Polish.
+
+    Repair strategy (language routing): when a contaminated field has a CLEAN
+    opposite-language counterpart, regenerate it by translating the clean one — far
+    more reliable than patching, with no re-fabrication or ATS keyword re-stuffing.
+    Falls back to in-place cleanup translation when both sides are dirty.
+
+    Returns (content, blocked, report). `blocked=True` means strong Polish survived
+    in an English field after repair — the caller must NOT ship the documents.
+    """
+    from hunter.lang_guard import scan_content, has_blocking_contamination, needs_repair
+
+    report: list[str] = []
+    scan = scan_content(content)
+    if not needs_repair(scan):
+        return content, False, report
+
+    contaminated = sorted(
+        set(scan.get("en_strong", {})) | set(scan.get("en_soft", {})) | set(scan.get("pl_english", {}))
+    )
+    report.append(f"contamination in {len(contaminated)} field(s): {', '.join(contaminated[:8])}")
+    expected_roles = _expected_role_count(content)
+
+    # Units: (en_key, pl_key, is_resume)
+    units = [
+        ("resume_en", "resume_pl", True),
+        ("cover_letter_en", "cover_letter_pl", False),
+        ("about_me_en", "about_me_pl", False),
+    ]
+
+    def _retranslate(src_obj, target_lang, is_resume, kind="text"):
+        if is_resume:
+            return _translate_resume(src_obj, target_lang, expected_roles=expected_roles)
+        return _translate_plain(src_obj, target_lang, kind)
+
+    # Round 0 — repair each contaminated field by translating the CLEAN
+    # opposite-language counterpart (most reliable: no re-fabrication).
+    for en_key, pl_key, is_resume in units:
+        en_dirty = not _is_unit_clean(scan, en_key, "en")
+        pl_dirty = not _is_unit_clean(scan, pl_key, "pl")
+
+        kind = "cover letter" if "letter" in en_key else ("about-me text" if "about" in en_key else "text")
+        if en_dirty and content.get(pl_key) and not pl_dirty:
+            fixed = _retranslate(content[pl_key], "EN", is_resume, kind)
+            if fixed:
+                content[en_key] = fixed
+                report.append(f"{en_key}: re-translated from clean {pl_key}")
+        if pl_dirty and content.get(en_key) and not en_dirty:
+            fixed = _retranslate(content[en_key], "PL", is_resume, kind)
+            if fixed:
+                content[pl_key] = fixed
+                report.append(f"{pl_key}: re-translated from clean {en_key}")
+
+    # Rounds 1-2 — for any field still carrying STRONG Polish (no clean counterpart,
+    # or the counterpart-translation left residue), clean it IN PLACE. Translation
+    # is imperfect on the first try, so retry before giving up.
+    en_keys = {u[0]: u[2] for u in units}
+    for _round in range(2):
+        final_scan = scan_content(content)
+        if not has_blocking_contamination(final_scan):
+            break
+        for en_key in list(final_scan.get("en_strong", {})):
+            unit_key = en_key.split(".")[0]  # resume_en / cover_letter_en / about_me_en
+            is_resume = en_keys.get(unit_key, False)
+            src = content.get(unit_key)
+            if not src:
+                continue
+            kind = "cover letter" if "letter" in unit_key else ("about-me text" if "about" in unit_key else "text")
+            fixed = _retranslate(src, "EN", is_resume, kind)
+            if fixed and fixed != src:
+                content[unit_key] = fixed
+                report.append(f"{unit_key}: cleaned in place (round {_round + 1})")
+
+    # Final verdict: block only if STRONG Polish still survives in an English field.
+    final_scan = scan_content(content)
+    blocked = has_blocking_contamination(final_scan)
+    if blocked:
+        survivors = final_scan.get("en_strong", {})
+        detail = "; ".join(
+            f"{p}: {', '.join(frags[:4])}" for p, frags in list(survivors.items())[:5]
+        )
+        report.append(f"BLOCKED — strong Polish survived → {detail}")
+    return content, blocked, report
+
+
 _ATS_THRESHOLD = 95.0
 _ATS_MAX_ROUNDS = 2   # honest rounds; after this: soft → aggressive → final check
 
@@ -725,7 +938,9 @@ Gap analysis:
 
 Rewrite 'resume_en' to reach {threshold}%+:
 - Add ALL missing keywords naturally into the Skills section and relevant experience bullets.
-- Mirror the exact phrasing from the job description where possible.
+- resume_en MUST stay entirely in English. If a job-posting keyword is in another
+  language (e.g. Polish), add its standard ENGLISH equivalent — never the foreign
+  word, and never a parenthetical gloss like "X (Y)".
 - Do NOT invent facts — integrate keywords into real experience the candidate has.
 - Keep the same JSON schema; return ALL fields unchanged except the ones you improve.
 
@@ -748,6 +963,8 @@ Rules for this pass:
   add it as an alternative phrasing (e.g. "REST / RESTful APIs", "CI/CD / GitHub Actions").
 - Rephrase existing bullet points to use the exact wording from the job description
   (e.g. if JD says "cross-functional teams", replace "multi-team collaboration").
+- Keep resume_en entirely in English: translate any non-English keyword to its
+  English equivalent; never paste foreign words or "X (Y)" glosses.
 - You may expand the Skills section with adjacent technologies the candidate has
   encountered in projects, even briefly.
 - Keep all factual claims truthful; do not add years of experience for new terms.
@@ -770,7 +987,8 @@ Rules:
 - Insert ALL missing keywords from the list directly into the Skills section.
 - No caveats, no "familiar with" — just list them as skills.
 - Also rewrite any bullet point that can naturally absorb a missing term.
-- Mirror job description phrasing verbatim wherever possible.
+- resume_en MUST be entirely in English: use the English equivalent of any
+  non-English keyword; never paste foreign words or "X (Y)" glosses.
 - Return the same JSON schema with improved resume_en (and resume_pl if present).
 
 Job posting:

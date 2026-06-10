@@ -396,8 +396,12 @@ def main():
         fname = resume_docx_basename(stack, "EN")
         save_docx(doc, Path(output_folder) / fname)
 
-    # --- Resume PL (full mode only) ---
-    if full_mode and content.get("resume_pl"):
+    # --- Resume PL ---
+    # Rendered in full mode, OR in short mode when the posting is Polish — a Polish
+    # employer should receive the (clean) Polish CV as the primary document, so it
+    # ships even in the default short flow alongside the EN CV.
+    _primary_pl = (content.get("primary_lang") or "").strip().upper() == "PL"
+    if (full_mode or _primary_pl) and content.get("resume_pl"):
         doc = Document()
         set_margins(doc)
         build_resume(doc, content["resume_pl"], stack, "PL")

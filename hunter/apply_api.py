@@ -408,6 +408,34 @@ def main_api(
     except Exception as _cc_err:
         print(f"[apply_agent] Warning: compliance scrub failed (continuing): {_cc_err}")
 
+    # Step 4.75 — Language enforce-gate: each _en field must be clean English and
+    # each _pl field clean Polish. Polish postings cause the ATS loop to inject
+    # Polish keywords into resume_en; here we repair by translating from the clean
+    # opposite-language counterpart, and BLOCK delivery if strong Polish survives.
+    from hunter.lang_guard import detect_posting_language
+    posting_lang = detect_posting_language(job_text)
+    print(f"[apply_agent] Step 4.75: Language gate (posting language: {posting_lang})...")
+    try:
+        from hunter.apply_shared import enforce_language_separation
+        content, _lang_blocked, _lang_report = enforce_language_separation(content, posting_lang)
+        for _line in _lang_report:
+            print(f"[apply_agent] lang-gate: {_line}")
+        if _lang_blocked:
+            notify(
+                f"⛔ <b>Blocked — Polish leaked into the English CV</b>\n"
+                f"🔗 {url}\n"
+                f"The English resume still contained Polish after an automatic "
+                f"translation pass, so no document was generated (a broken CV was "
+                f"NOT sent). Re-run /force to retry, or apply manually.\n\n"
+                + "\n".join(f"• {l}" for l in _lang_report[-3:])
+            )
+            print(f"[apply_agent] ABORT — language gate blocked delivery: {url}")
+            sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception as _lang_err:
+        print(f"[apply_agent] Warning: language gate failed (continuing): {_lang_err}")
+
     # Step 4.8 — Content QA sanity check
     print("[apply_agent] Step 4.9: Running content QA checks...")
     try:
@@ -436,6 +464,9 @@ def main_api(
 
     content["output_folder"] = str(output_folder).replace("\\", "/")
     content["apply_url"] = "" if url == PASTE_NO_URL_PLACEHOLDER else url
+    # Deterministic posting language drives which CV is delivered as primary
+    # (PL posting → also render the Polish CV in short mode; see generate_docs).
+    content["primary_lang"] = posting_lang
     if "ats_score" not in content:
         content["ats_score"] = ""
 
