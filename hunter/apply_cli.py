@@ -297,6 +297,71 @@ def main_cli(
                         print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
                     return
 
+                # Language enforce-gate (parity with the API pipeline). The CLI skill
+                # already generated docs; if any _en field leaked Polish, repair the
+                # content and REGENERATE the docs from the cleaned content.json — or, if
+                # strong Polish can't be removed, delete the docs and block delivery so a
+                # contaminated CV is never sent.
+                try:
+                    from hunter.lang_guard import detect_posting_language
+                    from hunter.apply_shared import enforce_language_separation
+                    _posting_lang = detect_posting_language(job_text or "")
+                    _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
+                    for _line in _report:
+                        print(f"[apply_agent] lang-gate: {_line}")
+                    if _report:  # gate repaired something and/or blocked
+                        _cli_content["primary_lang"] = _posting_lang
+                        content_json_path.write_text(
+                            json.dumps(_cli_content, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        if _blocked:
+                            for _f in (
+                                list(folder_path.glob("*.pdf")) + list(folder_path.glob("*.docx"))
+                            ):
+                                try:
+                                    _f.unlink()
+                                except OSError:
+                                    pass
+                            notify(
+                                f"⛔ <b>Blocked — Polish leaked into the English CV</b>\n"
+                                f"🔗 {url}\n"
+                                f"The English documents still contained Polish after an "
+                                f"automatic translation pass, so they were NOT sent. "
+                                f"Re-run /force to retry, or apply manually."
+                            )
+                            print("[apply_agent] ABORT — language gate blocked delivery (CLI)")
+                            return
+                        # Remove the pre-gate (contaminated) docs FIRST, so a failed
+                        # regeneration (e.g. LibreOffice down) can't leave a stale
+                        # contaminated PDF behind for created_files to pick up and send.
+                        for _stale in (
+                            list(folder_path.glob("*.pdf")) + list(folder_path.glob("*.docx"))
+                        ):
+                            try:
+                                _stale.unlink()
+                            except OSError:
+                                pass
+                        # Regenerate docs from the cleaned content.json.
+                        _gen_cmd = build_generate_docs_cmd(
+                            generate_docs_script=GENERATE_DOCS_PATH,
+                            content_json_path=content_json_path,
+                            use_full=full_mode,
+                            force=skip_dedup,
+                            python_executable=sys.executable,
+                        )
+                        subprocess.run(
+                            _gen_cmd,
+                            cwd=str(PROJECT_DIR),
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            timeout=120,
+                        )
+                        print("[apply_agent] lang-gate: regenerated docs from cleaned content")
+                except Exception as _lang_err:
+                    print(f"[apply_agent] Warning: CLI language gate failed (continuing): {_lang_err}")
 
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")

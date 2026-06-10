@@ -135,6 +135,10 @@ hunter/
   tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (~980 lines)
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
+  lang_guard.py             Language routing + contamination guard: detect_posting_language()
+                            (PL/EN by token density) + Polish-in-English / English-in-Polish
+                            detection (diacritics + lexicon + suffix + bilingual gloss). Feeds
+                            the apply enforce-gate (enforce_language_separation in apply_shared)
   expired_check.py          Expired job detection (regex patterns)
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
@@ -280,6 +284,19 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 3. `expired_check.is_job_expired(text)` — skip if expired
 4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
 5. Cover letter self-review loop (up to 3 LLM rounds)
+5b. **Language enforce-gate** (`apply_shared.enforce_language_separation`, runs in BOTH
+   the API and CLI pipelines): after sanitize/compliance-scrub, scan every `_en` field for
+   Polish and every `_pl` field for English prose (`hunter.lang_guard`). On contamination,
+   repair by *translating from the clean opposite-language counterpart* (a Polish posting
+   makes the ATS loop inject Polish into `resume_en`; the clean `resume_pl` is translated
+   back to EN — no re-fabrication, role-count guarded, then up to 2 in-place cleanup passes).
+   If strong Polish survives in an `_en` field, **block delivery** (no broken doc is sent:
+   API → `sys.exit(0)`; CLI → delete generated docs + return). Posting language is detected
+   deterministically (`detect_posting_language`) and written to `content["primary_lang"]` to
+   drive delivery routing. The detector allowlists Polish **place names** (Wrocław, Kraków…)
+   so the candidate's city is never mistaken for contamination. In the CLI pipeline the gate
+   runs as a post-process: read the CLI-written `content.json` → enforce → rewrite +
+   regenerate docs (or block).
 6. Output folder: `Applications/{today}/{CompanyName}/`
 7. `generate_docs.py` -> DOCX + PDF (LibreOffice headless)
 8. `tracker_service.record_successful_apply()` -> tracker.xlsx row
@@ -287,7 +304,8 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 10. Telegram notification + file upload
 
 ### Doc generation modes
-- **Short** (default): PDF only, EN CV only (3 files)
+- **Short** (default): PDF only, EN CV — **plus the PL CV when the posting is Polish**
+  (`content["primary_lang"] == "PL"`), so a Polish employer receives the clean Polish CV
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
 - **Force** (`--force`): skip dedup, bypass React-only skip
 
@@ -588,3 +606,4 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-06-08 | opus | Fix false-EXPIRED from pull reconcile (branch fix/reconcile-false-expired). Root cause traced from prod: after the Sheets OAuth token expired (`invalid_grant`), new applies/skips couldn't be mirrored (`mirror_new_row` returns early → `sheets_row` stays NULL); the next successful pull's `_reconcile_deleted_rows` saw "ID in DB, absent from Sheet" and `mark_orphans_expired` stamped them EXPIRED — conflating *never-pushed* with *user-deleted* (incl. URL-less rows, proving it wasn't `expired_check`; verified `is_job_expired`→False on a live Built In job). Fix: `mark_orphans_expired` WHERE now also requires `sheets_row IS NOT NULL` (only ever-mirrored rows can be reconciled as deletions). Updated 2 existing reconcile tests (deleted orphans now carry a sheets_row) + 2 new never-mirrored-protection tests (1200 total). |
 | 2026-06-08 | opus | New remote sources Queue 2 — JustRemote (`justremote.py`). SPA backed by a public JSON API on a separate host (`justremote-api.herokuapp.com/api/v1/jobs`); listing `?category=developer` returns ~10 newest dev roles (skill filter is client-side, API ignores it → low-volume trickle like Jobspresso). `fetch_text` uses the single-job API `/jobs/{slug}` (about_role/who_looking_for/our_offer/about_company) instead of scraping the SPA. Canonical URL `justremote.co/{href}`; `_format_location` guarantees a remote token. No pagination (page 1==2). 20→21 sources. Live-verified: API + single-job fetch work; momentary 0 frontend in the newest-10. |
 | 2026-06-08 | opus | Source helper consolidation (deferred from PR #83 review). New `hunter/sources/text_utils.py`: `strip_html(html, max_len)` (HTML fragment → plain text, unescape + whitespace-collapse + truncate) replaces 8 local `_text_preview`/`_html_to_plain` copies (arbeitnow, himalayas, remoteok, remotive, weworkremotely, workingnomads, jobspresso, justremote); `REMOTE_ANY` frozenset + `ensure_remote_token(base, geo=None)` replace the duplicated `_REMOTE_ANY` set (workingnomads, jobspresso) and justremote's substring remote-token logic. Each source keeps its own `_format_location` wrapper (input shapes differ) but delegates the core. remotive's `_format_location` left untouched — its synonym set intentionally excludes "remote". No behaviour change (location strings + stripped text identical). 11 new tests in test_text_utils.py (1198 total). |
+| 2026-06-10 | opus | PL/EN language routing + enforce-gate (branch fix/pl-en-language-routing). Root cause (traced from 2 prod CVs, RTVEuroAGD/theprotocol + DCG/solid.jobs): for Polish postings the EN CV shipped riddled with Polish ("responsywne interfejsy (responsive interfaces)", "monolitycznych to mikroserwisach", "(7+ lat doświadczenia)") because (a) `lang` was detected but never used, (b) the ATS loop mirrors the Polish posting's keywords verbatim into resume_en, (c) `resume_sanitizer`/`content_qa` only *warn*, never block — the broken EN PDF (the one delivered in short mode) was sent anyway. Fix: new `hunter/lang_guard.py` (deterministic `detect_posting_language` + Polish-in-EN / English-in-PL detection via diacritics+lexicon+suffix+bilingual-gloss, dependency-free, Polish place-name allowlist so "Wrocław" isn't flagged); new `apply_shared.enforce_language_separation` enforce-gate wired into BOTH `apply_api` and `apply_cli` after sanitize — repairs by *translating from the clean opposite-language counterpart* (role-count guarded) + up to 2 in-place cleanup passes, and BLOCKS delivery (no broken doc: API `sys.exit(0)`, CLI deletes docs+returns) if strong Polish survives. ATS rewrite prompts now forbid foreign words/glosses. Delivery routing: `content["primary_lang"]` makes short mode also render the clean PL CV for PL postings (so a Polish vacancy ships BOTH PL+EN CV and CL). **Live-verified** on both prod URLs (theprotocol + solid.jobs): EN resume now fully clean (en_strong/soft/pl all empty), full bilingual set generated, gate logs show active repair each run; full suite run 4× green. 32 new tests (test_lang_guard 21 + test_lang_enforce_gate 5 + ATS-prompt/routing ... 1232 total). |
