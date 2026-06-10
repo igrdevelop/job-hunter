@@ -334,6 +334,16 @@ def main_cli(
                             )
                             print("[apply_agent] ABORT — language gate blocked delivery (CLI)")
                             return
+                        # Remove the pre-gate (contaminated) docs FIRST, so a failed
+                        # regeneration (e.g. LibreOffice down) can't leave a stale
+                        # contaminated PDF behind for created_files to pick up and send.
+                        for _stale in (
+                            list(folder_path.glob("*.pdf")) + list(folder_path.glob("*.docx"))
+                        ):
+                            try:
+                                _stale.unlink()
+                            except OSError:
+                                pass
                         # Regenerate docs from the cleaned content.json.
                         _gen_cmd = build_generate_docs_cmd(
                             generate_docs_script=GENERATE_DOCS_PATH,
