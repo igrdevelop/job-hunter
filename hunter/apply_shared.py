@@ -765,8 +765,12 @@ def enforce_language_separation(content: dict, posting_lang: str = "EN") -> tupl
         final_scan = scan_content(content)
         if not has_blocking_contamination(final_scan):
             break
-        for en_key in list(final_scan.get("en_strong", {})):
-            unit_key = en_key.split(".")[0]  # resume_en / cover_letter_en / about_me_en
+        # en_strong is keyed by field PATH; collapse to distinct UNITS so a resume
+        # with several contaminated fields is re-translated once, not once per field.
+        dirty_units = dict.fromkeys(
+            k.split(".")[0] for k in final_scan.get("en_strong", {})
+        )
+        for unit_key in dirty_units:
             is_resume = en_keys.get(unit_key, False)
             src = content.get(unit_key)
             if not src:

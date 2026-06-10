@@ -121,6 +121,30 @@ def test_role_drop_rejected(monkeypatch, with_api_key):
     assert blocked is True
 
 
+def test_inplace_cleanup_translates_unit_once_not_per_field(monkeypatch, with_api_key):
+    """Rounds 1-2 must re-translate a contaminated resume ONCE per round, not once
+    per contaminated field (regression: K full-resume LLM calls for K dirty fields)."""
+    calls = {"n": 0}
+
+    def _fake(system_prompt, user_message, **k):
+        calls["n"] += 1
+        return {"resume": json.loads(json.dumps(_CLEAN_EN_RESUME))}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake)
+
+    # resume_en dirty in 3 fields; NO clean PL counterpart → round 0 can't help,
+    # so the in-place rounds must do the work. With the fix that's a single call.
+    dirty = json.loads(json.dumps(_CLEAN_EN_RESUME))
+    dirty["summary"] = "Senior Developer (7+ lat doświadczenia)."
+    dirty["skills"]["frontend"] = "Angular, responsywne interfejsy"
+    dirty["experience"][0]["bullets"] = ["Built projekty wewnętrzne dashboards"]
+    content = {"resume_en": dirty}  # no resume_pl
+
+    out, blocked, report = apply_shared.enforce_language_separation(content, "PL")
+    assert blocked is False
+    assert calls["n"] == 1  # one translation for the whole resume_en, not three
+
+
 def test_no_api_key_no_repair(monkeypatch):
     """Without an API key the gate cannot translate; it reports but does not crash."""
     monkeypatch.setattr(apply_shared, "LLM_API_KEY", "")
