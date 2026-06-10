@@ -40,6 +40,18 @@ def test_detect_language_polish_without_diacritics():
     assert lg.detect_posting_language(txt) == "PL"
 
 
+def test_detect_language_english_posting_with_polish_city_names():
+    # English posting for a Polish-office role: the city names carry diacritics but
+    # must NOT flip detection to PL (regression: raw diacritic count >= 3 short-circuit).
+    txt = (
+        "We are hiring a Senior Frontend Developer for our offices in Wrocław, "
+        "Kraków and Łódź. You will build Angular applications, write unit tests, and "
+        "collaborate with cross-functional teams. Hybrid work from the Wrocław hub. "
+        "Strong TypeScript and RxJS skills required; relocation to Poland supported."
+    )
+    assert lg.detect_posting_language(txt) == "EN"
+
+
 def test_detect_language_empty_defaults_en():
     assert lg.detect_posting_language("") == "EN"
     assert lg.detect_posting_language(None) == "EN"

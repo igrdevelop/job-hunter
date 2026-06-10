@@ -221,11 +221,10 @@ def detect_posting_language(job_text: str) -> str:
     """
     if not job_text or not isinstance(job_text, str):
         return "EN"
-    if _PL_DIACRITICS_RE.search(job_text):
-        # Diacritics are a near-certain PL marker; still require a couple to avoid
-        # a single stray accented name in an English posting.
-        if len(_PL_DIACRITICS_RE.findall(job_text)) >= 3:
-            return "PL"
+    # Density of Polish *content* words. Tech terms and Polish place names are in the
+    # allowlist (_is_tech) and excluded, so an English posting for a Wrocław/Kraków
+    # office is not misread as Polish just because the city name carries diacritics.
+    # _looks_polish_word already counts diacritics + lexicon for non-allowlist words.
     words = [w for w in _WORD_RE.findall(job_text) if not _is_tech(w)]
     if len(words) < 10:
         return "EN"
