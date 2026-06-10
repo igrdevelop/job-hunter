@@ -145,6 +145,35 @@ def test_inplace_cleanup_translates_unit_once_not_per_field(monkeypatch, with_ap
     assert calls["n"] == 1  # one translation for the whole resume_en, not three
 
 
+def test_both_sides_dirty_pl_repaired_from_cleaned_en(monkeypatch, with_api_key):
+    """When BOTH resume_en (Polish) and resume_pl (English prose) are contaminated,
+    the EN side is cleaned in place, then the PL side is repaired from the clean EN."""
+
+    def _fake(system_prompt, user_message, **k):
+        if "into Polish" in user_message:
+            return {"resume": json.loads(json.dumps(_CLEAN_PL_RESUME))}
+        return {"resume": json.loads(json.dumps(_CLEAN_EN_RESUME))}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake)
+
+    dirty_en = json.loads(json.dumps(_CLEAN_EN_RESUME))
+    dirty_en["summary"] = "Senior Developer (7+ lat doświadczenia) in Angular."
+    dirty_pl = json.loads(json.dumps(_CLEAN_PL_RESUME))
+    dirty_pl["summary"] = (
+        "Senior Frontend Developer with 10 years of experience building teams "
+        "and delivering scalable applications across many projects."
+    )
+    content = {"resume_en": dirty_en, "resume_pl": dirty_pl}
+
+    out, blocked, report = apply_shared.enforce_language_separation(content)
+    assert blocked is False
+    from hunter import lang_guard as lg
+    final = lg.scan_content(out)
+    assert not final["en_strong"]       # EN cleaned
+    assert not final["pl_english"]      # PL repaired from clean EN
+    assert any("final PL pass" in r for r in report)
+
+
 def test_no_api_key_no_repair(monkeypatch):
     """Without an API key the gate cannot translate; it reports but does not crash."""
     monkeypatch.setattr(apply_shared, "LLM_API_KEY", "")

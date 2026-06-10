@@ -764,6 +764,22 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
                 content[unit_key] = fixed
                 report.append(f"{unit_key}: cleaned in place (round {_round + 1})")
 
+    # Final PL-repair pass: a Polish field whose English counterpart was ALSO dirty
+    # was skipped by Round 0 (it only translates from an already-clean side). Now that
+    # the EN side has been cleaned, translate any still-contaminated PL field from it.
+    pl_scan = scan_content(content)
+    def _en_strong_dirty(en_key: str) -> bool:
+        bucket = pl_scan.get("en_strong", {})
+        return any(p == en_key or p.startswith(en_key + ".") for p in bucket)
+    for en_key, pl_key, is_resume in units:
+        if (not _is_unit_clean(pl_scan, pl_key, "pl")
+                and content.get(en_key) and not _en_strong_dirty(en_key)):
+            kind = "cover letter" if "letter" in pl_key else ("about-me text" if "about" in pl_key else "text")
+            fixed = _retranslate(content[en_key], "PL", is_resume, kind)
+            if fixed:
+                content[pl_key] = fixed
+                report.append(f"{pl_key}: re-translated from clean {en_key} (final PL pass)")
+
     # Final verdict: block only if STRONG Polish still survives in an English field.
     final_scan = scan_content(content)
     blocked = has_blocking_contamination(final_scan)
