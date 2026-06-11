@@ -79,6 +79,7 @@ def _enrich_justjoin(job: Job) -> Job:
         url=job.url,
         source=job.source,
         raw=offer,
+        email_meta=job.email_meta,
     )
 
 
@@ -108,6 +109,7 @@ def _enrich_via_text(job: Job) -> Job:
         url=job.url,
         source=job.source,
         raw=job.raw,
+        email_meta=job.email_meta,
     )
 
 
