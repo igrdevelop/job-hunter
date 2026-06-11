@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright"]
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 hunter = "hunter.__main__:main"
@@ -43,6 +43,23 @@ include = ["hunter*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# Initial gate covers the application package + entry scripts. tests/ and tools/
+# carry their own import noise and are excluded for now (mirrors [tool.mypy]);
+# smoke_test_cl.py is a scratch script. Widen coverage over time.
+extend-exclude = ["tests", "tools", "smoke_test_cl.py"]
+
+[tool.ruff.lint]
+# Default rule set (pyflakes F + a focused pycodestyle E subset) plus warnings.
+# Kept conservative on purpose so the gate stays green on a large existing
+# codebase; expand selectively over time.
+select = ["E4", "E7", "E9", "F", "W"]
+# E402: many modules import after a sys.path tweak or behind a runtime guard.
+# E741: a few short loop vars (l/I/O) that are clear enough in context.
+ignore = ["E402", "E741"]
 
 [tool.mypy]
 python_version = "3.11"

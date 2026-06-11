@@ -22,7 +22,6 @@ from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
     filters,
 )
@@ -37,6 +36,14 @@ from hunter.config import (
 # Always-needed by main.py and _post_init:
 from hunter.bot.notifications import send_text, send_job_cards, _tg_notify
 from hunter.bot.paste import _looks_like_paste, _extract_url
+
+# Eager re-exports kept for backward compatibility (main.py + tests import these
+# from here). Declared in __all__ so the linter treats them as used, not dead.
+__all__ = [
+    "send_text", "send_job_cards", "_tg_notify",
+    "_looks_like_paste", "_extract_url",
+    "build_application", "_post_init",
+]
 
 logger = logging.getLogger(__name__)
 

@@ -86,7 +86,7 @@ def main(
                 print(f"[apply_agent] CLI failed ({e}), falling back to API mode")
                 notify(f"🔄 CLI failed — retrying via API\n🔗 {url}")
             else:
-                print(f"[apply_agent] CLI failed and no API key available")
+                print("[apply_agent] CLI failed and no API key available")
                 sys.exit(1)
 
     if LLM_API_KEY:

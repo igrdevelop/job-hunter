@@ -119,7 +119,7 @@ def _format_job_posting_ld(jp: dict) -> str:
     quals = jp.get("qualifications") or jp.get("skills") or ""
     if quals:
         parts.append(
-            f"\n--- Requirements ---\n"
+            "\n--- Requirements ---\n"
             + (_strip_html(quals) if isinstance(quals, str) else str(quals))
         )
 

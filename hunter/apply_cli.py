@@ -18,7 +18,6 @@ import subprocess
 import sys
 import time
 from datetime import date
-from pathlib import Path
 
 from hunter.apply_shared import (
     ApplyError,
@@ -196,7 +195,7 @@ def main_cli(
             return
 
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
-    print(f"[apply_agent] Running claude CLI...\n")
+    print("[apply_agent] Running claude CLI...\n")
 
     result = None
     new_folder_timeout = None
@@ -223,7 +222,7 @@ def main_cli(
                 break
             else:
                 notify(f"⏱ <b>apply_agent timeout (10 min)</b>\nURL: {url}")
-                print(f"\n[apply_agent] Timeout — no folder created.")
+                print("\n[apply_agent] Timeout — no folder created.")
                 raise ApplyError("CLI timeout — no folder created")
 
         if result.returncode == 0:
@@ -384,7 +383,7 @@ def main_cli(
                 f"📁 <code>Applications/{new_folder}/</code>\n"
                 f"Check the folder for partial output."
             )
-            print(f"\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
+            print("\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
             raise ApplyError("Folder created but no docs found")
     else:
         stdout_preview = (result.stdout or "").strip()[:600] if result else ""
@@ -393,5 +392,5 @@ def main_cli(
             f"🔗 {url}\n\n"
             + (f"Claude output:\n<pre>{stdout_preview}</pre>" if stdout_preview else "No CLI output captured.")
         )
-        print(f"\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
+        print("\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
         raise ApplyError("No output folder created")

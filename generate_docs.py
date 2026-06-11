@@ -132,7 +132,6 @@ def keep_with_next(paragraph, keep_lines=True):
 
 
 def set_paragraph_spacing(paragraph, before=0, after=4, line_spacing=1.08):
-    from docx.shared import Pt
     from docx.oxml.ns import qn
     pPr = paragraph._p.get_or_add_pPr()
     pSpacing = OxmlElement("w:spacing")

@@ -36,7 +36,7 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         from hunter.sources import fetch_job_text
         from hunter.sources.html_fallback import clean_url
         from hunter.expired_check import is_job_expired, is_expired_by_html
-        from hunter.expired_marker import _quick_html_expired, _is_cloudflare_challenge
+        from hunter.expired_marker import _is_cloudflare_challenge
 
         domain = urlparse(url).hostname or ""
         clean = clean_url(url)

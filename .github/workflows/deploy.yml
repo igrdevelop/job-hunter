@@ -13,6 +13,18 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff==0.15.16
+      - name: Ruff lint
+        run: ruff check .
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -26,7 +38,7 @@ jobs:
         run: pytest tests/ -q
 
   build-and-deploy:
-    needs: test
+    needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:

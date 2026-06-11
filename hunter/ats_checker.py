@@ -199,7 +199,7 @@ def _llm_review(
 ) -> tuple[float, list[str], list[str], str]:
     """Returns (score 0–100, missing_keywords, recommendations, gap_report)."""
     try:
-        from llm_client import LLMError, call_llm
+        from llm_client import call_llm
 
         result = call_llm(
             system_prompt=_LLM_SYSTEM,
