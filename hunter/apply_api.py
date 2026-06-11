@@ -406,6 +406,20 @@ def main_api(
     except Exception as _cc_err:
         print(f"[apply_agent] Warning: compliance scrub failed (continuing): {_cc_err}")
 
+    # Strip fabricated client-prestige claims ("Fortune 500 clients", "top-tier")
+    # the LLM invents despite the RED LINE, and collapse "term / synonym" gloss
+    # pairs the ATS rewrite leaves in the skills section.
+    try:
+        from hunter.apply_shared import _dedup_skill_glosses, _strip_prestige_claims
+        content, _prestige_fixes = _strip_prestige_claims(content, job_text)
+        for _fix in _prestige_fixes:
+            print(f"[apply_agent] prestige-scrub: {_fix}")
+        content, _gloss_fixes = _dedup_skill_glosses(content)
+        for _fix in _gloss_fixes:
+            print(f"[apply_agent] gloss-dedup: {_fix}")
+    except Exception as _ps_err:
+        print(f"[apply_agent] Warning: prestige/gloss scrub failed (continuing): {_ps_err}")
+
     # Step 4.75 — Language enforce-gate: each _en field must be clean English and
     # each _pl field clean Polish. Polish postings cause the ATS loop to inject
     # Polish keywords into resume_en; here we repair by translating from the clean

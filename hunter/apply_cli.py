@@ -303,12 +303,29 @@ def main_cli(
                 # contaminated CV is never sent.
                 try:
                     from hunter.lang_guard import detect_posting_language
-                    from hunter.apply_shared import enforce_language_separation
+                    from hunter.apply_shared import (
+                        _dedup_skill_glosses,
+                        _strip_prestige_claims,
+                        enforce_language_separation,
+                    )
+                    # Deterministic scrubs (parity with the API pipeline): drop
+                    # fabricated prestige claims + collapse skills gloss pairs.
+                    # Any fix means the already-generated docs are stale and must
+                    # be regenerated below, same as a language-gate repair.
+                    _scrub_fixes: list[str] = []
+                    _cli_content, _prestige_fixes = _strip_prestige_claims(
+                        _cli_content, job_text or ""
+                    )
+                    _scrub_fixes.extend(_prestige_fixes)
+                    _cli_content, _gloss_fixes = _dedup_skill_glosses(_cli_content)
+                    _scrub_fixes.extend(_gloss_fixes)
+                    for _line in _scrub_fixes:
+                        print(f"[apply_agent] content-scrub: {_line}")
                     _posting_lang = detect_posting_language(job_text or "")
                     _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:
                         print(f"[apply_agent] lang-gate: {_line}")
-                    if _report:  # gate repaired something and/or blocked
+                    if _report or _scrub_fixes:  # repaired/scrubbed something and/or blocked
                         _cli_content["primary_lang"] = _posting_lang
                         content_json_path.write_text(
                             json.dumps(_cli_content, ensure_ascii=False, indent=2),
