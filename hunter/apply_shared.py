@@ -927,6 +927,246 @@ def _strip_compliance_claims(content: dict) -> tuple[dict, list[str]]:
 
     return content, fixes
 
+
+# ---------------------------------------------------------------------------
+# Prestige-claim scrub — "Fortune 500 clients", "top-tier clients", ...
+# ---------------------------------------------------------------------------
+# generation_rules.md RED LINE: "NEVER invent client scale or prestige." The LLM
+# still fabricates these (observed: "300+ German banks and Fortune 500 clients"
+# in both EN and PL summaries for a posting that never mentions Fortune 500), so
+# the rule is enforced deterministically here. A term that DOES appear in the
+# job posting text is allowed (the rule's explicit exception) and is not scrubbed.
+_PRESTIGE_TERMS: tuple[str, ...] = (
+    r"Fortune\s?(?:50|100|500|1000)",
+    r"top[-\s]tier",
+    r"blue[-\s]chip",
+)
+
+# Connectors that attach a prestige clause to an otherwise-honest sentence,
+# e.g. "for 300+ German banks and Fortune 500 clients" (EN) or
+# "dla 300+ niemieckich banków i klientów Fortune 500" (PL).
+_PRESTIGE_CONNECTORS = r"and|with|for|including|serving|plus|i|oraz|dla|w tym"
+
+_PRESTIGE_TRAILING_NOUNS = (
+    r"(?:\s+(?:clients?|companies|firms?|customers|enterprises|brands"
+    r"|klientów|klienci|firm))?"
+)
+
+
+def _prestige_claim_re(job_text: str) -> re.Pattern | None:
+    """Combined matcher for prestige terms NOT present in the job posting.
+    Returns None when every term is legitimised by the posting."""
+    active = [t for t in _PRESTIGE_TERMS
+              if not re.search(t, job_text or "", re.IGNORECASE)]
+    if not active:
+        return None
+    return re.compile(r"\b(?:" + "|".join(active) + r")\b", re.IGNORECASE)
+
+
+def _prestige_clause_re(claim_re: re.Pattern) -> re.Pattern:
+    """Connector + clause containing a prestige term, within one comma/period
+    segment. The middle part is tempered so the match cannot swallow an earlier
+    honest clause ("for 300+ German banks and Fortune 500" must only remove
+    " and Fortune 500 ...", not the banks)."""
+    middle = rf"(?:(?!\b(?:{_PRESTIGE_CONNECTORS})\b)[^,.;])*?"
+    return re.compile(
+        rf"\s*(?:[,;]|\b(?:{_PRESTIGE_CONNECTORS})\b)\s+{middle}"
+        rf"(?:{claim_re.pattern}){_PRESTIGE_TRAILING_NOUNS}",
+        re.IGNORECASE,
+    )
+
+
+def _scrub_prestige_text(text: str, claim_re: re.Pattern) -> str:
+    """Remove prestige clauses from a sentence-ish text; if a claim survives
+    clause removal (e.g. it opens the sentence), drop the whole sentence."""
+    if not isinstance(text, str) or not claim_re.search(text):
+        return text
+    clause_re = _prestige_clause_re(claim_re)
+    prev = None
+    cur = text
+    while prev != cur and claim_re.search(cur):
+        prev = cur
+        cur = clause_re.sub("", cur, count=1)
+    if claim_re.search(cur):  # clause removal couldn't reach it → drop sentence
+        parts = re.split(r"(?<=[.!?])\s+", cur)
+        cur = " ".join(s for s in parts if not claim_re.search(s))
+    cur = re.sub(r"\s{2,}", " ", cur)
+    cur = re.sub(rf"\s+(?:{_PRESTIGE_CONNECTORS})\s*$", "", cur, flags=re.IGNORECASE)
+    cur = re.sub(r"\s+([,.;])", r"\1", cur)
+    cur = re.sub(r"\s*[,;]\s*$", "", cur)
+    return cur.strip()
+
+
+def _strip_prestige_claims(content: dict, job_text: str = "") -> tuple[dict, list[str]]:
+    """Remove fabricated client-prestige claims (Fortune 500, top-tier,
+    blue-chip) from summary / skills / experience / about-me in both resume
+    languages. Terms actually present in the job posting are left alone.
+    Returns (content, list_of_fixes)."""
+    fixes: list[str] = []
+    claim_re = _prestige_claim_re(job_text)
+    if claim_re is None:
+        return content, fixes
+
+    def _scrub_field(holder: dict, key: str, label: str) -> None:
+        val = holder.get(key)
+        if isinstance(val, str) and claim_re.search(val):
+            new = _scrub_prestige_text(val, claim_re)
+            if new != val:
+                holder[key] = new
+                fixes.append(f"[{label}] scrubbed prestige claim from {key}")
+
+    for rk, lang in (("resume_en", "EN"), ("resume_pl", "PL")):
+        r = content.get(rk)
+        if not isinstance(r, dict):
+            continue
+        _scrub_field(r, "summary", lang)
+        skills = r.get("skills")
+        if isinstance(skills, dict):
+            for cat, val in list(skills.items()):
+                if isinstance(val, str) and claim_re.search(val):
+                    items = [i.strip() for i in _split_skill_items(val)
+                             if not claim_re.search(i)]
+                    skills[cat] = ", ".join(i for i in items if i)
+                    fixes.append(f"[{lang}] removed prestige claim from skills.{cat}")
+                elif isinstance(val, list) and any(claim_re.search(str(i)) for i in val):
+                    skills[cat] = [i for i in val if not claim_re.search(str(i))]
+                    fixes.append(f"[{lang}] removed prestige claim from skills.{cat}")
+        for role in (r.get("experience") or []):
+            if not isinstance(role, dict):
+                continue
+            bullets = role.get("bullets")
+            if isinstance(bullets, list):
+                new_bullets = []
+                for b in bullets:
+                    nb = _scrub_prestige_text(b, claim_re) if isinstance(b, str) else b
+                    if isinstance(b, str) and nb != b:
+                        fixes.append(f"[{lang}] scrubbed prestige claim from a bullet")
+                    if isinstance(nb, str) and not nb.strip():
+                        continue
+                    new_bullets.append(nb)
+                role["bullets"] = new_bullets
+            for fld in ("stack_line", "subtitle"):
+                _scrub_field(role, fld, lang)
+    for ak, lang in (("about_me_en", "EN"), ("about_me_pl", "PL")):
+        if isinstance(content.get(ak), str):
+            _scrub_field(content, ak, lang)
+
+    return content, fixes
+
+
+# ---------------------------------------------------------------------------
+# Skills slash-gloss dedup — "Performance Optimization / Performance optimisation"
+# ---------------------------------------------------------------------------
+# The ATS rewrite loop mirrors the posting's phrasing of a skill the base CV
+# already lists, and the LLM keeps BOTH joined by " / " instead of picking one
+# (observed: "technical documentation / High-quality technical documentation",
+# "Performance Optimization / Performance optimisation" — US vs UK spelling).
+# Genuinely different skills sharing a slash ("OpenShift / container platforms")
+# are kept; only near-duplicate sides are collapsed (keep the first side — the
+# base-CV phrasing).
+
+_GLOSS_STOPWORDS = frozenset({
+    "and", "or", "of", "the", "a", "an", "in", "with", "by", "to", "high-quality",
+    "i", "oraz", "z", "w", "do", "na",
+})
+
+
+def _split_skill_items(value: str) -> list[str]:
+    """Split a comma-separated skills string into items, ignoring commas inside
+    parentheses ("Agile (Scrum, SAFe)" stays one item)."""
+    items: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in value:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            items.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    items.append("".join(cur))
+    return [i for i in (it.strip() for it in items) if i]
+
+
+_PL_DIACRITIC_FOLD = str.maketrans("ąćęłńóśźż", "acelnoszz")
+
+
+def _gloss_stem(token: str) -> str:
+    """Crude stem so "validation"/"validating", UK/US spellings and
+    with/without-diacritics Polish variants compare equal."""
+    t = token.lower().translate(_PL_DIACRITIC_FOLD).replace("isation", "ization")
+    for suf in ("ations", "ation", "ing", "ies", "ied", "ed", "es", "s"):
+        if t.endswith(suf) and len(t) - len(suf) >= 4:
+            t = t[: -len(suf)]
+            break
+    if t.endswith("at") and len(t) - 2 >= 4:
+        t = t[:-2]
+    return t
+
+
+def _gloss_tokens(side: str) -> frozenset[str]:
+    words = re.findall(r"[\w+#.-]+", side.lower())
+    return frozenset(
+        _gloss_stem(w) for w in words if w not in _GLOSS_STOPWORDS
+    )
+
+
+def _sides_are_gloss(a: str, b: str) -> bool:
+    """True when the two slash sides describe the same skill."""
+    ta, tb = _gloss_tokens(a), _gloss_tokens(b)
+    if not ta or not tb:
+        return False
+    if ta == tb or ta <= tb or tb <= ta:
+        return True
+    jaccard = len(ta & tb) / len(ta | tb)
+    return jaccard >= 0.6
+
+
+def _collapse_gloss_item(item: str) -> str:
+    """Collapse "A / B" (spaced slash) when the sides are near-duplicates.
+    Compact slashes (UI/UX, CI/CD) are untouched."""
+    sides = [s.strip() for s in item.split(" / ") if s.strip()]
+    if len(sides) < 2:
+        return item
+    kept: list[str] = [sides[0]]
+    for side in sides[1:]:
+        if not any(_sides_are_gloss(side, k) for k in kept):
+            kept.append(side)
+    return " / ".join(kept)
+
+
+def _dedup_skill_glosses(content: dict) -> tuple[dict, list[str]]:
+    """Collapse "term / synonym" gloss pairs inside every skills category of
+    resume_en and resume_pl. Returns (content, list_of_fixes)."""
+    fixes: list[str] = []
+    for rk, lang in (("resume_en", "EN"), ("resume_pl", "PL")):
+        r = content.get(rk)
+        skills = r.get("skills") if isinstance(r, dict) else None
+        if not isinstance(skills, dict):
+            continue
+        for cat, val in list(skills.items()):
+            if cat == "languages":
+                continue
+            if isinstance(val, str) and " / " in val:
+                items = _split_skill_items(val)
+                new_items = [_collapse_gloss_item(i) for i in items]
+                new = ", ".join(new_items)
+                if new != val:
+                    skills[cat] = new
+                    fixes.append(f"[{lang}] collapsed gloss pair(s) in skills.{cat}")
+            elif isinstance(val, list):
+                new_list = [
+                    _collapse_gloss_item(i) if isinstance(i, str) else i for i in val
+                ]
+                if new_list != val:
+                    skills[cat] = new_list
+                    fixes.append(f"[{lang}] collapsed gloss pair(s) in skills.{cat}")
+    return content, fixes
+
+
 _ATS_REWRITE_PROMPT = """\
 The resume scored {score:.1f}% on an independent ATS check (target: {threshold}%).
 
