@@ -420,6 +420,46 @@ def main_api(
     except Exception as _ps_err:
         print(f"[apply_agent] Warning: prestige/gloss scrub failed (continuing): {_ps_err}")
 
+    # Step 4.72 — Claim judge: a second cheap model verifies every generated
+    # claim against the candidate profile + job posting and returns a structured
+    # violations list. Runs after the deterministic scrubs (first echelon) and
+    # BEFORE the language gate (a repair could introduce language drift; the gate
+    # stays the last word). Best-effort — never fatal. See docs/CV_JUDGE_PLAN.md.
+    judge_report = None
+    from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+    if JUDGE_ENABLED:
+        print("[apply_agent] Step 4.72: Claim judge verifying content...")
+        try:
+            from hunter.claim_judge import judge_content, quote_survives, repair_content
+            judge_report = judge_content(content, job_text, base_cv)
+            if judge_report.actionable:
+                for _v in judge_report.actionable:
+                    print(f"[apply_agent] judge: [{_v.severity}] {_v.field}: {_v.reason}")
+                content, _judge_fixes = repair_content(content, judge_report, job_text)
+                for _fix in _judge_fixes:
+                    print(f"[apply_agent] judge-repair: {_fix}")
+                # Re-judge nothing here (one round); surviving fabrications drive
+                # warn/block. Recompute against the repaired content cheaply by
+                # checking which flagged quotes still appear verbatim.
+                _survivors = [
+                    _v for _v in judge_report.fabrications
+                    if quote_survives(content, _v.field, _v.quote)
+                ]
+                if JUDGE_MODE in ("warn", "block") and judge_report.actionable:
+                    notify(judge_report.telegram_summary(url))
+                if JUDGE_MODE == "block" and _survivors:
+                    notify(
+                        f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
+                        f"🔗 {url}\n"
+                        + "\n".join(f"• {v.field}: {v.reason[:100]}" for v in _survivors[:3])
+                    )
+                    print(f"[apply_agent] ABORT — claim judge blocked delivery: {url}")
+                    sys.exit(0)
+        except SystemExit:
+            raise
+        except Exception as _judge_err:
+            print(f"[apply_agent] Warning: claim judge failed (continuing): {_judge_err}")
+
     # Step 4.75 — Language enforce-gate: each _en field must be clean English and
     # each _pl field clean Polish. Polish postings cause the ATS loop to inject
     # Polish keywords into resume_en; here we repair by translating from the clean
@@ -486,6 +526,16 @@ def main_api(
     content_path = output_folder / "content.json"
     content_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[apply_agent] Wrote {content_path}")
+
+    # Audit trail for tuning the judge prompt: persist findings whenever any.
+    if judge_report is not None and judge_report.violations:
+        try:
+            (output_folder / "judge_report.json").write_text(
+                json.dumps(judge_report.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write judge_report.json: {e}")
 
     job_posting_path = output_folder / "job_posting.txt"
     try:

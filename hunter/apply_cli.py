@@ -321,6 +321,64 @@ def main_cli(
                     _scrub_fixes.extend(_gloss_fixes)
                     for _line in _scrub_fixes:
                         print(f"[apply_agent] content-scrub: {_line}")
+
+                    # Claim judge (parity with the API pipeline): verify claims
+                    # against profile + posting between the scrubs and the language
+                    # gate. Any repair joins _scrub_fixes → triggers the rewrite +
+                    # doc-regeneration path below. A surviving fabrication in
+                    # JUDGE_MODE=block deletes the docs and aborts.
+                    from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+                    if JUDGE_ENABLED:
+                        try:
+                            from hunter.claim_judge import (
+                                judge_content,
+                                quote_survives,
+                                repair_content,
+                            )
+                            _jreport = judge_content(_cli_content, job_text or "")
+                            if _jreport.violations:
+                                try:
+                                    (folder_path / "judge_report.json").write_text(
+                                        json.dumps(_jreport.to_dict(), ensure_ascii=False, indent=2),
+                                        encoding="utf-8",
+                                    )
+                                except OSError:
+                                    pass
+                            if _jreport.actionable:
+                                _cli_content, _jfixes = repair_content(
+                                    _cli_content, _jreport, job_text or ""
+                                )
+                                for _line in _jfixes:
+                                    print(f"[apply_agent] judge-repair: {_line}")
+                                _scrub_fixes.extend(_jfixes)
+                                if JUDGE_MODE in ("warn", "block"):
+                                    notify(_jreport.telegram_summary(url))
+                                _survivors = [
+                                    _v for _v in _jreport.fabrications
+                                    if quote_survives(_cli_content, _v.field, _v.quote)
+                                ]
+                                if JUDGE_MODE == "block" and _survivors:
+                                    for _f in (
+                                        list(folder_path.glob("*.pdf"))
+                                        + list(folder_path.glob("*.docx"))
+                                    ):
+                                        try:
+                                            _f.unlink()
+                                        except OSError:
+                                            pass
+                                    notify(
+                                        f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
+                                        f"🔗 {url}\n"
+                                        + "\n".join(
+                                            f"• {v.field}: {v.reason[:100]}"
+                                            for v in _survivors[:3]
+                                        )
+                                    )
+                                    print("[apply_agent] ABORT — claim judge blocked delivery (CLI)")
+                                    return
+                        except Exception as _je:
+                            print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
+
                     _posting_lang = detect_posting_language(job_text or "")
                     _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:

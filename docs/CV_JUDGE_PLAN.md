@@ -1,6 +1,6 @@
 # CV Claim-Judge Plan — LLM-as-judge verification pass (Roadmap Phase C)
 
-Status: PLANNED
+Status: M1–M3 IMPLEMENTED (shipping in `JUDGE_MODE=warn`); M4 rollout pending
 Context: `docs/PROJECT_REVIEW_2026-06.md`, Phase C.
 
 ---
@@ -175,45 +175,52 @@ timeout is 900 s.
 
 ## Implementation milestones
 
-### M1 — Judge core (report-only), no pipeline wiring
+### M1 — Judge core (report-only), no pipeline wiring ✅ DONE (2026-06-12)
 
-- [ ] `prompts/judge_rules.md` — system prompt per the structure above; seed
-      the few-shot examples from the two real prod incidents (PeopleVibe
-      "Fortune 500", DORA compliance case) so the judge anchors on real data.
-- [ ] `hunter/claim_judge.py`: `Violation`, `JudgeReport`, `judge_content()`,
-      `_validate_violations()` (verbatim-quote check + dotted-path resolver),
-      `_iter_judged_fields(content)` helper.
-- [ ] Config: `JUDGE_ENABLED`, `JUDGE_MODEL`, `JUDGE_MODE`,
+- [x] `prompts/judge_rules.md` — system prompt with the ground-truth definition,
+      violation taxonomy (fabrication/exaggeration/style), and the adjacent-claims
+      policy carve-out; examples seeded from the real Fortune 500 + DORA incidents.
+- [x] `hunter/claim_judge.py`: `Violation`, `JudgeReport`, `judge_content()`,
+      `_parse_violations()` (verbatim-quote check; the planned `_validate_violations`
+      name) + `_resolve_path()` dotted-path resolver, `iter_judged_fields()` helper
+      (public, not `_`-prefixed). Added `quote_survives()` for the cheap post-repair
+      re-check the pipeline needs.
+- [x] Config: `JUDGE_ENABLED`, `JUDGE_MODEL`, `JUDGE_MODE`,
       `JUDGE_MAX_REPAIR_ROUNDS` in `hunter/config.py`.
-- [ ] Tests (`tests/test_claim_judge.py`), `call_llm` mocked:
-      prompt assembly includes profile/posting/content; violations with
-      non-matching quotes are dropped; dotted-path resolution incl.
-      `experience[i].bullets[j]`; judge exception → empty passing report.
+- [x] Tests (`tests/test_claim_judge.py`), `call_llm` mocked: field flattening,
+      non-verbatim/unknown-field/bad-severity findings dropped, dotted-path
+      resolution incl. `experience[i].bullets[j]`, judge exception → empty
+      passing report.
 
-### M2 — Repair tier
+### M2 — Repair tier ✅ DONE (2026-06-12)
 
-- [ ] `repair_content()`: deterministic clause-drop (reuse/extract the
-      sentence-drop helpers from `_strip_prestige_claims` — this is also the
-      first concrete step of roadmap Phase A.1's scrub extraction), LLM rewrite
-      fallback for broken fields, `validate_content()` guard.
-- [ ] Tests: drop preserves surrounding sentence; full-field fabrication routes
-      to rewrite; role-count regression rejects the repair; `style` severity is
-      never repaired.
+- [x] `repair_content()`: connector-aware deterministic clause-drop (`_drop_quote`
+      — keeps the honest preceding clause, e.g. "...300+ German banks and Fortune
+      500 firms" → "...300+ German banks"), single targeted LLM rewrite
+      (`_llm_rewrite`) for fields a drop would empty, `validate_content()`
+      role-count guard that discards a structure-worsening repair.
+      Note: `_drop_quote` is keyed off the exact judged `quote` rather than a term
+      regex, so it's a sibling of `_scrub_prestige_text` not a literal reuse;
+      extracting a shared clause-drop helper is left to roadmap Phase A.1.
+- [x] Tests: drop preserves the honest clause + collapses commas; structure-
+      worsening repair rejected (returns original); `style` severity never repaired;
+      end-to-end judge→repair on a mocked Fortune 500 finding.
 
-### M3 — Pipeline wiring (mode=report → warn)
+### M3 — Pipeline wiring (mode=report → warn) ✅ DONE (2026-06-12)
 
-- [ ] `apply_api.py` Step 4.72 + `judge_report.json` artifact.
-- [ ] `apply_cli.py` post-process insertion (fix → rewrite + regen via the
-      existing `_scrub_fixes` path).
-- [ ] Telegram notify on findings in `warn` mode (template mirrors the QA
-      notify; includes top-3 violations).
-- [ ] Wiring tests in the style of the existing scrub-wiring tests (both
-      pipelines call the judge between scrubs and the language gate; judge
-      failure does not break the pipeline).
-- [ ] Verify with `tools/preview_apply.py` against
-      `tests/fixtures/sample_jobs/` (all tracks) — expected: zero or near-zero
-      findings on clean fixtures; then against the two archived prod
-      content.json incidents — expected: both caught.
+- [x] `apply_api.py` Step 4.72 + `judge_report.json` artifact (written in Step 6
+      where `output_folder` exists).
+- [x] `apply_cli.py` post-process insertion (fix → joins `_scrub_fixes` → existing
+      rewrite + regen path; `block` reuses delete-docs+return).
+- [x] Telegram notify on findings in `warn`/`block` mode (top-5 actionable, via
+      `JudgeReport.telegram_summary`).
+- [x] Unit + integration tests (28 total); both pipelines compile + ruff-clean;
+      full suite 1311 green. (Function-level coverage mirrors the existing
+      scrub-test convention — direct function tests, not heavy pipeline mocks.)
+- [ ] **TODO (M3 follow-up):** verify with `tools/preview_apply.py` against
+      `tests/fixtures/sample_jobs/` (clean → near-zero findings) and against the
+      two archived prod content.json incidents (both caught). Deferred —
+      preview needs live API/CLI credentials.
 
 ### M4 — Rollout & tightening
 
