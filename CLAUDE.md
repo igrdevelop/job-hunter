@@ -47,11 +47,11 @@ hunter/main.py              Core hunt loop:
                             |
          +------------------+--------------------+
          v                  v                    v
-hunter/sources/        hunter/tracker.py     apply_agent.py (1297 lines)
-  17 sources             tracker.xlsx r/w       |
-  (see list below)       dedup logic         job_fetch/       -> fetch job text
-                         SKIP/FAIL/MANUAL      22 fetchers
-                         add_applied()         html_fallback.py
+hunter/sources/        hunter/tracker.py     apply_agent.py (thin CLI entry)
+  21 sources             tracker.db r/w         |
+  (see list below)       dedup logic         apply_api / apply_cli -> run pipeline
+                         SKIP/FAIL/MANUAL      apply_shared.py       (shared helpers)
+                         add_applied()         sources.fetch_job_text() -> job text
                                                 |
                                                 v
 hunter/services/                             llm_client.py   -> call LLM API
@@ -132,13 +132,15 @@ hunter/
   filters.py                Central filter: keywords, level, location, patterns, React-only, German
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
   telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
-  tracker.py                tracker.xlsx CRUD: dedup, skip, fail, applied, manual (~980 lines)
+  tracker.py                tracker.db (SQLite) CRUD: dedup, skip, fail, applied, manual (~1250 lines)
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
   lang_guard.py             Language routing + contamination guard: detect_posting_language()
                             (PL/EN by token density) + Polish-in-English / English-in-Polish
                             detection (diacritics + lexicon + suffix + bilingual gloss). Feeds
                             the apply enforce-gate (enforce_language_separation in apply_shared)
+  resume_sanitizer.py       Strip LLM artifacts/foreign-language leakage from generated resume text
+  content_qa.py             Post-generation QA checks on content.json (warns on quality issues)
   expired_check.py          Expired job detection (regex patterns)
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
