@@ -21,24 +21,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Regex helpers (same patterns as Gate 8 in apply_shared.py)
+# Polish-contamination detection delegates to hunter.lang_guard (see _has_polish),
+# the SAME allowlist-aware detector the apply enforce-gate uses. Sharing it keeps QA
+# from warning about something the gate considers clean — notably Polish place names
+# (Wrocław, Kraków) that legitimately appear in an English CV for a Poland-based
+# candidate. A blunt diacritic regex here used to false-positive on the candidate's
+# own city in every cover letter.
 # ---------------------------------------------------------------------------
-_PL_DIACRITICS_RE = re.compile(r"[ąęóśźżćńł]", re.IGNORECASE)
-_PL_WORDS_RE = re.compile(
-    r"\b(się|przez|oraz|który|która|które|tego|czy|już"
-    r"|pisanie|pokrywanie|projektowanie|programowaniu|programowanie|rozwiązań"
-    r"|frontendowych|jednostkowych|podobnymi|kontroli|wersji|systemu|wiedzy"
-    r"|technicznej|doświadczenia|doświadczenie|wymagania|umiejętność)\b",
-    re.IGNORECASE,
-)
-# IT terms that look like Polish words — strip before checking
-_IT_TERMS_RE = re.compile(
-    r"\b(Jest|Angular|React|TypeScript|JavaScript|NgRx|RxJS|Nx|Node\.?js"
-    r"|Jasmine|Karma|Jenkins|Webpack|Docker|GitHub|GitLab|CI/CD|SCSS|Bootstrap"
-    r"|AG\s*Grid|Signals|Agile|Scrum|SAFe|REST|API|JSON|HTML|CSS|WCAG"
-    r"|Cypress|Playwright|Next\.?js|NestJS|Redux|SonarQube|Jasmine)\b",
-    re.IGNORECASE,
-)
 _EN_SENTENCE_RE = re.compile(
     r"\b(I am writing|I would like|I have been|As a Senior|I look forward"
     r"|I bring|I have worked|In my previous|Dear Hiring|With over)\b",
@@ -130,15 +119,19 @@ def _check_role_count(resume_en: dict[str, Any]) -> QACheck:
     )
 
 
-def _strip_it_terms(text: str) -> str:
-    """Remove known IT terms before language-mixing checks to avoid false positives."""
-    return _IT_TERMS_RE.sub("", text)
+def _has_polish(text: str) -> str | None:
+    """Return the first Polish-contamination fragment in `text`, or None.
 
+    Delegates to ``hunter.lang_guard.polish_fragments`` (strong signals only) — the
+    same detector the apply enforce-gate uses to decide whether to block delivery.
+    It allowlists tech terms AND Polish place names, so the candidate's own city
+    ("Wrocław") or a Polish office location in an otherwise-English document is not
+    misflagged as contamination. QA must not disagree with the gate that ships docs.
+    """
+    from hunter.lang_guard import polish_fragments
 
-def _has_polish(text: str) -> re.Match | None:
-    """Return first Polish match after stripping IT terms, or None."""
-    cleaned = _strip_it_terms(text)
-    return _PL_DIACRITICS_RE.search(cleaned) or _PL_WORDS_RE.search(cleaned)
+    frags = polish_fragments(text or "", soft=False)
+    return frags[0] if frags else None
 
 
 def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
@@ -154,7 +147,7 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
     summary = resume_en.get("summary") or ""
     m = _has_polish(summary)
     if m:
-        hits.append(f"summary: '{m.group()[:30]}'")
+        hits.append(f"summary: '{m[:30]}'")
 
     # Skills — all skill fields concatenated
     skills = resume_en.get("skills") or {}
@@ -164,7 +157,7 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
         text = str(skill_val) if skill_val else ""
         m = _has_polish(text)
         if m:
-            hits.append(f"skills.{skill_key}: '{m.group()[:40]}'")
+            hits.append(f"skills.{skill_key}: '{m[:40]}'")
 
     # Experience bullets
     for entry in (resume_en.get("experience") or []):
@@ -172,7 +165,7 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
         for bullet in (entry.get("bullets") or []):
             m = _has_polish(bullet)
             if m:
-                hits.append(f"{company} bullet: '{m.group()[:30]}'")
+                hits.append(f"{company} bullet: '{m[:30]}'")
                 break  # one per role
 
     ok = len(hits) == 0
@@ -186,22 +179,19 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
 def _check_cover_letter_en_language(content: dict[str, Any]) -> QACheck:
     """cover_letter_en must be in English."""
     cl = content.get("cover_letter_en") or ""
-    cleaned = _strip_it_terms(cl)
-    has_pl = bool(_PL_DIACRITICS_RE.search(cleaned) or _PL_WORDS_RE.search(cleaned))
+    frag = _has_polish(cl)
     has_en = bool(_EN_SENTENCE_RE.search(cl) or re.search(r"\bDear\b", cl, re.IGNORECASE))
-    if has_pl and not has_en:
-        m = _PL_DIACRITICS_RE.search(cleaned) or _PL_WORDS_RE.search(cleaned)
+    if frag and not has_en:
         return QACheck(
             name="cover_letter_en in English",
             passed=False,
-            detail=f"Appears to be in Polish — found: '{m.group()[:40]}'",
+            detail=f"Appears to be in Polish — found: '{frag[:40]}'",
         )
-    if has_pl:
-        m = _PL_DIACRITICS_RE.search(cleaned) or _PL_WORDS_RE.search(cleaned)
+    if frag:
         return QACheck(
             name="cover_letter_en in English",
             passed=False,
-            detail=f"Polish mixed into EN cover letter: '{m.group()[:40]}'",
+            detail=f"Polish mixed into EN cover letter: '{frag[:40]}'",
         )
     return QACheck(name="cover_letter_en in English", passed=True)
 
