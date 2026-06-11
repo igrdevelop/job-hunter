@@ -19,8 +19,10 @@ from hunter.config import (
     AUTO_APPLY, APPLY_AGENT_PATH, APPLY_USE_CLI,
     LLM_API_KEY, LLM_PROVIDER, LLM_MODEL,
     APPLY_DELAY_SEC, MAX_JOBS_PER_RUN, APPLY_AGENT_TIMEOUT_SEC,
+    GMAIL_MAX_RESULTS,
 )
-from hunter.filters import apply_filters_with_stats
+from hunter.filters import apply_filters_with_stats, classify_job
+from hunter.gmail_report import build_gmail_report, JobOutcome
 from hunter.models import Job
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
@@ -114,6 +116,7 @@ async def _run_hunt_impl(
     # ── Step 1: Fetch ────────────────────────────────────────────────────────
     all_jobs: list[Job] = []
     fetch_stats: dict[str, int | str] = {}
+    gmail_source = None  # captured for its per-email diagnostics (last_email_log)
     for source in active_sources:
         try:
             jobs = await asyncio.to_thread(source.search)
@@ -124,11 +127,13 @@ async def _run_hunt_impl(
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
 
-        # Gmail: upload the log snapshot to Drive right after the scan so the
-        # Drive copy reflects the full email pipeline trace (who sent, which
-        # URLs were extracted, enrichment results) while the rest of the hunt
-        # continues.  Fire-and-forget via create_task — doesn't block fetching.
+        # Gmail: capture the source for its per-email diagnostics, and upload the
+        # log snapshot to Drive right after the scan so the Drive copy reflects the
+        # full email pipeline trace (who sent, which URLs were extracted, enrichment
+        # results) while the rest of the hunt continues.  Fire-and-forget via
+        # create_task — doesn't block fetching.
         if source.name == "gmail":
+            gmail_source = source
             asyncio.get_event_loop().create_task(
                 _upload_log_to_drive(),
                 name="gmail_log_upload",
@@ -144,6 +149,18 @@ async def _run_hunt_impl(
     filtered, filter_reasons = apply_filters_with_stats(all_jobs)
     filtered_out = len(all_jobs) - len(filtered)
     logger.info(f"[Hunt] After filter: {len(filtered)} jobs")
+
+    # Per-email report bookkeeping: record the fate of every Gmail-sourced job.
+    # Filtered-out gmail jobs are tagged here with their exact filter reason
+    # (classify_job is the same per-job core apply_filters used above); taken /
+    # deduplicated ones are tagged in the dedup loop below.
+    gmail_outcomes: list[JobOutcome] = []
+    filtered_ids = {id(j) for j in filtered}
+    for j in all_jobs:
+        if j.source.startswith("gmail_") and id(j) not in filtered_ids:
+            gmail_outcomes.append(
+                JobOutcome.from_job(j, "filtered", classify_job(j))
+            )
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple
@@ -168,14 +185,19 @@ async def _run_hunt_impl(
     dup_ct = 0
     dup_cooldown = 0
     for j in filtered:
+        is_gmail = j.source.startswith("gmail_")
         norm = normalize_url(j.url)
         if norm in known_urls or norm in seen_urls_this_run:
             dup_url += 1
+            if is_gmail:
+                gmail_outcomes.append(JobOutcome.from_job(j, "dup_url"))
             continue
         key = dedup_key(j.company, j.title)
         if key in known_ct or key in seen_ct_this_run:
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
+            if is_gmail:
+                gmail_outcomes.append(JobOutcome.from_job(j, "dup_ct"))
             continue
         # Fuzzy title dedup — catches Gmail-enriched variants such as
         # "Remote Angular Developer" vs stored "Angular Developer" (same company).
@@ -187,48 +209,27 @@ async def _run_hunt_impl(
                     f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}"
                 )
                 dup_ct += 1
+                if is_gmail:
+                    gmail_outcomes.append(JobOutcome.from_job(j, "dup_ct"))
                 continue
         except Exception as _fe:
             logger.debug("[Hunt] fuzzy CT check failed: %s", _fe)
         if await asyncio.to_thread(is_in_cooldown, j.company, j.title):
             logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
             dup_cooldown += 1
+            if is_gmail:
+                gmail_outcomes.append(JobOutcome.from_job(j, "cooldown"))
             continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
         new_jobs.append(j)
+        if is_gmail:
+            gmail_outcomes.append(JobOutcome.from_job(j, "taken"))
 
     logger.info(
         f"[Hunt] New: {len(new_jobs)} "
         f"(dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
     )
-
-    # ── Gmail breakdown ──────────────────────────────────────────────────────
-    gmail_section = ""
-    gmail_jobs = [j for j in new_jobs if j.source.startswith("gmail_")]
-    if gmail_jobs:
-        # Group by sub-source (gmail_linkedin, gmail_justjoin, etc.)
-        from collections import defaultdict
-        by_source: dict[str, list[Job]] = defaultdict(list)
-        for j in gmail_jobs:
-            by_source[j.source].append(j)
-
-        gmail_lines = ["\n<b>--- Gmail ---</b>"]
-        for src, jobs in sorted(by_source.items()):
-            aggregator = src.replace("gmail_", "")
-            gmail_lines.append(f"  <b>{aggregator}</b> — {len(jobs)} jobs:")
-            # Group by email subject
-            by_subject: dict[str, list[Job]] = defaultdict(list)
-            for j in jobs:
-                by_subject[j.title].append(j)
-            for subject, sjobs in by_subject.items():
-                subj_short = subject[:60] + ("…" if len(subject) > 60 else "")
-                gmail_lines.append(f"    📧 {subj_short} ({len(sjobs)})")
-                for j in sjobs[:5]:  # max 5 URLs per email
-                    gmail_lines.append(f"      🔗 {j.url}")
-                if len(sjobs) > 5:
-                    gmail_lines.append(f"      … {len(sjobs) - 5} more")
-        gmail_section = "\n".join(gmail_lines)
 
     # ── Send detailed report ─────────────────────────────────────────────────
     report = (
@@ -250,9 +251,19 @@ async def _run_hunt_impl(
         f"<b>--- Dedup ---</b>\n"
         f"  {len(filtered)} passed -> <b>{len(new_jobs)}</b> new\n"
         f"  Skipped: {dup_url} by URL, {dup_ct} by company+title"
-        + gmail_section
     )
     await send_text(context, report)
+
+    # ── Per-email Gmail report (separate message(s) to avoid 4096 truncation) ──
+    if gmail_source is not None:
+        chunks = build_gmail_report(
+            getattr(gmail_source, "last_email_log", []),
+            getattr(gmail_source, "last_capped", False),
+            GMAIL_MAX_RESULTS,
+            gmail_outcomes,
+        )
+        for chunk in chunks:
+            await send_text(context, chunk)
 
     # ── Step 4: Act ──────────────────────────────────────────────────────────
     if not new_jobs:
