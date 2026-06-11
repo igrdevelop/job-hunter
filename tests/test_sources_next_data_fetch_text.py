@@ -188,6 +188,56 @@ def test_theprotocol_fetch_text_from_json_ld() -> None:
     assert "Do cool things" in out
 
 
+def test_theprotocol_fetch_text_from_next_data_offer() -> None:
+    """Detail pages carry the body in __NEXT_DATA__.props.pageProps.offer."""
+    next_data = {
+        "props": {
+            "pageProps": {
+                "offer": {
+                    "language": "pl",
+                    "attributes": {
+                        "title": {"value": "Frontend Developer (K/M)"},
+                        "employer": {"name": "Polska Grupa Lotnicza"},
+                        "workplaces": [{"location": "Warszawa, Włochy", "city": "Warszawa"}],
+                        "employment": {
+                            "detailedWorkModes": [{"name": "praca zdalna"}],
+                        },
+                    },
+                    "textSections": [
+                        {
+                            "type": "responsibilities",
+                            "plainText": "Projektowanie i implementacja nowych funkcjonalności.",
+                            "elements": [],
+                        },
+                        {
+                            "type": "requirements-expected",
+                            "plainText": "Bardzo dobra znajomość frameworka Angular oraz RxJS.",
+                            "elements": [],
+                        },
+                    ],
+                }
+            }
+        }
+    }
+    html = (
+        '<html><body><script id="__NEXT_DATA__" type="application/json">'
+        f"{json.dumps(next_data)}</script></body></html>"
+    )
+    with patch(
+        "hunter.sources.theprotocol._scraper.get",
+        return_value=_mk_html_response(html),
+    ):
+        out = TheProtocolSource().fetch_text("https://theprotocol.it/praca/x,oferta,abc")
+    assert "Frontend Developer (K/M)" in out
+    assert "Polska Grupa Lotnicza" in out
+    assert "Warszawa" in out
+    assert "Responsibilities" in out
+    assert "Projektowanie i implementacja" in out
+    assert "Requirements" in out
+    assert "znajomość frameworka Angular" in out
+    assert len(out) > 100
+
+
 def test_theprotocol_fetch_text_falls_back_on_network_error() -> None:
     with patch(
         "hunter.sources.theprotocol._scraper.get",
