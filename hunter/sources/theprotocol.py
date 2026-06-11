@@ -129,6 +129,99 @@ def _format_job_posting_ld(jp: dict) -> str:
     return text
 
 
+_SECTION_HEADERS = {
+    "technologies-expected": "Technologies",
+    "technologies-optional": "Optional Technologies",
+    "responsibilities": "Responsibilities",
+    "requirements-expected": "Requirements",
+    "requirements-optional": "Nice to have",
+    "offered": "What we offer",
+    "benefits": "Benefits",
+    "about-us-description": "About the company",
+    "training-space": "Development",
+}
+
+
+def _section_text(section: dict) -> str:
+    """Render one offer.textSections entry to plain text."""
+    plain = (section.get("plainText") or "").strip()
+    if plain:
+        return plain
+    elements = section.get("elements")
+    if isinstance(elements, list):
+        parts: list[str] = []
+        for el in elements:
+            if isinstance(el, str):
+                parts.append(el)
+            elif isinstance(el, dict):
+                val = el.get("value") or el.get("text") or ""
+                if val:
+                    parts.append(str(val))
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _try_next_data_offer(html: str) -> str:
+    """Extract the full offer text from __NEXT_DATA__.props.pageProps.offer.
+
+    theprotocol.it detail pages are a Next.js SPA: JSON-LD is only a
+    BreadcrumbList and the visible DOM is JS-rendered, so the job body
+    lives in the SSR JSON under `offer.textSections` (one block per
+    section, each with a `plainText` rendering).
+    """
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', html, re.S)
+    if not m:
+        return ""
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return ""
+
+    offer = data.get("props", {}).get("pageProps", {}).get("offer")
+    if not isinstance(offer, dict):
+        return ""
+
+    attr = offer.get("attributes") or {}
+    parts: list[str] = []
+
+    title = (attr.get("title") or {})
+    title = title.get("value") if isinstance(title, dict) else title
+    if title:
+        parts.append(f"Job Title: {title}")
+
+    employer = attr.get("employer") or {}
+    if isinstance(employer, dict) and employer.get("name"):
+        parts.append(f"Company: {employer['name']}")
+
+    workplaces = attr.get("workplaces") or []
+    if isinstance(workplaces, list) and workplaces:
+        first = workplaces[0] if isinstance(workplaces[0], dict) else {}
+        loc = first.get("location") or first.get("city") or ""
+        if loc:
+            parts.append(f"Location: {loc}")
+
+    employment = attr.get("employment") or {}
+    if isinstance(employment, dict):
+        modes = employment.get("detailedWorkModes") or []
+        mode_names = [m.get("name") for m in modes if isinstance(m, dict) and m.get("name")]
+        if mode_names:
+            parts.append(f"Work mode: {', '.join(mode_names)}")
+
+    sections = offer.get("textSections")
+    if isinstance(sections, list):
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            body = _section_text(section)
+            if not body:
+                continue
+            header = _SECTION_HEADERS.get(section.get("type", ""), section.get("type", ""))
+            parts.append(f"\n--- {header} ---\n{body}")
+
+    text = "\n".join(parts)
+    return text if len(text) > 100 else ""
+
+
 def _try_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -231,6 +324,10 @@ class TheProtocolSource(BaseSource):
         except Exception as e:
             logger.warning(f"[theprotocol] HTTP fetch failed ({e}), trying html_fallback")
             return fetch_html(url)
+
+        text = _try_next_data_offer(html)
+        if text and len(text) > 100:
+            return text
 
         text = _try_json_ld(html)
         if text and len(text) > 100:
