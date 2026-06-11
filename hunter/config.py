@@ -327,6 +327,12 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py
 GMAIL_ENABLED: bool = os.getenv("GMAIL_ENABLED", "false").lower() in ("true", "1", "yes")
+# How far back to scan the inbox for job-alert emails (hours). Slightly over one
+# day bridges the gap between scheduled runs; widen if a run can be skipped.
+GMAIL_LOOKBACK_HOURS: int = int(os.getenv("GMAIL_LOOKBACK_HOURS", "25"))
+# Max alert emails fetched per scan. If a scan hits this ceiling the hunt report
+# warns that emails were truncated (raise this if you subscribe to many alerts).
+GMAIL_MAX_RESULTS: int = int(os.getenv("GMAIL_MAX_RESULTS", "100"))
 # Fetch real title/company/location/salary for each URL extracted from alert emails.
 GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
 # Max parallel HTTP requests during enrichment (global cap, across all hosts)

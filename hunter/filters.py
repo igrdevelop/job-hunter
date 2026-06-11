@@ -448,6 +448,62 @@ def _matches_location(job: Job) -> bool:
     return False
 
 
+# Reason keys emitted by classify_job() / apply_filters_with_stats(). Kept here so
+# callers (e.g. the Gmail hunt report) can rely on a stable, documented vocabulary.
+FILTER_REASONS: tuple[str, ...] = (
+    "title_kw",
+    "require_angular",
+    "level",
+    "exclude_pattern",
+    "react_no_angular",
+    "location",
+    "german",
+    "contract",
+    "relocation",
+)
+
+
+def classify_job(job: Job) -> str | None:
+    """Return the reason a single job is filtered out, or None if it passes.
+
+    The reason string is one of FILTER_REASONS. This is the per-job core that
+    apply_filters_with_stats() aggregates; callers that need the reason for one
+    specific job (the Gmail per-email report) reuse it directly so the report and
+    the filter pipeline can never disagree.
+    """
+    is_gmail = job.source.startswith("gmail_")
+
+    # Title-keyword / require-angular — Gmail bypass (pre-filtered by alerts)
+    if not is_gmail:
+        if not _matches_title_keywords(job.title):
+            return "title_kw"
+        if not _requires_angular_check(job.title):
+            return "require_angular"
+
+    # Hard filters — apply to ALL sources including gmail_*
+    if _is_excluded_level(job.title):
+        return "level"
+    if _is_react_only_title(job.title):
+        return "react_no_angular"
+    if _is_node_only_title(job.title):
+        return "exclude_pattern"
+    if _is_fullstack_without_angular(job.title):
+        return "exclude_pattern"
+    if _matches_exclude_pattern(job.title):
+        return "exclude_pattern"
+    if _is_react_without_angular(job):
+        return "react_no_angular"
+    if not _matches_location(job):
+        return "location"
+    if _is_german_language_required(job):
+        return "german"
+    if _is_unacceptable_contract(job):
+        return "contract"
+    if _requires_relocation(job):
+        return "relocation"
+    return None
+
+
 def apply_filters(jobs: list[Job]) -> list[Job]:
     """Filter jobs — returns passing jobs only. See apply_filters_with_stats for breakdown."""
     return apply_filters_with_stats(jobs)[0]
@@ -473,84 +529,13 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
                         react_no_angular, location, german, contract, relocation
     """
     result = []
-    reasons: dict[str, int] = {
-        "title_kw": 0,
-        "require_angular": 0,
-        "level": 0,
-        "exclude_pattern": 0,
-        "react_no_angular": 0,
-        "location": 0,
-        "german": 0,
-        "contract": 0,
-        "relocation": 0,
-    }
+    reasons: dict[str, int] = {key: 0 for key in FILTER_REASONS}
 
     for job in jobs:
-        is_gmail = job.source.startswith("gmail_")
-
-        # ── Title-keyword / require-angular — Gmail bypass (pre-filtered by alerts) ──
-        if not is_gmail:
-            if not _matches_title_keywords(job.title):
-                reasons["title_kw"] += 1
-                continue
-            if not _requires_angular_check(job.title):
-                reasons["require_angular"] += 1
-                continue
-
-        # ── Hard filters — apply to ALL sources including gmail_* ──────────────────
-
-        # Level/seniority exclusions (intern, manager, tech lead, etc.)
-        if _is_excluded_level(job.title):
-            reasons["level"] += 1
-            continue
-
-        # Title-only React check (P-3.1) — catches "React Developer" from any source
-        if _is_react_only_title(job.title):
-            reasons["react_no_angular"] += 1
-            continue
-
-        # Node.js backend title check (P-5.1) — catches "TypeScript/Node.js Developer"
-        # where 'backend' is absent but the role is clearly BE
-        if _is_node_only_title(job.title):
-            reasons["exclude_pattern"] += 1
-            continue
-
-        # Fullstack without Angular — blocked; fullstack WITH Angular passes
-        # (bare patterns removed from exclude_patterns so this check owns the logic)
-        if _is_fullstack_without_angular(job.title):
-            reasons["exclude_pattern"] += 1
-            continue
-
-        # Exclude-pattern: Java, .NET, Magento, React Native, Node backend …
-        if _matches_exclude_pattern(job.title):
-            reasons["exclude_pattern"] += 1
-            continue
-
-        # Raw-skills React check (needs API data — may be absent for gmail_*)
-        if _is_react_without_angular(job):
-            reasons["react_no_angular"] += 1
-            continue
-
-        # ── Location — uniform check for ALL sources ──────────────────────────────
-        if not _matches_location(job):
-            reasons["location"] += 1
-            continue
-
-        # German language requirement — check full text blob for all sources
-        if _is_german_language_required(job):
-            reasons["german"] += 1
-            continue
-
-        # Part-time / very short contract — check full text blob
-        if _is_unacceptable_contract(job):
-            reasons["contract"] += 1
-            continue
-
-        # Explicit relocation requirement — check full text blob
-        if _requires_relocation(job):
-            reasons["relocation"] += 1
-            continue
-
-        result.append(job)
+        reason = classify_job(job)
+        if reason is None:
+            result.append(job)
+        else:
+            reasons[reason] += 1
 
     return result, reasons

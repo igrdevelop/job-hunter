@@ -12,6 +12,10 @@ class Job:
     url: str               # canonical URL — used as unique key for dedup
     source: str            # "justjoin" | "linkedin" | "nofluffjobs" | "pracuj"
     raw: dict = field(default_factory=dict, repr=False)  # original API response for debugging
+    # Gmail provenance (gmail_* sources only): which alert email this URL came from.
+    # Keys: msg_id, date (datetime|None), subject, sender, aggregator. Empty for
+    # all non-gmail sources. Lets the hunt report group vacancies per email.
+    email_meta: dict = field(default_factory=dict, repr=False)
 
     def job_id(self) -> str:
         """Short hash of URL — used as callback_data key in Telegram (max 64 bytes)."""
