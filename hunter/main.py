@@ -19,7 +19,6 @@ from hunter.config import (
     AUTO_APPLY, APPLY_AGENT_PATH, APPLY_USE_CLI,
     LLM_API_KEY, LLM_PROVIDER, LLM_MODEL,
     APPLY_DELAY_SEC, MAX_JOBS_PER_RUN, APPLY_AGENT_TIMEOUT_SEC,
-    TRACKER_PATH,
 )
 from hunter.filters import apply_filters_with_stats
 from hunter.models import Job
@@ -29,7 +28,7 @@ from hunter.tracker import (
     get_known_urls, get_known_company_titles,
     dedup_key, normalize_url,
     add_failed, get_failed_jobs, remove_failed, increment_fail_count,
-    is_known, is_in_cooldown, MAX_FAIL_RETRIES,
+    is_in_cooldown, MAX_FAIL_RETRIES,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -199,7 +198,6 @@ async def _run_hunt_impl(
         seen_ct_this_run.add(key)
         new_jobs.append(j)
 
-    skipped_total = dup_url + dup_ct + dup_cooldown
     logger.info(
         f"[Hunt] New: {len(new_jobs)} "
         f"(dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"

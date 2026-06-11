@@ -35,7 +35,7 @@ async def scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("[scheduled_check_expired] Nothing expired.")
         return
 
-    lines = [f"🌙 <b>Nightly expired check</b>\n"]
+    lines = ["🌙 <b>Nightly expired check</b>\n"]
     lines.append(f"⏭ Expired: <b>{len(expired)}</b>")
     for item in expired:
         lines.append(f"  • {item['company']} — {item['title']}")

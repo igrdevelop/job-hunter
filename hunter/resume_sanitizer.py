@@ -70,8 +70,8 @@ _MONTH_MAP: dict[str, int] = {
     # English
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-    # Polish
-    "sty": 1, "lut": 2, "mar": 3, "kwi": 4, "maj": 5, "cze": 6,
+    # Polish (March "mar" already covered by the English row above)
+    "sty": 1, "lut": 2, "kwi": 4, "maj": 5, "cze": 6,
     "lip": 7, "sie": 8, "wrz": 9, "paź": 10, "paz": 10, "lis": 11, "gru": 12,
 }
 

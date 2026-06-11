@@ -46,8 +46,8 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
             token_file.write_text(creds.to_json())
         else:
             raise RuntimeError(
-                f"gsheets_token.json is missing or invalid. "
-                f"Run: python tools/gsheets_auth.py"
+                "gsheets_token.json is missing or invalid. "
+                "Run: python tools/gsheets_auth.py"
             )
 
     return build("sheets", "v4", credentials=creds)

@@ -444,6 +444,8 @@ GSHEETS_ENABLED=true
 
 - **Never commit** `.env`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`
 - Always test syntax after edits: `python -m compileall .`
+- Run `ruff check .` before committing — CI gates on it (config in `pyproject.toml`,
+  scoped to `hunter/` + entry scripts; `tests/`/`tools/` excluded for now)
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
 - Candidate profile single source of truth: `prompts/candidate_profile.md`

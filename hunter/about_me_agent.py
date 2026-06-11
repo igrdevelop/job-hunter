@@ -128,7 +128,7 @@ BANNED phrases: {banned}
 """
 
     try:
-        from llm_client import call_llm, LLMError
+        from llm_client import call_llm
         result = call_llm(
             system_prompt=_SYSTEM_PROMPT,
             user_message=user_message,

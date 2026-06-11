@@ -587,8 +587,8 @@ def validate_startup() -> dict:
         return {
             "ok": False,
             "error": (
-                f"gsheets_token.json not found. "
-                f"Run: python tools/gsheets_auth.py"
+                "gsheets_token.json not found. "
+                "Run: python tools/gsheets_auth.py"
             ),
             "sheet_url": None,
         }

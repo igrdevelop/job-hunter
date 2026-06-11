@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 from hunter.config import (
     GENERATE_DOCS_PATH,
@@ -24,7 +23,6 @@ from hunter.config import (
     PROJECT_DIR,
 )
 from hunter.apply_shared import (
-    APPLY_MANUAL_EXIT_CODE,
     APPLY_RATE_LIMITED_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     PROMPTS_DIR,
@@ -550,5 +548,5 @@ def main_api(
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n"
             f"Run manually: python generate_docs.py \"{content_path}\""
         )
-        print(f"\n[apply_agent] WARNING: No .docx/.pdf files found, but content.json is saved.")
+        print("\n[apply_agent] WARNING: No .docx/.pdf files found, but content.json is saved.")
         sys.exit(1)
