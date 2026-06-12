@@ -142,9 +142,10 @@ hunter/
   resume_sanitizer.py       Strip LLM artifacts/foreign-language leakage from generated resume text
   content_qa.py             Post-generation QA checks on content.json (warns on quality issues)
   funnel.py                 Application funnel analytics over tracker.db: compute_funnel(days?) →
-                            tracked→generated→sent→responded, overall + per source (source inferred
-                            from URL via each source's matches_url + registered-domain fallback).
-                            Feeds the /funnel command
+                            tracked→generated→sent→confirmed→answered, overall + per source (source
+                            inferred from URL via each source's matches_url + registered-domain
+                            fallback). Confirmed = ATS ack (confirmation col, stamped by
+                            /check_responses); Answered = human reply (answer col). Feeds /funnel
   expired_check.py          Expired job detection (regex patterns)
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
@@ -602,7 +603,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
-| 2026-06-12 | opus | Funnel analytics D.1 (Phase D, branch feat/funnel-analytics; roadmap docs/PROJECT_REVIEW_2026-06.md). The bot applied jobs but never showed conversion. New `hunter/funnel.py`: `compute_funnel(days?)` aggregates tracker.db into tracked→generated→sent→responded both overall and per source. Source isn't stored on the row (tracker predates it) so it's inferred from the URL via each registered source's `matches_url` (cached) with a registered-domain fallback. Stage rules: generated = ats_status holds a numeric % (CV built); sent = `sent` column is a real value (not blank/dash/EXPIRED); responded = `answer` or `confirmation` non-empty. Optional day-window filters by the `date` column (undated rows excluded from a window). New `/funnel [days]` command (`commands/funnel.py`) renders overall counts + sent/response rates + per-source breakdown (tracked/gen/sent/resp, sorted by sent). 14 new tests (test_funnel, 1297 total); ruff clean. Read-only over tracker.db — no schema change, no CV generation. D.2 (stamp /check_responses replies into the answer column to power the responded stage) is the follow-up. |
+| 2026-06-12 | opus | Funnel analytics D.1 (Phase D, branch feat/funnel-analytics; roadmap docs/PROJECT_REVIEW_2026-06.md). The bot applied jobs but never showed conversion. New `hunter/funnel.py`: `compute_funnel(days?)` aggregates tracker.db into tracked→generated→sent→responded both overall and per source. Source isn't stored on the row (tracker predates it) so it's inferred from the URL via each registered source's `matches_url` (cached) with a registered-domain fallback. Stage rules: generated = ats_status holds a numeric % (CV built); sent = `sent` column is a real value (not blank/dash/EXPIRED); responded = `answer` or `confirmation` non-empty. Optional day-window filters by the `date` column (undated rows excluded from a window). New `/funnel [days]` command (`commands/funnel.py`) renders overall counts + sent/response rates + per-source breakdown (tracked/gen/sent/resp, sorted by sent). 14 new tests (test_funnel, 1297 total); ruff clean. Read-only over tracker.db — no schema change, no CV generation. |
+| 2026-06-12 | opus | Funnel analytics D.2 (same branch). Split the conflated terminal stage into two: **Confirmed** (ATS/board automated acknowledgement — the `confirmation` column already stamped by `/check_responses`→`email_response_checker.run_confirmation_check`→`tracker.set_confirmation`) vs **Answered** (human reply: rejection/interview/offer — the `answer` column). `FunnelCounts` now tracks `confirmed`/`answered` with `confirm_rate`/`answer_rate` (both over sent); `/funnel` shows both stages + per-source `tracked/gen/sent/conf/ans`. The /check_responses→tracker link already existed (set_confirmation), so the Confirmed stage is populated end-to-end with no new wiring. Tests updated (14 in test_funnel; 1297 total). |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |

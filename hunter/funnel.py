@@ -93,8 +93,14 @@ def _is_sent(sent: str) -> bool:
     return (sent or "").strip().lower() not in _NON_SENT
 
 
-def _is_responded(answer: str, confirmation: str) -> bool:
-    return bool((answer or "").strip()) or bool((confirmation or "").strip())
+def _is_confirmed(confirmation: str) -> bool:
+    """An ATS / board acknowledged the application (automated receipt)."""
+    return bool((confirmation or "").strip())
+
+
+def _is_answered(answer: str) -> bool:
+    """A human reply landed (rejection / interview / offer) — the real signal."""
+    return bool((answer or "").strip())
 
 
 # ── Report dataclasses ────────────────────────────────────────────────────────
@@ -104,21 +110,27 @@ class FunnelCounts:
     tracked: int = 0
     generated: int = 0
     sent: int = 0
-    responded: int = 0
+    confirmed: int = 0   # ATS / board automated acknowledgement
+    answered: int = 0    # human reply (rejection / interview / offer)
 
-    def add(self, *, generated: bool, sent: bool, responded: bool) -> None:
+    def add(self, *, generated: bool, sent: bool, confirmed: bool, answered: bool) -> None:
         self.tracked += 1
         self.generated += int(generated)
         self.sent += int(sent)
-        self.responded += int(responded)
+        self.confirmed += int(confirmed)
+        self.answered += int(answered)
 
     @property
     def sent_rate(self) -> float:
         return round(100 * self.sent / self.generated, 1) if self.generated else 0.0
 
     @property
-    def response_rate(self) -> float:
-        return round(100 * self.responded / self.sent, 1) if self.sent else 0.0
+    def confirm_rate(self) -> float:
+        return round(100 * self.confirmed / self.sent, 1) if self.sent else 0.0
+
+    @property
+    def answer_rate(self) -> float:
+        return round(100 * self.answered / self.sent, 1) if self.sent else 0.0
 
 
 @dataclass
@@ -165,12 +177,15 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
 
         generated = _is_generated(r["ats_status"])
         sent = _is_sent(r["sent"])
-        responded = _is_responded(r["answer"], r["confirmation"])
+        confirmed = _is_confirmed(r["confirmation"])
+        answered = _is_answered(r["answer"])
 
-        report.overall.add(generated=generated, sent=sent, responded=responded)
+        report.overall.add(
+            generated=generated, sent=sent, confirmed=confirmed, answered=answered
+        )
         src = source_for_url(r["url"])
         report.by_source.setdefault(src, FunnelCounts()).add(
-            generated=generated, sent=sent, responded=responded
+            generated=generated, sent=sent, confirmed=confirmed, answered=answered
         )
 
     return report

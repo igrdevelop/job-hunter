@@ -73,17 +73,19 @@ def test_is_sent():
     assert not funnel._is_sent("EXPIRED")
 
 
-def test_is_responded():
-    assert funnel._is_responded("Rejected", "")
-    assert funnel._is_responded("", "2026-06-01")
-    assert not funnel._is_responded("", "")
+def test_is_confirmed_and_answered():
+    assert funnel._is_confirmed("2026-06-01")
+    assert not funnel._is_confirmed("")
+    assert funnel._is_answered("Rejected")
+    assert not funnel._is_answered("")
 
 
 # ── compute_funnel ────────────────────────────────────────────────────────────
 
 def test_overall_counts(funnel_db):
-    _insert(funnel_db, ats="90%", sent="2026-06-10", answer="Interview")  # gen+sent+resp
-    _insert(funnel_db, ats="80%", sent="2026-06-09")                       # gen+sent
+    _insert(funnel_db, ats="90%", sent="2026-06-10", answer="Interview",
+            confirmation="2026-06-11")                                     # gen+sent+conf+ans
+    _insert(funnel_db, ats="80%", sent="2026-06-09", confirmation="2026-06-10")  # gen+sent+conf
     _insert(funnel_db, ats="75%")                                          # gen only
     _insert(funnel_db, ats="SKIP")                                         # tracked only
     _insert(funnel_db, ats="EXPIRED", sent="EXPIRED")                      # tracked only
@@ -93,9 +95,11 @@ def test_overall_counts(funnel_db):
     assert o.tracked == 5
     assert o.generated == 3
     assert o.sent == 2
-    assert o.responded == 1
+    assert o.confirmed == 2
+    assert o.answered == 1
     assert o.sent_rate == round(100 * 2 / 3, 1)
-    assert o.response_rate == 50.0
+    assert o.confirm_rate == 100.0
+    assert o.answer_rate == 50.0
 
 
 def test_by_source_grouping(funnel_db):
@@ -139,7 +143,8 @@ def test_empty_db(funnel_db):
     rep = funnel.compute_funnel()
     assert rep.overall.tracked == 0
     assert rep.overall.sent_rate == 0.0
-    assert rep.overall.response_rate == 0.0
+    assert rep.overall.confirm_rate == 0.0
+    assert rep.overall.answer_rate == 0.0
 
 
 # ── command report builder ────────────────────────────────────────────────────
