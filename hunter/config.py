@@ -23,6 +23,18 @@ LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-3-5-haiku-20241022")
 LLM_API_KEY: str = os.getenv("LLM_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
 APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1", "yes")
 
+# ── Claim judge (LLM-as-judge CV verification pass) ──────────────────────────
+# A second, cheap model verifies every generated claim against the candidate
+# profile + job posting and returns a structured violations list. Runs after the
+# deterministic scrubs and before the language gate in both pipelines.
+# JUDGE_MODE rollout stages: "report" (write judge_report.json only),
+# "warn" (also Telegram-notify on findings), "block" (additionally abort
+# delivery when a fabrication survives repair — mirrors the language gate).
+JUDGE_ENABLED: bool = os.getenv("JUDGE_ENABLED", "true").lower() in ("true", "1", "yes")
+JUDGE_MODEL: str = os.getenv("JUDGE_MODEL", "claude-haiku-4-5-20251001")
+JUDGE_MODE: str = os.getenv("JUDGE_MODE", "warn").strip().lower()
+JUDGE_MAX_REPAIR_ROUNDS: int = int(os.getenv("JUDGE_MAX_REPAIR_ROUNDS", "1"))
+
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
