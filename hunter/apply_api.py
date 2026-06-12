@@ -430,31 +430,26 @@ def main_api(
     if JUDGE_ENABLED:
         print("[apply_agent] Step 4.72: Claim judge verifying content...")
         try:
-            from hunter.claim_judge import judge_content, quote_survives, repair_content
-            judge_report = judge_content(content, job_text, base_cv)
-            if judge_report.actionable:
-                for _v in judge_report.actionable:
-                    print(f"[apply_agent] judge: [{_v.severity}] {_v.field}: {_v.reason}")
-                content, _judge_fixes = repair_content(content, judge_report, job_text)
-                for _fix in _judge_fixes:
-                    print(f"[apply_agent] judge-repair: {_fix}")
-                # Re-judge nothing here (one round); surviving fabrications drive
-                # warn/block. Recompute against the repaired content cheaply by
-                # checking which flagged quotes still appear verbatim.
-                _survivors = [
-                    _v for _v in judge_report.fabrications
-                    if quote_survives(content, _v.field, _v.quote)
-                ]
-                if JUDGE_MODE in ("warn", "block") and judge_report.actionable:
-                    notify(judge_report.telegram_summary(url))
-                if JUDGE_MODE == "block" and _survivors:
-                    notify(
-                        f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
-                        f"🔗 {url}\n"
-                        + "\n".join(f"• {v.field}: {v.reason[:100]}" for v in _survivors[:3])
-                    )
-                    print(f"[apply_agent] ABORT — claim judge blocked delivery: {url}")
-                    sys.exit(0)
+            from hunter.claim_judge import run_judge_stage
+            _outcome = run_judge_stage(
+                content, job_text, base_cv, enabled=True, mode=JUDGE_MODE
+            )
+            content = _outcome.content
+            judge_report = _outcome.report
+            for _v in judge_report.actionable:
+                print(f"[apply_agent] judge: [{_v.severity}] {_v.field}: {_v.reason}")
+            for _fix in _outcome.fixes:
+                print(f"[apply_agent] judge-repair: {_fix}")
+            if JUDGE_MODE in ("warn", "block") and judge_report.actionable:
+                notify(judge_report.telegram_summary(url))
+            if _outcome.blocked:
+                notify(
+                    f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
+                    f"🔗 {url}\n"
+                    + "\n".join(f"• {v.field}: {v.reason[:100]}" for v in _outcome.survivors[:3])
+                )
+                print(f"[apply_agent] ABORT — claim judge blocked delivery: {url}")
+                sys.exit(0)
         except SystemExit:
             raise
         except Exception as _judge_err:

@@ -330,52 +330,46 @@ def main_cli(
                     from hunter.config import JUDGE_ENABLED, JUDGE_MODE
                     if JUDGE_ENABLED:
                         try:
-                            from hunter.claim_judge import (
-                                judge_content,
-                                quote_survives,
-                                repair_content,
+                            from hunter.claim_judge import run_judge_stage
+                            _outcome = run_judge_stage(
+                                _cli_content, job_text or "", enabled=True, mode=JUDGE_MODE
                             )
-                            _jreport = judge_content(_cli_content, job_text or "")
-                            if _jreport.violations:
+                            _cli_content = _outcome.content
+                            if _outcome.report.violations:
                                 try:
                                     (folder_path / "judge_report.json").write_text(
-                                        json.dumps(_jreport.to_dict(), ensure_ascii=False, indent=2),
+                                        json.dumps(
+                                            _outcome.report.to_dict(),
+                                            ensure_ascii=False, indent=2,
+                                        ),
                                         encoding="utf-8",
                                     )
                                 except OSError:
                                     pass
-                            if _jreport.actionable:
-                                _cli_content, _jfixes = repair_content(
-                                    _cli_content, _jreport, job_text or ""
-                                )
-                                for _line in _jfixes:
-                                    print(f"[apply_agent] judge-repair: {_line}")
-                                _scrub_fixes.extend(_jfixes)
-                                if JUDGE_MODE in ("warn", "block"):
-                                    notify(_jreport.telegram_summary(url))
-                                _survivors = [
-                                    _v for _v in _jreport.fabrications
-                                    if quote_survives(_cli_content, _v.field, _v.quote)
-                                ]
-                                if JUDGE_MODE == "block" and _survivors:
-                                    for _f in (
-                                        list(folder_path.glob("*.pdf"))
-                                        + list(folder_path.glob("*.docx"))
-                                    ):
-                                        try:
-                                            _f.unlink()
-                                        except OSError:
-                                            pass
-                                    notify(
-                                        f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
-                                        f"🔗 {url}\n"
-                                        + "\n".join(
-                                            f"• {v.field}: {v.reason[:100]}"
-                                            for v in _survivors[:3]
-                                        )
+                            for _line in _outcome.fixes:
+                                print(f"[apply_agent] judge-repair: {_line}")
+                            _scrub_fixes.extend(_outcome.fixes)
+                            if JUDGE_MODE in ("warn", "block") and _outcome.report.actionable:
+                                notify(_outcome.report.telegram_summary(url))
+                            if _outcome.blocked:
+                                for _f in (
+                                    list(folder_path.glob("*.pdf"))
+                                    + list(folder_path.glob("*.docx"))
+                                ):
+                                    try:
+                                        _f.unlink()
+                                    except OSError:
+                                        pass
+                                notify(
+                                    f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
+                                    f"🔗 {url}\n"
+                                    + "\n".join(
+                                        f"• {v.field}: {v.reason[:100]}"
+                                        for v in _outcome.survivors[:3]
                                     )
-                                    print("[apply_agent] ABORT — claim judge blocked delivery (CLI)")
-                                    return
+                                )
+                                print("[apply_agent] ABORT — claim judge blocked delivery (CLI)")
+                                return
                         except Exception as _je:
                             print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
 

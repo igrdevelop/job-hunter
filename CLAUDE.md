@@ -228,6 +228,8 @@ tests/                      37+ test files, ~3200 lines (pytest)
 tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
+tools/preview_judge.py      Run the claim-judge (+scrubs) on an existing content.json without
+                            regenerating — one Haiku call; mirrors run_judge_stage (JUDGE_MODE env)
 tools/dedup_sheet.py        One-time cleanup of duplicate rows in the Sheets tracker (--apply to delete)
 tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
 tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
@@ -318,14 +320,20 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
    `_en` + `_pl`) against the candidate profile + job posting and returns a structured
    violations list (`fabrication`/`exaggeration`/`style`). Each finding's `quote` must be a
    verbatim substring of the named field — non-verbatim findings are dropped, neutralising
-   judge hallucinations. Actionable findings (fabrication/exaggeration) are repaired:
+   judge hallucinations. The whole stage is orchestrated by `run_judge_stage(content,
+   job_text, base_cv, *, enabled, mode)` (pure logic; the pipelines own notify + block).
+   **Only `fabrication` is auto-repaired** (high-precision: absent from BOTH profile and
+   posting, quote-validated); `exaggeration` is a judgment call (a tool genuinely in the
+   profile can be mis-flagged) so it is surfaced (Telegram) but NOT auto-dropped until the
+   prompt is tuned (plan M4); `style` is report-only (the gloss-dedup owns it). Repair:
    deterministic clause-drop first (keeps the honest preceding clause via connector-aware
-   boundaries), single targeted LLM rewrite for fields a drop would empty; the repair is
-   rejected if it worsens `validate_content` (role-count guard). `JUDGE_MODE` stages the
-   rollout: `report` (write `judge_report.json` only), `warn` (+Telegram notify), `block`
-   (+abort delivery when a fabrication survives — API `sys.exit(0)`, CLI delete-docs+return).
-   Best-effort: any judge failure logs a warning and continues. `style` findings are
-   report-only (the deterministic gloss-dedup owns them).
+   boundaries), single targeted LLM rewrite for fields a drop would empty; rejected if it
+   worsens `validate_content` (role-count guard). `JUDGE_MODE` stages the rollout: `report`
+   (write `judge_report.json` only — **no content change**), `warn` (repair fabrications +
+   Telegram notify), `block` (+abort delivery when a fabrication survives — API `sys.exit(0)`,
+   CLI delete-docs+return). Best-effort: any judge failure logs a warning and continues.
+   Verify a generated CV without regenerating it via `tools/preview_judge.py content.json
+   [job.txt]` (one Haiku call).
 5b. **Language enforce-gate** (`apply_shared.enforce_language_separation`, runs in BOTH
    the API and CLI pipelines): after sanitize/compliance-scrub, scan every `_en` field for
    Polish and every `_pl` field for English prose (`hunter.lang_guard`). On contamination,

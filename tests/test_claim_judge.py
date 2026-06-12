@@ -369,3 +369,115 @@ def test_config_defaults():
     assert config.JUDGE_MODE in ("report", "warn", "block")
     assert config.JUDGE_MAX_REPAIR_ROUNDS >= 1
     assert config.JUDGE_MODEL
+
+
+# ---------------------------------------------------------------------------
+# repair_content severities filter
+# ---------------------------------------------------------------------------
+
+def test_repair_severities_filter_skips_exaggeration():
+    """With severities={'fabrication'}, an exaggeration finding is left intact."""
+    c = _content_7_roles()
+    c["resume_en"]["skills"]["tools"] = "Figma, Jest, SonarQube"
+    report = JudgeReport(violations=[
+        Violation("resume_en.skills.tools", "Figma", "not in profile", "fabrication"),
+        Violation("resume_en.skills.tools", "SonarQube", "only in CI context", "exaggeration"),
+    ])
+    fixed, fixes = repair_content(c, report, "job", severities={"fabrication"})
+    tools = fixed["resume_en"]["skills"]["tools"]
+    assert "Figma" not in tools          # fabrication dropped
+    assert "SonarQube" in tools          # exaggeration kept
+    assert len(fixes) == 1
+
+
+# ---------------------------------------------------------------------------
+# run_judge_stage (mode-aware orchestration)
+# ---------------------------------------------------------------------------
+
+def _stage_content():
+    c = _content_7_roles()
+    c["resume_en"]["skills"]["tools"] = "Figma, Jest, SonarQube"
+    return c
+
+
+def _mock_judge(monkeypatch, violations):
+    monkeypatch.setattr(claim_judge, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm_client, "call_llm", lambda **kw: {"violations": violations})
+
+
+def test_run_judge_stage_disabled_is_noop(monkeypatch):
+    from hunter.claim_judge import run_judge_stage
+    c = _stage_content()
+    out = run_judge_stage(c, "job", enabled=False, mode="warn")
+    assert out.content is c
+    assert out.report.violations == []
+    assert not out.fixes
+    assert not out.blocked
+
+
+def test_run_judge_stage_report_mode_no_change(monkeypatch):
+    from hunter.claim_judge import run_judge_stage
+    _mock_judge(monkeypatch, [
+        {"field": "resume_en.skills.tools", "quote": "Figma",
+         "reason": "not in profile", "severity": "fabrication"},
+    ])
+    c = _stage_content()
+    out = run_judge_stage(c, "job", enabled=True, mode="report")
+    # report mode: judge ran (finding present) but content is untouched.
+    assert len(out.report.fabrications) == 1
+    assert not out.fixes
+    assert "Figma" in out.content["resume_en"]["skills"]["tools"]
+    assert not out.blocked
+
+
+def test_run_judge_stage_warn_repairs_fabrication_only(monkeypatch):
+    from hunter.claim_judge import run_judge_stage
+    _mock_judge(monkeypatch, [
+        {"field": "resume_en.skills.tools", "quote": "Figma",
+         "reason": "not in profile", "severity": "fabrication"},
+        {"field": "resume_en.skills.tools", "quote": "SonarQube",
+         "reason": "CI tool", "severity": "exaggeration"},
+    ])
+    out = run_judge_stage(_stage_content(), "job", enabled=True, mode="warn")
+    tools = out.content["resume_en"]["skills"]["tools"]
+    assert "Figma" not in tools       # fabrication repaired
+    assert "SonarQube" in tools       # exaggeration surfaced, not dropped
+    assert out.fixes
+    assert not out.blocked            # warn never blocks
+
+
+def test_run_judge_stage_block_when_fabrication_survives(monkeypatch):
+    from hunter.claim_judge import run_judge_stage
+    # A fabrication the deterministic drop can't fully remove: the quote is the
+    # entire summary sentence → drop empties it → LLM rewrite (mocked to no-op) →
+    # quote still present → survivor → blocked.
+    monkeypatch.setattr(claim_judge, "LLM_API_KEY", "test-key")
+    # judge returns the violation; rewrite returns a dict without the field → no fix.
+    calls = {"n": 0}
+
+    def _router(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"violations": [
+                {"field": "resume_en.summary",
+                 "quote": "Senior Angular developer with 10+ years.",
+                 "reason": "fabricated", "severity": "fabrication"},
+            ]}
+        return {}  # rewrite no-op
+    monkeypatch.setattr(llm_client, "call_llm", _router)
+
+    c = _content_7_roles()  # summary == the flagged quote exactly
+    out = run_judge_stage(c, "job", enabled=True, mode="block")
+    assert out.blocked
+    assert out.survivors
+
+
+def test_run_judge_stage_judge_exception_safe(monkeypatch):
+    from hunter.claim_judge import run_judge_stage
+    monkeypatch.setattr(claim_judge, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm_client, "call_llm", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+    c = _stage_content()
+    out = run_judge_stage(c, "job", enabled=True, mode="block")
+    assert out.content is c
+    assert not out.blocked
+    assert out.report.passed

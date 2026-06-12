@@ -60,6 +60,13 @@ the profile — claims about them are supported.
 
 ## Hard rules
 
+- **A technology named ANYWHERE in the profile is a legitimate skill.** If a tool,
+  framework, or platform appears in the profile — including inside an experience
+  bullet, a "Stack:" line, the tools list, or the courses list — then listing it
+  in the resume's skills section is correct and supported. Do NOT flag it as an
+  exaggeration on the grounds that "it was only used in one project" or "it is a
+  CI/CD tool, not a primary skill". Example: SonarQube, Jenkins, Cypress, and Jest
+  all appear in the profile's experience — listing them under skills is fine.
 - **Quote verbatim.** The `quote` field MUST be an exact substring copied from
   the field you name — character for character. If you cannot copy an exact
   substring, do not report the finding.

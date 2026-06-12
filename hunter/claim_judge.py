@@ -436,13 +436,23 @@ def _llm_rewrite(
 
 
 def repair_content(
-    content: dict[str, Any], report: JudgeReport, job_text: str
+    content: dict[str, Any],
+    report: JudgeReport,
+    job_text: str,
+    *,
+    severities: frozenset[str] | set[str] | tuple[str, ...] = ACTIONABLE_SEVERITIES,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Repair actionable violations. Deterministic clause-drop first, single LLM
-    rewrite for what's left. Guards the 7-role count: a repair that drops a role
-    is rejected (returns the pre-repair content). Returns (content, fixes).
+    """Repair violations of the given severities. Deterministic clause-drop first,
+    single LLM rewrite for what's left. Guards the 7-role count: a repair that
+    drops a role is rejected (returns the pre-repair content). Returns
+    (content, fixes).
+
+    `severities` defaults to all actionable (fabrication + exaggeration); the
+    pipeline passes a narrower set (fabrication only) for the conservative
+    rollout, since `exaggeration` is a judgment call with a higher false-positive
+    rate (e.g. a tool genuinely in the profile mis-flagged as inflated).
     """
-    actionable = report.actionable
+    actionable = [v for v in report.violations if v.severity in severities]
     if not actionable:
         return content, []
 
@@ -469,3 +479,75 @@ def repair_content(
         return content, []
 
     return working, fixes
+
+
+# ---------------------------------------------------------------------------
+# Pipeline stage — mode-aware orchestration shared by both pipelines
+# ---------------------------------------------------------------------------
+
+# Severities auto-repaired in warn/block mode. `fabrication` only: it's the
+# high-precision class (claim absent from BOTH profile and posting, quote
+# verbatim-validated). `exaggeration` is a judgment call with a higher
+# false-positive rate (a tool genuinely in the profile can be mis-flagged), so it
+# is surfaced (notify) but not auto-dropped until the prompt is tuned (plan M4).
+REPAIR_SEVERITIES = frozenset({"fabrication"})
+
+
+@dataclass
+class JudgeOutcome:
+    content: dict[str, Any]
+    report: JudgeReport
+    fixes: list[str] = field(default_factory=list)
+    survivors: list[Violation] = field(default_factory=list)
+    blocked: bool = False
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.fixes)
+
+
+def run_judge_stage(
+    content: dict[str, Any],
+    job_text: str,
+    base_cv: str = "",
+    *,
+    enabled: bool = True,
+    mode: str = "warn",
+) -> JudgeOutcome:
+    """Run the judge + (mode-gated) repair as one stage. Pure orchestration —
+    no Telegram, no sys.exit; the caller decides how to notify and block.
+
+    - disabled                → no-op outcome (judge not run).
+    - mode == "report"        → judge only, NO content change (dry run / artifact).
+    - mode in {"warn","block"}→ repair REPAIR_SEVERITIES (fabrication); compute
+                                surviving fabrications.
+    - blocked                 → mode == "block" AND a fabrication survived repair.
+
+    Best-effort: a judge/repair exception yields a passing no-op outcome.
+    """
+    if not enabled:
+        return JudgeOutcome(content=content, report=JudgeReport())
+
+    try:
+        report = judge_content(content, job_text, base_cv)
+    except Exception as e:  # noqa: BLE001 — never fatal
+        print(f"[claim_judge] stage failed (skipping): {e}")
+        return JudgeOutcome(content=content, report=JudgeReport())
+
+    if mode == "report" or not report.actionable:
+        return JudgeOutcome(content=content, report=report)
+
+    try:
+        content, fixes = repair_content(content, report, job_text, severities=REPAIR_SEVERITIES)
+    except Exception as e:  # noqa: BLE001
+        print(f"[claim_judge] repair failed (skipping): {e}")
+        return JudgeOutcome(content=content, report=report)
+
+    survivors = [
+        v for v in report.fabrications
+        if quote_survives(content, v.field, v.quote)
+    ]
+    blocked = mode == "block" and bool(survivors)
+    return JudgeOutcome(
+        content=content, report=report, fixes=fixes, survivors=survivors, blocked=blocked
+    )

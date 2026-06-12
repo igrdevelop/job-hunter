@@ -217,10 +217,32 @@ timeout is 900 s.
 - [x] Unit + integration tests (28 total); both pipelines compile + ruff-clean;
       full suite 1311 green. (Function-level coverage mirrors the existing
       scrub-test convention — direct function tests, not heavy pipeline mocks.)
-- [ ] **TODO (M3 follow-up):** verify with `tools/preview_apply.py` against
-      `tests/fixtures/sample_jobs/` (clean → near-zero findings) and against the
-      two archived prod content.json incidents (both caught). Deferred —
-      preview needs live API/CLI credentials.
+- [x] **M3 follow-up — live verification (2026-06-12).** `tools/preview_judge.py`
+      added (runs scrubs + `run_judge_stage` on an existing content.json, one Haiku
+      call, no regeneration). Validated on a real CLI-generated CV (Lumicode /
+      solid.jobs, Angular fixture): the judge correctly flagged **Figma** as a
+      fabrication (absent from the profile, woven in from the posting) and the
+      repair dropped it from skills — a class no existing regex scrub covers,
+      proving the Phase C premise. Surfaced "Architected a workflow-consolidation
+      module" as an `exaggeration` (profile: "Built ...") without auto-dropping it.
+
+#### M3 review fixes (2026-06-12)
+
+The first live run exposed two issues, fixed before merge:
+
+1. **False-positive auto-repair.** A run flagged `SonarQube` as `exaggeration` and
+   the repair dropped it — but SonarQube IS in the profile (Venture Labs). Two
+   mitigations: (a) `judge_rules.md` now states a technology named anywhere in the
+   profile (incl. experience bullets / Stack lines) is a legitimate skill; (b)
+   **auto-repair is now `fabrication`-only** (`REPAIR_SEVERITIES`), the
+   high-precision class — `exaggeration` is surfaced but never auto-dropped during
+   the warn rollout.
+2. **`report` mode mutated content.** The plan specifies report = artifact only;
+   the first wiring repaired regardless of mode. Centralised the mode logic in
+   `run_judge_stage()` (report → no content change; warn/block → repair
+   fabrications; block → abort on a surviving fabrication). Both pipelines now call
+   the one helper; `repair_content` gained a `severities` filter. +6 tests
+   (1317 total).
 
 ### M4 — Rollout & tightening
 
