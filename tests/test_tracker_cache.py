@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from hunter.tracker_cache import TrackerCache
-from hunter.tracker import TRACKER_HEADERS, normalize_url, dedup_key
+from hunter.tracker import TRACKER_HEADERS, normalize_url
 from hunter.db import get_db
 
 

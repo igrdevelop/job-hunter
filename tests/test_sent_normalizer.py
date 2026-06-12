@@ -7,7 +7,6 @@ All Google API calls are mocked — no network access needed.
 from datetime import date
 from unittest.mock import MagicMock
 
-import pytest
 
 from hunter.sent_normalizer import (
     APPLIED_COL,

@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 from hunter.email_response_checker import (
     ConfirmationEmail,
-    MatchResult,
     _extract_body_text,
     _is_confirmation_subject,
     _message_date,

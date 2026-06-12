@@ -1,6 +1,5 @@
 """Tests for hunter/resume_sanitizer.py"""
 
-import pytest
 from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
@@ -138,7 +137,6 @@ def test_parse_period_bare_years():
 
 def test_is_real_company_exact():
     with _patch_profile()[0]:
-        from hunter.resume_sanitizer import _is_real_company
         # reload whitelist with patched data
         import hunter.resume_sanitizer as s
         s._load_profile_roles.cache_clear()

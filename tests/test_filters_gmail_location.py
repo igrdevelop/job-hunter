@@ -6,7 +6,6 @@ one applied to LinkedIn, JustJoin, etc.
 """
 from unittest.mock import patch
 
-import pytest
 
 from hunter.models import Job
 from hunter.filters import apply_filters_with_stats

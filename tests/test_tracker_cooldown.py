@@ -2,7 +2,6 @@
 import datetime
 import uuid
 
-import pytest
 
 from hunter.tracker import is_in_cooldown, company_cooldown_active
 from hunter.db import get_db

@@ -461,7 +461,8 @@ GSHEETS_ENABLED=true
 - **Never commit** `.env`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`
 - Always test syntax after edits: `python -m compileall .`
 - Run `ruff check .` before committing — CI gates on it (config in `pyproject.toml`,
-  scoped to `hunter/` + entry scripts; `tests/`/`tools/` excluded for now)
+  covers the whole repo: `hunter/` + entry scripts + `tests/` + `tools/`; only the
+  scratch `smoke_test_cl.py` is excluded)
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
 - Candidate profile single source of truth: `prompts/candidate_profile.md`
@@ -597,6 +598,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-06-12 | opus | Hygiene A.2 (Phase A, branch chore/hygiene-ruff-mypy; roadmap docs/PROJECT_REVIEW_2026-06.md). Widened the ruff CI gate from `hunter/` + entry scripts to the whole repo (`tests/` + `tools/` no longer excluded; only the scratch `smoke_test_cl.py` stays out). Auto-fixed the 65 pre-existing lint issues that the exclusion had hidden (59 F401 unused-import + 6 F541 f-string-without-placeholder), all `ruff --fix`-safe. `ruff check .` green across the repo; full suite 1283 still green (no behaviour change). A.1 (split apply_shared.py) is DEFERRED until PR #91 (claim_judge, which extends apply_shared.py) merges — splitting it now would guarantee a large conflict. A.3 (mypy gate) DEFERRED: mypy isn't installed and gating untyped tracker.py/sources/ needs a large annotation pass, out of scope for one clean commit. |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |

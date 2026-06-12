@@ -1,8 +1,6 @@
 """Tests for base CV stack detection and loading logic in apply_api.py."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+from unittest.mock import patch
 
 from hunter.apply_api import _detect_stack_hint, _load_base_cv
 

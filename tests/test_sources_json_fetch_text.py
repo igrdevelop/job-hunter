@@ -8,7 +8,6 @@ For each source we test:
   * fetch_text error paths (fallback / raise)
 """
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
