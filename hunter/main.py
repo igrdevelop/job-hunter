@@ -117,15 +117,18 @@ async def _run_hunt_impl(
     all_jobs: list[Job] = []
     fetch_stats: dict[str, int | str] = {}
     gmail_source = None  # captured for its per-email diagnostics (last_email_log)
+    broken_sources: list[str] = []  # sources that just crossed the breakage threshold
     for source in active_sources:
         try:
             jobs = await asyncio.to_thread(source.search)
             all_jobs.extend(jobs)
             fetch_stats[source.name] = len(jobs)
             logger.info(f"[Hunt] {source.name}: {len(jobs)} raw jobs")
+            _record_source_health(source.name, len(jobs), ok=True, broken=broken_sources)
         except Exception as e:
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
+            _record_source_health(source.name, 0, ok=False, error=str(e), broken=broken_sources)
 
         # Gmail: capture the source for its per-email diagnostics, and upload the
         # log snapshot to Drive right after the scan so the Drive copy reflects the
@@ -144,6 +147,15 @@ async def _run_hunt_impl(
         for name, cnt in fetch_stats.items()
     )
     total_raw = sum(v for v in fetch_stats.values() if isinstance(v, int))
+
+    # Alert once when a previously-working source goes dry (likely broken scraper).
+    if broken_sources:
+        await send_text(
+            context,
+            "⚠️ <b>Scraper(s) may be broken</b>\n"
+            + "\n".join(f"  • <b>{n}</b> — 0 jobs for several runs" for n in broken_sources)
+            + "\n\nRun <code>/health</code> for details, or the scraper-health-checker agent.",
+        )
 
     # ── Step 2: Filter ───────────────────────────────────────────────────────
     filtered, filter_reasons = apply_filters_with_stats(all_jobs)
@@ -294,6 +306,30 @@ async def _run_hunt_impl(
         await _retry_failed(context)
     else:
         await send_job_cards(context, new_jobs)
+
+
+# ── Scraper health ────────────────────────────────────────────────────────────
+
+def _record_source_health(
+    source_name: str,
+    yield_count: int,
+    *,
+    ok: bool,
+    error: str = "",
+    broken: list[str],
+) -> None:
+    """Record one source run and append to `broken` if it just crossed the
+    breakage threshold. Best-effort — telemetry must never break a hunt."""
+    try:
+        from hunter.config import SOURCE_HEALTH_ENABLED
+        if not SOURCE_HEALTH_ENABLED:
+            return
+        from hunter import source_health
+        source_health.record_run(source_name, yield_count, ok=ok, error=error)
+        if source_health.newly_broken(source_name):
+            broken.append(source_name)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[Hunt] source health record failed for %s: %s", source_name, e)
 
 
 # ── Auto-apply pipeline ──────────────────────────────────────────────────────

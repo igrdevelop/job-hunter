@@ -30,7 +30,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
                             v
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
-                              /sync_sent /process_manual /check_expired
+                              /sync_sent /process_manual /check_expired /health
                               /gsheets_status /gsheets_resync
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
@@ -151,6 +151,10 @@ hunter/
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
                             shared by expired_marker and gmail_enricher to avoid HTTP 429
+  source_health.py          Per-source yield tracking in SQLite (source_runs table): record_run()
+                            after each source.search() in the hunt loop, health_report() for /health,
+                            newly_broken() alerts once when a previously-working source goes dry for
+                            SOURCE_HEALTH_ALERT_STREAK consecutive runs (broken selector vs quiet day)
   gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
   gsheets_client.py         Low-level Sheets API v4 wrapper
   gdrive_sync.py            High-level Drive upload (upload_application_folder)
@@ -186,6 +190,7 @@ hunter/
     gdrive.py               /gdrive_upload_missing
     check_responses.py      /check_responses
     normalize.py            /normalize — rebuild Sheets column L (Applied Date) from Sent
+    health.py               /health — per-source scraper yield report (source_health)
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   schedules/                One file per JobQueue callback
     hunt.py                 scheduled_hunt
@@ -266,6 +271,9 @@ Applications/               Generated documents (gitignored)
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
 | `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
+| `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
+| `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
+| `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
 | `GSHEETS_REFRESH_INTERVAL_MIN` | `30` | Sheets → Excel pull interval |
@@ -629,6 +637,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-06-12 | opus | Scraper health monitoring (Phase B, branch feat/scraper-health-monitoring; roadmap docs/PROJECT_REVIEW_2026-06.md). A source returning 0 jobs was indistinguishable from "no new vacancies" — breakage was silent. New `hunter/source_health.py` (`source_runs` table in tracker.db, created lazily; ring-buffered to SOURCE_HEALTH_KEEP per source): `record_run(source, yield, ok, error)` after each `source.search()` in the hunt loop (main.py Step 1, best-effort); `source_health()`/`health_report()` classify OK/IDLE/BROKEN?/ERROR/NODATA over the last 20 runs; `newly_broken()` fires exactly once when a *previously-working* source (ever_positive) hits SOURCE_HEALTH_ALERT_STREAK=3 consecutive 0/error runs → `run_hunt` posts a "scraper may be broken" Telegram alert. New `/health` command (`commands/health.py`) groups the live ALL_SOURCES roster into attention/healthy/idle/no-data. Config: SOURCE_HEALTH_ENABLED/ALERT_STREAK/KEEP. 15 new tests (test_source_health, 1298 total); ruff clean. No CV generation involved (telemetry only). |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |

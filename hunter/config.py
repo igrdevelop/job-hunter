@@ -49,6 +49,17 @@ APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 
+# ── Scraper health monitoring ─────────────────────────────────────────────────
+# Track per-source raw yield per hunt run; alert when a source that used to
+# produce jobs goes dry for N consecutive runs (broken selector / renamed field).
+SOURCE_HEALTH_ENABLED: bool = os.getenv("SOURCE_HEALTH_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+# Consecutive zero/error runs (for a previously-working source) before alerting.
+SOURCE_HEALTH_ALERT_STREAK: int = int(os.getenv("SOURCE_HEALTH_ALERT_STREAK", "3"))
+# Rows retained per source (ring buffer; older runs pruned).
+SOURCE_HEALTH_KEEP: int = int(os.getenv("SOURCE_HEALTH_KEEP", "50"))
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
