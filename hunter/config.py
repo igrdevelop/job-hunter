@@ -19,7 +19,7 @@ AUTO_APPLY: bool = os.getenv("AUTO_APPLY", "false").lower() in ("true", "1", "ye
 
 # ── LLM config (used by apply_agent.py in API mode) ──────────────────────────
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-3-5-haiku-20241022")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
 LLM_API_KEY: str = os.getenv("LLM_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
 APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1", "yes")
 

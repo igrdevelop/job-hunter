@@ -32,11 +32,17 @@ def call_llm(
     api_key: str = "",
     max_retries: int = 3,
     max_tokens: int = 8192,
+    effort: str = "low",
 ) -> dict:
     """Send prompt to LLM and return parsed JSON dict.
 
     Retries on 429 / 5xx with exponential backoff.
     Raises LLMError on permanent failure or invalid JSON.
+
+    `effort` (anthropic only) sets ``output_config.effort`` on models that
+    support it (Sonnet 4.6, Opus 4.5+, Fable 5); ``low`` keeps the structured
+    generation task fast and cheap. Silently skipped on models without the
+    param (e.g. Haiku 4.5 used by the judge) so those calls never 400.
     """
     if not api_key:
         raise LLMError(f"No API key provided for {provider}")
@@ -45,7 +51,9 @@ def call_llm(
     for attempt in range(1, max_retries + 1):
         try:
             if provider == "anthropic":
-                raw = _call_anthropic(system_prompt, user_message, model, api_key, max_tokens)
+                raw = _call_anthropic(
+                    system_prompt, user_message, model, api_key, max_tokens, effort=effort
+                )
             elif provider == "openai":
                 raw = _call_openai(system_prompt, user_message, model, api_key, max_tokens)
             else:
@@ -79,7 +87,28 @@ def call_llm(
 
 # ── Provider implementations ──────────────────────────────────────────────────
 
-def _call_anthropic(system: str, user: str, model: str, key: str, max_tokens: int) -> str:
+# Models that accept the GA effort param (output_config.effort). Substring match
+# on the model id so dated snapshots (…-6, …-4-8) and aliases both resolve.
+_EFFORT_MODEL_TAGS = (
+    "sonnet-4-6", "opus-4-5", "opus-4-6", "opus-4-7", "opus-4-8", "fable-5",
+)
+
+
+def _supports_effort(model: str) -> bool:
+    """True if `model` accepts output_config.effort (else passing it would 400)."""
+    m = (model or "").lower()
+    return any(tag in m for tag in _EFFORT_MODEL_TAGS)
+
+
+def _supports_disabled_thinking(model: str) -> bool:
+    """Sonnet 4.6 + Opus 4.5–4.8 accept thinking={'type':'disabled'};
+    Fable 5 returns 400 on it (omit the param there instead)."""
+    return _supports_effort(model) and "fable" not in (model or "").lower()
+
+
+def _call_anthropic(
+    system: str, user: str, model: str, key: str, max_tokens: int, effort: str = "low",
+) -> str:
     try:
         import anthropic
     except ImportError:
@@ -87,12 +116,26 @@ def _call_anthropic(system: str, user: str, model: str, key: str, max_tokens: in
 
     try:
         client = anthropic.Anthropic(api_key=key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            # Cache the large, repeated system prefix (candidate profile + rules +
+            # base CV). It is byte-identical across every call within a CV (ATS
+            # rewrite loop, cover-letter review, repair passes) and across CVs in a
+            # hunt, so after the first write subsequent reads cost ~0.1x — a large
+            # saving on the multi-pass apply pipeline.
+            "system": [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ],
+            "messages": [{"role": "user", "content": user}],
+        }
+        # Keep the structured generation fast/cheap on models that support it;
+        # gated so judge calls on Haiku (no effort param) never 400.
+        if effort and _supports_effort(model):
+            create_kwargs["output_config"] = {"effort": effort}
+        if _supports_disabled_thinking(model):
+            create_kwargs["thinking"] = {"type": "disabled"}
+        response = client.messages.create(**create_kwargs)
         return response.content[0].text
     except anthropic.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
