@@ -1,8 +1,7 @@
 """Tests for /force two-step flow and cleanup logic."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def run(coro):

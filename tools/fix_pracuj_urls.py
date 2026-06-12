@@ -99,7 +99,7 @@ def main():
     mode = "APPLY" if APPLY else "DRY RUN"
     print(f"\n[fix_pracuj] === Fix broken pracuj.pl URLs — {mode} ===\n")
 
-    print(f"📋 tracker.xlsx:")
+    print("📋 tracker.xlsx:")
     total = fix_file(TRACKER_PATH)
     print(f"\n{'='*60}")
     if total == 0:

@@ -1,15 +1,12 @@
 """Tests for tracker.get_drive_url_by_url and tracker.set_drive_url."""
 
-import pytest
 
 from hunter import tracker
-from hunter.tracker import COL_DRIVE_URL
 from hunter.db import get_db
 
 
 def _insert_row(tracker_db, *, url: str, drive_url: str = "", row_id: str = "abc12345") -> None:
     """Insert a minimal row directly into the SQLite DB."""
-    import uuid
     norm = tracker.normalize_url(url)
     with get_db(tracker_db) as conn:
         conn.execute(

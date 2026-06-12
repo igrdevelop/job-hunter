@@ -187,7 +187,7 @@ def _regen_covers_for_folder(folder_abs: Path, system_prompt: str, url: str) -> 
         json.dumps(snap, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    print(f"  [OK] cover_letters_v2_snapshot.json")
+    print("  [OK] cover_letters_v2_snapshot.json")
 
 
 def main() -> None:

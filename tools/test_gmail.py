@@ -27,12 +27,11 @@ def main():
                         help="Print From/Subject of every matched email")
     args = parser.parse_args()
 
-    print(f"Connecting to Gmail...")
+    print("Connecting to Gmail...")
     service = get_gmail_service()
 
     # Build query
     from datetime import datetime, timedelta, timezone
-    import base64
 
     after_ts = int((datetime.now(timezone.utc) - timedelta(hours=args.hours)).timestamp())
     sender_filter = " OR ".join(f"from:{d}" for d in PARSERS)
@@ -70,7 +69,7 @@ def main():
             for j in jobs:
                 print(f"   → {j.url}")
         elif args.debug:
-            print(f"⚠️  No jobs parsed from this email")
+            print("⚠️  No jobs parsed from this email")
         if args.debug:
             print()
 

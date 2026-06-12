@@ -5,9 +5,8 @@ Verifies Phase 4 steps 4.3 (callable as import) and 4.4 (thin CLI entry point).
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 

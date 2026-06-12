@@ -2,11 +2,9 @@
 
 import asyncio
 import uuid
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import openpyxl
-import pytest
 
 from hunter.export_xlsx import export_tracker_xlsx
 from hunter.tracker import TRACKER_HEADERS, normalize_url

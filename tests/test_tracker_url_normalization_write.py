@@ -1,7 +1,5 @@
 """B3 — tracker must persist normalised URLs so dedup is param-order-independent."""
-from pathlib import Path
 
-import pytest
 
 from hunter.tracker import (
     add_applied,

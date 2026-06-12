@@ -1,6 +1,5 @@
 """Tests for tracker.get_url_status_flags."""
 from hunter import tracker
-from hunter.models import Job
 
 
 def _add_row_direct(tracker_db, *, url: str, ats: str, sent: str = "") -> None:

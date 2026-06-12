@@ -258,7 +258,7 @@ def main():
     total_added = added_from_apps
     total_removed = len(garbage)
 
-    print(f"\n[repair] Summary:")
+    print("\n[repair] Summary:")
     print(f"  Rows before:   {len(existing_rows)}")
     print(f"  Garbage removed: {total_removed}")
     print(f"  Added:           {total_added}")

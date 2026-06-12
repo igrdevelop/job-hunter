@@ -3,7 +3,6 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-import pytest
 
 from hunter import main
 from hunter.apply_shared import is_rate_limit_error

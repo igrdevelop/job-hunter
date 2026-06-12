@@ -4,9 +4,7 @@ Unit tests for hunter/gdrive_client.py.
 All Google API calls are mocked — no network access needed.
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from hunter.gdrive_client import (
     _q,

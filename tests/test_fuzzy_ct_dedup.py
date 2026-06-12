@@ -5,7 +5,6 @@ Catches Gmail-enriched title variants that pass exact dedup_key but
 describe the same job at the same company.
 """
 import asyncio
-import pytest
 
 from hunter.tracker_cache import TrackerCache
 
