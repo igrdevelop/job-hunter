@@ -86,6 +86,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_check_responses":      ("hunter.commands.check_responses", "cmd_check_responses"),
     "cmd_export":               ("hunter.commands.export",          "cmd_export"),
     "cmd_normalize":            ("hunter.commands.normalize",       "cmd_normalize"),
+    "cmd_funnel":               ("hunter.commands.funnel",          "cmd_funnel"),
+    "cmd_health":               ("hunter.commands.health",          "cmd_health"),
     "cmd_url":          ("hunter.commands.url_message", "cmd_url"),
     "button_callback":  ("hunter.commands.url_message", "button_callback"),
     "_handle_apply":    ("hunter.commands.url_message", "_handle_apply"),
@@ -141,6 +143,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("check_responses",       "Check Gmail confirmations [days]"),
         BotCommand("export",                "Export tracker as .xlsx file"),
         BotCommand("normalize",             "Rebuild clean Applied Date column (L) from Sent"),
+        BotCommand("funnel",                "Application funnel: tracked→generated→sent→responded [days]"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
@@ -235,6 +238,8 @@ def build_application() -> Application:
     from hunter.commands.check_responses import cmd_check_responses
     from hunter.commands.export import cmd_export
     from hunter.commands.normalize import cmd_normalize
+    from hunter.commands.funnel import cmd_funnel
+    from hunter.commands.health import cmd_health
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
 
@@ -259,6 +264,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("check_responses",       cmd_check_responses))
     app.add_handler(CommandHandler("export",               cmd_export))
     app.add_handler(CommandHandler("normalize",            cmd_normalize))
+    app.add_handler(CommandHandler("funnel",               cmd_funnel))
+    app.add_handler(CommandHandler("health",               cmd_health))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))

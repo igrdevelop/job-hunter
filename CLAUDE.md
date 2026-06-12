@@ -30,7 +30,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
                             v
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
-                              /sync_sent /process_manual /check_expired
+                              /sync_sent /process_manual /check_expired /funnel /health
                               /gsheets_status /gsheets_resync
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
@@ -141,10 +141,25 @@ hunter/
                             the apply enforce-gate (enforce_language_separation in apply_shared)
   resume_sanitizer.py       Strip LLM artifacts/foreign-language leakage from generated resume text
   content_qa.py             Post-generation QA checks on content.json (warns on quality issues)
+  funnel.py                 Application funnel analytics over tracker.db: compute_funnel(days?) →
+                            tracked→generated→sent→confirmed→answered, overall + per source (source
+                            inferred from URL via each source's matches_url + registered-domain
+                            fallback). Confirmed = ATS ack (confirmation col, stamped by
+                            /check_responses); Answered = human reply (answer col). Feeds /funnel
+  claim_judge.py            LLM-as-judge CV verification: judge_content() flags claims absent
+                            from the candidate profile + posting (fabrication/exaggeration/
+                            style); repair_content() drops the offending clause (deterministic
+                            quote-drop, LLM rewrite fallback, role-count guarded). Runs between
+                            the scrubs and the language gate in both pipelines. See
+                            docs/CV_JUDGE_PLAN.md
   expired_check.py          Expired job detection (regex patterns)
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
                             shared by expired_marker and gmail_enricher to avoid HTTP 429
+  source_health.py          Per-source yield tracking in SQLite (source_runs table): record_run()
+                            after each source.search() in the hunt loop, health_report() for /health,
+                            newly_broken() alerts once when a previously-working source goes dry for
+                            SOURCE_HEALTH_ALERT_STREAK consecutive runs (broken selector vs quiet day)
   gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
   gsheets_client.py         Low-level Sheets API v4 wrapper
   gdrive_sync.py            High-level Drive upload (upload_application_folder)
@@ -180,6 +195,8 @@ hunter/
     gdrive.py               /gdrive_upload_missing
     check_responses.py      /check_responses
     normalize.py            /normalize — rebuild Sheets column L (Applied Date) from Sent
+    funnel.py               /funnel [days] — application funnel report (hunter.funnel)
+    health.py               /health — per-source scraper yield report (source_health)
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   schedules/                One file per JobQueue callback
     hunt.py                 scheduled_hunt
@@ -222,6 +239,8 @@ tests/                      37+ test files, ~3200 lines (pytest)
 tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
+tools/preview_judge.py      Run the claim-judge (+scrubs) on an existing content.json without
+                            regenerating — one Haiku call; mirrors run_judge_stage (JUDGE_MODE env)
 tools/dedup_sheet.py        One-time cleanup of duplicate rows in the Sheets tracker (--apply to delete)
 tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
 tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
@@ -247,6 +266,10 @@ Applications/               Generated documents (gitignored)
 | `LLM_MODEL` | `claude-3-5-haiku-20241022` | Model for API mode |
 | `LLM_API_KEY` | — | API key for LLM provider |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
+| `JUDGE_ENABLED` | `true` | Run the LLM-as-judge CV verification pass |
+| `JUDGE_MODEL` | `claude-haiku-4-5-20251001` | Cheap model for the judge (independent of generator) |
+| `JUDGE_MODE` | `warn` | Rollout: `report` (artifact only) / `warn` (+Telegram) / `block` (+abort on surviving fabrication) |
+| `JUDGE_MAX_REPAIR_ROUNDS` | `1` | Repair rounds before warn/block |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
@@ -254,6 +277,9 @@ Applications/               Generated documents (gitignored)
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
 | `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
+| `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
+| `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
+| `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
 | `GSHEETS_REFRESH_INTERVAL_MIN` | `30` | Sheets → Excel pull interval |
@@ -302,6 +328,26 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
    the first side; genuinely different "A / B" entries like "OpenShift / container
    platforms" are kept). In the CLI pipeline any scrub fix rewrites content.json and
    regenerates the docs.
+5a-bis. **Claim judge** (`hunter.claim_judge`, runs in BOTH pipelines after the scrubs,
+   BEFORE the language gate; toggled by `JUDGE_ENABLED`): a second cheap model (`JUDGE_MODEL`,
+   Haiku) verifies every generated claim (summary, skills, bullets, cover letters, about-me;
+   `_en` + `_pl`) against the candidate profile + job posting and returns a structured
+   violations list (`fabrication`/`exaggeration`/`style`). Each finding's `quote` must be a
+   verbatim substring of the named field — non-verbatim findings are dropped, neutralising
+   judge hallucinations. The whole stage is orchestrated by `run_judge_stage(content,
+   job_text, base_cv, *, enabled, mode)` (pure logic; the pipelines own notify + block).
+   **Only `fabrication` is auto-repaired** (high-precision: absent from BOTH profile and
+   posting, quote-validated); `exaggeration` is a judgment call (a tool genuinely in the
+   profile can be mis-flagged) so it is surfaced (Telegram) but NOT auto-dropped until the
+   prompt is tuned (plan M4); `style` is report-only (the gloss-dedup owns it). Repair:
+   deterministic clause-drop first (keeps the honest preceding clause via connector-aware
+   boundaries), single targeted LLM rewrite for fields a drop would empty; rejected if it
+   worsens `validate_content` (role-count guard). `JUDGE_MODE` stages the rollout: `report`
+   (write `judge_report.json` only — **no content change**), `warn` (repair fabrications +
+   Telegram notify), `block` (+abort delivery when a fabrication survives — API `sys.exit(0)`,
+   CLI delete-docs+return). Best-effort: any judge failure logs a warning and continues.
+   Verify a generated CV without regenerating it via `tools/preview_judge.py content.json
+   [job.txt]` (one Haiku call).
 5b. **Language enforce-gate** (`apply_shared.enforce_language_separation`, runs in BOTH
    the API and CLI pipelines): after sanitize/compliance-scrub, scan every `_en` field for
    Polish and every `_pl` field for English prose (`hunter.lang_guard`). On contamination,
@@ -599,6 +645,9 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | Date | Agent | Work |
 |------|-------|------|
 | 2026-06-12 | opus | Hygiene A.2 (Phase A, branch chore/hygiene-ruff-mypy; roadmap docs/PROJECT_REVIEW_2026-06.md). Widened the ruff CI gate from `hunter/` + entry scripts to the whole repo (`tests/` + `tools/` no longer excluded; only the scratch `smoke_test_cl.py` stays out). Auto-fixed the 65 pre-existing lint issues that the exclusion had hidden (59 F401 unused-import + 6 F541 f-string-without-placeholder), all `ruff --fix`-safe. `ruff check .` green across the repo; full suite 1283 still green (no behaviour change). A.1 (split apply_shared.py) is DEFERRED until PR #91 (claim_judge, which extends apply_shared.py) merges — splitting it now would guarantee a large conflict. A.3 (mypy gate) DEFERRED: mypy isn't installed and gating untyped tracker.py/sources/ needs a large annotation pass, out of scope for one clean commit. |
+| 2026-06-12 | opus | Funnel analytics D.1 (Phase D, branch feat/funnel-analytics; roadmap docs/PROJECT_REVIEW_2026-06.md). The bot applied jobs but never showed conversion. New `hunter/funnel.py`: `compute_funnel(days?)` aggregates tracker.db into tracked→generated→sent→responded both overall and per source. Source isn't stored on the row (tracker predates it) so it's inferred from the URL via each registered source's `matches_url` (cached) with a registered-domain fallback. Stage rules: generated = ats_status holds a numeric % (CV built); sent = `sent` column is a real value (not blank/dash/EXPIRED); responded = `answer` or `confirmation` non-empty. Optional day-window filters by the `date` column (undated rows excluded from a window). New `/funnel [days]` command (`commands/funnel.py`) renders overall counts + sent/response rates + per-source breakdown (tracked/gen/sent/resp, sorted by sent). 14 new tests (test_funnel, 1297 total); ruff clean. Read-only over tracker.db — no schema change, no CV generation. |
+| 2026-06-12 | opus | Funnel analytics D.2 (same branch). Split the conflated terminal stage into two: **Confirmed** (ATS/board automated acknowledgement — the `confirmation` column already stamped by `/check_responses`→`email_response_checker.run_confirmation_check`→`tracker.set_confirmation`) vs **Answered** (human reply: rejection/interview/offer — the `answer` column). `FunnelCounts` now tracks `confirmed`/`answered` with `confirm_rate`/`answer_rate` (both over sent); `/funnel` shows both stages + per-source `tracked/gen/sent/conf/ans`. The /check_responses→tracker link already existed (set_confirmation), so the Confirmed stage is populated end-to-end with no new wiring. Tests updated (14 in test_funnel; 1297 total). |
+| 2026-06-12 | opus | Scraper health monitoring (Phase B, branch feat/scraper-health-monitoring; roadmap docs/PROJECT_REVIEW_2026-06.md). A source returning 0 jobs was indistinguishable from "no new vacancies" — breakage was silent. New `hunter/source_health.py` (`source_runs` table in tracker.db, created lazily; ring-buffered to SOURCE_HEALTH_KEEP per source): `record_run(source, yield, ok, error)` after each `source.search()` in the hunt loop (main.py Step 1, best-effort); `source_health()`/`health_report()` classify OK/IDLE/BROKEN?/ERROR/NODATA over the last 20 runs; `newly_broken()` fires exactly once when a *previously-working* source (ever_positive) hits SOURCE_HEALTH_ALERT_STREAK=3 consecutive 0/error runs → `run_hunt` posts a "scraper may be broken" Telegram alert. New `/health` command (`commands/health.py`) groups the live ALL_SOURCES roster into attention/healthy/idle/no-data. Config: SOURCE_HEALTH_ENABLED/ALERT_STREAK/KEEP. 15 new tests (test_source_health, 1298 total); ruff clean. No CV generation involved (telemetry only). |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
@@ -630,4 +679,5 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | 2026-06-08 | opus | Source helper consolidation (deferred from PR #83 review). New `hunter/sources/text_utils.py`: `strip_html(html, max_len)` (HTML fragment → plain text, unescape + whitespace-collapse + truncate) replaces 8 local `_text_preview`/`_html_to_plain` copies (arbeitnow, himalayas, remoteok, remotive, weworkremotely, workingnomads, jobspresso, justremote); `REMOTE_ANY` frozenset + `ensure_remote_token(base, geo=None)` replace the duplicated `_REMOTE_ANY` set (workingnomads, jobspresso) and justremote's substring remote-token logic. Each source keeps its own `_format_location` wrapper (input shapes differ) but delegates the core. remotive's `_format_location` left untouched — its synonym set intentionally excludes "remote". No behaviour change (location strings + stripped text identical). 11 new tests in test_text_utils.py (1198 total). |
 | 2026-06-11 | opus | Per-email Gmail hunt report (branch feat/gmail-per-email-report). Root cause of "/hunt gmail doesn't check all emails/vacancies": the report only showed jobs that survived filter+dedup, grouped by the enriched title *mislabelled as the email subject*, with no email date/sender — so an email whose vacancies were all filtered/deduped, or one where the regex extracted 0 URLs, was invisible. Fix: **Phase A** `Job.email_meta` (msg_id/date/subject/sender/aggregator) threaded from `gmail._parse_message` through `gmail_enricher` (preserved on Job recreate); `GmailSource.last_email_log` records one entry per email incl. 0-URL + skipped confirmations, `last_capped` flags the `GMAIL_MAX_RESULTS` ceiling; `LOOKBACK_HOURS`/`maxResults` → `GMAIL_LOOKBACK_HOURS`/`GMAIL_MAX_RESULTS` env. **Phase B** extracted `filters.classify_job(job)→reason|None` (apply_filters_with_stats now aggregates it) so the report gets the exact per-job filter reason. **Phase C/D** new `hunter/gmail_report.py:build_gmail_report()` renders per email `📧 date · aggregator · subject (found→taken)` + ✅ taken (title@company) + ♻️ dup · ✂️ filtered (human-labelled reasons); surfaces 0-URL emails (regex miss) + ceiling warning; chunked under 4096 and sent as own message(s). main.py tags every gmail Job (taken/dup_url/dup_ct/cooldown/filtered) across filter+dedup. 26 new tests (provenance 8 + classify 7 + report 11). Full suite 1262 pass. |
 | 2026-06-11 | fable | Prestige-claim scrub + skills gloss dedup (branch fix/resume-prestige-and-gloss). Root cause (2 prod CVs, PeopleVibe 2026-06-11 + Shimi 2026-06-10, diffed against user's manual fixes): (1) the LLM fabricated "Fortune 500 clients" into BOTH EN and PL summaries despite the generation_rules.md RED LINE — prompt-only rule, nothing enforced it post-generation; (2) ATS keyword mirroring left "term / synonym" slash-gloss pairs in skills ("Performance Optimization / Performance optimisation" — literally US/UK spelling, "technical documentation / High-quality technical documentation"). Fix in `apply_shared.py`, wired into BOTH pipelines (API after compliance scrub; CLI before lang gate, any fix → content.json rewrite + doc regen): `_strip_prestige_claims(content, job_text)` removes Fortune 50/100/500/1000, top-tier, blue-chip claims from summary/skills/bullets/about-me EN+PL via tempered clause regex (can't swallow the honest "300+ German banks" clause; EN+PL connectors), sentence-drop fallback, posting-exception (term present in job text → allowed); `_dedup_skill_glosses` collapses "A / B" where sides are near-dups (crude stem + UK→US + PL-diacritic fold; equal/subset/Jaccard≥0.6 → keep first side), paren-aware comma split, compact UI/UX / CI/CD untouched, distinct "OpenShift / container platforms" kept. New gloss-pair rule in generation_rules.md. Verified against both real content.json: PeopleVibe output now byte-matches the user's manual edit; Shimi collapses all 4+3 gloss pairs, keeps "Security by Design / Security best practices". 17 new tests (1283 total). |
+| 2026-06-12 | opus | CV claim-judge (Phase C, branch feat/cv-judge-verification; see docs/CV_JUDGE_PLAN.md). Replaces the regex-scrub whack-a-mole (each prestige/compliance scrub was added after one broken prod CV) with a systemic LLM-as-judge pass: new `prompts/judge_rules.md` + `hunter/claim_judge.py`. `judge_content(content, job_text, base_cv)` flattens the judged fields (summary/skills/bullets/cover-letters/about-me, `_en`+`_pl`; verbatim-locked company/title/education excluded), asks `JUDGE_MODEL` (Haiku) to list claims absent from the candidate profile + posting as `{field, quote, reason, severity}`; every finding's `quote` is verbatim-validated against the named field so judge hallucinations are dropped deterministically. `repair_content()` fixes actionable findings (fabrication/exaggeration): connector-aware clause-drop keeps the honest preceding clause ("...300+ German banks and Fortune 500 firms" → "...300+ German banks"), single targeted LLM rewrite for fields a drop would empty, rejected if it worsens `validate_content` (7-role guard). Wired into BOTH pipelines after the scrubs + before the language gate (apply_api Step 4.72 + `judge_report.json` artifact; apply_cli post-process, fixes join `_scrub_fixes` → rewrite+regen). `JUDGE_MODE` stages rollout report→warn→block (block aborts on surviving fabrication: API `sys.exit(0)`, CLI delete-docs+return). Best-effort throughout (never fatal). Config: JUDGE_ENABLED/MODEL/MODE/MAX_REPAIR_ROUNDS. 28 new tests (test_claim_judge), 1311 total green; ruff clean. Ships in `JUDGE_MODE=warn` — flip to `block` after a precision-review period (see plan M4). |
 | 2026-06-10 | opus | PL/EN language routing + enforce-gate (branch fix/pl-en-language-routing). Root cause (traced from 2 prod CVs, RTVEuroAGD/theprotocol + DCG/solid.jobs): for Polish postings the EN CV shipped riddled with Polish ("responsywne interfejsy (responsive interfaces)", "monolitycznych to mikroserwisach", "(7+ lat doświadczenia)") because (a) `lang` was detected but never used, (b) the ATS loop mirrors the Polish posting's keywords verbatim into resume_en, (c) `resume_sanitizer`/`content_qa` only *warn*, never block — the broken EN PDF (the one delivered in short mode) was sent anyway. Fix: new `hunter/lang_guard.py` (deterministic `detect_posting_language` + Polish-in-EN / English-in-PL detection via diacritics+lexicon+suffix+bilingual-gloss, dependency-free, Polish place-name allowlist so "Wrocław" isn't flagged); new `apply_shared.enforce_language_separation` enforce-gate wired into BOTH `apply_api` and `apply_cli` after sanitize — repairs by *translating from the clean opposite-language counterpart* (role-count guarded) + up to 2 in-place cleanup passes, and BLOCKS delivery (no broken doc: API `sys.exit(0)`, CLI deletes docs+returns) if strong Polish survives. ATS rewrite prompts now forbid foreign words/glosses. Delivery routing: `content["primary_lang"]` makes short mode also render the clean PL CV for PL postings (so a Polish vacancy ships BOTH PL+EN CV and CL). **Live-verified** on both prod URLs (theprotocol + solid.jobs): EN resume now fully clean (en_strong/soft/pl all empty), full bilingual set generated, gate logs show active repair each run; full suite run 4× green. 32 new tests (test_lang_guard 21 + test_lang_enforce_gate 5 + ATS-prompt/routing ... 1232 total). |
