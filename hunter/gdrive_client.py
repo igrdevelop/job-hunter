@@ -44,13 +44,19 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            token_file.write_text(creds.to_json())
+            from hunter.oauth_alert import refresh_or_alert
+            refresh_or_alert(
+                creds, Request(), token_file,
+                service="Google Drive", reauth_cmd="python tools/gsheets_auth.py",
+            )
         else:
-            raise RuntimeError(
+            from hunter.oauth_alert import alert_oauth_expired
+            err = RuntimeError(
                 "gsheets_token.json is missing or invalid. "
                 "Run: python tools/gsheets_auth.py"
             )
+            alert_oauth_expired("Google Drive", err, reauth_cmd="python tools/gsheets_auth.py")
+            raise err
 
     return build("drive", "v3", credentials=creds)
 

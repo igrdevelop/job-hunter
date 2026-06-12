@@ -18,7 +18,10 @@ def get_gmail_service():
     creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
 
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        TOKEN_PATH.write_text(creds.to_json())
+        from hunter.oauth_alert import refresh_or_alert
+        refresh_or_alert(
+            creds, Request(), TOKEN_PATH,
+            service="Gmail", reauth_cmd="python tools/gmail_auth.py",
+        )
 
     return build("gmail", "v1", credentials=creds)

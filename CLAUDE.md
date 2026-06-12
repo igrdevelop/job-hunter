@@ -150,6 +150,10 @@ hunter/
   gdrive_sync.py            High-level Drive upload (upload_application_folder)
   gdrive_client.py          Low-level Drive API v3 wrapper
   gmail_client.py           Gmail API wrapper
+  oauth_alert.py            Detect Google OAuth token expiry (invalid_grant/RefreshError) at the
+                            gsheets/gmail/gdrive auth boundary; refresh_or_alert() fires a
+                            cooldown-deduplicated Telegram "re-auth needed" alert then re-raises
+                            (a dead Sheets token once caused a false-EXPIRED cascade)
   gmail_parsers.py          Parse job alert emails from various boards
   gmail_report.py           Per-email hunt report: build_gmail_report() renders
                             [date · aggregator · subject → taken/dup/filtered]
@@ -490,7 +494,7 @@ GSHEETS_ENABLED=true
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
-7. **tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call. The in-memory `tracker_cache` solves dedup/stats O(1) but individual write functions still re-open the workbook.
+7. ~~**tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call.~~ ✅ Resolved by the Phase 5 SQLite migration (2026-05-27): tracker.py no longer imports openpyxl at all — every read/write goes through `hunter.db.get_db()` (SQLite, WAL). No per-call workbook re-parse remains. (tracker.py is still ~1050 lines, but that's surface area, not the Excel-reparse cost the issue described.)
 
 ---
 
@@ -597,6 +601,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-06-12 | opus | OAuth token-expiry alerts E.3 + E.2 doc cleanup (Phase E, branch feat/oauth-token-alerts; roadmap docs/PROJECT_REVIEW_2026-06.md). **E.3:** a dead Sheets OAuth token (`invalid_grant`) once caused a false-EXPIRED cascade and was only noticed by its damage. New `hunter/oauth_alert.py`: `is_oauth_error()` classifies RefreshError/invalid_grant/expired-or-revoked/missing-token (vs transient 5xx); `refresh_or_alert(creds, request, token_file, service, reauth_cmd)` wraps the `creds.refresh()` at each client's auth boundary — on an auth error it fires a cooldown-deduplicated (6 h per service) Telegram "re-auth needed" alert naming the service + re-auth command, then re-raises so existing best-effort handling is unchanged. Wired into all three Google clients (gsheets_client, gmail_client, gdrive_client), incl. the missing/invalid-token branch. Telegram send is direct/sync (requests), no heavy imports. 9 new tests (test_oauth_alert, 1292 total); ruff clean. **E.2:** verified Known Issue #7 stale — tracker.py no longer imports openpyxl (Phase 5 SQLite migration); marked resolved. **E.1** (rebuild prod image for Playwright/Inhire) is a deploy-host action, not doable from dev — left as an ops note. |
 | 2026-04-16 | agent | P0-P2 refactoring tasks completed (timeout, tracker centralization, config unification, tests) |
 | 2026-04-16 | agent | Source contract tests, prefilter helper, tracker status normalization |
 | 2026-05-11 | agent | Tracker backups, Gmail source, hunt/apply hardening |
