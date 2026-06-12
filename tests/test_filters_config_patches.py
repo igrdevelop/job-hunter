@@ -12,7 +12,6 @@ import pytest
 from hunter.filters import (
     apply_filters, apply_filters_with_stats,
     _is_node_only_title, _matches_location,
-    _is_german_language_required,
 )
 from hunter.models import Job
 

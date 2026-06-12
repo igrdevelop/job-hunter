@@ -3,7 +3,6 @@ Tests for P-2.x: expired_check.py + iter_unsent_rows dash-marker fix.
 """
 import uuid
 import pytest
-from pathlib import Path
 
 from hunter.expired_check import is_job_expired, is_expired_by_html
 from hunter.tracker import iter_unsent_rows, _is_unsent, normalize_url

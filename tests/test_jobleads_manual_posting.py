@@ -1,6 +1,5 @@
 """JobLeads MANUAL flow: pasted job_posting.txt + tracker path resolution."""
 
-from pathlib import Path
 
 from hunter import tracker
 from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting

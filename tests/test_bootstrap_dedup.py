@@ -7,7 +7,7 @@ See BOOTSTRAP_DEDUP_PLAN.md.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from hunter import tracker
 from hunter.db import get_db

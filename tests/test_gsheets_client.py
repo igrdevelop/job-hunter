@@ -5,7 +5,7 @@ All Google API calls are mocked — no network access needed.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 from hunter.gsheets_client import (
     COLUMNS,

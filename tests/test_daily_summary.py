@@ -7,7 +7,6 @@ import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from hunter import tracker
 from hunter.telegram_bot import _format_daily_summary

@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
 
 
@@ -112,8 +111,6 @@ class TestHtmlMarkersNoFluffJobs:
 
 from hunter.models import Job
 from hunter.filters import (
-    _is_unacceptable_contract,
-    _requires_relocation,
     _ANTI_HYBRID_CITIES,
     apply_filters_with_stats,
 )

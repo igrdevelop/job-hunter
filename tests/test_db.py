@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from hunter import db as db_module
 from hunter.db import get_db, init_db, migrate_from_excel, row_to_dict
 
 
@@ -151,7 +150,6 @@ def test_row_to_dict(db_path: Path) -> None:
 def _make_xlsx(path: Path) -> None:
     """Create a minimal tracker.xlsx with two data rows."""
     import openpyxl
-    from openpyxl.styles import Font
 
     wb = openpyxl.Workbook()
     ws = wb.active

@@ -8,7 +8,6 @@ Uses synchronous asyncio.run() wrappers (no pytest-asyncio dependency).
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -448,7 +447,6 @@ def test_init_or_load_noop_when_disabled():
 
 
 def test_init_or_load_from_state_file(tmp_path):
-    import importlib
     state_file = tmp_path / "gsheets_state.json"
     state_file.write_text('{"sheet_id": "fromfile123"}')
 

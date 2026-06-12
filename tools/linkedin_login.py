@@ -38,7 +38,7 @@ def main():
         state_path = Path(env_val)
         state_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[linkedin_login] Opening browser...")
+    print("\n[linkedin_login] Opening browser...")
     print(f"[linkedin_login] Session will be saved to: {state_path}\n")
 
     with sync_playwright() as pw:

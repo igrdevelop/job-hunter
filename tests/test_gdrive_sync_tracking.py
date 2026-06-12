@@ -9,10 +9,8 @@ Verifies:
 
 import asyncio
 import uuid
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from hunter import tracker
 from hunter.db import get_db
