@@ -11,6 +11,7 @@ via job_fetch/linkedin.py — but the search itself works without login.
 import logging
 import os
 import re
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -277,9 +278,9 @@ class LinkedInSource(BaseSource):
 
         jobs: list[Job] = []
         for i in range(len(job_ids)):
-            title = titles[i].strip() if i < len(titles) else ""
-            company = companies[i].strip() if i < len(companies) else "Unknown"
-            location = locations[i].strip() if i < len(locations) else "Unknown"
+            title = html_unescape(titles[i].strip()) if i < len(titles) else ""
+            company = html_unescape(companies[i].strip()) if i < len(companies) else "Unknown"
+            location = html_unescape(locations[i].strip()) if i < len(locations) else "Unknown"
             job_id = job_ids[i]
 
             if not title:

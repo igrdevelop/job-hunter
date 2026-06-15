@@ -6,10 +6,10 @@ Strategy (tested 2026-04):
   HTML response without JavaScript execution. No __NEXT_DATA__ or public API.
   We use cloudscraper (handles Cloudflare) + BeautifulSoup DOM parsing.
 
-  Card DOM structure:
-    div[data-testid="seo-search-list-job-card-{N}"]
+  Card DOM structure (re-verified 2026-06-15):
+    div[data-testid="search-job-card"]
       h2                                    → title
-      a[data-testid="search-job-card-link"] → absolute job URL
+      a[data-testid="search-job-card-link"] → job URL (relative, prefix BASE)
       p[data-testid="search-job-card-company"] > span  → company
       div[data-testid="search-job-card-chips"]
         div[data-testid="job-card-chip-location"]  → city / country
@@ -346,10 +346,7 @@ class JobLeadsSource(BaseSource):
     def _parse_cards(html: str) -> list[dict]:
         """Extract job card dicts from listing page HTML."""
         soup = BeautifulSoup(html, "html.parser")
-        cards = soup.find_all(
-            "div",
-            attrs={"data-testid": re.compile(r"^seo-search-list-job-card-\d+$")},
-        )
+        cards = soup.find_all("div", attrs={"data-testid": "search-job-card"})
         results = []
         for card in cards:
             raw = JobLeadsSource._extract_card(card)
@@ -366,11 +363,12 @@ class JobLeadsSource(BaseSource):
         if not title:
             return None
 
-        # Absolute URL
+        # Job URL — href is relative (e.g. "/pl/job/..."), prefix BASE
         link = card.find("a", attrs={"data-testid": "search-job-card-link"})
-        url = link["href"].split("?")[0] if link and link.get("href") else ""
-        if not url:
+        href = link["href"].split("?")[0] if link and link.get("href") else ""
+        if not href:
             return None
+        url = href if href.startswith("http") else BASE + href
 
         # Company
         company_el = card.find("p", attrs={"data-testid": "search-job-card-company"})
