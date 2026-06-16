@@ -688,7 +688,13 @@ def add_react_skipped(content: dict, url: str) -> None:
 
 
 def add_expired(url: str, company: str = "", title: str = "") -> None:
-    """Write an EXPIRED row — offer was no longer active when fetched."""
+    """Write an expired row — offer was no longer active when fetched.
+
+    Convention (matches expired_marker / mark_orphans_expired): the EXPIRED
+    marker lives in the ``Sent`` column; the ATS column gets ``SKIP`` (no CV was
+    generated). Both ``SKIP`` and a non-blank ``sent`` keep the row out of future
+    hunts via the dedup/cooldown path.
+    """
     if is_known(url, company, title):
         return
 
@@ -699,8 +705,8 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm)
-            VALUES (?, ?, ?, ?, 'EXPIRED', ?, ?)
+            (id, date, company, title, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, 'SKIP', ?, ?, 'EXPIRED')
             """,
             (_new_row_id(), today, company, title, norm, norm),
         )

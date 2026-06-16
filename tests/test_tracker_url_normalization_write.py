@@ -119,6 +119,18 @@ def test_add_expired_writes_normalized_url(tracker_db) -> None:
     assert expected in known
 
 
+def test_add_expired_marks_sent_not_ats(tracker_db) -> None:
+    """EXPIRED marker lives in Sent; ATS column gets SKIP (no CV generated)."""
+    url = "https://justjoin.it/job-offer/acme-frontend-developer-warszawa-javascript"
+
+    add_expired(url, company="Acme", title="Frontend Developer")
+
+    rows = lookup_url(url)
+    assert len(rows) == 1
+    assert rows[0]["sent"] == "EXPIRED"
+    assert rows[0]["ats"] == "SKIP"
+
+
 # ---------------------------------------------------------------------------
 # get_known_urls — round-trip sanity
 # ---------------------------------------------------------------------------
