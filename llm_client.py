@@ -28,7 +28,7 @@ def call_llm(
     system_prompt: str,
     user_message: str,
     provider: str = "anthropic",
-    model: str = "claude-3-5-haiku-20241022",
+    model: str = "claude-sonnet-4-6",
     api_key: str = "",
     max_retries: int = 3,
     max_tokens: int = 8192,

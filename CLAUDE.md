@@ -271,7 +271,7 @@ Applications/               Generated documents (gitignored)
 | `TELEGRAM_CHAT_ID` | — | Required |
 | `AUTO_APPLY` | `false` | Auto-generate docs without manual button press |
 | `LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models; older `claude-3-5-haiku-*` default was retired) |
+| `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_API_KEY` | — | API key for LLM provider |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
 | `JUDGE_ENABLED` | `true` | Run the LLM-as-judge CV verification pass |
