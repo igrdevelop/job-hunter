@@ -132,6 +132,50 @@ def test_nofluffjobs_fetch_text_formats_api_payload() -> None:
     assert "Build something cool" in out
 
 
+def test_nofluffjobs_fetch_text_new_schema_payload() -> None:
+    """Current NoFluffJobs schema: no `sections`; content lives in
+    details.description / requirements.description / specs.dailyTasks, salary in
+    essentials.originalSalary, company name + seniority moved into sub-objects."""
+    payload = {
+        "title": "Senior Angular Developer",
+        "name": None,
+        "company": {"name": "XTB"},
+        "location": {"places": [{"city": "Warszawa"}]},
+        "fullyRemote": True,
+        "basics": {"seniority": ["Senior"]},
+        "requirements": {
+            "musts": [{"value": "Angular"}, {"value": "TypeScript"}],
+            "nices": [],
+            "description": "<ul><li>Very good knowledge of Angular and RxJS</li></ul>",
+        },
+        "details": {"description": "<p>" + ("XTB is a global fintech company. " * 6) + "</p>"},
+        "specs": {"dailyTasks": ["Designing new functionalities", "Collaborating with backend"]},
+        "essentials": {
+            "originalSalary": {
+                "currency": "PLN",
+                "types": {"permanent": {"range": [19125.0, 24300.0]}},
+            }
+        },
+    }
+    with patch(
+        "hunter.sources.nofluffjobs.requests.get",
+        return_value=_mk_json_response(payload),
+    ):
+        out = NoFluffJobsSource().fetch_text(
+            "https://nofluffjobs.com/pl/job/senior-angular-developer-xtb-remote"
+        )
+    assert "Company: XTB" in out
+    assert "Company: N/A" not in out
+    assert "Seniority: Senior" in out
+    assert "Remote" in out
+    assert "Must-have: Angular, TypeScript" in out
+    assert "XTB is a global fintech company" in out
+    assert "Designing new functionalities" in out
+    assert "19125.0" in out and "24300.0" in out
+    assert "permanent" in out
+    assert len(out) >= 300  # clears MIN_JOB_TEXT_LEN — the original bug
+
+
 def test_nofluffjobs_fetch_text_falls_back_on_api_failure() -> None:
     with patch(
         "hunter.sources.nofluffjobs.requests.get",

@@ -69,43 +69,131 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
+def _dig(data: dict, path: str):
+    """Walk a dotted path through nested dicts; return None if any hop is missing."""
+    cur = data
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _first(data: dict, paths: list[str]):
+    """Return the first non-empty value among several candidate dotted paths."""
+    for path in paths:
+        val = _dig(data, path)
+        if val:
+            return val
+    return None
+
+
+def _coerce_text(value) -> str:
+    """Render an HTML string, a list of strings, or a dict of strings as plain text."""
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return _strip_html(value)
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict):
+                item = item.get("value") or item.get("text") or ""
+            text = _strip_html(str(item)).strip()
+            if text:
+                lines.append(f"- {text}")
+        return "\n".join(lines)
+    if isinstance(value, dict):
+        # join string-ish fields (e.g. details: {quote, position, description})
+        chunks = [_strip_html(str(v)) for v in value.values() if isinstance(v, str) and v.strip()]
+        return "\n".join(c for c in chunks if c)
+    return _strip_html(str(value))
+
+
+def _extract_company(data: dict) -> str:
+    return (
+        data.get("name")
+        or _dig(data, "company.name")
+        or _dig(data, "company.companyName")
+        or "N/A"
+    )
+
+
+def _extract_seniority(data: dict) -> list[str]:
+    sen = data.get("seniority") or _dig(data, "basics.seniority") or []
+    if isinstance(sen, str):
+        return [sen]
+    return [str(s) for s in sen if s]
+
+
+def _extract_salary(data: dict):
+    """Return (low, high, currency, emp_type) across old and new schemas, or None."""
+    ess = data.get("essentials") or {}
+
+    # Old schema: essentials.salary
+    sal = ess.get("salary") or {}
+    if sal.get("from") or sal.get("to"):
+        return sal.get("from"), sal.get("to"), sal.get("currency", "PLN"), sal.get("type", "")
+
+    # New schema: essentials.originalSalary.types.<empType>.range = [low, high]
+    orig = ess.get("originalSalary") or {}
+    cur = orig.get("currency", "PLN")
+    for emp_type, info in (orig.get("types") or {}).items():
+        rng = (info or {}).get("range") or []
+        if rng:
+            low = rng[0] if len(rng) > 0 else None
+            high = rng[1] if len(rng) > 1 else None
+            if low or high:
+                return low, high, cur, emp_type
+    return None
+
+
+# (label, candidate dotted paths) — first non-empty path wins. Covers the current
+# NoFluffJobs schema (details/requirements.description, specs.dailyTasks) plus the
+# legacy `sections.*` shape so older cached/alternate payloads still parse.
+_SECTION_SPECS: list[tuple[str, list[str]]] = [
+    ("Description", ["details.description", "sections.description", "description"]),
+    ("Requirements", ["requirements.description", "sections.requirements"]),
+    ("Responsibilities", ["specs.dailyTasks", "sections.responsibilities", "responsibilities"]),
+    ("Methodology", ["specs.methodology", "sections.methodology", "methodology"]),
+    ("Environment", ["specs.environment", "sections.environment", "environment"]),
+]
+
+
 def _format_posting_text(data: dict) -> str:
     parts: list[str] = [
         f"Job Title: {data.get('title', 'N/A')}",
-        f"Company: {data.get('name', 'N/A')}",
+        f"Company: {_extract_company(data)}",
     ]
 
-    location = data.get("location", {})
-    places = location.get("places", [])
+    location = data.get("location") or {}
+    places = location.get("places") or []
     remote = data.get("fullyRemote", False)
-    loc_str = "Remote" if remote else ", ".join(p.get("city", "") for p in places)
-    parts.append(f"Location: {loc_str}")
+    loc_str = "Remote" if remote else ", ".join(p.get("city", "") for p in places if p.get("city"))
+    parts.append(f"Location: {loc_str or 'N/A'}")
 
-    seniority = data.get("seniority", [])
+    seniority = _extract_seniority(data)
     if seniority:
         parts.append(f"Seniority: {', '.join(seniority)}")
 
-    musts = data.get("requirements", {}).get("musts", [])
-    nices = data.get("requirements", {}).get("nices", [])
+    musts = _dig(data, "requirements.musts") or []
+    nices = _dig(data, "requirements.nices") or []
     if musts:
         parts.append(f"Must-have: {', '.join(m.get('value', '') for m in musts)}")
     if nices:
         parts.append(f"Nice-to-have: {', '.join(n.get('value', '') for n in nices)}")
 
-    salary = data.get("essentials", {}).get("salary", {})
+    salary = _extract_salary(data)
     if salary:
-        low = salary.get("from")
-        high = salary.get("to")
-        cur = salary.get("currency", "PLN")
-        emp = salary.get("type", "")
-        if low or high:
-            parts.append(f"Salary: {low or '?'}–{high or '?'} {cur} {emp}")
+        low, high, cur, emp = salary
+        parts.append(f"Salary: {low or '?'}–{high or '?'} {cur} {emp}".rstrip())
 
-    sections = data.get("sections", {})
-    for key in ("requirements", "responsibilities", "description", "methodology", "environment"):
-        content = sections.get(key, "")
-        if content:
-            parts.append(f"\n--- {key.title()} ---\n{_strip_html(content)}")
+    seen_blocks: set[str] = set()
+    for label, paths in _SECTION_SPECS:
+        content = _coerce_text(_first(data, paths))
+        if content and content not in seen_blocks:
+            seen_blocks.add(content)
+            parts.append(f"\n--- {label} ---\n{content}")
 
     text = "\n".join(parts)
     if len(text) < 50:
