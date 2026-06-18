@@ -114,14 +114,26 @@ def parse_bulldogjob(subject: str, body_text: str, body_html: str) -> list[Job]:
 
 
 # ── Pracuj.pl ─────────────────────────────────────────────────────────────────
-# URLs: https://www.pracuj.pl/praca/some-job,oferta,XXXXXXXX
+# Site canonical URLs: https://www.pracuj.pl/praca/some-job,oferta,XXXXXXXX
+# Recommendation digests (rekomendacje@wysylka.pracuj.pl) send the bare-host
+# variant https://pracuj.pl/praca/...,oferta,X?sendid=...&utm_*=... — the www.
+# subdomain is dropped, and there's no separate click-tracker host. Accept both
+# and canonicalize to the www. form so normalize_url's path-id treatment + dedup
+# stay stable across email and scraped links.
 
 @register("pracuj.pl")
 def parse_pracuj(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
     # Only use full URLs that contain the title slug — slug-less URLs (/praca/oferta,ID)
     # are invalid on pracuj.pl and will show "not found"
-    direct = re.findall(r'https://www\.pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html)
-    clean = [re.sub(r'\?.*$', '', url) for url in direct
-             if re.search(r'/praca/[^/]+,oferta,\d+', url)]
+    direct = re.findall(
+        r'https://(?:www\.)?pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html
+    )
+    clean = []
+    for url in direct:
+        if not re.search(r'/praca/[^/]+,oferta,\d+', url):
+            continue
+        url = re.sub(r'\?.*$', '', url)
+        url = re.sub(r'^https://pracuj\.pl/', 'https://www.pracuj.pl/', url)
+        clean.append(url)
     return _jobs_from_urls(clean, "pracuj", subject)
