@@ -99,6 +99,56 @@ def test_parse_message_skip_subject_flagged():
     assert rec["extracted"] == 0
 
 
+def test_ack_subject_with_similar_offers_is_parsed_not_skipped():
+    # NoFluffJobs sends "Your application for X @ Y" with a "similar job
+    # offers especially for you" block. The ACK-subject SKIP must not throw
+    # those recommendations away.
+    src = GmailSource()
+    src.last_email_log = []
+    html = (
+        'Your application has been sent successfully.'
+        '<a href="https://nofluffjobs.com/pl/job/senior-angular-developer-remote-link-group">a</a>'
+        '<a href="https://nofluffjobs.com/pl/job/mid-angular-developer-link-group">b</a>'
+        '<a href="https://nofluffjobs.com/pl/job/senior-angular-developer-xtb">c</a>'
+    )
+    msg = _msg(
+        "m_ack",
+        "notifications@nofluffjobs.com",
+        "Your application for Senior Angular Developer @ j-labs software specialist",
+        html,
+    )
+
+    jobs = src._parse_message(msg)
+
+    assert len(jobs) == 3
+    rec = src.last_email_log[0]
+    assert rec["skipped"] is False
+    assert rec["extracted"] == 3
+    assert rec["aggregator"] == "nofluffjobs"
+
+
+def test_ack_subject_without_similar_offers_still_skipped():
+    # Pure ACK email (no recommendations) still skipped, so the report keeps
+    # grouping these under "подтверждений пропущено".
+    src = GmailSource()
+    src.last_email_log = []
+    msg = _msg(
+        "m_ack_only",
+        "notifications@nofluffjobs.com",
+        "Your application for Senior Angular Developer @ j-labs",
+        "Your application has been sent successfully. Thank you.",
+    )
+
+    jobs = src._parse_message(msg)
+
+    assert jobs == []
+    rec = src.last_email_log[0]
+    assert rec["skipped"] is True
+    assert rec["extracted"] == 0
+    # Aggregator is now known even though we skipped (parser ran first).
+    assert rec["aggregator"] == "nofluffjobs"
+
+
 def test_parse_date_unparseable_returns_none():
     assert GmailSource._parse_date("(no date)") is None
     assert isinstance(
