@@ -471,14 +471,19 @@ def classify_job(job: Job) -> str | None:
     specific job (the Gmail per-email report) reuse it directly so the report and
     the filter pipeline can never disagree.
     """
-    is_gmail = job.source.startswith("gmail_")
-
-    # Title-keyword / require-angular — Gmail bypass (pre-filtered by alerts)
-    if not is_gmail:
-        if not _matches_title_keywords(job.title):
-            return "title_kw"
-        if not _requires_angular_check(job.title):
-            return "require_angular"
+    # title_keywords and require_angular enforced for ALL sources, including
+    # gmail_*. Recommendation-style alert digests (rekomendacje@wysylka.pracuj.pl,
+    # NoFluffJobs "similar offers" blocks, LinkedIn "New jobs similar to ...")
+    # pack 10–20 unrelated roles (.NET, PHP, database, DevOps, embedded …)
+    # next to the headline FE one. Bypassing the title whitelist for gmail_*
+    # used to let those through to AUTO_APPLY, burning LLM calls on irrelevant
+    # roles. The cost of a false-negative (missing one ambiguous title like
+    # "Software Engineer III") is much lower than the cost of a false-positive
+    # (CV generated for a database/Go/PHP role we'd never apply to).
+    if not _matches_title_keywords(job.title):
+        return "title_kw"
+    if not _requires_angular_check(job.title):
+        return "require_angular"
 
     # Hard filters — apply to ALL sources including gmail_*
     if _is_excluded_level(job.title):
@@ -512,10 +517,11 @@ def apply_filters(jobs: list[Job]) -> list[Job]:
 def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]]:
     """Filter jobs and return (passing_jobs, reason_counts).
 
-    Gmail-sourced jobs (source starts with 'gmail_') bypass only the
-    title-keyword and require-angular checks — the user's alert subscriptions
-    already pre-filter for relevance.  All other checks run uniformly for
-    every source including gmail_*:
+    All filters run uniformly for every source, including gmail_*. The gmail
+    title-keyword bypass was removed in fix/gmail-enforce-title-keywords:
+    recommendation-style digests pack unrelated roles (.NET, PHP, database,
+    DevOps …) next to the headline FE one, and bypassing the whitelist let
+    those through to AUTO_APPLY. Checks:
       - level exclusions  (intern / manager / tech lead)
       - title-only React check  (_is_react_only_title)
       - exclude_pattern  (Java, .NET, Magento, React Native …)
