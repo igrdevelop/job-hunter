@@ -234,8 +234,10 @@ def build_resume(doc, data, stack, lang="EN"):
             set_font(run_value, size=11)
             set_paragraph_spacing(p, before=1, after=1)
 
-    # WORK EXPERIENCE
-    add_section_heading(doc, "WORK EXPERIENCE")
+    # EXPERIENCE — Taleo and a handful of legacy ATS expect an exact-match
+    # section header. "WORK EXPERIENCE" can be classified as "Other" and
+    # the entire experience array silently drops out of the parsed fields.
+    add_section_heading(doc, "EXPERIENCE")
     for job in data["experience"]:
         # Title | Company — Period
         p = doc.add_paragraph()

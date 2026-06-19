@@ -22,6 +22,7 @@ beautifulsoup4
 
 # ATS scoring
 scikit-learn
+pypdf
 
 # Testing
 pytest

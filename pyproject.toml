@@ -27,6 +27,7 @@ dependencies = [
     "google-auth-httplib2==0.2.0",
     # ATS scoring
     "scikit-learn",
+    "pypdf",
 ]
 
 [project.optional-dependencies]

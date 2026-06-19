@@ -574,6 +574,31 @@ def main_api(
         gen_ok = False
         print("[apply_agent] generate_docs.py timed out (120s)")
 
+    # Step 7.5 — PDF roundtrip: re-score the *rendered* PDF against the job
+    # posting. Catches keywords our generate_docs pipeline drops at render time
+    # (line-break hyphenation, lost bullets, table reordering) that the JSON
+    # score can't see. Heuristic-only — no LLM call, runs offline. Best-effort:
+    # any failure logs and continues. Stored on content.json for future audits.
+    pdf_summary = ""
+    if gen_ok:
+        try:
+            from hunter.ats_pdf_roundtrip import format_summary, run_pdf_roundtrip
+            pdf_check = run_pdf_roundtrip(
+                folder=output_folder,
+                job_text=job_text,
+                json_ats_score=content.get("ats_score"),
+            )
+            if pdf_check is not None:
+                content["ats_check_pdf"] = pdf_check
+                content_path.write_text(
+                    json.dumps(content, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                pdf_summary = " | " + format_summary(pdf_check)
+                print(f"[apply_agent] {format_summary(pdf_check)}")
+        except Exception as e:
+            print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
+
     # Step 8 — Notify success
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:
@@ -590,7 +615,7 @@ def main_api(
             f"✅ <b>Docs ready!</b>\n\n"
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
-            f"ATS: {ats}% | Stack: {content.get('stack', '?')}\n"
+            f"ATS: {ats}%{pdf_summary} | Stack: {content.get('stack', '?')}\n"
             f"Via: API ({LLM_MODEL})\n"
             f"Review and send when ready."
             f"{issues_note}"

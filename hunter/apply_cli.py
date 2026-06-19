@@ -434,13 +434,46 @@ def main_cli(
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")
 
+        # PDF roundtrip — re-score the rendered EN CV PDF against the job
+        # posting (heuristic, no LLM). Catches keywords the python-docx →
+        # LibreOffice → PDF pipeline drops during rendering. Best-effort —
+        # failures log + continue, never block delivery.
+        pdf_summary = ""
+        if job_text:
+            try:
+                from hunter.ats_pdf_roundtrip import format_summary, run_pdf_roundtrip
+                _json_score = None
+                try:
+                    _cli_content_for_score = json.loads(
+                        content_json_path.read_text(encoding="utf-8")
+                    )
+                    _json_score = _cli_content_for_score.get("ats_score")
+                except Exception:
+                    _cli_content_for_score = None
+                pdf_check = run_pdf_roundtrip(
+                    folder=folder_path,
+                    job_text=job_text,
+                    json_ats_score=_json_score,
+                )
+                if pdf_check is not None and _cli_content_for_score is not None:
+                    _cli_content_for_score["ats_check_pdf"] = pdf_check
+                    content_json_path.write_text(
+                        json.dumps(_cli_content_for_score, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    pdf_summary = "\n" + format_summary(pdf_check)
+                    print(f"[apply_agent] {format_summary(pdf_check)}")
+            except Exception as e:
+                print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
+
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:
             file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
             notify(
                 f"✅ <b>Docs ready!</b>\n\n"
                 f"📁 <code>Applications/{new_folder}/</code>\n\n"
-                f"{file_names}\n\n"
+                f"{file_names}\n"
+                f"{pdf_summary}\n"
                 f"Via: CLI (Pro subscription)\n"
                 f"Review and send when ready."
             )
