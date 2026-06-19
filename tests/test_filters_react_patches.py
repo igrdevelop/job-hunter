@@ -70,8 +70,12 @@ def test_react_native_engineer_blocked() -> None:
 # ---------------------------------------------------------------------------
 
 def test_react_developer_blocked_even_from_gmail() -> None:
-    """Gmail source must NOT bypass React-only title check."""
-    job = _gmail_job(title="React Developer")
+    """Gmail source must NOT bypass React-only title check.
+
+    Title carries a whitelist keyword (frontend) so it passes the title_kw gate
+    and reaches the react_no_angular check — that's the filter we're exercising.
+    """
+    job = _gmail_job(title="Frontend Developer (React)")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
     assert reasons["react_no_angular"] == 1
@@ -79,14 +83,14 @@ def test_react_developer_blocked_even_from_gmail() -> None:
 
 def test_react_native_blocked_from_gmail_via_exclude_pattern() -> None:
     """React Native in Gmail title → exclude_pattern fires."""
-    job = _gmail_job(title="Senior React Native Engineer")
+    job = _gmail_job(title="Senior Frontend React Native Engineer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
 
 
 def test_magento_blocked_from_gmail() -> None:
     """Magento in Gmail title → exclude_pattern must fire (was bypassed before P-3.2)."""
-    job = _gmail_job(title="Magento Developer")
+    job = _gmail_job(title="Frontend Magento Developer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
     assert reasons["exclude_pattern"] == 1
@@ -124,7 +128,7 @@ def test_junior_blocked_from_gmail() -> None:
 
 def test_react_native_blocked_via_gmail() -> None:
     """React Native in a Gmail job title is blocked (P-3.1 title check or P-3.3 pattern)."""
-    job = _gmail_job(title="Senior React Native Engineer")
+    job = _gmail_job(title="Senior Frontend React Native Engineer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
     # _is_react_only_title fires first (react_no_angular) before exclude_pattern reaches it
@@ -133,7 +137,7 @@ def test_react_native_blocked_via_gmail() -> None:
 
 def test_react_native_hyphen_blocked_via_gmail() -> None:
     """react-native (hyphen variant) → exclude_pattern fires."""
-    job = _gmail_job(title="React-Native Developer")
+    job = _gmail_job(title="Frontend React-Native Developer")
     result, reasons = apply_filters_with_stats([job])
     assert result == []
     assert reasons["exclude_pattern"] >= 1

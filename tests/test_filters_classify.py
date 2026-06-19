@@ -24,10 +24,18 @@ def test_non_gmail_title_keyword_miss():
     assert classify_job(_job("Plumber")) == "title_kw"
 
 
-def test_gmail_bypasses_title_keyword():
-    # Gmail source skips the title-keyword gate (alerts pre-filter relevance).
-    j = _job("Some Random Role", source="gmail_linkedin")
-    assert classify_job(j) != "title_kw"
+def test_gmail_enforces_title_keyword():
+    # Recommendation digests (pracuj rekomendacje@, nofluff "similar offers",
+    # linkedin "New jobs similar to ...") pack 10–20 unrelated roles next to
+    # the headline FE one. Gmail sources must go through the title whitelist
+    # like every other source, or AUTO_APPLY burns LLM calls on .NET / PHP /
+    # database / DevOps roles bundled into a "Frontend Engineer III ..." email.
+    assert classify_job(_job("Programista baz danych", source="gmail_pracuj")) == "title_kw"
+    assert classify_job(_job("Database Developer", source="gmail_pracuj")) == "title_kw"
+    assert classify_job(_job("Senior Go Developer", source="gmail_linkedin")) == "title_kw"
+    # Genuine FE titles in gmail still pass the title gate.
+    assert classify_job(_job("Senior Frontend Engineer", source="gmail_linkedin")) is None
+    assert classify_job(_job("Angular Developer", source="gmail_pracuj")) is None
 
 
 def test_excluded_level():

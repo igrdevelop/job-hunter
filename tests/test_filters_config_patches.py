@@ -33,17 +33,20 @@ def _gmail(*, title: str, location: str = "remote") -> Job:
 # P-4.1 — eCommerce/CMS blocked via exclude_pattern (gmail, so title_kw bypassed)
 # ---------------------------------------------------------------------------
 
+# Each title is prefixed/suffixed with a whitelist keyword (frontend/typescript)
+# so it passes the title_kw gate and reaches the exclude_pattern check —
+# that's the filter under test here.
 @pytest.mark.parametrize("title", [
-    "Hyva Developer",
+    "Frontend Hyva Developer",
     "Adobe Commerce Frontend",
-    "PWA Studio Engineer",
-    "Shopware Developer",
+    "Frontend PWA Studio Engineer",
+    "Frontend Shopware Developer",
     "Shopify Frontend",
-    "BigCommerce Developer",
-    "WooCommerce Dev",
-    "Drupal Developer",
+    "Frontend BigCommerce Developer",
+    "Frontend WooCommerce Dev",
+    "Frontend Drupal Developer",
     "WordPress Frontend",
-    "SharePoint Developer",
+    "Frontend SharePoint Developer",
     "SAP Frontend Developer",
 ])
 def test_ecommerce_cms_blocked(title: str) -> None:
@@ -162,7 +165,7 @@ def test_devops_mobile_blocked(title: str) -> None:
     "Tech Lead Angular",
     "Angular Tech Lead",
     "Project Lead Frontend",
-    "Engineering Manager",
+    "Engineering Manager Frontend",  # needs whitelist kw to clear title_kw
     "Frontend Developer Part-Time",
     "Angular Developer part time",
 ])
