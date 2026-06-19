@@ -69,13 +69,15 @@ def _jobs_from_urls(urls: list[str], source: str, subject: str) -> list[Job]:
 
 
 # ── LinkedIn ──────────────────────────────────────────────────────────────────
-# Sends "10 new jobs for you" digests.
-# URLs: https://www.linkedin.com/jobs/view/1234567890
+# Sends "10 new jobs for you" / "New jobs similar to ..." / "<query>: ..." digests.
+# Hrefs in those emails are wrapped in LinkedIn's click-tracker, so the path is
+# almost always /comm/jobs/view/<id> (with refId/trk query params), not the bare
+# /jobs/view/<id> users see in their browser. We accept both, then canonicalize.
 
 @register("linkedin.com")
 def parse_linkedin(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
-    ids = re.findall(r'linkedin\.com/jobs/view/(\d{8,12})', html)
+    ids = re.findall(r'linkedin\.com/(?:comm/)?jobs/view/(\d{8,12})', html)
     urls = [f"https://www.linkedin.com/jobs/view/{jid}" for jid in ids]
     return _jobs_from_urls(urls, "linkedin", subject)
 
@@ -112,14 +114,26 @@ def parse_bulldogjob(subject: str, body_text: str, body_html: str) -> list[Job]:
 
 
 # ── Pracuj.pl ─────────────────────────────────────────────────────────────────
-# URLs: https://www.pracuj.pl/praca/some-job,oferta,XXXXXXXX
+# Site canonical URLs: https://www.pracuj.pl/praca/some-job,oferta,XXXXXXXX
+# Recommendation digests (rekomendacje@wysylka.pracuj.pl) send the bare-host
+# variant https://pracuj.pl/praca/...,oferta,X?sendid=...&utm_*=... — the www.
+# subdomain is dropped, and there's no separate click-tracker host. Accept both
+# and canonicalize to the www. form so normalize_url's path-id treatment + dedup
+# stay stable across email and scraped links.
 
 @register("pracuj.pl")
 def parse_pracuj(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
     # Only use full URLs that contain the title slug — slug-less URLs (/praca/oferta,ID)
     # are invalid on pracuj.pl and will show "not found"
-    direct = re.findall(r'https://www\.pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html)
-    clean = [re.sub(r'\?.*$', '', url) for url in direct
-             if re.search(r'/praca/[^/]+,oferta,\d+', url)]
+    direct = re.findall(
+        r'https://(?:www\.)?pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html
+    )
+    clean = []
+    for url in direct:
+        if not re.search(r'/praca/[^/]+,oferta,\d+', url):
+            continue
+        url = re.sub(r'\?.*$', '', url)
+        url = re.sub(r'^https://pracuj\.pl/', 'https://www.pracuj.pl/', url)
+        clean.append(url)
     return _jobs_from_urls(clean, "pracuj", subject)

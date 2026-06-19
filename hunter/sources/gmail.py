@@ -139,43 +139,57 @@ class GmailSource(BaseSource):
 
         logger.info("[gmail] ✉  from=%r  date=%s  subject=%r", sender, date, subject)
 
-        if any(s in subject.lower() for s in self._SKIP_SUBJECTS):
-            logger.info("[gmail]    → SKIP (confirmation/activity email)")
-            record["skipped"] = True
-            return []
-
         body_text, body_html = self._extract_body(msg["payload"])
+        is_ack_subject = any(s in subject.lower() for s in self._SKIP_SUBJECTS)
 
+        # Try the parser FIRST, even on ACK-looking subjects: NoFluffJobs (and
+        # occasionally Pracuj) bundle a "similar job offers especially for you"
+        # block into the application-confirmation email. Skipping on subject
+        # alone threw those 10 recommendations away. Only fall back to SKIP if
+        # the parser found 0 URLs in an ACK-shaped email.
         for domain, parser_fn in PARSERS.items():
             if domain in sender:
                 aggregator = _aggregator_name(domain)
                 record["aggregator"] = aggregator
                 try:
                     found = parser_fn(subject, body_text, body_html)
-                    record["extracted"] = len(found)
-                    # Stamp provenance so the hunt report can group by email.
-                    meta = {
-                        "msg_id": msg_id,
-                        "date": parsed_date,
-                        "subject": subject,
-                        "sender": sender,
-                        "aggregator": aggregator,
-                    }
-                    for job in found:
-                        job.email_meta = meta
-                    if found:
-                        logger.info(
-                            "[gmail]    → %s: extracted %d URL(s):",
-                            domain, len(found),
-                        )
-                        for job in found:
-                            logger.info("[gmail]       %s", job.url)
-                    else:
-                        logger.info("[gmail]    → %s: 0 URLs extracted (no matching pattern in body)", domain)
-                    return found
                 except Exception as e:
                     logger.warning("[gmail]    → %s: parser error — %s", domain, e)
                     return []
+                record["extracted"] = len(found)
+                # Stamp provenance so the hunt report can group by email.
+                meta = {
+                    "msg_id": msg_id,
+                    "date": parsed_date,
+                    "subject": subject,
+                    "sender": sender,
+                    "aggregator": aggregator,
+                }
+                for job in found:
+                    job.email_meta = meta
+                if found:
+                    logger.info(
+                        "[gmail]    → %s: extracted %d URL(s)%s:",
+                        domain, len(found),
+                        " (similar offers in ACK email)" if is_ack_subject else "",
+                    )
+                    for job in found:
+                        logger.info("[gmail]       %s", job.url)
+                    return found
+                if is_ack_subject:
+                    logger.info("[gmail]    → SKIP (confirmation/activity email, no similar offers)")
+                    record["skipped"] = True
+                    return []
+                logger.info("[gmail]    → %s: 0 URLs extracted (no matching pattern in body)", domain)
+                return []
+
+        # No parser matched the sender. Honor SKIP for ACK-shaped subjects so
+        # the report still groups them under "подтверждений пропущено" rather
+        # than the noisier "парсер не распознал".
+        if is_ack_subject:
+            logger.info("[gmail]    → SKIP (confirmation/activity email, unknown sender)")
+            record["skipped"] = True
+            return []
 
         logger.debug("[gmail]    → no parser matched sender %r", sender)
         return []
