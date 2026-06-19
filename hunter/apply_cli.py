@@ -434,13 +434,99 @@ def main_cli(
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")
 
+        # PDF roundtrip + NBSP self-heal — mirror of the API pipeline.
+        # See hunter/apply_api.py for the full rationale: re-score the
+        # rendered EN CV PDF, and if Δ ≥ HEAL_DELTA_PP below the JSON score
+        # patch each multi-word missing keyword with NBSP and regen once.
+        # Best-effort — failures log + continue, never block delivery.
+        pdf_summary = ""
+        if job_text:
+            try:
+                from hunter.ats_pdf_roundtrip import (
+                    HEAL_DELTA_PP,
+                    format_summary,
+                    nbsp_patch_missing_keywords,
+                    run_pdf_roundtrip,
+                )
+                try:
+                    _cli_content_for_score = json.loads(
+                        content_json_path.read_text(encoding="utf-8")
+                    )
+                    _json_score = _cli_content_for_score.get("ats_score")
+                except Exception:
+                    _cli_content_for_score = None
+                    _json_score = None
+
+                pdf_check = run_pdf_roundtrip(
+                    folder=folder_path,
+                    job_text=job_text,
+                    json_ats_score=_json_score,
+                )
+
+                delta = pdf_check.get("delta_from_json") if pdf_check else None
+                if (
+                    pdf_check
+                    and _cli_content_for_score is not None
+                    and delta is not None
+                    and delta <= -HEAL_DELTA_PP
+                ):
+                    missing = pdf_check.get("missing_keywords") or []
+                    patches = nbsp_patch_missing_keywords(_cli_content_for_score, missing)
+                    if patches:
+                        print(
+                            f"[apply_agent] PDF Δ={delta:+.1f}pp — "
+                            f"patched {patches} multi-word keyword(s) with NBSP, regenerating"
+                        )
+                        content_json_path.write_text(
+                            json.dumps(_cli_content_for_score, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        _heal_cmd = build_generate_docs_cmd(
+                            generate_docs_script=GENERATE_DOCS_PATH,
+                            content_json_path=content_json_path,
+                            use_full=full_mode,
+                            force=skip_dedup,
+                            python_executable=sys.executable,
+                        )
+                        try:
+                            subprocess.run(
+                                _heal_cmd,
+                                cwd=str(PROJECT_DIR),
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                timeout=120,
+                            )
+                            pdf_check_2 = run_pdf_roundtrip(
+                                folder=folder_path,
+                                job_text=job_text,
+                                json_ats_score=_json_score,
+                            )
+                            if pdf_check_2 is not None:
+                                pdf_check = pdf_check_2
+                        except subprocess.TimeoutExpired:
+                            print("[apply_agent] self-heal regen timed out (120s) — keeping original PDF")
+
+                if pdf_check is not None and _cli_content_for_score is not None:
+                    _cli_content_for_score["ats_check_pdf"] = pdf_check
+                    content_json_path.write_text(
+                        json.dumps(_cli_content_for_score, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    pdf_summary = "\n" + format_summary(pdf_check)
+                    print(f"[apply_agent] {format_summary(pdf_check)}")
+            except Exception as e:
+                print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
+
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:
             file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
             notify(
                 f"✅ <b>Docs ready!</b>\n\n"
                 f"📁 <code>Applications/{new_folder}/</code>\n\n"
-                f"{file_names}\n\n"
+                f"{file_names}\n"
+                f"{pdf_summary}\n"
                 f"Via: CLI (Pro subscription)\n"
                 f"Review and send when ready."
             )

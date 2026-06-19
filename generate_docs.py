@@ -234,15 +234,20 @@ def build_resume(doc, data, stack, lang="EN"):
             set_font(run_value, size=11)
             set_paragraph_spacing(p, before=1, after=1)
 
-    # WORK EXPERIENCE
-    add_section_heading(doc, "WORK EXPERIENCE")
+    # EXPERIENCE — Taleo and a handful of legacy ATS expect an exact-match
+    # section header. "WORK EXPERIENCE" can be classified as "Other" and
+    # the entire experience array silently drops out of the parsed fields.
+    add_section_heading(doc, "EXPERIENCE")
+    # Date normalizer (lazy import — generate_docs.py is invoked as a script).
+    from hunter.date_normalize import normalize_period
+
     for job in data["experience"]:
-        # Title | Company — Period
+        # Title | Company — Period (period normalized to MM/YYYY – MM/YYYY for
+        # Taleo-strict ATS parsers; unparseable periods pass through unchanged).
         p = doc.add_paragraph()
         run_title = p.add_run(f"{job['title']} | {job['company']}")
         set_font(run_title, size=11, bold=True)
-        # Period — right aligned via tab or just appended
-        run_period = p.add_run(f"   {job['period']}")
+        run_period = p.add_run(f"   {normalize_period(job['period'])}")
         set_font(run_period, size=10, italic=True)
         set_paragraph_spacing(p, before=4, after=1)
         keep_with_next(p)
