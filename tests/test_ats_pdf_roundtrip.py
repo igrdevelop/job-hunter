@@ -11,8 +11,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from hunter.ats_pdf_roundtrip import (
+    NBSP,
     find_en_cv_pdf,
     format_summary,
+    nbsp_patch_missing_keywords,
     run_pdf_roundtrip,
 )
 
@@ -73,11 +75,14 @@ def test_run_pdf_roundtrip_no_json_score_skips_delta(tmp_path: Path) -> None:
     assert "delta_from_json" not in result
 
 
-def test_format_summary_includes_delta_and_warn_flag() -> None:
+def test_format_summary_includes_delta_no_warn_flag() -> None:
+    # The warn ⚠️ flag was removed: by the time format_summary runs the
+    # NBSP self-heal loop has either fixed the regression or accepted it,
+    # so flagging the user with an unactionable number is just noise.
     s = format_summary({"score": 92.0, "delta_from_json": -7.5})
     assert "92.0%" in s
     assert "-7.5" in s
-    assert "⚠️" in s
+    assert "⚠️" not in s
 
 
 def test_format_summary_no_warn_when_delta_small() -> None:
@@ -95,6 +100,62 @@ def test_format_summary_without_delta() -> None:
     s = format_summary({"score": 90.0})
     assert "90.0%" in s
     assert "vs JSON" not in s
+
+
+def test_nbsp_patch_replaces_internal_space_in_skills() -> None:
+    # Real failure case from production: "Performance Optimization" appears in
+    # skills.methodologies, ATS regex matches the JSON resume, but the PDF
+    # render breaks the phrase across a line wrap and pypdf returns
+    # "Performance\noptimization" — regex `\s+` matches \n but the wrapper
+    # adds a stray space the substring search misses.
+    content = {
+        "resume_en": {
+            "skills": {
+                "methodologies": "Agile, TDD, Performance Optimization, CI/CD",
+            },
+            "experience": [
+                {
+                    "bullets": ["Drove performance optimization across the SPA."],
+                },
+            ],
+        }
+    }
+    n = nbsp_patch_missing_keywords(content, ["Performance Optimization"])
+    assert n == 2  # patched in skills AND in the bullet
+    assert NBSP in content["resume_en"]["skills"]["methodologies"]
+    # The original casing is preserved; only the space character changed.
+    assert "Performance" + NBSP + "Optimization" in content["resume_en"]["skills"]["methodologies"]
+    # Bullet also patched, case-insensitively.
+    assert "performance" + NBSP + "optimization" in content["resume_en"]["experience"][0]["bullets"][0]
+
+
+def test_nbsp_patch_skips_single_word_keywords() -> None:
+    # Single-word missing keywords ("express", "jasmine") are NOT a render
+    # artefact — they're absent from the JSON itself. NBSP can't help; the
+    # earlier _ats_check_loop is responsible for rewriting content.
+    content = {"resume_en": {"skills": {"tools": "Jest, Cypress, Express, Webpack"}}}
+    before = content["resume_en"]["skills"]["tools"]
+    n = nbsp_patch_missing_keywords(content, ["express", "webpack"])
+    assert n == 0
+    assert content["resume_en"]["skills"]["tools"] == before
+
+
+def test_nbsp_patch_no_keywords_is_noop() -> None:
+    content = {"resume_en": {"skills": {"x": "Angular"}}}
+    assert nbsp_patch_missing_keywords(content, []) == 0
+    assert content["resume_en"]["skills"]["x"] == "Angular"
+
+
+def test_nbsp_patch_keyword_absent_from_resume_is_noop() -> None:
+    # Missing keyword that doesn't appear in the resume — nothing to patch.
+    content = {"resume_en": {"skills": {"x": "Angular, TypeScript"}}}
+    assert nbsp_patch_missing_keywords(content, ["Continuous Integration"]) == 0
+
+
+def test_nbsp_patch_handles_non_dict_resume() -> None:
+    # Defensive: if resume_en is a stringified blob (rare but seen), bail out.
+    content = {"resume_en": "Angular Senior"}
+    assert nbsp_patch_missing_keywords(content, ["Performance Optimization"]) == 0
 
 
 def test_run_pdf_roundtrip_stores_content_payload(tmp_path: Path) -> None:

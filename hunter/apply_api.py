@@ -574,26 +574,79 @@ def main_api(
         gen_ok = False
         print("[apply_agent] generate_docs.py timed out (120s)")
 
-    # Step 7.5 — PDF roundtrip: re-score the *rendered* PDF against the job
-    # posting. Catches keywords our generate_docs pipeline drops at render time
-    # (line-break hyphenation, lost bullets, table reordering) that the JSON
-    # score can't see. Heuristic-only — no LLM call, runs offline. Best-effort:
-    # any failure logs and continues. Stored on content.json for future audits.
+    # Step 7.5 — PDF roundtrip + NBSP self-heal.
+    #
+    # First pass: extract text from the rendered EN CV PDF and re-score it
+    # against the job posting. This catches keywords that python-docx →
+    # LibreOffice → PDF drops at render time (multi-word phrases split across
+    # a line wrap, lost bullets, table reordering) that the JSON ATS score
+    # can't see.
+    #
+    # If the PDF score is ≥ HEAL_DELTA_PP below the JSON score, the loss is
+    # almost certainly a multi-word keyword breaking on a wrap ("performance
+    # optimization" → "performance\noptimization"). Patch each affected
+    # phrase with NBSP in content.json, regenerate the docs, re-score once.
+    # The user never sees a warn flag — either we self-healed it, or one
+    # extra pass wasn't enough and we accept the residual rather than
+    # spamming Telegram with an unactionable number.
+    #
+    # Best-effort throughout: any failure logs + continues. Heuristic only —
+    # no LLM call, no extra API spend.
     pdf_summary = ""
     if gen_ok:
         try:
-            from hunter.ats_pdf_roundtrip import format_summary, run_pdf_roundtrip
+            from hunter.ats_pdf_roundtrip import (
+                HEAL_DELTA_PP,
+                format_summary,
+                nbsp_patch_missing_keywords,
+                run_pdf_roundtrip,
+            )
+
+            def _save_content():
+                content_path.write_text(
+                    json.dumps(content, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+
             pdf_check = run_pdf_roundtrip(
                 folder=output_folder,
                 job_text=job_text,
                 json_ats_score=content.get("ats_score"),
             )
+
+            delta = pdf_check.get("delta_from_json") if pdf_check else None
+            if pdf_check and delta is not None and delta <= -HEAL_DELTA_PP:
+                missing = pdf_check.get("missing_keywords") or []
+                patches = nbsp_patch_missing_keywords(content, missing)
+                if patches:
+                    print(
+                        f"[apply_agent] PDF Δ={delta:+.1f}pp — "
+                        f"patched {patches} multi-word keyword(s) with NBSP, regenerating"
+                    )
+                    _save_content()
+                    try:
+                        subprocess.run(
+                            gen_cmd,
+                            cwd=str(PROJECT_DIR),
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            timeout=120,
+                        )
+                        pdf_check_2 = run_pdf_roundtrip(
+                            folder=output_folder,
+                            job_text=job_text,
+                            json_ats_score=content.get("ats_score"),
+                        )
+                        if pdf_check_2 is not None:
+                            pdf_check = pdf_check_2
+                    except subprocess.TimeoutExpired:
+                        print("[apply_agent] self-heal regen timed out (120s) — keeping original PDF")
+
             if pdf_check is not None:
                 content["ats_check_pdf"] = pdf_check
-                content_path.write_text(
-                    json.dumps(content, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _save_content()
                 pdf_summary = " | " + format_summary(pdf_check)
                 print(f"[apply_agent] {format_summary(pdf_check)}")
         except Exception as e:
