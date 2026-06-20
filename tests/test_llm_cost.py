@@ -24,6 +24,30 @@ def test_resolve_pricing_sonnet_dated_snapshot() -> None:
     assert _resolve_pricing("claude-sonnet-4-6") is PRICING["sonnet-4"]
 
 
+def test_resolve_pricing_deepseek_via_openrouter() -> None:
+    """OpenRouter prefixes model ids ('deepseek/deepseek-r1') — substring match
+    must still pick R1/V3-specific rates rather than the Sonnet fallback."""
+    assert _resolve_pricing("deepseek/deepseek-r1") is PRICING["deepseek-r1"]
+    assert _resolve_pricing("deepseek/deepseek-chat") is PRICING["deepseek-chat"]
+    # And the bare ids (in case some caller drops the prefix)
+    assert _resolve_pricing("deepseek-r1") is PRICING["deepseek-r1"]
+
+
+def test_deepseek_r1_per_call_cost() -> None:
+    """Pin the arithmetic on R1 so an accidental rate edit shows up in CI.
+
+    1000 input + 2000 output + 5000 cache_read on R1:
+      (1000 * 0.55 + 2000 * 2.19 + 5000 * 0.14) / 1_000_000
+      = (550 + 4380 + 700) / 1M = 0.00563
+    """
+    cost = usd_for_call("deepseek/deepseek-r1", {
+        "input_tokens": 1000,
+        "output_tokens": 2000,
+        "cache_read_input_tokens": 5000,
+    })
+    assert abs(cost - 0.00563) < 1e-6
+
+
 def test_resolve_pricing_unknown_falls_back_to_sonnet_rates() -> None:
     # Unknown model → fallback rates. A future model that we forgot to add
     # should be over-estimated rather than reported as free.

@@ -132,6 +132,8 @@ def call_llm(
                 )
             elif provider == "openai":
                 raw = _call_openai(system_prompt, user_message, model, api_key, max_tokens)
+            elif provider == "openrouter":
+                raw = _call_openrouter(system_prompt, user_message, model, api_key, max_tokens)
             else:
                 raise LLMError(f"Unknown LLM provider: {provider}")
 
@@ -255,6 +257,65 @@ def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) 
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
         raise LLMError(f"OpenAI API error {e.status_code}: {e}") from e
+
+
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: int) -> str:
+    """Call any model on OpenRouter via the OpenAI-compatible endpoint.
+
+    OpenRouter is the gateway for DeepSeek/Gemini/Qwen/etc. without needing a
+    separate account per provider. The wire format is OpenAI chat-completions,
+    so we reuse the openai SDK with a custom base_url.
+
+    JSON mode is forced (response_format) — generation_rules.md already tells
+    the model to respond with JSON. Reasoning models (R1) emit their CoT to
+    a separate message.reasoning field which we ignore — we read .content only,
+    so the JSON parser never sees the reasoning trace.
+
+    Usage mapping (DeepSeek via OpenRouter exposes prefix-cache stats):
+      prompt_tokens             → input_tokens (minus cache hits)
+      prompt_cache_hit_tokens   → cache_read_input_tokens
+      completion_tokens         → output_tokens
+      cache_creation_input_tokens stays 0 (provider doesn't expose writes).
+    """
+    try:
+        import openai
+    except ImportError:
+        raise LLMError("Package 'openai' not installed. Run: pip install openai")
+
+    try:
+        client = openai.OpenAI(
+            api_key=key,
+            base_url=_OPENROUTER_BASE_URL,
+            default_headers={"X-Title": "job-hunter-bot"},
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        u = getattr(response, "usage", None)
+        if u is not None:
+            prompt_tokens = int(getattr(u, "prompt_tokens", 0) or 0)
+            cache_hit = int(getattr(u, "prompt_cache_hit_tokens", 0) or 0)
+            _record_usage(model, {
+                "input_tokens": max(0, prompt_tokens - cache_hit),
+                "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
+                "cache_read_input_tokens": cache_hit,
+            })
+        return response.choices[0].message.content
+    except openai.RateLimitError as e:
+        raise LLMRateLimitError(str(e)) from e
+    except openai.APIStatusError as e:
+        if e.status_code in _RETRYABLE:
+            raise LLMRateLimitError(str(e)) from e
+        raise LLMError(f"OpenRouter API error {e.status_code}: {e}") from e
 
 
 # ── JSON parsing ──────────────────────────────────────────────────────────────
