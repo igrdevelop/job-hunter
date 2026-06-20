@@ -597,7 +597,9 @@ def _run_main_api(
     # collapses. (Verified by /code-review on PR #104.)
     #
     # Best-effort throughout: any pricing error logs + falls back to None
-    # so the apply flow completes regardless.
+    # so the apply flow completes regardless. cost_dict is read again
+    # later for the Telegram summary so an unparseable usage log doesn't
+    # both skip the DB cost AND make the message misleading.
     cost_dict: dict | None = None
     try:
         from hunter.llm_cost import price_usage as _price_usage

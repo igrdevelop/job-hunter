@@ -57,7 +57,7 @@ _header_written: dict[str, bool] = {}
 
 def _row_for(row_id: str) -> tuple[int | None, float | None]:
     """Return (sheet_row_index, cost_usd) for the given application ID."""
-    with get_db(globals()["DB_PATH"]) as conn:
+    with get_db(DB_PATH) as conn:
         row = conn.execute(
             "SELECT sheets_row, cost_usd FROM applications WHERE id = ?",
             (row_id,),
@@ -141,7 +141,7 @@ def backfill_all_costs_sync(
     Skipped tallies cover rows that have no sheets_row yet (never pushed)
     and rows with NULL cost_usd (CLI runs / pre-tracking).
     """
-    with get_db(globals()["DB_PATH"]) as conn:
+    with get_db(DB_PATH) as conn:
         rows = conn.execute(
             "SELECT id, sheets_row, cost_usd FROM applications"
         ).fetchall()
