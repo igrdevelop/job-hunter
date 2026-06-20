@@ -405,7 +405,7 @@ LLM-generated. PL CV gets the Polish clause, EN CV the English one. Controlled b
 | 10 | To Learn | Skills gap |
 | 11 | ID | Short UUID (8-char hex) — Google Sheets sync key |
 | 12 | Drive URL | Google Drive folder URL after upload (local-only, not synced to Sheets) |
-| 15 | Cost $ | Per-vacancy LLM USD spend (API mode). Blank for CLI mode (Pro subscription, no per-token visibility) and for pre-tracking rows. **Local-only, not synced to Sheets yet** — Sheets column M writer is a follow-up; column L is already used by `sent_normalizer` for "Applied Date" so cost cannot piggy-back on the A–K sync. |
+| 15 | Cost $ | Per-vacancy LLM USD spend (API mode). Blank for CLI mode (Pro subscription, no per-token visibility) and for pre-tracking rows. Mirrored to Sheet column **M** by `hunter.cost_writer` — separate writer (not part of the A–K push), parallel to `sent_normalizer` on column L. |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
