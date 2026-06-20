@@ -136,6 +136,45 @@ def main_api(
         print(f"[apply_agent] SKIP — already in tracker: {url}")
         return
 
+    # Begin per-vacancy LLM cost accounting. Every call_llm fired from inside
+    # this push/pop pair (generation, ATS-loop rewrites, CL self-review,
+    # claim-judge + repair, judge model calls) appends one usage record to
+    # `_usage_log`; the apply_shared helpers don't need to know about it.
+    # Manual push/pop instead of `with` because main_api has half a dozen
+    # early returns + sys.exit paths and wrapping the whole body in a `with`
+    # would be a huge whitespace diff. The finally block guarantees pop
+    # regardless of how the function exits.
+    from llm_client import pop_usage_log, push_usage_log
+    _usage_log = push_usage_log()
+    try:
+        return _run_main_api(
+            url=url,
+            paste_text=paste_text,
+            skip_dedup=skip_dedup,
+            full_mode=full_mode,
+            jobleads_company=jobleads_company,
+            jobleads_title=jobleads_title,
+            _usage_log=_usage_log,
+        )
+    finally:
+        pop_usage_log()
+
+
+def _run_main_api(
+    *,
+    url: str,
+    paste_text: str,
+    skip_dedup: bool,
+    full_mode: bool,
+    jobleads_company: str,
+    jobleads_title: str,
+    _usage_log: list,
+) -> None:
+    """Inner body of main_api, split out so push_usage_log() / pop_usage_log()
+    can wrap it without forcing a 500-line `with` block. See main_api for arg
+    semantics. `_usage_log` is the live accounting frame populated as the
+    pipeline runs LLM calls; the notify step reads it to price the run.
+    """
     # Step 1 — Get job text: either use pasted text or fetch
     if paste_text:
         job_text = paste_text
@@ -544,6 +583,36 @@ def main_api(
     except Exception as e:
         print(f"[apply_agent] Warning: could not save job_posting.txt: {e}")
 
+    # Step 6.5 — Price the full LLM run and persist on content.json BEFORE
+    # generate_docs runs.
+    #
+    # All LLM work is done by this point (generation, ATS-loop rewrites, CL
+    # self-review, judge + repair). generate_docs.py is a child Python
+    # subprocess that imports hunter.services.tracker_service and calls
+    # add_applied — which reads cost off content.json. If we priced AFTER
+    # the subprocess, add_applied would land cost_usd=NULL in tracker.db
+    # and the downstream Sheet mirror (mirror_cost_cell_sync) would no-op
+    # because it reads cost_usd from the DB. Result: every row's M column
+    # stays empty and the whole "cost in the table" feature silently
+    # collapses. (Verified by /code-review on PR #104.)
+    #
+    # Best-effort throughout: any pricing error logs + falls back to None
+    # so the apply flow completes regardless.
+    cost_dict: dict | None = None
+    try:
+        from hunter.llm_cost import price_usage as _price_usage
+        cost_dict = _price_usage(_usage_log)
+        content["cost"] = cost_dict
+        try:
+            content_path.write_text(
+                json.dumps(content, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as _save_err:
+            print(f"[apply_agent] Warning: could not persist cost to content.json: {_save_err}")
+    except Exception as e:
+        print(f"[apply_agent] Warning: cost pricing failed (continuing): {e}")
+
     # Step 7 — Run generate_docs.py
     gen_cmd = build_generate_docs_cmd(
         generate_docs_script=GENERATE_DOCS_PATH,
@@ -652,11 +721,15 @@ def main_api(
         except Exception as e:
             print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
 
-    # Step 8 — Notify success
+    # Step 8 — Notify success (cost was already priced + persisted in Step 6.5).
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:
         file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
         ats = content.get("ats_score", "?")
+        cost_line = ""
+        if cost_dict is not None:
+            from hunter.llm_cost import format_summary as _cost_summary
+            cost_line = f"\n{_cost_summary(cost_dict)}"
         issues_note = ""
         if not gen_ok:
             issues_note = (
@@ -669,7 +742,7 @@ def main_api(
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"ATS: {ats}%{pdf_summary} | Stack: {content.get('stack', '?')}\n"
-            f"Via: API ({LLM_MODEL})\n"
+            f"Via: API ({LLM_MODEL}){cost_line}\n"
             f"Review and send when ready."
             f"{issues_note}"
         )

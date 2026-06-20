@@ -1,0 +1,122 @@
+"""Unit tests for hunter.llm_cost — pricing + log aggregation."""
+
+import pytest
+
+from hunter.llm_cost import (
+    PRICING,
+    _resolve_pricing,
+    format_summary,
+    price_usage,
+    usd_for_call,
+)
+
+
+def test_resolve_pricing_longest_match_wins() -> None:
+    # haiku-4-5 is more specific than haiku-4; both contain "haiku".
+    rates = _resolve_pricing("claude-haiku-4-5-20251001")
+    assert rates is PRICING["haiku-4-5"]
+    rates_4 = _resolve_pricing("claude-haiku-4-1")
+    assert rates_4 is PRICING["haiku-4"]
+
+
+def test_resolve_pricing_sonnet_dated_snapshot() -> None:
+    assert _resolve_pricing("claude-sonnet-4-20250514") is PRICING["sonnet-4"]
+    assert _resolve_pricing("claude-sonnet-4-6") is PRICING["sonnet-4"]
+
+
+def test_resolve_pricing_unknown_falls_back_to_sonnet_rates() -> None:
+    # Unknown model → fallback rates. A future model that we forgot to add
+    # should be over-estimated rather than reported as free.
+    rates = _resolve_pricing("claude-future-9")
+    assert rates == PRICING["sonnet-4"]
+
+
+def test_usd_for_call_sonnet_basic() -> None:
+    # 1000 input tokens at $3/M = $0.003; 500 output at $15/M = $0.0075. Total $0.0105.
+    usage = {"input_tokens": 1000, "output_tokens": 500}
+    assert usd_for_call("claude-sonnet-4-6", usage) == pytest.approx(0.0105, abs=1e-9)
+
+
+def test_usd_for_call_includes_cache_tokens() -> None:
+    # cache_write at 1.25× input rate, cache_read at 0.1× input rate.
+    usage = {
+        "input_tokens": 1000,         # 1000 * 3 / 1M = 0.003
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 1000,  # 1000 * 3.75 / 1M = 0.00375
+        "cache_read_input_tokens": 1000,      # 1000 * 0.30 / 1M = 0.0003
+    }
+    assert usd_for_call("claude-sonnet-4-6", usage) == pytest.approx(0.00705, abs=1e-9)
+
+
+def test_usd_for_call_haiku_cheaper() -> None:
+    usage = {"input_tokens": 1000, "output_tokens": 500}
+    sonnet = usd_for_call("claude-sonnet-4-6", usage)
+    haiku = usd_for_call("claude-haiku-4-5-20251001", usage)
+    # Haiku $1 / $5 vs Sonnet $3 / $15 — exactly 1/3 the cost on a pure tokens basis.
+    assert haiku == pytest.approx(sonnet / 3, abs=1e-9)
+
+
+def test_usd_for_call_missing_keys_treated_as_zero() -> None:
+    assert usd_for_call("sonnet-4-6", {}) == 0.0
+    assert usd_for_call("sonnet-4-6", {"input_tokens": None}) == 0.0
+
+
+def test_price_usage_aggregates_by_model_and_total() -> None:
+    log = [
+        {"model": "claude-sonnet-4-6",
+         "input_tokens": 30000, "output_tokens": 7000,
+         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        {"model": "claude-sonnet-4-6",
+         "input_tokens": 0, "output_tokens": 5000,
+         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 30000},
+        {"model": "claude-haiku-4-5-20251001",
+         "input_tokens": 2000, "output_tokens": 800,
+         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    ]
+    out = price_usage(log)
+
+    assert out["calls"] == 3
+    assert out["input_tokens"] == 32000
+    assert out["output_tokens"] == 12800
+    assert out["cache_read_tokens"] == 30000
+    assert "claude-sonnet-4-6" in out["by_model"]
+    assert "claude-haiku-4-5-20251001" in out["by_model"]
+    # Sonnet dominates the total — Haiku is single-digit-percent.
+    assert out["by_model"]["claude-sonnet-4-6"] > out["by_model"]["claude-haiku-4-5-20251001"] * 5
+    assert out["total_usd"] == pytest.approx(
+        sum(out["by_model"].values()), abs=1e-4
+    )
+
+
+def test_price_usage_empty_log_returns_zero_totals() -> None:
+    out = price_usage([])
+    assert out["total_usd"] == 0.0
+    assert out["calls"] == 0
+    assert out["by_model"] == {}
+    assert out["input_tokens"] == 0
+    assert out["output_tokens"] == 0
+
+
+def test_price_usage_tolerates_garbage_entries() -> None:
+    # Garbage records (non-dict, missing model) silently skipped — we should
+    # never crash the apply pipeline because the LLM SDK returned something
+    # unexpected.
+    log = [
+        None,                                      # type: ignore[list-item]
+        "broken",                                  # type: ignore[list-item]
+        {"model": "sonnet-4-6", "input_tokens": 100, "output_tokens": 50},
+    ]
+    out = price_usage(log)
+    assert out["calls"] == 1
+    assert out["total_usd"] > 0
+
+
+def test_format_summary_renders_total_and_call_count() -> None:
+    cost = {"total_usd": 0.0473, "calls": 8}
+    s = format_summary(cost)
+    assert "$0.0473" in s
+    assert "8 LLM call" in s
+    # No trailing 's' on singular call
+    cost = {"total_usd": 0.0050, "calls": 1}
+    assert "1 LLM call" in format_summary(cost)
+    assert "calls)" not in format_summary(cost)

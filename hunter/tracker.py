@@ -37,7 +37,7 @@ DB_PATH: Path = TRACKER_DB_PATH
 TRACKER_HEADERS = [
     "Date", "Company", "Job Title", "Stack",
     "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
-    "Drive URL", "Confirmation", "Answer",
+    "Drive URL", "Confirmation", "Answer", "Cost $",
 ]
 # 1-based column indices (mirror xlsx schema; kept for tracker_cache / db imports)
 URL_COL_INDEX = 6
@@ -49,6 +49,7 @@ ID_COL_INDEX = 11
 COL_DRIVE_URL = 12
 COL_CONFIRMATION = 13
 COL_ANSWER = 14
+COL_COST_USD = 15
 
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 MANUAL_PENDING_ATS = "MANUAL"
@@ -206,7 +207,42 @@ def _db_row_to_tracker_dict(row) -> dict:
         "Drive URL":      str(row["drive_url"] or ""),
         "Confirmation":   str(row["confirmation"] or ""),
         "Answer":         str(row["answer"] or ""),
+        "Cost $":         _format_cost(row["cost_usd"] if "cost_usd" in row.keys() else None),
     }
+
+
+def _format_cost(cost_usd) -> str:
+    """Render a cost_usd column value for display / Sheets push.
+
+    None → empty string (no measurement, either a pre-tracking row or a CLI
+    run). 0 → '$0.0000' (kept distinguishable from missing). Any positive
+    number rounded to 4 decimals.
+    """
+    if cost_usd is None or cost_usd == "":
+        return ""
+    try:
+        return f"${float(cost_usd):.4f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _parse_cost_cell(value) -> float | None:
+    """Inverse of _format_cost: turn a Sheet "Cost $" cell back into a float.
+
+    "$0.4712" → 0.4712, "" / None → None. Any junk silently → None — a
+    user edit in the Cost column shouldn't be able to crash the pull.
+    Used by insert_pulled_rows when bootstrapping from the Sheet on a
+    fresh DB so historical cost data isn't lost on redeploy.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lstrip("$").replace(",", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 # ── Dedup reads ───────────────────────────────────────────────────────────────
@@ -586,6 +622,12 @@ def add_applied(content: dict, force: bool = False) -> bool:
     ats_display, _ = _parse_ats_score(ats_raw)
     today = date.today().strftime("%Y-%m-%d")
     norm_url = normalize_url(apply_url) if apply_url else ""
+    # Per-vacancy USD spent on LLM calls — recorded by apply_api into
+    # content["cost"] = {"total_usd": 0.47, "by_model": ..., ...}. CLI runs
+    # stamp {"mode": "cli", "total_usd": None}. We persist only the scalar
+    # total; the full breakdown stays on content.json next to the docs.
+    cost_payload = content.get("cost") if isinstance(content.get("cost"), dict) else None
+    cost_usd = cost_payload.get("total_usd") if cost_payload else None
 
     with get_db(DB_PATH) as conn:
         # Atomic dedup: check + insert inside ONE transaction so concurrent
@@ -619,8 +661,8 @@ def add_applied(content: dict, force: bool = False) -> bool:
             """
             INSERT INTO applications
             (id, date, company, title, stack, ats_status, url, url_norm,
-             folder, sent, reapplication, to_learn)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+             folder, sent, reapplication, to_learn, cost_usd)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
             """,
             (
                 _new_row_id(), today, company, job_title, stack, ats_display,
@@ -628,6 +670,7 @@ def add_applied(content: dict, force: bool = False) -> bool:
                 folder,
                 "+" if is_reapply else "",
                 to_learn,
+                cost_usd,
             ),
         )
     return True
@@ -893,11 +936,11 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
                 INSERT OR IGNORE INTO applications
                 (id, date, company, title, stack, ats_status, url, url_norm,
                  folder, sent, reapplication, to_learn, drive_url,
-                 confirmation, answer, sheets_row, sheets_dirty)
+                 confirmation, answer, sheets_row, sheets_dirty, cost_usd)
                 VALUES
                 (:id, :date, :company, :title, :stack, :ats_status, :url, :url_norm,
                  :folder, :sent, :reapplication, :to_learn, :drive_url,
-                 :confirmation, :answer, :sheets_row, :sheets_dirty)
+                 :confirmation, :answer, :sheets_row, :sheets_dirty, :cost_usd)
                 """,
                 {
                     "id":            row_id,
@@ -917,6 +960,7 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
                     "answer":        row.get("Answer", ""),
                     "sheets_row":    sheet_idx,
                     "sheets_dirty":  0,
+                    "cost_usd":      _parse_cost_cell(row.get("Cost $", "")),
                 },
             )
             if conn.execute("SELECT changes()").fetchone()[0]:
