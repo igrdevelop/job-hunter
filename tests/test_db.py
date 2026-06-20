@@ -45,7 +45,7 @@ def test_init_db_has_all_columns(db_path: Path) -> None:
         "id", "date", "company", "title", "stack", "ats_status",
         "url", "url_norm", "folder", "sent", "reapplication", "to_learn",
         "drive_url", "confirmation", "answer", "sheets_row", "sheets_dirty",
-        "fail_count",
+        "fail_count", "cost_usd",
     }
     with get_db(db_path) as conn:
         cols = {

@@ -519,6 +519,21 @@ def main_cli(
             except Exception as e:
                 print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
 
+        # Stamp a "mode=cli" cost record on content.json so the tracker /
+        # Sheets column stays consistent across API and CLI runs. The CLI
+        # runs through the Claude Pro subscription — we have no per-token
+        # visibility, and dividing $20/month by call count would be
+        # misleading. total_usd=None means "not measured" downstream.
+        try:
+            _cli_content = json.loads(content_json_path.read_text(encoding="utf-8"))
+            _cli_content["cost"] = {"mode": "cli", "total_usd": None}
+            content_json_path.write_text(
+                json.dumps(_cli_content, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not stamp CLI cost record: {e}")
+
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:
             file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
@@ -528,6 +543,7 @@ def main_cli(
                 f"{file_names}\n"
                 f"{pdf_summary}\n"
                 f"Via: CLI (Pro subscription)\n"
+                f"Cost: included in Pro plan\n"
                 f"Review and send when ready."
             )
             send_telegram_documents(created_files)

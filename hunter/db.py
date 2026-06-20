@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS applications (
     answer        TEXT    NOT NULL DEFAULT '',
     sheets_row    INTEGER,
     sheets_dirty  INTEGER NOT NULL DEFAULT 0,
-    fail_count    INTEGER NOT NULL DEFAULT 0
+    fail_count    INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_url_norm
@@ -121,6 +122,11 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("sheets_row",   "INTEGER"),
         ("sheets_dirty", "INTEGER NOT NULL DEFAULT 0"),
         ("fail_count",   "INTEGER NOT NULL DEFAULT 0"),
+        # cost_usd is the per-vacancy total USD spent on LLM calls (rounded
+        # to 4 decimals). NULL means "not measured" — either a pre-cost-
+        # tracking row, or a CLI-mode run (Pro subscription, no per-token
+        # visibility). The Sheets mirror renders NULL as an empty cell.
+        ("cost_usd",     "REAL"),
     ]
     for col, definition in migrations:
         if col not in existing:

@@ -124,6 +124,12 @@ async def mirror_new_row(row: dict) -> None:
     """Append a new row to Sheets.  On success, stores sheets_row in DB.
 
     Called after: add_applied, add_skipped, add_manual_jobleads_pending.
+
+    After the A–K append lands, this also pokes column M (`Cost $`) via
+    hunter.cost_writer — that column is outside COLUMNS by design so the
+    bot never overwrites it with empty strings on subsequent A–K pushes.
+    Cost is best-effort; a failure there doesn't dirty the row (cost is
+    not part of the user-visible workflow state).
     """
     if not _ready():
         return
@@ -131,6 +137,7 @@ async def mirror_new_row(row: dict) -> None:
     if not row_id:
         return
 
+    from hunter.cost_writer import mirror_cost_cell_sync
     from hunter.gsheets_client import append_rows
 
     try:
@@ -144,6 +151,18 @@ async def mirror_new_row(row: dict) -> None:
     except Exception as e:
         log.error("gsheets mirror_new_row failed for %s: %s", row_id, e)
         mark_sheets_dirty(row_id)
+        return
+
+    # Mirror cost into column M. Best-effort: a Sheets hiccup here doesn't
+    # roll back the A–K push or mark the row dirty (cost isn't part of any
+    # workflow gate). We swallow failures because cost_writer logs them
+    # internally and the next /sync_costs backfill will catch up.
+    try:
+        await asyncio.to_thread(
+            mirror_cost_cell_sync, _get_service(), _sheet_id(), row_id
+        )
+    except Exception as e:
+        log.warning("gsheets cost mirror failed for %s (non-fatal): %s", row_id, e)
 
 
 # ---------------------------------------------------------------------------

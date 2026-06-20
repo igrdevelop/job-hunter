@@ -3,17 +3,93 @@ llm_client.py — Unified LLM caller with retry logic and JSON parsing.
 
 Supports Anthropic and OpenAI providers. Provider/model/key are passed in
 so the module stays stateless and testable.
+
+Per-call usage accounting (account_usage / current_log) is a context manager
+the apply pipeline wraps around its entire LLM-using flow. When the stack is
+non-empty, every successful call_llm appends one record to the innermost
+frame's log — model + four anthropic token counters. The caller passes the
+log to hunter.llm_cost.price_usage to convert to USD. Zero overhead when
+the stack is empty, so non-apply callers (tests, ad-hoc scripts) are
+unaffected.
 """
 
 import json
 import logging
 import re
 import time
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
 # Retry-eligible HTTP status codes
 _RETRYABLE = {429, 500, 502, 503, 529}
+
+# Stack of active usage logs. The apply pipeline pushes one on entry and
+# pops it on exit; nested calls add to the innermost frame (we don't expect
+# nesting in practice but the stack keeps account_usage reentrant-safe).
+_USAGE_STACK: list[list[dict]] = []
+
+
+@contextmanager
+def account_usage():
+    """Context manager: yield a list that gets one record per LLM call inside.
+
+    Each record is a dict with keys: model, input_tokens, output_tokens,
+    cache_creation_input_tokens, cache_read_input_tokens. Empty if no LLM
+    call ran inside the block. Pass the list to hunter.llm_cost.price_usage
+    to convert to USD + per-model breakdown.
+    """
+    log = push_usage_log()
+    try:
+        yield log
+    finally:
+        pop_usage_log()
+
+
+def push_usage_log() -> list[dict]:
+    """Begin a new accounting frame. Returns the list that will collect records.
+
+    Manual counterpart to account_usage() — useful when the pipeline body
+    isn't easily nestable under a `with` (apply_api.main_api has a half-dozen
+    early returns and multiple sys.exit paths; wrapping it in an explicit
+    push/pop pair keeps the diff small).
+    """
+    log: list[dict] = []
+    _USAGE_STACK.append(log)
+    return log
+
+
+def pop_usage_log() -> list[dict] | None:
+    """End the innermost accounting frame. Returns the collected log, or None
+    if the stack was empty (defensive — calling pop without a matching push
+    is a bug but we don't want it to crash the apply pipeline)."""
+    return _USAGE_STACK.pop() if _USAGE_STACK else None
+
+
+def _record_usage(model: str, usage) -> None:
+    """Push one usage entry onto the innermost active log, if any.
+
+    Accepts the raw anthropic SDK Usage object (has attribute access) or
+    a plain dict. Missing fields default to 0. Best-effort: any error here
+    must never affect the call's return value.
+    """
+    if not _USAGE_STACK:
+        return
+    try:
+        def _get(name: str) -> int:
+            if isinstance(usage, dict):
+                return int(usage.get(name) or 0)
+            return int(getattr(usage, name, 0) or 0)
+
+        _USAGE_STACK[-1].append({
+            "model": model,
+            "input_tokens": _get("input_tokens"),
+            "output_tokens": _get("output_tokens"),
+            "cache_creation_input_tokens": _get("cache_creation_input_tokens"),
+            "cache_read_input_tokens": _get("cache_read_input_tokens"),
+        })
+    except Exception as e:
+        logger.warning("[LLM] usage record failed for %s: %s", model, e)
 
 
 class LLMError(Exception):
@@ -136,6 +212,7 @@ def _call_anthropic(
         if _supports_disabled_thinking(model):
             create_kwargs["thinking"] = {"type": "disabled"}
         response = client.messages.create(**create_kwargs)
+        _record_usage(model, getattr(response, "usage", None))
         return response.content[0].text
     except anthropic.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
@@ -161,6 +238,16 @@ def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) 
             ],
             max_tokens=max_tokens,
         )
+        # OpenAI returns prompt_tokens / completion_tokens — remap to the
+        # anthropic-shaped fields so price_usage doesn't need a per-provider
+        # branch (cache_*_tokens stay 0 because OpenAI exposes no cache stats
+        # in the standard response).
+        u = getattr(response, "usage", None)
+        if u is not None:
+            _record_usage(model, {
+                "input_tokens": getattr(u, "prompt_tokens", 0),
+                "output_tokens": getattr(u, "completion_tokens", 0),
+            })
         return response.choices[0].message.content
     except openai.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
