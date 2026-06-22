@@ -52,6 +52,15 @@ adjacent tech they have plausibly touched, as long as it is not framed as deep
 multi-year ownership. React, Node.js, Next.js, and AI tooling are all genuinely in
 the profile — claims about them are supported.
 
+**NOT a fabrication — ATS-mirrored skill keywords (do NOT flag):** If a technology
+keyword appears in the job posting, it may appear as a bare keyword in the skills
+section. This is intentional ATS keyword mirroring. Do NOT flag a bare skill-list
+entry (no years claimed, no specific project, no "led"/"architected") as fabrication
+or exaggeration just because it is absent from the profile, as long as the keyword
+is present in the job posting. Only flag when a specific experience claim appears
+in a bullet — e.g. "Built 3 apps with NGXS at Venture Labs" where NGXS is not in
+the profile.
+
 ### `style` — phrasing defects, NOT factual problems
 - Slash-gloss pairs ("Performance Optimization / Performance optimisation"),
   duplicated keywords, broken or untranslated fragments.
