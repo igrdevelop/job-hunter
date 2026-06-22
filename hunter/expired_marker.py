@@ -18,6 +18,8 @@ from hunter.config import (
     EXPIRED_CHECK_DOMAIN_LIMIT,
     EXPIRED_CHECK_DOMAIN_DELAY,
     EXPIRED_CHECK_FETCH_TIMEOUT,
+    PRACUJ_HOST_CONCURRENCY,
+    PRACUJ_HOST_DELAY_SEC,
 )
 from hunter.expired_check import is_job_expired, is_expired_by_html
 from hunter.rate_limiter import DomainLimiter, domain_of
@@ -160,7 +162,11 @@ async def run_check(
     from hunter.sources import fetch_job_text
 
     global_sem = asyncio.Semaphore(EXPIRED_CHECK_CONCURRENCY)
-    limiter = DomainLimiter(EXPIRED_CHECK_DOMAIN_LIMIT, EXPIRED_CHECK_DOMAIN_DELAY)
+    limiter = DomainLimiter(
+        EXPIRED_CHECK_DOMAIN_LIMIT,
+        EXPIRED_CHECK_DOMAIN_DELAY,
+        overrides={"pracuj.pl": (PRACUJ_HOST_CONCURRENCY, PRACUJ_HOST_DELAY_SEC)},
+    )
 
     async def _check_one(item: dict) -> dict:
         nonlocal done, expired_count
