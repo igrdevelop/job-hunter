@@ -15,6 +15,8 @@ unaffected.
 
 import json
 import logging
+import os
+import random
 import re
 import time
 from contextlib import contextmanager
@@ -100,19 +102,31 @@ class LLMRateLimitError(LLMError):
     """Rate limit or overloaded — retryable."""
 
 
+def _backoff_seconds(attempt: int) -> float:
+    """Exponential backoff with jitter. attempt is 1-based.
+
+    Schedule (approx): 10s, 20s, 40s, 80s, 160s, 300s (cap), each ±25% jitter.
+    """
+    base = min(10 * (2 ** (attempt - 1)), 300)
+    return base * random.uniform(0.75, 1.25)
+
+
 def call_llm(
     system_prompt: str,
     user_message: str,
     provider: str = "anthropic",
     model: str = "claude-sonnet-4-6",
     api_key: str = "",
-    max_retries: int = 3,
+    max_retries: int = 6,
     max_tokens: int = 8192,
     effort: str = "low",
+    fallback_model: str | None = None,
 ) -> dict:
     """Send prompt to LLM and return parsed JSON dict.
 
-    Retries on 429 / 5xx with exponential backoff.
+    Retries on 429 / 5xx / 529 with exponential backoff + jitter.
+    On overload, after half the retries the call switches to `fallback_model`
+    (or env LLM_FALLBACK_MODEL) for the remaining attempts.
     Raises LLMError on permanent failure or invalid JSON.
 
     `effort` (anthropic only) sets ``output_config.effort`` on models that
@@ -123,25 +137,42 @@ def call_llm(
     if not api_key:
         raise LLMError(f"No API key provided for {provider}")
 
+    if fallback_model is None:
+        fallback_model = os.getenv("LLM_FALLBACK_MODEL") or None
+    switch_after = max(1, max_retries // 2)
+
     last_err = None
     for attempt in range(1, max_retries + 1):
+        active_model = model
+        if fallback_model and provider == "anthropic" and attempt > switch_after:
+            active_model = fallback_model
         try:
             if provider == "anthropic":
                 raw = _call_anthropic(
-                    system_prompt, user_message, model, api_key, max_tokens, effort=effort
+                    system_prompt, user_message, active_model, api_key, max_tokens, effort=effort
                 )
             elif provider == "openai":
-                raw = _call_openai(system_prompt, user_message, model, api_key, max_tokens)
+                raw = _call_openai(system_prompt, user_message, active_model, api_key, max_tokens)
             else:
                 raise LLMError(f"Unknown LLM provider: {provider}")
 
+            if active_model != model:
+                logger.warning(f"[LLM] Succeeded on fallback model {active_model} (attempt {attempt})")
             return _parse_json(raw)
 
         except LLMRateLimitError as e:
             last_err = e
             if attempt < max_retries:
-                wait = min(2 ** attempt * 10, 120)
-                logger.warning(f"[LLM] Rate limit (attempt {attempt}/{max_retries}), waiting {wait}s")
+                wait = _backoff_seconds(attempt)
+                next_model = (
+                    fallback_model
+                    if fallback_model and provider == "anthropic" and (attempt + 1) > switch_after
+                    else active_model
+                )
+                logger.warning(
+                    f"[LLM] Overload/rate-limit on {active_model} "
+                    f"(attempt {attempt}/{max_retries}), sleeping {wait:.1f}s, next={next_model}"
+                )
                 time.sleep(wait)
             else:
                 raise LLMError(f"Rate limit after {max_retries} retries: {e}") from e
@@ -152,8 +183,11 @@ def call_llm(
         except Exception as e:
             last_err = e
             if attempt < max_retries and _is_retryable_exception(e):
-                wait = min(2 ** attempt * 10, 120)
-                logger.warning(f"[LLM] Retryable error (attempt {attempt}/{max_retries}): {e}")
+                wait = _backoff_seconds(attempt)
+                logger.warning(
+                    f"[LLM] Retryable error on {active_model} "
+                    f"(attempt {attempt}/{max_retries}), sleeping {wait:.1f}s: {e}"
+                )
                 time.sleep(wait)
             else:
                 raise LLMError(f"LLM call failed: {e}") from e
