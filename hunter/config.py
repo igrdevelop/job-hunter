@@ -392,6 +392,18 @@ GMAIL_ENRICH_DOMAIN_DELAY: float = float(os.getenv("GMAIL_ENRICH_DOMAIN_DELAY", 
 # HTTP 429. Throttle it harder than other hosts (override on top of the defaults).
 PRACUJ_HOST_CONCURRENCY: int = int(os.getenv("PRACUJ_HOST_CONCURRENCY", "2"))
 PRACUJ_HOST_DELAY_SEC: float = float(os.getenv("PRACUJ_HOST_DELAY_SEC", "1.0"))
+# Hosts that systematically hard-block enrichment detail fetches (HTTP 429/403)
+# and so are NOT worth enriching during the hunt — fetching them only wastes
+# requests and poisons the shared rate budget for everyone else. The Gmail stub
+# (title/company parsed from the alert email) is kept instead. LinkedIn 429s
+# without a logged-in session (see LINKEDIN_STORAGE_STATE); pracuj Cloudflares.
+# Comma-separated host substrings. Remove a host here once it can be fetched
+# reliably (e.g. after providing a LinkedIn session).
+GMAIL_ENRICH_SKIP_HOSTS: list[str] = [
+    h.strip().lower()
+    for h in os.getenv("GMAIL_ENRICH_SKIP_HOSTS", "linkedin.com,pracuj.pl").split(",")
+    if h.strip()
+]
 
 # ── Email response checker ────────────────────────────────────────────────────
 # Default look-back window for /check_responses (and the daily scheduled run).
