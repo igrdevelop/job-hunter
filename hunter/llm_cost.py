@@ -38,6 +38,20 @@ PRICING: dict[str, dict[str, float]] = {
     "opus-4": {"input": 15.0, "output": 75.0, "cache_write": 18.75, "cache_read": 1.50},
     # Fable 5 — used if explicitly opted into.
     "fable-5": {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30},
+    # DeepSeek (via OpenRouter). Numbers are approximate — OpenRouter applies a
+    # small markup on top of the provider's published rates, and the dashboard
+    # is the source of truth for actual billing. We bake in approximate listed
+    # rates so per-vacancy telemetry stays meaningful (off by a few percent at
+    # worst). cache_write left at the input rate — DeepSeek's auto-cache writes
+    # are not separately billed but the field has to be non-zero or a partial
+    # log would price the same payload as $0.00.
+    "deepseek-r1":   {"input": 0.55, "output": 2.19, "cache_write": 0.55, "cache_read": 0.14},
+    "deepseek-chat": {"input": 0.27, "output": 1.10, "cache_write": 0.27, "cache_read": 0.07},
+    # OpenAI GPT (openai.com/pricing as of 2026-06). No cache stats exposed in the
+    # standard response (cache_write / cache_read stay 0 in usage records).
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cache_write": 0.40, "cache_read": 0.10},
+    "gpt-4.1":      {"input": 2.00, "output": 8.00, "cache_write": 2.00, "cache_read": 0.50},
+    "gpt-4o":       {"input": 2.50, "output": 10.0, "cache_write": 2.50, "cache_read": 1.25},
 }
 
 # Fallback used when the model id matches nothing in PRICING. We pick

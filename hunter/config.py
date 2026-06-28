@@ -20,7 +20,15 @@ AUTO_APPLY: bool = os.getenv("AUTO_APPLY", "false").lower() in ("true", "1", "ye
 # ── LLM config (used by apply_agent.py in API mode) ──────────────────────────
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
 LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
-LLM_API_KEY: str = os.getenv("LLM_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
+# LLM_API_KEY wins if set; otherwise we accept provider-specific env names so a
+# .env can carry keys for several providers simultaneously (needed for phase B
+# runtime profile switching — see docs/DEEPSEEK_PROVIDER_PLAN.md).
+LLM_API_KEY: str = (
+    os.getenv("LLM_API_KEY", "")
+    or os.getenv("ANTHROPIC_API_KEY", "")
+    or os.getenv("OPENROUTER_API_KEY", "")
+    or os.getenv("OPENAI_API_KEY", "")
+)
 APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1", "yes")
 
 # ── Claim judge (LLM-as-judge CV verification pass) ──────────────────────────
@@ -34,6 +42,17 @@ JUDGE_ENABLED: bool = os.getenv("JUDGE_ENABLED", "true").lower() in ("true", "1"
 JUDGE_MODEL: str = os.getenv("JUDGE_MODEL", "claude-haiku-4-5-20251001")
 JUDGE_MODE: str = os.getenv("JUDGE_MODE", "warn").strip().lower()
 JUDGE_MAX_REPAIR_ROUNDS: int = int(os.getenv("JUDGE_MAX_REPAIR_ROUNDS", "1"))
+# The judge always uses a cheap Anthropic model (Haiku), independent of the main
+# LLM provider. When LLM_PROVIDER=openrouter, the main key is an OpenRouter key
+# which doesn't accept Anthropic model IDs — so the judge needs its own provider
+# + key. JUDGE_API_KEY reads ANTHROPIC_API_KEY first so a dual-provider .env
+# (ANTHROPIC_API_KEY + OPENROUTER_API_KEY) just works without extra config.
+JUDGE_PROVIDER: str = os.getenv("JUDGE_PROVIDER", "anthropic")
+JUDGE_API_KEY: str = (
+    os.getenv("JUDGE_API_KEY", "")
+    or os.getenv("ANTHROPIC_API_KEY", "")
+    or LLM_API_KEY  # last resort: if only one key is configured
+)
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")

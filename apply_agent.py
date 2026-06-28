@@ -72,14 +72,16 @@ def main(
 ) -> None:
     """Dispatch to CLI or API pipeline based on availability and flags."""
     if force_cli or APPLY_USE_CLI:
-        main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+        folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+        _maybe_run_shadow(folder, full=full)
         return
 
     cli_ok = _is_cli_available()
     if cli_ok:
         print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
         try:
-            main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+            folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+            _maybe_run_shadow(folder, full=full)
             return
         except (ApplyError, SystemExit) as e:
             if LLM_API_KEY:
@@ -90,7 +92,7 @@ def main(
                 sys.exit(1)
 
     if LLM_API_KEY:
-        main_api(
+        folder = main_api(
             url or PASTE_NO_URL_PLACEHOLDER,
             paste_text=paste_text,
             skip_dedup=force,
@@ -98,9 +100,26 @@ def main(
             jobleads_company=jobleads_company,
             jobleads_title=jobleads_title,
         )
+        _maybe_run_shadow(folder, full=full)
     else:
         print("[apply_agent] ERROR: No Claude CLI login and no LLM_API_KEY set. Cannot proceed.")
         sys.exit(1)
+
+
+def _maybe_run_shadow(folder, full: bool) -> None:
+    """Run the dual-apply shadow comparison if the primary produced docs.
+
+    `folder` is the boevoy apply's output folder (or None when the job was
+    skipped/deduped/expired). The shadow itself checks whether dual mode is on,
+    so this is a cheap no-op when disabled. Best-effort: never propagates errors.
+    """
+    if not folder:
+        return
+    try:
+        from hunter.dual_apply import run_shadow
+        run_shadow(folder, full_mode=full)
+    except Exception as e:
+        print(f"[apply_agent] dual-apply shadow skipped: {e}")
 
 
 # ── CLI argument parser ────────────────────────────────────────────────────────

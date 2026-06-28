@@ -1,0 +1,86 @@
+"""commands/llm.py — /llm command: show and switch the active LLM profile.
+
+/llm                — show current profile + all available options with cost estimates
+/llm <name>         — switch to the named profile (persisted to tracker.db)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
+
+from hunter.config import TELEGRAM_CHAT_ID
+
+logger = logging.getLogger(__name__)
+
+
+def _build_status_text() -> str:
+    from hunter.llm_profiles import PROFILES, get_active, list_available
+
+    active = get_active()
+    available = list_available()
+    available_names = {p.name for p in available}
+
+    lines = [f"🤖 <b>LLM generator: {active.name}</b>"]
+    lines.append(f"   Model: <code>{active.model}</code>")
+    lines.append(f"   Provider: {active.provider}")
+    lines.append(f"   Cost: {active.cost_estimate()}")
+    lines.append("")
+
+    lines.append("<b>Available profiles:</b>")
+    for name, prof in PROFILES.items():
+        if not prof.is_available():
+            continue
+        marker = " ← active" if name == active.name else ""
+        lines.append(
+            f"  • <code>/llm {name}</code> — {prof.model} "
+            f"({prof.cost_estimate()}){marker}"
+        )
+
+    unavailable = [name for name, p in PROFILES.items() if name not in available_names]
+    if unavailable:
+        lines.append("")
+        lines.append("<b>Unavailable (missing API key):</b>")
+        for name in unavailable:
+            p = PROFILES[name]
+            lines.append(f"  • {name} — set <code>{p.env_key}</code> in .env")
+
+    return "\n".join(lines)
+
+
+def _switch_profile(name: str) -> str:
+    from hunter.llm_profiles import PROFILES, set_active
+
+    try:
+        profile = set_active(name)
+        return (
+            f"✅ <b>Switched to {profile.name}</b>\n"
+            f"Model: <code>{profile.model}</code>\n"
+            f"Cost: {profile.cost_estimate()}\n\n"
+            f"Takes effect on the next vacancy (no restart needed)."
+        )
+    except ValueError as e:
+        known = ", ".join(f"<code>{n}</code>" for n in PROFILES)
+        return f"❌ {e}\n\nKnown profiles: {known}"
+
+
+async def cmd_llm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/llm — show current LLM profile or switch to a named one."""
+    if update.effective_chat.id != TELEGRAM_CHAT_ID:
+        return
+
+    args = context.args or []
+
+    if not args:
+        text = await asyncio.to_thread(_build_status_text)
+    else:
+        name = args[0].strip().lower()
+        text = await asyncio.to_thread(_switch_profile, name)
+
+    await update.message.reply_text(
+        text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
