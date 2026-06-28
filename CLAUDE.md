@@ -292,6 +292,8 @@ Applications/               Generated documents (gitignored)
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
+| `DUAL_SHADOW_TIMEOUT_SEC` | `900` | Hard wall-clock cap for the detached dual-apply shadow run (its own watchdog; independent of the primary timeout). |
+| `LINKEDIN_STORAGE_STATE` | — | Path to a Playwright session JSON from `python tools/linkedin_login.py`. **Without it every LinkedIn fetch 429s — the single biggest source of FAIL rows.** Once set, drop `linkedin.com` from `GMAIL_ENRICH_SKIP_HOSTS`. |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
 | `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
 | `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
@@ -308,6 +310,7 @@ Applications/               Generated documents (gitignored)
 | `GMAIL_ENRICH_CONCURRENCY` | `5` | Global cap on parallel enrichment fetches (all hosts) |
 | `GMAIL_ENRICH_DOMAIN_LIMIT` | `2` | Default per-host concurrent enrichment fetches |
 | `GMAIL_ENRICH_DOMAIN_DELAY` | `0.0` | Default per-host delay (sec) between enrichment fetches |
+| `GMAIL_ENRICH_SKIP_HOSTS` | `linkedin.com,pracuj.pl` | Hosts NOT enriched during the hunt (they hard-block → 429/403 and poison the shared rate budget). The email-derived stub is kept. Comma-separated; remove a host once it fetches reliably. |
 | `PRACUJ_HOST_CONCURRENCY` | `2` | pracuj.pl per-host concurrency override (Cloudflare 429) |
 | `PRACUJ_HOST_DELAY_SEC` | `1.0` | pracuj.pl per-host delay (sec) override |
 
