@@ -30,9 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from hunter.config import (
+    JUDGE_API_KEY,
     JUDGE_MAX_REPAIR_ROUNDS,
     JUDGE_MODEL,
+    JUDGE_PROVIDER,
     LLM_API_KEY,
+    LLM_MODEL,
     LLM_PROVIDER,
 )
 
@@ -272,9 +275,9 @@ def judge_content(content: dict[str, Any], job_text: str, base_cv: str = "") -> 
         raw = call_llm(
             system_prompt=_load_rules(),
             user_message=_build_user_message(fields, job_text, base_cv),
-            provider=LLM_PROVIDER,
+            provider=JUDGE_PROVIDER,
             model=JUDGE_MODEL,
-            api_key=LLM_API_KEY,
+            api_key=JUDGE_API_KEY,
             max_tokens=2048,
         )
     except Exception as e:  # noqa: BLE001 — best-effort, never fatal
@@ -405,7 +408,6 @@ def _llm_rewrite(
     )
     try:
         from llm_client import call_llm
-        from hunter.config import LLM_MODEL
         rewritten = call_llm(
             system_prompt=(
                 "You correct individual resume fields. Output strict JSON mapping "

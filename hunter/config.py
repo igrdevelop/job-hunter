@@ -41,6 +41,17 @@ JUDGE_ENABLED: bool = os.getenv("JUDGE_ENABLED", "true").lower() in ("true", "1"
 JUDGE_MODEL: str = os.getenv("JUDGE_MODEL", "claude-haiku-4-5-20251001")
 JUDGE_MODE: str = os.getenv("JUDGE_MODE", "warn").strip().lower()
 JUDGE_MAX_REPAIR_ROUNDS: int = int(os.getenv("JUDGE_MAX_REPAIR_ROUNDS", "1"))
+# The judge always uses a cheap Anthropic model (Haiku), independent of the main
+# LLM provider. When LLM_PROVIDER=openrouter, the main key is an OpenRouter key
+# which doesn't accept Anthropic model IDs — so the judge needs its own provider
+# + key. JUDGE_API_KEY reads ANTHROPIC_API_KEY first so a dual-provider .env
+# (ANTHROPIC_API_KEY + OPENROUTER_API_KEY) just works without extra config.
+JUDGE_PROVIDER: str = os.getenv("JUDGE_PROVIDER", "anthropic")
+JUDGE_API_KEY: str = (
+    os.getenv("JUDGE_API_KEY", "")
+    or os.getenv("ANTHROPIC_API_KEY", "")
+    or LLM_API_KEY  # last resort: if only one key is configured
+)
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
