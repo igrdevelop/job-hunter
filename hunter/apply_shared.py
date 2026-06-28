@@ -19,14 +19,20 @@ import requests
 from hunter.config import (
     APPLICATIONS_DIR,
     GENERATE_PL_RESUME,
-    LLM_API_KEY,
-    LLM_MODEL,
-    LLM_PROVIDER,
     PROJECT_DIR,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_SEND_DOCS,
 )
+
+# ── LLM profile helper ───────────────────────────────────────────────────────
+
+def _llm_p():
+    """Return the currently active LLM profile. Resolved fresh each call so a
+    /llm switch in Telegram takes effect on the next vacancy without restart."""
+    from hunter.llm_profiles import get_active
+    return get_active()
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -430,7 +436,7 @@ def _review_cover_letter(letter: str, expected_lang: str = "EN") -> tuple[str, i
     Returns (rewritten_or_original, score_1_to_10). Score > 6 = acceptable.
     Skips if no API key available.
     """
-    if not LLM_API_KEY:
+    if not _llm_p().api_key:
         return letter, 10
 
     opener_hits = _opener_banlist_hits(letter)
@@ -528,9 +534,9 @@ def _review_cover_letter(letter: str, expected_lang: str = "EN") -> tuple[str, i
         result = call_llm(
             system_prompt=_REVIEW_SYSTEM,
             user_message=user_msg,
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
+            provider=_llm_p().provider,
+            model=_llm_p().model,
+            api_key=_llm_p().api_key,
             max_tokens=2000,
         )
         score = int(result.get("score", 10))
@@ -587,7 +593,7 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
     array structure identical; only natural-language values are translated. Guards
     against role drop — returns None if the translation loses experience entries.
     """
-    if not LLM_API_KEY or not isinstance(source_resume, dict):
+    if not _llm_p().api_key or not isinstance(source_resume, dict):
         return None
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -611,9 +617,9 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
                 'Respond with JSON only: {"resume": <translated resume object>}\n\n'
                 f"Resume to translate:\n{json.dumps(source_resume, ensure_ascii=False)}"
             ),
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
+            provider=_llm_p().provider,
+            model=_llm_p().model,
+            api_key=_llm_p().api_key,
             max_tokens=4000,
         )
         out = result.get("resume") if isinstance(result, dict) else None
@@ -637,7 +643,7 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
 
 def _translate_plain(text: str, target_lang: str, kind: str) -> str:
     """Translate a cover letter / about-me string into target_lang. '' on failure."""
-    if not LLM_API_KEY or not isinstance(text, str) or not text.strip():
+    if not _llm_p().api_key or not isinstance(text, str) or not text.strip():
         return ""
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -656,9 +662,9 @@ def _translate_plain(text: str, target_lang: str, kind: str) -> str:
                 'Respond with JSON only: {"text": "<translated text>"}\n\n'
                 f"Text:\n{text}"
             ),
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
+            provider=_llm_p().provider,
+            model=_llm_p().model,
+            api_key=_llm_p().api_key,
             max_tokens=2000,
         )
         out = result.get("text", "") if isinstance(result, dict) else ""
@@ -1282,13 +1288,13 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     _rewrite_job_text = _COMPLIANCE_CLAIM_RE.sub("", job_text)[:3000]
 
     for attempt in range(1, _TOTAL_ROUNDS + 2):
-        run_llm = attempt == 1 and bool(LLM_API_KEY)
+        run_llm = attempt == 1 and bool(_llm_p().api_key)
         result = ats_checker.check(
             job_text=job_text,
             resume_text=resume_text_for_ats,
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
+            provider=_llm_p().provider,
+            model=_llm_p().model,
+            api_key=_llm_p().api_key,
             run_llm_review=run_llm,
         )
         print(f"[apply_agent] ATS check (attempt {attempt}):\n{result.summary()}")
@@ -1355,9 +1361,9 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                     "Return the same JSON schema with improved fields."
                 ),
                 user_message=rewrite_msg,
-                provider=LLM_PROVIDER,
-                model=LLM_MODEL,
-                api_key=LLM_API_KEY,
+                provider=_llm_p().provider,
+                model=_llm_p().model,
+                api_key=_llm_p().api_key,
             )
             for key in ("resume_en", "resume_pl",
                         "ats_score", "stack", "to_learn", "skills"):
