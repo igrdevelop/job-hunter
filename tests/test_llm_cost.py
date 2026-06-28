@@ -24,6 +24,30 @@ def test_resolve_pricing_sonnet_dated_snapshot() -> None:
     assert _resolve_pricing("claude-sonnet-4-6") is PRICING["sonnet-4"]
 
 
+def test_resolve_pricing_deepseek_via_openrouter() -> None:
+    """OpenRouter prefixes model ids ('deepseek/deepseek-r1') — substring match
+    must still pick R1/V3-specific rates rather than the Sonnet fallback."""
+    assert _resolve_pricing("deepseek/deepseek-r1") is PRICING["deepseek-r1"]
+    assert _resolve_pricing("deepseek/deepseek-chat") is PRICING["deepseek-chat"]
+    # And the bare ids (in case some caller drops the prefix)
+    assert _resolve_pricing("deepseek-r1") is PRICING["deepseek-r1"]
+
+
+def test_deepseek_r1_per_call_cost() -> None:
+    """Pin the arithmetic on R1 so an accidental rate edit shows up in CI.
+
+    1000 input + 2000 output + 5000 cache_read on R1:
+      (1000 * 0.55 + 2000 * 2.19 + 5000 * 0.14) / 1_000_000
+      = (550 + 4380 + 700) / 1M = 0.00563
+    """
+    cost = usd_for_call("deepseek/deepseek-r1", {
+        "input_tokens": 1000,
+        "output_tokens": 2000,
+        "cache_read_input_tokens": 5000,
+    })
+    assert abs(cost - 0.00563) < 1e-6
+
+
 def test_resolve_pricing_unknown_falls_back_to_sonnet_rates() -> None:
     # Unknown model → fallback rates. A future model that we forgot to add
     # should be over-estimated rather than reported as free.
@@ -109,6 +133,29 @@ def test_price_usage_tolerates_garbage_entries() -> None:
     out = price_usage(log)
     assert out["calls"] == 1
     assert out["total_usd"] > 0
+
+
+def test_resolve_pricing_gpt_models() -> None:
+    """GPT model ids resolve to their specific rate entries, not the Sonnet fallback."""
+    assert _resolve_pricing("gpt-4.1") is PRICING["gpt-4.1"]
+    assert _resolve_pricing("gpt-4.1-mini") is PRICING["gpt-4.1-mini"]
+    assert _resolve_pricing("gpt-4o") is PRICING["gpt-4o"]
+    # gpt-4.1-mini is more specific than gpt-4.1 — longest match wins
+    assert _resolve_pricing("gpt-4.1-mini") is not PRICING["gpt-4.1"]
+
+
+def test_gpt_4_1_mini_per_call_cost() -> None:
+    """Pin gpt-4.1-mini arithmetic: 1000 in + 2000 out = $0.40*1 + $1.60*2 / 1M = $0.0036."""
+    cost = usd_for_call("gpt-4.1-mini", {"input_tokens": 1000, "output_tokens": 2000})
+    assert abs(cost - (1000 * 0.40 + 2000 * 1.60) / 1_000_000) < 1e-9
+
+
+def test_gpt_models_cheaper_than_sonnet() -> None:
+    """gpt-4.1-mini should be substantially cheaper than Sonnet per token."""
+    usage = {"input_tokens": 10000, "output_tokens": 5000}
+    mini = usd_for_call("gpt-4.1-mini", usage)
+    sonnet = usd_for_call("claude-sonnet-4-6", usage)
+    assert mini < sonnet  # ~$0.012 vs ~$0.105
 
 
 def test_format_summary_renders_total_and_call_count() -> None:

@@ -26,6 +26,20 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"📋 Pending decisions: <b>{pending}</b>",
     ]
 
+    # LLM generator + dual-apply comparison state
+    try:
+        from hunter.llm_profiles import dual_enabled, get_active, shadow_profile
+        active = get_active()
+        lines.append(f"🤖 LLM: <b>{active.name}</b>")
+        if dual_enabled():
+            shadow = shadow_profile()
+            shadow_name = shadow.name if shadow else "unavailable"
+            lines.append(f"🧪 Dual-apply: <b>ON</b> (shadow: {shadow_name})")
+        else:
+            lines.append("🧪 Dual-apply: <b>OFF</b>")
+    except Exception:
+        pass
+
     if _active_apply_urls:
         now = datetime.now(timezone.utc)
         lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")

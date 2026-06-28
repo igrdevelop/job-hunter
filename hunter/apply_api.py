@@ -14,14 +14,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from hunter.config import (
     GENERATE_DOCS_PATH,
-    LLM_API_KEY,
-    LLM_MODEL,
-    LLM_PROVIDER,
     PROJECT_DIR,
 )
+from hunter.llm_profiles import get_active as _get_llm_profile
 from hunter.apply_shared import (
     APPLY_RATE_LIMITED_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
@@ -103,8 +102,11 @@ def main_api(
     full_mode: bool = False,
     jobleads_company: str = "",
     jobleads_title: str = "",
-) -> None:
+) -> Path | None:
     """API pipeline: fetch job text → LLM → content.json → generate_docs.
+
+    Returns the output folder on success (so the caller can run the dual-apply
+    shadow), or None when the job was skipped / deduped / expired.
 
     Parameters
     ----------
@@ -169,12 +171,17 @@ def _run_main_api(
     jobleads_company: str,
     jobleads_title: str,
     _usage_log: list,
-) -> None:
+) -> Path | None:
     """Inner body of main_api, split out so push_usage_log() / pop_usage_log()
     can wrap it without forcing a 500-line `with` block. See main_api for arg
     semantics. `_usage_log` is the live accounting frame populated as the
     pipeline runs LLM calls; the notify step reads it to price the run.
     """
+    # Resolve the active LLM profile once for the whole pipeline. Every call_llm
+    # below uses _llm_prof.provider/.model/.api_key so a /llm switch takes effect
+    # on the next vacancy without a bot restart.
+    _llm_prof = _get_llm_profile()
+
     # Step 1 — Get job text: either use pasted text or fetch
     if paste_text:
         job_text = paste_text
@@ -271,7 +278,7 @@ def _run_main_api(
         print(f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch")
 
     # Step 3 — Call LLM
-    print(f"[apply_agent] Step 3: Calling {LLM_PROVIDER}/{LLM_MODEL}...")
+    print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
     try:
         from llm_client import call_llm, LLMError
         url_hint = (
@@ -301,16 +308,16 @@ def _run_main_api(
         content = call_llm(
             system_prompt=system_prompt,
             user_message=user_message,
-            provider=LLM_PROVIDER,
-            model=LLM_MODEL,
-            api_key=LLM_API_KEY,
+            provider=_llm_prof.provider,
+            model=_llm_prof.model,
+            api_key=_llm_prof.api_key,
         )
     except LLMError as e:
         error_type = "rate_limit" if "rate" in str(e).lower() else "llm_error"
         notify(
             f"❌ <b>LLM failed ({error_type})</b>\n"
             f"URL: {url}\n"
-            f"Model: {LLM_MODEL}\n\n"
+            f"Model: {_llm_prof.model}\n\n"
             f"<pre>{str(e)[:500]}</pre>"
         )
         print(f"[apply_agent] LLM ERROR: {e}")
@@ -345,9 +352,9 @@ def _run_main_api(
             _repaired = _repair_call_llm(
                 system_prompt=system_prompt,
                 user_message=_repair_msg,
-                provider=LLM_PROVIDER,
-                model=LLM_MODEL,
-                api_key=LLM_API_KEY,
+                provider=_llm_prof.provider,
+                model=_llm_prof.model,
+                api_key=_llm_prof.api_key,
             )
             _repaired_errors = validate_content(_repaired)
             if len(_repaired_errors) < len(errors):
@@ -394,9 +401,9 @@ def _run_main_api(
                 _boosted = call_llm(
                     system_prompt=system_prompt,
                     user_message=_boost_msg,
-                    provider=LLM_PROVIDER,
-                    model=LLM_MODEL,
-                    api_key=LLM_API_KEY,
+                    provider=_llm_prof.provider,
+                    model=_llm_prof.model,
+                    api_key=_llm_prof.api_key,
                 )
                 for _key in ("resume_en", "resume_pl", "ats_score", "stack", "to_learn"):
                     if _boosted.get(_key):
@@ -744,7 +751,7 @@ def _run_main_api(
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"ATS: {ats}%{pdf_summary} | Stack: {content.get('stack', '?')}\n"
-            f"Via: API ({LLM_MODEL}){cost_line}\n"
+            f"Via: API ({_llm_prof.model}){cost_line}\n"
             f"Review and send when ready."
             f"{issues_note}"
         )
@@ -754,6 +761,9 @@ def _run_main_api(
             f"Applications/{output_folder.parent.name}/{output_folder.name}/ "
             f"({len(created_files)} files)"
         )
+        # Success: hand the folder back so apply_agent.main() can run the
+        # dual-apply shadow comparison (if enabled) off the saved job_posting.txt.
+        return output_folder
     else:
         notify(
             f"⚠️ <b>content.json OK but no docs generated</b>\n"

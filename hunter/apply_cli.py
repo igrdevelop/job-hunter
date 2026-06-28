@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from datetime import date
+from pathlib import Path
 
 from hunter.apply_shared import (
     ApplyError,
@@ -125,8 +126,11 @@ def main_cli(
     skip_dedup: bool = False,
     full_mode: bool = False,
     paste_text: str = "",
-) -> None:
+) -> Path | None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
+
+    Returns the output folder on success (so the caller can run the dual-apply
+    shadow), or None when the job was skipped / deduped / expired / blocked.
 
     Parameters
     ----------
@@ -548,6 +552,9 @@ def main_cli(
             )
             send_telegram_documents(created_files)
             print(f"\n[apply_agent] Done! Folder: Applications/{new_folder}/ ({len(created_files)} files)")
+            # Success: return the folder so apply_agent.main() can run the
+            # dual-apply shadow comparison (if enabled).
+            return folder_path
         else:
             notify(
                 f"⚠️ <b>Folder created but no docs found!</b>\n"

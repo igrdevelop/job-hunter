@@ -6,6 +6,8 @@ import pytest
 
 import llm_client
 from hunter import apply_shared
+import hunter.llm_profiles as llm_profiles
+from types import SimpleNamespace
 
 
 # A clean, fully-English resume with 7 roles (matches the expected role count).
@@ -38,9 +40,13 @@ _CLEAN_PL_RESUME = {
 }
 
 
+def _fake_profile(key="test-key"):
+    return SimpleNamespace(provider="anthropic", model="claude-test", api_key=key)
+
+
 @pytest.fixture
 def with_api_key(monkeypatch):
-    monkeypatch.setattr(apply_shared, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile("test-key"))
 
 
 def test_clean_content_no_llm_call(monkeypatch, with_api_key):
@@ -176,7 +182,7 @@ def test_both_sides_dirty_pl_repaired_from_cleaned_en(monkeypatch, with_api_key)
 
 def test_no_api_key_no_repair(monkeypatch):
     """Without an API key the gate cannot translate; it reports but does not crash."""
-    monkeypatch.setattr(apply_shared, "LLM_API_KEY", "")
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile(""))
     contaminated_en = json.loads(json.dumps(_CLEAN_EN_RESUME))
     contaminated_en["summary"] = "Senior Developer (7+ lat doświadczenia)."
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}

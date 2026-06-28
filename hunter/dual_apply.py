@@ -1,0 +1,284 @@
+"""hunter/dual_apply.py — Shadow (A/B comparison) generation.
+
+When dual-apply mode is on (toggled via the /dual Telegram command), after the
+primary "boevoy" apply produces its documents, ``run_shadow`` generates a second,
+side-by-side set with the shadow profile (default ``deepseek-v3``) into a
+``{primary_folder}/{shadow_name}/`` subfolder.
+
+The shadow is comparison-only:
+  • NO tracker row (generate_docs runs with --no-tracker)
+  • NO Telegram message / no document upload
+  • NO Google Sheets / Drive mirror (those run in the bot layer off the tracker
+    row, which the shadow never creates)
+
+Generated CV / cover-letter filenames are suffixed with the ATS score the shadow
+scored on the independent check, e.g.::
+
+    Ihar_Petrasheuski_CV_Angular_2026_EN_ats88.pdf
+
+so the boevoy set and the shadow set can be eyeballed side by side.
+
+Best-effort throughout: every failure logs a warning and returns. The primary
+application is already complete and is never touched by anything here.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from hunter.config import GENERATE_DOCS_PATH, PROJECT_DIR
+from hunter.services.apply_service import build_generate_docs_cmd
+
+# Doc files that should carry the ATS-score suffix (CV + cover letters).
+_SUFFIXABLE = ("*.pdf", "*.docx")
+# Files that are not application documents — never suffixed.
+_SKIP_SUFFIX_NAMES = {"job_posting.txt", "content.json", "judge_report.json"}
+
+
+def _read_job_text(primary_folder: Path) -> str:
+    """Read job_posting.txt and strip the leading 'URL: ...' header line."""
+    jp = primary_folder / "job_posting.txt"
+    raw = jp.read_text(encoding="utf-8")
+    # job_posting.txt is written as "URL: <url>\n\n<body>" (or "URL: (none...)").
+    if raw.startswith("URL:"):
+        parts = raw.split("\n\n", 1)
+        return parts[1].strip() if len(parts) == 2 else raw.strip()
+    return raw.strip()
+
+
+def _ats_suffix(content: dict) -> str:
+    """'_ats88' from content['ats_check']['score'], or '' if unavailable."""
+    try:
+        score = content.get("ats_check", {}).get("score")
+        if score is None:
+            return ""
+        return f"_ats{round(float(score))}"
+    except Exception:
+        return ""
+
+
+def _suffix_docs(folder: Path, suffix: str) -> int:
+    """Append `suffix` before the extension of every generated doc. Returns count."""
+    if not suffix:
+        return 0
+    renamed = 0
+    for pattern in _SUFFIXABLE:
+        for f in folder.glob(pattern):
+            if f.name in _SKIP_SUFFIX_NAMES or suffix in f.stem:
+                continue
+            target = f.with_name(f"{f.stem}{suffix}{f.suffix}")
+            try:
+                f.replace(target)
+                renamed += 1
+            except OSError as e:
+                print(f"[dual] could not rename {f.name}: {e}")
+    return renamed
+
+
+def run_shadow(primary_folder: Path | str, *, full_mode: bool = False) -> Path | None:
+    """Generate a shadow comparison set for an already-completed primary apply.
+
+    Parameters
+    ----------
+    primary_folder : the boevoy apply's output folder (contains job_posting.txt).
+    full_mode      : mirror the primary's doc mode (DOCX+PDF, PL CV, About_Me).
+
+    Returns the shadow subfolder on success, else None. Never raises.
+    """
+    from hunter.llm_profiles import (
+        dual_enabled,
+        get_active,
+        set_override,
+        shadow_profile,
+    )
+
+    if not dual_enabled():
+        return None
+
+    shadow = shadow_profile()
+    if shadow is None:
+        print("[dual] shadow profile unavailable (missing API key) — skipping")
+        return None
+
+    active = get_active()
+    if shadow.name == active.name:
+        print(f"[dual] shadow == active ({active.name}) — nothing to compare, skipping")
+        return None
+
+    primary_folder = Path(primary_folder)
+    try:
+        job_text = _read_job_text(primary_folder)
+    except Exception as e:
+        print(f"[dual] could not read job_posting.txt ({e}) — skipping shadow")
+        return None
+    if len(job_text) < 100:
+        print("[dual] job text too short — skipping shadow")
+        return None
+
+    sub = primary_folder / shadow.name
+    print(f"[dual] Shadow run: {shadow.name} ({shadow.model}) -> {sub}")
+
+    set_override(shadow)
+    try:
+        return _generate_shadow(sub, job_text, primary_folder, full_mode=full_mode)
+    except Exception as e:
+        print(f"[dual] shadow generation failed (continuing): {e}")
+        return None
+    finally:
+        set_override(None)
+
+
+def _generate_shadow(
+    sub: Path, job_text: str, primary_folder: Path, *, full_mode: bool
+) -> Path | None:
+    """Core shadow pipeline (override already active). Best-effort."""
+    from llm_client import LLMError, call_llm
+    from hunter.apply_api import _detect_stack_hint, _load_base_cv
+    from hunter.apply_shared import (
+        PROMPTS_DIR,
+        _ats_check_loop,
+        _dedup_skill_glosses,
+        _strip_compliance_claims,
+        _strip_prestige_claims,
+        validate_content,
+    )
+    from hunter.llm_profiles import get_active
+
+    prof = get_active()  # == shadow profile (override is set)
+
+    # System prompt: candidate profile + generation rules (same as apply_api).
+    instructions = (PROMPTS_DIR / "generation_rules.md").read_text(encoding="utf-8")
+    profile_path = PROMPTS_DIR / "candidate_profile.md"
+    system_prompt = (
+        profile_path.read_text(encoding="utf-8") + "\n\n---\n\n" + instructions
+        if profile_path.exists()
+        else instructions
+    )
+
+    stack_hint = _detect_stack_hint(job_text)
+    base_cv = _load_base_cv(stack_hint)
+
+    user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+    if base_cv:
+        user_message += (
+            f"\n\n---\n\n## Base CV — {stack_hint} Track "
+            f"(use as starting point for bullets)\n\n{base_cv}"
+        )
+
+    print(f"[dual] Calling {prof.provider}/{prof.model}...")
+    try:
+        content = call_llm(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            provider=prof.provider,
+            model=prof.model,
+            api_key=prof.api_key,
+        )
+    except LLMError as e:
+        print(f"[dual] shadow LLM call failed: {e}")
+        return None
+
+    # Validate + one best-effort repair pass (mirror of apply_api's logic).
+    errors = validate_content(content)
+    if errors:
+        print(f"[dual] validation errors: {errors}")
+        try:
+            repaired = call_llm(
+                system_prompt=system_prompt,
+                user_message=(
+                    "The JSON you returned has structural problems. Fix ALL issues "
+                    "below and return the COMPLETE JSON again (same schema, every "
+                    "field):\n" + "\n".join(f"- {e}" for e in errors)
+                    + f"\n\nPrevious JSON:\n{json.dumps(content, ensure_ascii=False)}"
+                ),
+                provider=prof.provider,
+                model=prof.model,
+                api_key=prof.api_key,
+            )
+            if len(validate_content(repaired)) < len(errors):
+                content = repaired
+        except Exception as e:
+            print(f"[dual] repair pass failed (using first pass): {e}")
+
+    # ATS rewrite loop (uses get_active() -> shadow via the override).
+    content = _ats_check_loop(content, job_text)
+
+    # Content scrubs (parity with the boevoy pipeline).
+    try:
+        from hunter.resume_sanitizer import sanitize_content
+        content = sanitize_content(content)
+    except Exception as e:
+        print(f"[dual] sanitizer failed (continuing): {e}")
+    try:
+        content, _ = _strip_compliance_claims(content)
+        content, _ = _strip_prestige_claims(content, job_text)
+        content, _ = _dedup_skill_glosses(content)
+    except Exception as e:
+        print(f"[dual] scrubs failed (continuing): {e}")
+
+    # Language gate — clean contamination but never block (this is a comparison
+    # artifact, not an outgoing application).
+    try:
+        from hunter.lang_guard import detect_posting_language
+        from hunter.apply_shared import enforce_language_separation
+        content, _blocked, _report = enforce_language_separation(content)
+        posting_lang = detect_posting_language(job_text)
+    except Exception as e:
+        print(f"[dual] language gate failed (continuing): {e}")
+        posting_lang = "EN"
+
+    # Carry the primary's apply_url so the shadow content.json is self-describing.
+    apply_url = ""
+    try:
+        primary_cj = primary_folder / "content.json"
+        if primary_cj.exists():
+            apply_url = json.loads(primary_cj.read_text(encoding="utf-8")).get("apply_url", "")
+    except Exception:
+        pass
+
+    sub.mkdir(parents=True, exist_ok=True)
+    content["output_folder"] = str(sub).replace("\\", "/")
+    content["apply_url"] = apply_url
+    content["primary_lang"] = posting_lang
+    content.setdefault("ats_score", "")
+
+    content_path = sub / "content.json"
+    content_path.write_text(
+        json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (sub / "job_posting.txt").write_text(job_text, encoding="utf-8")
+
+    # Render docs — shadow run, so NO tracker row.
+    gen_cmd = build_generate_docs_cmd(
+        generate_docs_script=GENERATE_DOCS_PATH,
+        content_json_path=content_path,
+        use_full=full_mode,
+        force=False,
+        python_executable=sys.executable,
+        no_tracker=True,
+    )
+    try:
+        result = subprocess.run(
+            gen_cmd,
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print("[dual] generate_docs STDERR:", result.stderr, file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("[dual] generate_docs timed out (120s) — keeping content.json only")
+
+    # Suffix the rendered docs with the ATS score for at-a-glance comparison.
+    suffix = _ats_suffix(content)
+    n = _suffix_docs(sub, suffix)
+    print(f"[dual] Shadow done: {n} doc(s){' ' + suffix if suffix else ''} in {sub}")
+    return sub

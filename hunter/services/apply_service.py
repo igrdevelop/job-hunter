@@ -27,13 +27,20 @@ def build_generate_docs_cmd(
     use_full: bool,
     force: bool,
     python_executable: str,
+    no_tracker: bool = False,
 ) -> list[str]:
-    """Build generate_docs.py command from a concrete content.json path."""
+    """Build generate_docs.py command from a concrete content.json path.
+
+    no_tracker=True passes --no-tracker so the render skips the tracker write
+    (used by the dual-apply shadow run).
+    """
     cmd = [python_executable, str(generate_docs_script), str(content_json_path)]
     if use_full:
         cmd.append("--full")
     if force:
         cmd.append("--force")
+    if no_tracker:
+        cmd.append("--no-tracker")
     return cmd
 
 
