@@ -286,10 +286,16 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
         raise LLMError("Package 'openai' not installed. Run: pip install openai")
 
     try:
+        # R1 reasoning models can take several minutes per call. Set an explicit
+        # request timeout (default SDK 600s) to surface hangs as retryable errors
+        # rather than silent blocks. APPLY_AGENT_TIMEOUT_SEC (900s) is the outer
+        # per-vacancy wall-clock limit; stay well under it at the per-call level.
+        import httpx
         client = openai.OpenAI(
             api_key=key,
             base_url=_OPENROUTER_BASE_URL,
             default_headers={"X-Title": "job-hunter-bot"},
+            timeout=httpx.Timeout(timeout=300.0, connect=10.0),  # 5-min per call
         )
         response = client.chat.completions.create(
             model=model,
@@ -312,6 +318,8 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
         return response.choices[0].message.content
     except openai.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
+    except openai.APITimeoutError as e:
+        raise LLMRateLimitError(f"OpenRouter timeout: {e}") from e
     except openai.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e

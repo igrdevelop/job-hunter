@@ -220,7 +220,10 @@ PROFILES = {
     "sonnet":      Profile("anthropic",  "claude-sonnet-4-6",       env="ANTHROPIC_API_KEY"),
     "deepseek-r1": Profile("openrouter", "deepseek/deepseek-r1",    env="OPENROUTER_API_KEY"),
     "deepseek-v3": Profile("openrouter", "deepseek/deepseek-chat",  env="OPENROUTER_API_KEY"),
-    # gemini-flash, qwen, gpt-4.1 land here as one-line additions
+    "gpt-4.1":     Profile("openai",     "gpt-4.1",           env="OPENAI_API_KEY"),
+    "gpt-4.1-mini":Profile("openai",     "gpt-4.1-mini",      env="OPENAI_API_KEY"),
+    "gpt-4o":      Profile("openai",     "gpt-4o",            env="OPENAI_API_KEY"),
+    # gemini-flash, qwen land here as one-line additions
 }
 ```
 
@@ -284,8 +287,10 @@ PR.** Reasons:
   var only. Preview-validated. Sonnet still default. **Proves the provider works.**
 - **Phase B (next PR):** profile registry + `/llm` command + DB-persisted active
   profile. **No new LLM code** — just wraps what A built. Easier to review.
-- **Phase C (later, if needed):** per-role routing, more model profiles
-  (Gemini / Qwen / GPT-4.1).
+- **Phase C (done, same PR as B):** GPT-4.1 / GPT-4.1-mini / GPT-4o profiles added.
+  Requires `OPENAI_API_KEY` in `.env`. Uses the existing `_call_openai()` directly
+  (no gateway needed — OpenAI has normal card billing).
+- **Phase D (later, if needed):** per-role routing, Gemini / Qwen profiles.
 
 Splitting A from B keeps each PR small and means we don't build a switcher before we
 have something worth switching to.
