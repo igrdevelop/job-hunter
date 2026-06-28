@@ -25,6 +25,7 @@ from hunter.config import (
     GMAIL_ENRICH_CONCURRENCY,
     GMAIL_ENRICH_DOMAIN_DELAY,
     GMAIL_ENRICH_DOMAIN_LIMIT,
+    GMAIL_ENRICH_SKIP_HOSTS,
     GMAIL_ENRICH_TIMEOUT,
     PRACUJ_HOST_CONCURRENCY,
     PRACUJ_HOST_DELAY_SEC,
@@ -113,8 +114,18 @@ def _enrich_via_text(job: Job) -> Job:
     )
 
 
+def _is_skipped_host(domain: str) -> bool:
+    """True if `domain` is on the enrich skip list (hard-blocking hosts)."""
+    return any(h in domain for h in GMAIL_ENRICH_SKIP_HOSTS)
+
+
 def _enrich_one(job: Job) -> Job:
     domain = (urlparse(job.url).hostname or "").lower()
+    # Hosts that hard-block (LinkedIn w/o session, pracuj Cloudflare) only 429 here
+    # and poison the shared rate budget — keep the email-derived stub instead.
+    if _is_skipped_host(domain):
+        logger.info("[gmail_enricher]   → skip-host %r — keeping stub (no fetch)", domain)
+        return job
     logger.info("[gmail_enricher] enriching %s", job.url)
     try:
         if "justjoin.it" in domain:

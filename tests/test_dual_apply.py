@@ -232,3 +232,80 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     names = {p.name for p in sub.iterdir()}
     assert "Ihar_CV_Angular_EN_ats88.pdf" in names
     assert "Cover_Letter_EN_ats88.pdf" in names
+
+
+# ── Detached CLI shim (_main) ───────────────────────────────────────────────────
+
+def test_main_usage_without_folder_returns_2():
+    assert dual_apply._main(["prog"]) == 2
+
+
+def test_main_calls_run_shadow_with_full_flag(monkeypatch):
+    captured = {}
+
+    def fake_run_shadow(folder, *, full_mode):
+        captured["folder"] = folder
+        captured["full"] = full_mode
+
+    monkeypatch.setattr(dual_apply, "run_shadow", fake_run_shadow)
+    rc = dual_apply._main(["prog", "/app/Applications/2026-06-28/Acme", "--full"])
+    assert rc == 0
+    assert captured["folder"] == "/app/Applications/2026-06-28/Acme"
+    assert captured["full"] is True
+
+
+def test_main_swallows_shadow_errors(monkeypatch):
+    def boom(folder, *, full_mode):
+        raise RuntimeError("shadow blew up")
+
+    monkeypatch.setattr(dual_apply, "run_shadow", boom)
+    # Must not raise — best-effort detached process.
+    assert dual_apply._main(["prog", "/some/folder"]) == 0
+
+
+# ── launch_detached (fire-and-forget) ───────────────────────────────────────────
+
+def test_launch_detached_noop_when_dual_disabled(monkeypatch):
+    monkeypatch.setattr(lp, "dual_enabled", lambda: False)
+    called = {"popen": False}
+    monkeypatch.setattr(dual_apply.subprocess, "Popen",
+                        lambda *a, **k: called.__setitem__("popen", True))
+    assert dual_apply.launch_detached("/app/Applications/2026-06-28/Acme") is False
+    assert called["popen"] is False
+
+
+def test_launch_detached_spawns_when_enabled(monkeypatch):
+    monkeypatch.setattr(lp, "dual_enabled", lambda: True)
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(dual_apply.subprocess, "Popen", fake_popen)
+    assert dual_apply.launch_detached("/app/Applications/2026-06-28/Acme", full_mode=True) is True
+    assert "hunter.dual_apply" in captured["cmd"]
+    assert "/app/Applications/2026-06-28/Acme" in captured["cmd"]
+    assert "--full" in captured["cmd"]
+    # Detached: stdio redirected away so it can't tie to the parent.
+    assert captured["kwargs"].get("stdout") is not None
+
+
+def test_maybe_run_shadow_noop_when_folder_none(monkeypatch):
+    import apply_agent
+    called = {"launch": False}
+    monkeypatch.setattr(dual_apply, "launch_detached",
+                        lambda *a, **k: called.__setitem__("launch", True))
+    apply_agent._maybe_run_shadow(None, full=False)
+    assert called["launch"] is False
+
+
+def test_maybe_run_shadow_delegates_to_launch_detached(monkeypatch):
+    import apply_agent
+    captured = {}
+    monkeypatch.setattr(dual_apply, "launch_detached",
+                        lambda folder, *, full_mode: captured.update(folder=folder, full=full_mode))
+    apply_agent._maybe_run_shadow("/app/Applications/2026-06-28/Acme", full=True)
+    assert captured["folder"] == "/app/Applications/2026-06-28/Acme"
+    assert captured["full"] is True

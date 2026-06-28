@@ -215,3 +215,38 @@ def test_enrich_jobs_disabled_via_gmail_source(monkeypatch):
     with patch("hunter.gmail_enricher.enrich_jobs") as mock_enrich:
         src._fetch_jobs(mock_service)
         mock_enrich.assert_not_called()
+
+
+# ── Fix B: skip-host enrichment (avoid 429 storm) ───────────────────────────────
+
+def test_is_skipped_host():
+    from hunter.gmail_enricher import _is_skipped_host
+    assert _is_skipped_host("www.linkedin.com") is True
+    assert _is_skipped_host("www.pracuj.pl") is True
+    assert _is_skipped_host("justjoin.it") is False
+    assert _is_skipped_host("nofluffjobs.com") is False
+
+
+def test_enrich_one_skips_linkedin_without_fetch():
+    """LinkedIn is on the skip list → keep stub, never call fetch_job_text (no 429)."""
+    job = _stub("https://www.linkedin.com/jobs/view/4431461258")
+    with patch("hunter.sources.fetch_job_text") as mock_fetch:
+        result = _enrich_one(job)
+    assert result is job
+    mock_fetch.assert_not_called()
+
+
+def test_enrich_one_skips_pracuj_without_fetch():
+    job = _stub("https://www.pracuj.pl/praca/x,oferta,1")
+    with patch("hunter.sources.fetch_job_text") as mock_fetch:
+        result = _enrich_one(job)
+    assert result is job
+    mock_fetch.assert_not_called()
+
+
+def test_enrich_one_skip_list_is_configurable(monkeypatch):
+    """Removing a host from the skip list re-enables its enrichment."""
+    monkeypatch.setattr("hunter.gmail_enricher.GMAIL_ENRICH_SKIP_HOSTS", ["pracuj.pl"])
+    from hunter.gmail_enricher import _is_skipped_host
+    assert _is_skipped_host("www.linkedin.com") is False
+    assert _is_skipped_host("www.pracuj.pl") is True

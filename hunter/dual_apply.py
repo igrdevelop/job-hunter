@@ -25,6 +25,7 @@ application is already complete and is never touched by anything here.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -282,3 +283,99 @@ def _generate_shadow(
     n = _suffix_docs(sub, suffix)
     print(f"[dual] Shadow done: {n} doc(s){' ' + suffix if suffix else ''} in {sub}")
     return sub
+
+
+# ── Detached launcher ───────────────────────────────────────────────────────────
+
+def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> bool:
+    """Fire-and-forget the shadow run in its OWN process and return immediately.
+
+    Called by apply_agent.main() after the primary apply succeeds. Running detached
+    means the shadow can never affect the primary process's exit code or the bot's
+    APPLY_AGENT_TIMEOUT_SEC — the primary has already committed its docs + tracker
+    row by this point. No-op (returns False) when dual mode is off. Best-effort:
+    any launch error is swallowed and returns False.
+    """
+    try:
+        from hunter.llm_profiles import dual_enabled
+        if not dual_enabled():
+            return False
+    except Exception:
+        return False
+
+    cmd = [sys.executable, "-m", "hunter.dual_apply", str(primary_folder)]
+    if full_mode:
+        cmd.append("--full")
+
+    # Detach so the shadow outlives the parent and is never tied to its exit
+    # code / timeout. Platform-specific flags keep it fully decoupled.
+    kwargs: dict = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+    }
+    try:
+        if sys.platform == "win32":
+            kwargs["creationflags"] = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen(cmd, **kwargs)
+        print(f"[dual] shadow launched (detached) for {primary_folder}")
+        return True
+    except Exception as e:
+        print(f"[dual] shadow launch failed: {e}")
+        return False
+
+
+# ── Detached CLI entry point ────────────────────────────────────────────────────
+# Launched fire-and-forget by launch_detached() AFTER the primary apply finishes:
+#     python -m hunter.dual_apply <primary_folder> [--full]
+# Running in its own process means the shadow can NEVER affect the primary apply's
+# exit code or the bot's APPLY_AGENT_TIMEOUT_SEC — the primary subprocess has already
+# returned by the time this runs. A watchdog hard-caps the shadow's own runtime.
+
+def _main(argv: list[str]) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+    args = [a for a in argv[1:] if a]
+    full_mode = "--full" in args
+    positional = [a for a in args if not a.startswith("--")]
+    if not positional:
+        print("Usage: python -m hunter.dual_apply <primary_folder> [--full]")
+        return 2
+    primary_folder = positional[0]
+
+    # Watchdog: force-exit if the shadow overruns its own budget, so a hung LLM
+    # call or doc render can't leave an orphan running forever.
+    try:
+        from hunter.config import DUAL_SHADOW_TIMEOUT_SEC
+        budget = max(60, int(DUAL_SHADOW_TIMEOUT_SEC))
+    except Exception:
+        budget = 900
+
+    import threading
+
+    def _kill() -> None:
+        print(f"[dual] watchdog: shadow exceeded {budget}s budget — exiting")
+        os._exit(0)  # noqa: SLF001 — hard stop a detached best-effort process
+
+    timer = threading.Timer(budget, _kill)
+    timer.daemon = True
+    timer.start()
+    try:
+        run_shadow(primary_folder, full_mode=full_mode)
+    except Exception as e:  # noqa: BLE001 — best-effort, never surface
+        print(f"[dual] shadow run failed: {e}")
+    finally:
+        timer.cancel()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv))
