@@ -11,8 +11,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import openai
 import pytest
+
+# The OpenRouter path reuses the openai SDK. Skip the whole module (rather than
+# erroring at collection) when openai isn't installed — e.g. a minimal CI image
+# with only the anthropic provider.
+openai = pytest.importorskip("openai")
 
 import llm_client
 

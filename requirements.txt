@@ -15,7 +15,9 @@ pytz
 
 # LLM providers (install at least one)
 anthropic
-# openai
+# openai SDK — used directly for the OpenAI provider AND as the client for the
+# OpenRouter gateway (DeepSeek R1/V3 etc.). Required for non-anthropic profiles.
+openai
 
 # HTML extraction
 beautifulsoup4
