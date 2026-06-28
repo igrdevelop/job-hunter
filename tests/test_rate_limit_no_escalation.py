@@ -36,6 +36,39 @@ def test_is_rate_limit_error_false_for_other():
     assert is_rate_limit_error(err) is False
 
 
+# ── is_transient_fetch_error (Fix D) ──────────────────────────────────────────
+
+def test_transient_429_anywhere():
+    from hunter.apply_shared import is_transient_fetch_error
+    assert is_transient_fetch_error(Exception("429 Too Many Requests"), "https://x.com/y")
+
+
+def test_transient_403_on_antibot_host():
+    from hunter.apply_shared import is_transient_fetch_error
+    # pracuj Cloudflare 403 → transient (retry later, not a permanent FAIL)
+    err = Exception("cloudscraper failed (403 Client Error: Forbidden for url: ...)")
+    assert is_transient_fetch_error(err, "https://www.pracuj.pl/praca/x,oferta,1") is True
+
+
+def test_403_on_unknown_host_is_not_transient():
+    from hunter.apply_shared import is_transient_fetch_error
+    # A plain 403 on an arbitrary host stays a permanent failure (may be a gone page).
+    err = Exception("403 Client Error: Forbidden")
+    assert is_transient_fetch_error(err, "https://example.com/job/1") is False
+
+
+def test_transient_403_host_detected_from_message():
+    from hunter.apply_shared import is_transient_fetch_error
+    # Host info can come from the error text when url is unavailable.
+    err = Exception("403 Forbidden for url: https://www.linkedin.com/jobs/view/1")
+    assert is_transient_fetch_error(err, "") is True
+
+
+def test_real_404_still_permanent():
+    from hunter.apply_shared import is_transient_fetch_error
+    assert is_transient_fetch_error(Exception("404 Not Found"), "https://www.pracuj.pl/x") is False
+
+
 # ── _retry_failed does not escalate on rate_limited ───────────────────────────
 
 def _job(n: int) -> Job:
