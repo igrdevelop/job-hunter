@@ -97,6 +97,26 @@ PROFILES: dict[str, Profile] = {
 }
 
 _DB_KEY = "active_llm_profile"
+_DUAL_KEY = "dual_apply_enabled"
+_DUAL_SHADOW_KEY = "dual_shadow_profile"
+_DEFAULT_SHADOW = "deepseek-v3"
+
+# Process-local override of the active profile. Set transiently by the dual-apply
+# shadow run so that every building block that resolves through get_active()
+# (_ats_check_loop, scrubs, lang-gate) uses the shadow model — without mutating
+# the DB-persisted boevoy choice. Always cleared in a finally block by the caller.
+_override: "Profile | None" = None
+
+
+def set_override(profile: "Profile | None") -> None:
+    """Temporarily force get_active() to return `profile` (None clears it).
+
+    Used by hunter.dual_apply.run_shadow so the shadow generation runs entirely
+    on the shadow model. The shadow runs sequentially AFTER the primary apply
+    completes in the same process, so this never affects the boevoy run.
+    """
+    global _override
+    _override = profile
 
 
 # ── DB persistence (config key-value table) ────────────────────────────────────
@@ -159,7 +179,14 @@ def get_active() -> Profile:
     3. LLM_PROVIDER + LLM_MODEL env vars — backward-compat with existing .env
     4. First available profile in PROFILES registry
     5. Hard-coded "sonnet" fallback (even if unavailable — better than crashing)
+
+    A process-local override (set_override) wins over all of the above — it is
+    how the dual-apply shadow run forces the shadow model for its own LLM calls.
     """
+    # 0. Process-local override (dual-apply shadow run)
+    if _override is not None:
+        return _override
+
     # 1. DB-persisted choice
     name = _db_get(_DB_KEY)
     if name and name in PROFILES and PROFILES[name].is_available():
@@ -205,3 +232,35 @@ def set_active(name: str) -> Profile:
     _db_set(_DB_KEY, name)
     logger.info("[llm_profiles] active profile → %s (%s)", name, profile.model)
     return profile
+
+
+# ── Dual-apply (A/B comparison) mode ────────────────────────────────────────────
+# When enabled, after the primary (boevoy) apply produces its docs the bot runs a
+# second, side-by-side generation with the shadow profile into a {model} subfolder
+# (see hunter.dual_apply). Toggled at runtime via the /dual Telegram command.
+
+def dual_enabled() -> bool:
+    """True if dual-apply (shadow comparison) mode is on."""
+    return _db_get(_DUAL_KEY) == "1"
+
+
+def set_dual(enabled: bool) -> None:
+    """Persist dual-apply mode on/off in tracker.db."""
+    _db_set(_DUAL_KEY, "1" if enabled else "0")
+    logger.info("[llm_profiles] dual-apply mode → %s", "on" if enabled else "off")
+
+
+def shadow_profile() -> Profile | None:
+    """The profile used for the shadow generation.
+
+    Resolution: DB (dual_shadow_profile) → DUAL_SHADOW_PROFILE env → default
+    ("deepseek-v3"). Returns None if the resolved profile is unknown or its API
+    key is missing, so the shadow run quietly no-ops rather than crashing.
+    """
+    name = (
+        _db_get(_DUAL_SHADOW_KEY)
+        or os.getenv("DUAL_SHADOW_PROFILE", "").strip()
+        or _DEFAULT_SHADOW
+    )
+    prof = PROFILES.get(name)
+    return prof if (prof is not None and prof.is_available()) else None

@@ -89,6 +89,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_funnel":               ("hunter.commands.funnel",          "cmd_funnel"),
     "cmd_health":               ("hunter.commands.health",          "cmd_health"),
     "cmd_llm":                  ("hunter.commands.llm",             "cmd_llm"),
+    "cmd_dual":                 ("hunter.commands.dual",            "cmd_dual"),
     "cmd_url":          ("hunter.commands.url_message", "cmd_url"),
     "button_callback":  ("hunter.commands.url_message", "button_callback"),
     "_handle_apply":    ("hunter.commands.url_message", "_handle_apply"),
@@ -242,6 +243,7 @@ def build_application() -> Application:
     from hunter.commands.funnel import cmd_funnel
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
+    from hunter.commands.dual import cmd_dual
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
 
@@ -269,6 +271,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("funnel",               cmd_funnel))
     app.add_handler(CommandHandler("health",               cmd_health))
     app.add_handler(CommandHandler("llm",                  cmd_llm))
+    app.add_handler(CommandHandler("dual",                 cmd_dual))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))

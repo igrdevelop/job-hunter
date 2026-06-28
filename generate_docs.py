@@ -362,12 +362,15 @@ def update_tracker(content: dict, force_mode: bool = False) -> None:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python generate_docs.py <content.json> [--full] [--force]")
+        print("Usage: python generate_docs.py <content.json> [--full] [--force] [--no-tracker]")
         sys.exit(1)
 
     json_path = sys.argv[1]
     full_mode = "--full" in sys.argv
     force_mode = "--force" in sys.argv
+    # --no-tracker: render docs only, skip the tracker write. Used by the
+    # dual-apply shadow run so the comparison CV never lands a tracker row.
+    no_tracker = "--no-tracker" in sys.argv
 
     with open(json_path, "r", encoding="utf-8") as f:
         content = json.load(f)
@@ -435,10 +438,13 @@ def main():
         generate_about_me(Path(output_folder), lang="pl")
 
     # --- Update tracker.xlsx before PDF step so a LibreOffice crash doesn't lose the record ---
-    try:
-        update_tracker(content, force_mode=force_mode)
-    except Exception as exc:
-        print(f"  [WARN] Tracker update failed (close tracker.xlsx if open): {exc}")
+    if no_tracker:
+        print("  [tracker] Skipping (--no-tracker: shadow/comparison run)")
+    else:
+        try:
+            update_tracker(content, force_mode=force_mode)
+        except Exception as exc:
+            print(f"  [WARN] Tracker update failed (close tracker.xlsx if open): {exc}")
 
     # --- Convert all DOCX to PDF in one shot ---
     try:

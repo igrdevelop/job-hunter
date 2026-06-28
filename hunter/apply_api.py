@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from hunter.config import (
     GENERATE_DOCS_PATH,
@@ -101,8 +102,11 @@ def main_api(
     full_mode: bool = False,
     jobleads_company: str = "",
     jobleads_title: str = "",
-) -> None:
+) -> Path | None:
     """API pipeline: fetch job text → LLM → content.json → generate_docs.
+
+    Returns the output folder on success (so the caller can run the dual-apply
+    shadow), or None when the job was skipped / deduped / expired.
 
     Parameters
     ----------
@@ -167,7 +171,7 @@ def _run_main_api(
     jobleads_company: str,
     jobleads_title: str,
     _usage_log: list,
-) -> None:
+) -> Path | None:
     """Inner body of main_api, split out so push_usage_log() / pop_usage_log()
     can wrap it without forcing a 500-line `with` block. See main_api for arg
     semantics. `_usage_log` is the live accounting frame populated as the
@@ -757,6 +761,9 @@ def _run_main_api(
             f"Applications/{output_folder.parent.name}/{output_folder.name}/ "
             f"({len(created_files)} files)"
         )
+        # Success: hand the folder back so apply_agent.main() can run the
+        # dual-apply shadow comparison (if enabled) off the saved job_posting.txt.
+        return output_folder
     else:
         notify(
             f"⚠️ <b>content.json OK but no docs generated</b>\n"

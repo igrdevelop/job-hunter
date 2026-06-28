@@ -31,7 +31,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
                               /sync_sent /process_manual /check_expired /funnel /health
-                              /gsheets_status /gsheets_resync
+                              /gsheets_status /gsheets_resync /llm /dual
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
                             LinkedIn batch processing.
@@ -205,6 +205,8 @@ hunter/
     normalize.py            /normalize — rebuild Sheets column L (Applied Date) from Sent
     funnel.py               /funnel [days] — application funnel report (hunter.funnel)
     health.py               /health — per-source scraper yield report (source_health)
+    llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
+    dual.py                 /dual [on|off] — toggle dual-apply A/B comparison (hunter.dual_apply)
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   schedules/                One file per JobQueue callback
     hunt.py                 scheduled_hunt
@@ -273,6 +275,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_PROVIDER` | `anthropic` | `anthropic`, `openai`, or `openrouter`. **Prefer `/llm <profile>` in Telegram** — the profile system (`hunter/llm_profiles.py`) is the recommended way to switch models at runtime without restart. |
 | `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_DEFAULT_PROFILE` | — | Pin a named profile as default (e.g. `deepseek-r1`). Overrides `LLM_PROVIDER+LLM_MODEL`. Persisted per-vacancy selection via `/llm <name>` wins over this. |
+| `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` (set via env or future UI) overrides; this is the fallback. Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (for `sonnet` profile + judge) |
 | `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`) |
@@ -392,6 +395,20 @@ A GDPR/RODO consent clause is auto-appended as the **last body paragraph** of th
 Static legal text in `generate_docs.py` (`GDPR_CLAUSE_PL` / `GDPR_CLAUSE_EN`), never
 LLM-generated. PL CV gets the Polish clause, EN CV the English one. Controlled by
 `CV_GDPR_CLAUSE` (`both` / `pl` / `none`). Do NOT add this to prompts/profile.
+
+### Dual-apply (A/B model comparison) — `hunter/dual_apply.py`
+Toggled via `/dual on`/`/dual off` (DB key `dual_apply_enabled`; shown in `/status`).
+When ON, after the **primary (boevoy)** apply finishes successfully, `apply_agent.main()`
+calls `run_shadow(folder)`: a second generation with the **shadow** profile
+(`DUAL_SHADOW_PROFILE`, default `deepseek-v3`) into `{Company}/{shadow}/`. The shadow
+reuses the saved `job_posting.txt` (no re-fetch) and the same pipeline building blocks
+(`call_llm` → `_ats_check_loop` → scrubs → lang gate → `generate_docs --no-tracker`),
+forcing the shadow model for every step via `llm_profiles.set_override()`. It is
+**comparison-only**: NO tracker row, NO Telegram, NO Sheets/Drive. Rendered CV/CL
+filenames carry the shadow's ATS score (`..._EN_ats88.pdf`). Both pipelines (`main_api`
+/ `main_cli`) now return the output folder on success so the single hook in `main()`
+covers CLI (Sonnet via Pro subscription) and API alike. Best-effort throughout — any
+shadow failure logs and returns; the real application is never touched.
 
 ---
 
@@ -659,6 +676,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-06-28 | sonnet | Dual-apply A/B comparison (Phase D, branch `feat/deepseek-provider`). User wants every new generation produced by BOTH Sonnet (boevoy) and DeepSeek-V3 (shadow) side by side to compare quality in production. New `hunter/dual_apply.py`: `run_shadow(folder)` — after a successful primary apply, generates a second set with the shadow profile into `{Company}/{shadow}/` reusing the saved `job_posting.txt` (no re-fetch) and the same building blocks (call_llm → `_ats_check_loop` → scrubs → lang gate → `generate_docs`), forcing the shadow model on every step via new `llm_profiles.set_override()`. Comparison-only: NO tracker (`generate_docs --no-tracker` flag added), NO Telegram, NO Sheets/Drive; rendered doc filenames suffixed with the shadow's ATS score (`..._EN_ats88.pdf`). `main_api`/`main_cli` now **return the output folder** on success so a single hook in `apply_agent.main()` (`_maybe_run_shadow`) covers both CLI (Sonnet via Pro) and API. Runtime toggle: `llm_profiles.dual_enabled()`/`set_dual()`/`shadow_profile()` (DB keys `dual_apply_enabled`/`dual_shadow_profile`, env `DUAL_SHADOW_PROFILE` fallback). New `/dual [on|off]` command + dual/LLM line added to `/status`. Best-effort throughout — shadow failure never touches the real application. 18 new tests (test_dual_apply); full suite 1488 green; ruff clean. **Also (earlier this session):** re-ran 3 vacancies through R1 + 11 through V3 for the user's quality comparison (Applications_DeepSeek_R1 / _V3). |
 | 2026-06-28 | sonnet | OpenRouter + DeepSeek R1 provider (Phase A) + runtime LLM profiles (Phase B) + ChatGPT profiles (Phase C), branch `feat/deepseek-provider`. **Phase A:** `_call_openrouter()` in `llm_client.py` (OpenAI-compat SDK, JSON mode, DeepSeek R1 usage mapping), `deepseek-r1`/`deepseek-chat` pricing in `llm_cost.py`, `LLM_API_KEY` fallback extended to `OPENROUTER_API_KEY`, `JUDGE_PROVIDER`/`JUDGE_API_KEY` added so Haiku judge calls Anthropic even when main provider=openrouter. Live-verified: $0.0851/vacancy vs ~$0.50 Sonnet (6× cheaper), ATS 98%, lang_guard clean. **Phase B:** `hunter/llm_profiles.py` — named Profile registry (`sonnet`/`deepseek-r1`/`deepseek-v3`), DB-persisted active choice in `tracker.db` config table, `get_active()` resolution chain (DB→LLM_DEFAULT_PROFILE→LLM_PROVIDER+LLM_MODEL match→first available→sonnet fallback). `apply_api.py`/`apply_shared.py` route all LLM calls through `get_active()` (removed direct config imports). New `/llm` Telegram command shows current profile + cost estimate + available/unavailable profiles; `/llm <name>` switches runtime (no restart). **Phase C:** `gpt-4.1`/`gpt-4.1-mini`/`gpt-4o` profiles (provider=openai, env_key=OPENAI_API_KEY); pricing in `llm_cost.py`; `OPENAI_API_KEY` added to LLM_API_KEY fallback chain. All 1471 tests pass; ruff clean. CLAUDE.md config table updated with new env vars. |
 | 2026-06-17 | opus | NoFluffJobs detail-fetch fix (branch fix/nofluffjobs-posting-schema). Root cause traced from a prod "Job text too short — skipped" (XTB Senior Angular, 252 chars < MIN_JOB_TEXT_LEN 300): NoFluffJobs changed the `/api/posting/{slug}` response schema — the `sections` dict `_format_posting_text` read is gone, so only title/company(N/A)/location/seniority/musts made it into the text and the real body was dropped. Content moved to `details.description` / `requirements.description` (HTML) + `specs.dailyTasks` (list); salary to `essentials.originalSalary.types.<emp>.range`; company name to `company.name`; seniority to `basics.seniority`. Rewrote `_format_posting_text` multi-path (new `_dig`/`_first`/`_coerce_text`/`_extract_company`/`_extract_seniority`/`_extract_salary` + `_SECTION_SPECS` table, first-non-empty path wins, legacy `sections.*` kept as fallback, dup blocks deduped). Live-verified on the XTB URL: 252 → 3279 chars, company resolved, all body sections present. 1 new test (new-schema payload), 15 in test_sources_json_fetch_text; ruff clean. |
 | 2026-06-15 | opus | Scraper health audit + fixes. Ran every NEEDS-ATTENTION source's real `search()` live (not WebFetch — cloudscraper sources need their own code path): theprotocol(38)/pracuj(29)/bulldogjob(13)/linkedin/workingnomads(47)/builtin(21)/remoteleaf(84)/inhire(19) all OK; only **jobleads broke** (0 cards). Root cause: jobleads renamed the listing card `data-testid` `seo-search-list-job-card-{N}` → `search-job-card` AND switched hrefs to relative (`/pl/job/...`) — `_parse` then rejected them on the `startswith("http")` guard. Fixed both in `hunter/sources/jobleads.py` (`_parse_cards` exact testid match; `_extract_card` prefixes BASE) + refreshed the test fixture to the new markup. Note: jobleads' server ignores `q=` (returns generic results) so few survive the frontend filter — data-quality limit, not a scraper bug; detail pages still Cloudflare-blocked (MANUAL flow unchanged). Also fixed a linkedin cosmetic bug: titles/company/location were never HTML-unescaped (`Java &amp; Angular`) — added `html.unescape` (imported as `html_unescape` to avoid the local `html` var shadow). 54 jobleads+linkedin tests pass; ruff clean. |
