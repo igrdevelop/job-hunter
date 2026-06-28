@@ -1,6 +1,7 @@
 # Reliability Fixes — Apply FAIL Flood + Dual-Apply Safety
 
-**Status:** PLAN (not yet implemented)
+**Status:** IMPLEMENTED — Fix A/B/C/D done on branch `fix/reliability-fixes`
+(Fix C is docs + the user still needs to provide the LinkedIn session). See commits.
 **Branch:** `plan/reliability-fixes` (off `origin/master` @ c4c102d)
 **Author:** sonnet, 2026-06-28
 **Trigger:** User reported a flood of `FAIL` rows in the Sheets tracker and suspected
