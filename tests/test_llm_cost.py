@@ -135,6 +135,29 @@ def test_price_usage_tolerates_garbage_entries() -> None:
     assert out["total_usd"] > 0
 
 
+def test_resolve_pricing_gpt_models() -> None:
+    """GPT model ids resolve to their specific rate entries, not the Sonnet fallback."""
+    assert _resolve_pricing("gpt-4.1") is PRICING["gpt-4.1"]
+    assert _resolve_pricing("gpt-4.1-mini") is PRICING["gpt-4.1-mini"]
+    assert _resolve_pricing("gpt-4o") is PRICING["gpt-4o"]
+    # gpt-4.1-mini is more specific than gpt-4.1 — longest match wins
+    assert _resolve_pricing("gpt-4.1-mini") is not PRICING["gpt-4.1"]
+
+
+def test_gpt_4_1_mini_per_call_cost() -> None:
+    """Pin gpt-4.1-mini arithmetic: 1000 in + 2000 out = $0.40*1 + $1.60*2 / 1M = $0.0036."""
+    cost = usd_for_call("gpt-4.1-mini", {"input_tokens": 1000, "output_tokens": 2000})
+    assert abs(cost - (1000 * 0.40 + 2000 * 1.60) / 1_000_000) < 1e-9
+
+
+def test_gpt_models_cheaper_than_sonnet() -> None:
+    """gpt-4.1-mini should be substantially cheaper than Sonnet per token."""
+    usage = {"input_tokens": 10000, "output_tokens": 5000}
+    mini = usd_for_call("gpt-4.1-mini", usage)
+    sonnet = usd_for_call("claude-sonnet-4-6", usage)
+    assert mini < sonnet  # ~$0.012 vs ~$0.105
+
+
 def test_format_summary_renders_total_and_call_count() -> None:
     cost = {"total_usd": 0.0473, "calls": 8}
     s = format_summary(cost)

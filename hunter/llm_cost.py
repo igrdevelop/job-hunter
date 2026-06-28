@@ -47,6 +47,11 @@ PRICING: dict[str, dict[str, float]] = {
     # log would price the same payload as $0.00.
     "deepseek-r1":   {"input": 0.55, "output": 2.19, "cache_write": 0.55, "cache_read": 0.14},
     "deepseek-chat": {"input": 0.27, "output": 1.10, "cache_write": 0.27, "cache_read": 0.07},
+    # OpenAI GPT (openai.com/pricing as of 2026-06). No cache stats exposed in the
+    # standard response (cache_write / cache_read stay 0 in usage records).
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cache_write": 0.40, "cache_read": 0.10},
+    "gpt-4.1":      {"input": 2.00, "output": 8.00, "cache_write": 2.00, "cache_read": 0.50},
+    "gpt-4o":       {"input": 2.50, "output": 10.0, "cache_write": 2.50, "cache_read": 1.25},
 }
 
 # Fallback used when the model id matches nothing in PRICING. We pick

@@ -27,6 +27,7 @@ LLM_API_KEY: str = (
     os.getenv("LLM_API_KEY", "")
     or os.getenv("ANTHROPIC_API_KEY", "")
     or os.getenv("OPENROUTER_API_KEY", "")
+    or os.getenv("OPENAI_API_KEY", "")
 )
 APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1", "yes")
 

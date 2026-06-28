@@ -53,12 +53,14 @@ class Profile:
 # resolves to a non-empty value, so unused providers stay invisible in the UI.
 
 PROFILES: dict[str, Profile] = {
+    # ── Anthropic ──────────────────────────────────────────────────────────────
     "sonnet": Profile(
         name="sonnet",
         provider="anthropic",
         model="claude-sonnet-4-6",
         env_key="ANTHROPIC_API_KEY",
     ),
+    # ── DeepSeek via OpenRouter ───────────────────────────────────────────────
     "deepseek-r1": Profile(
         name="deepseek-r1",
         provider="openrouter",
@@ -70,6 +72,27 @@ PROFILES: dict[str, Profile] = {
         provider="openrouter",
         model="deepseek/deepseek-chat",
         env_key="OPENROUTER_API_KEY",
+    ),
+    # ── OpenAI GPT ────────────────────────────────────────────────────────────
+    # Requires OPENAI_API_KEY in .env. Uses the openai SDK directly (no gateway).
+    # Pricing as of 2026-06 (openai.com/pricing); update llm_cost.py if rates change.
+    "gpt-4.1": Profile(
+        name="gpt-4.1",
+        provider="openai",
+        model="gpt-4.1",
+        env_key="OPENAI_API_KEY",
+    ),
+    "gpt-4.1-mini": Profile(
+        name="gpt-4.1-mini",
+        provider="openai",
+        model="gpt-4.1-mini",
+        env_key="OPENAI_API_KEY",
+    ),
+    "gpt-4o": Profile(
+        name="gpt-4o",
+        provider="openai",
+        model="gpt-4o",
+        env_key="OPENAI_API_KEY",
     ),
 }
 
