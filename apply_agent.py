@@ -107,19 +107,16 @@ def main(
 
 
 def _maybe_run_shadow(folder, full: bool) -> None:
-    """Run the dual-apply shadow comparison if the primary produced docs.
-
-    `folder` is the boevoy apply's output folder (or None when the job was
-    skipped/deduped/expired). The shadow itself checks whether dual mode is on,
-    so this is a cheap no-op when disabled. Best-effort: never propagates errors.
-    """
+    """Fire-and-forget the dual-apply shadow (delegated to hunter.dual_apply, which
+    runs it detached so it can't affect this process's exit code/timeout). No-op
+    when the primary was skipped (folder is None). Best-effort."""
     if not folder:
         return
     try:
-        from hunter.dual_apply import run_shadow
-        run_shadow(folder, full_mode=full)
+        from hunter.dual_apply import launch_detached
+        launch_detached(folder, full_mode=full)
     except Exception as e:
-        print(f"[apply_agent] dual-apply shadow skipped: {e}")
+        print(f"[apply_agent] dual-apply shadow launch skipped: {e}")
 
 
 # ── CLI argument parser ────────────────────────────────────────────────────────

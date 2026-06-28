@@ -65,6 +65,10 @@ CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
 MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "20"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
+# Hard wall-clock cap for the detached dual-apply shadow run (its own budget,
+# independent of the primary's APPLY_AGENT_TIMEOUT_SEC). A watchdog force-exits
+# the detached shadow process after this many seconds.
+DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "900"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 
