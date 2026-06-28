@@ -146,6 +146,9 @@ async def _post_init(app: Application) -> None:
         BotCommand("export",                "Export tracker as .xlsx file"),
         BotCommand("normalize",             "Rebuild clean Applied Date column (L) from Sent"),
         BotCommand("funnel",                "Application funnel: tracked→generated→sent→responded [days]"),
+        BotCommand("health",                "Per-source scraper yield report"),
+        BotCommand("llm",                   "Show/switch active LLM profile [name]"),
+        BotCommand("dual",                  "Toggle dual-apply A/B comparison [on|off]"),
     ])
 
     # Bootstrap / validate Google Sheets on startup.
