@@ -1,8 +1,5 @@
 """Tests for hunter.llm_profiles — profile registry and active-profile resolution."""
 
-import os
-from types import SimpleNamespace
-
 import pytest
 
 import hunter.llm_profiles as lp
