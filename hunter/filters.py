@@ -145,20 +145,40 @@ def _is_node_only_title(title: str) -> bool:
     return any(re.search(p, t, re.IGNORECASE) for p in node_patterns)
 
 
-def _is_fullstack_without_angular(title: str) -> bool:
-    """Return True when the title says 'fullstack' but Angular is absent.
+_FULLSTACK_RE = re.compile(r"\bfull[-\s]?stack\b", re.IGNORECASE)
 
-    "Fullstack (Angular + React)" → Angular present → False (passes through).
-    "Fullstack Developer"         → no Angular    → True  (blocked).
-    "Full Stack Node.js"          → no Angular    → True  (blocked).
 
-    We no longer put bare fullstack patterns in exclude_patterns so that
-    Angular fullstack roles are visible.
+def _is_unwanted_fullstack(job: Job) -> bool:
+    """Return True when a 'Full Stack / Fullstack' role should be blocked.
+
+    Policy (owner's preference):
+      - "Fullstack Developer"            → no Angular        → True (blocked).
+      - "Full Stack Node.js"             → no Angular        → True (blocked).
+      - "Fullstack (Angular + Node.js)"  → Angular + Node    → False (kept) —
+            Node/Nuxt are intentionally absent from fullstack_backend_stacks.
+      - "Full-Stack Spring Boot + Angular" / "Fullstack (C# + Angular)" →
+            Angular + heavy backend (Java/Spring/.NET/C#/Python…) → True (blocked).
+
+    The heavy-backend pairing is checked in the title AND the full job body, so a
+    title that hides the backend ("FullStack Developer with Angular", Java in body)
+    is still caught.
     """
-    t = title.lower()
-    if "angular" in t:
+    title = job.title or ""
+    if not _FULLSTACK_RE.search(title):
         return False
-    return bool(re.search(r"\bfull[-\s]?stack\b", t, re.IGNORECASE))
+
+    # Fullstack without any Angular signal in the title → always block.
+    if "angular" not in title.lower():
+        return True
+
+    # Angular present: block only when paired with a heavy backend stack.
+    if not FILTER.get("exclude_fullstack_with_backend", False):
+        return False
+    stacks = FILTER.get("fullstack_backend_stacks", [])
+    if not stacks:
+        return False
+    haystack = f"{title}\n{_job_plain_text_blob(job)}"
+    return any(re.search(p, haystack, re.IGNORECASE) for p in stacks)
 
 
 def _is_react_only_title(title: str) -> bool:
@@ -402,6 +422,148 @@ def _requires_relocation(job: Job) -> bool:
     return any(p.search(blob) for p in _RELOCATION_REQUIRED_RES)
 
 
+# ── Body disqualifiers (title looks like clean FE, body says otherwise) ───────
+def _has_body_disqualifier(job: Job) -> bool:
+    """True → skip (a body_exclude_patterns token found in the full job text).
+
+    Catches roles whose title is a clean "Frontend Developer" but whose body
+    reveals a backend/CMS/low-code stack (Blazor, Mendix, WordPress, …) the
+    candidate doesn't want — these slip past the title-only exclude_patterns.
+    """
+    if not FILTER.get("exclude_body_disqualifiers", False):
+        return False
+    pats = FILTER.get("body_exclude_patterns", [])
+    if not pats:
+        return False
+    blob = _job_plain_text_blob(job)
+    if not blob.strip():
+        return False
+    return any(re.search(p, blob, re.IGNORECASE) for p in pats)
+
+
+# On-site / hybrid signals (English + Polish) that, when sitting next to an
+# anti-hybrid city in the body, mean the role is not remote-from-Wrocław.
+_ONSITE_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bhybrid\b",
+        r"\bon[-\s]?site\b",
+        r"\bonsite\b",
+        r"\bstationary\b",
+        r"\bstacjonarn\w*",          # PL: praca stacjonarna
+        r"\bin[-\s]the[-\s]office\b",
+        r"\bin[-\s]office\b",
+        r"\bdays?\s+(?:a|per)\s+week\b",   # "3 days a week" (in office)
+        r"\bdays?\s+in\s+the\s+office\b",
+        r"\bz\s+biura\b",            # PL: from the office
+        r"\bw\s+biurze\b",          # PL: in the office
+    )
+)
+
+# Strong fully-remote signals — if present, do NOT block on a body city mention.
+_FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bfully\s+remote\b",
+        r"\b100\s*%\s*remote\b",
+        r"\bremote[-\s]first\b",
+        r"\bwork\s+from\s+anywhere\b",
+        r"\bw\s+pełni\s+zdaln\w*",   # PL: fully remote
+    )
+)
+
+
+# Cities for which a ~1-day/week hybrid is acceptable (commutable from Wrocław).
+_WEEKLY_HYBRID_CITIES: frozenset[str] = frozenset(
+    {"warszawa", "warsaw", "kraków", "krakow", "cracow"}
+)
+
+# Low-frequency hybrid phrasing (≈ once a week) — English + Polish.
+_WEEKLY_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bonce\s+(?:a|per)\s+week\b",
+        r"\bone\s+day\s+(?:a|per|in\s+the)\s+week\b",
+        r"\b1\s*(?:day|dni|dzień)\s*(?:a|per|/|in|w)\s*(?:week|tydz)\w*",
+        r"\b1\s*x\s*(?:/|\s)*(?:a\s+)?(?:week|tydz\w*|wk)\b",
+        r"\braz\s+w\s+tygodniu\b",
+        r"\bjeden\s+dzień\s+w\s+tygodniu\b",
+    )
+)
+
+
+def _is_acceptable_weekly_hybrid(job: Job) -> bool:
+    """True → keep despite a Warsaw/Kraków hybrid, because it is only ~1 day/week.
+
+    Owner accepts a once-a-week office commute to Warsaw or Kraków (reachable from
+    Wrocław). Grants the exception only when (a) the text mentions Warsaw/Kraków,
+    (b) NO other anti-hybrid city is mentioned (so a multi-office role abroad still
+    fails), and (c) a low-frequency ("1 day a week" / "raz w tygodniu") signal is
+    present. An unspecified or higher frequency does NOT qualify.
+    """
+    if not FILTER.get("allow_weekly_hybrid_warsaw_krakow", False):
+        return False
+    blob = f"{job.title or ''} {job.location or ''} {_job_plain_text_blob(job)}".lower()
+    if not any(c in blob for c in _WEEKLY_HYBRID_CITIES):
+        return False
+    other_cities = _ANTI_HYBRID_CITIES - _WEEKLY_HYBRID_CITIES
+    if any(c in blob for c in other_cities):
+        return False
+    return any(p.search(blob) for p in _WEEKLY_HYBRID_RES)
+
+
+def _is_unwanted_onsite_location(job: Job) -> bool:
+    """True → skip (body couples an on-site/hybrid signal with a far-away city).
+
+    Complements _matches_location (which only sees title + location field): many
+    listings show location="remote"/"Poland" but the description demands N days a
+    week in a Kraków/Warsaw/Cyprus office. Requires the on-site signal and the city
+    to sit within a short window of each other to avoid false positives on jobs
+    that merely mention a head-office city in passing. A strong fully-remote signal,
+    a Wrocław location, or an acceptable ~1-day/week Warsaw/Kraków hybrid vetoes it.
+    """
+    if not FILTER.get("exclude_body_onsite_city", False):
+        return False
+    loc = (job.location or "").lower()
+    if "wroc" in loc:  # explicitly a Wrocław role — hybrid there is fine
+        return False
+    blob = _job_plain_text_blob(job).lower()
+    if not blob.strip():
+        return False
+    if any(p.search(blob) for p in _FULLY_REMOTE_RES):
+        return False
+    onsite_pos = [m.start() for p in _ONSITE_SIGNAL_RES for m in p.finditer(blob)]
+    if not onsite_pos:
+        return False
+    city_pos: list[int] = []
+    for city in _ANTI_HYBRID_CITIES:
+        idx = blob.find(city)
+        while idx != -1:
+            city_pos.append(idx)
+            idx = blob.find(city, idx + 1)
+    if not city_pos:
+        return False
+    if not any(abs(o - c) <= 120 for o in onsite_pos for c in city_pos):
+        return False
+    # Office only ~1 day/week in Warsaw/Kraków → acceptable, do not block.
+    return not _is_acceptable_weekly_hybrid(job)
+
+
+def _is_ai_training_or_mill(job: Job) -> bool:
+    """True → skip (known AI-data-labeling / staffing-mill company).
+
+    Title-based "AI Training"/"data annotation" roles are already caught by
+    exclude_patterns; this adds a company-name check for mills whose titles look
+    like clean "Angular Developer" (micro1 fronts: QuikHireStaffing, HireFeed …).
+    """
+    if not FILTER.get("exclude_ai_training", False):
+        return False
+    company = (job.company or "").lower()
+    if not company:
+        return False
+    return any(c in company for c in FILTER.get("exclude_companies", []))
+
+
 def _matches_location(job: Job) -> bool:
     """Check if job location matches allowed locations.
 
@@ -492,13 +654,22 @@ def classify_job(job: Job) -> str | None:
         return "react_no_angular"
     if _is_node_only_title(job.title):
         return "exclude_pattern"
-    if _is_fullstack_without_angular(job.title):
+    if _is_unwanted_fullstack(job):
         return "exclude_pattern"
     if _matches_exclude_pattern(job.title):
         return "exclude_pattern"
+    if _is_ai_training_or_mill(job):
+        return "exclude_pattern"
     if _is_react_without_angular(job):
         return "react_no_angular"
-    if not _matches_location(job):
+    if _has_body_disqualifier(job):
+        return "exclude_pattern"
+    # Location: a non-whitelisted location is rejected UNLESS it's an acceptable
+    # ~1-day/week Warsaw/Kraków hybrid. The body on-site/city gate (which already
+    # honours the same weekly exception) catches far cities hidden in the text.
+    if not _matches_location(job) and not _is_acceptable_weekly_hybrid(job):
+        return "location"
+    if _is_unwanted_onsite_location(job):
         return "location"
     if _is_german_language_required(job):
         return "german"
@@ -545,3 +716,53 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
             reasons[reason] += 1
 
     return result, reasons
+
+
+# Human-readable labels for the manual-apply "warn but allow" screen. Maps each
+# body-level gate to a short message shown in Telegram before docs are generated.
+_MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = (
+    ("_is_unwanted_fullstack", "fullstack role paired with a backend stack"),
+    ("_has_body_disqualifier", "excluded tech/platform in the description"),
+    ("_is_ai_training_or_mill", "AI-training / staffing-mill company"),
+    ("_is_unwanted_onsite_location", "on-site / hybrid outside Wrocław"),
+    ("_is_german_language_required", "German language required"),
+    ("_is_unacceptable_contract", "part-time / very short contract"),
+    ("_requires_relocation", "relocation required"),
+)
+
+
+def screen_job_text(
+    job_text: str,
+    *,
+    title: str = "",
+    company: str = "",
+    location: str = "",
+) -> str | None:
+    """Body-level screen for the manual URL/paste 'warn but allow' path.
+
+    A manually pasted URL bypasses the hunt-time filter entirely. This runs the
+    gates that work on the fetched full text (plus the supplied title/company when
+    known) and returns a short human-readable reason if the posting *would* have
+    been filtered — so the bot can warn the user before generating docs, while
+    still letting it through. Returns None when nothing fires.
+
+    Deliberately does NOT enforce the title-keyword whitelist: a manual paste is
+    an intentional override, so we only flag disqualifiers we're confident about.
+    """
+    job = Job(
+        title=title or "",
+        company=company or "",
+        location=location or "",
+        salary=None,
+        url="",
+        source="manual",
+        raw={"description": job_text or ""},
+    )
+    for fn_name, label in _MANUAL_SCREEN_CHECKS:
+        fn = globals().get(fn_name)
+        try:
+            if fn and fn(job):
+                return label
+        except Exception:  # noqa: BLE001 — best-effort warning, never block apply
+            continue
+    return None
