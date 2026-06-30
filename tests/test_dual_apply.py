@@ -234,6 +234,106 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     assert "Cover_Letter_EN_ats88.pdf" in names
 
 
+def test_generate_shadow_uploads_to_drive_when_enabled(monkeypatch, tmp_path):
+    """When GDRIVE_ENABLED, run_shadow uploads the shadow subfolder nested under
+    the primary's company folder — best-effort, never raises on failure."""
+    shadow = lp.PROFILES["deepseek-v3"]
+    active = lp.PROFILES["sonnet"]
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-o")
+    monkeypatch.setattr(lp, "dual_enabled", lambda: True)
+    monkeypatch.setattr(lp, "shadow_profile", lambda: shadow)
+    monkeypatch.setattr(lp, "get_active", lambda: active)
+
+    job_text = "We are hiring a Senior Angular developer. " * 10
+    (tmp_path / "job_posting.txt").write_text(f"URL: https://x/y\n\n{job_text}", encoding="utf-8")
+    (tmp_path / "content.json").write_text(json.dumps({"apply_url": "https://x/y"}), encoding="utf-8")
+
+    generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
+    monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
+    import hunter.apply_shared as ash
+    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
+    monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
+    monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
+    monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
+    monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
+    monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
+
+    def fake_run(cmd, **kw):
+        sub = tmp_path / shadow.name
+        (sub / "cv.pdf").write_text("pdf", encoding="utf-8")
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
+    monkeypatch.setattr("hunter.config.GDRIVE_ENABLED", True)
+
+    captured = {}
+
+    async def fake_upload(primary_folder, sub_folder):
+        captured["primary_folder"] = primary_folder
+        captured["sub_folder"] = sub_folder
+        return "https://drive.google.com/drive/folders/shadow"
+
+    monkeypatch.setattr("hunter.gdrive_sync.upload_shadow_folder", fake_upload)
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    assert result == tmp_path / shadow.name
+    assert captured["primary_folder"] == tmp_path
+    assert captured["sub_folder"] == tmp_path / shadow.name
+
+
+def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_path):
+    """A Drive upload error must never break the shadow run."""
+    shadow = lp.PROFILES["deepseek-v3"]
+    active = lp.PROFILES["sonnet"]
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-o")
+    monkeypatch.setattr(lp, "dual_enabled", lambda: True)
+    monkeypatch.setattr(lp, "shadow_profile", lambda: shadow)
+    monkeypatch.setattr(lp, "get_active", lambda: active)
+
+    job_text = "We are hiring a Senior Angular developer. " * 10
+    (tmp_path / "job_posting.txt").write_text(f"URL: https://x/y\n\n{job_text}", encoding="utf-8")
+    (tmp_path / "content.json").write_text(json.dumps({"apply_url": "https://x/y"}), encoding="utf-8")
+
+    generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
+    monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
+    import hunter.apply_shared as ash
+    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
+    monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
+    monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
+    monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
+    monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
+    monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
+
+    def fake_run(cmd, **kw):
+        sub = tmp_path / shadow.name
+        (sub / "cv.pdf").write_text("pdf", encoding="utf-8")
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
+    monkeypatch.setattr("hunter.config.GDRIVE_ENABLED", True)
+
+    async def boom(primary_folder, sub_folder):
+        raise RuntimeError("Drive API down")
+
+    monkeypatch.setattr("hunter.gdrive_sync.upload_shadow_folder", boom)
+
+    result = dual_apply.run_shadow(tmp_path)  # must not raise
+    assert result == tmp_path / shadow.name
+
+
 # ── Detached CLI shim (_main) ───────────────────────────────────────────────────
 
 def test_main_usage_without_folder_returns_2():

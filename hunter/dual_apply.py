@@ -282,6 +282,21 @@ def _generate_shadow(
     suffix = _ats_suffix(content)
     n = _suffix_docs(sub, suffix)
     print(f"[dual] Shadow done: {n} doc(s){' ' + suffix if suffix else ''} in {sub}")
+
+    # Best-effort Drive upload, nested under the primary's company folder
+    # (Job Hunter/{date}/{company}/{shadow_name}/). No tracker row exists for
+    # the shadow, so this is the only path its files reach Drive.
+    try:
+        from hunter.config import GDRIVE_ENABLED
+        if GDRIVE_ENABLED:
+            import asyncio
+            from hunter.gdrive_sync import upload_shadow_folder
+            url = asyncio.run(upload_shadow_folder(primary_folder, sub))
+            if url:
+                print(f"[dual] uploaded to Drive: {url}")
+    except Exception as e:
+        print(f"[dual] drive upload failed (continuing): {e}")
+
     return sub
 
 

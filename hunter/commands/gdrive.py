@@ -45,15 +45,21 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         already = result.get("already_uploaded", 0)
         skipped = result["skipped_missing"]
         errors = result.get("errors", [])
+        shadow_uploaded = result.get("shadow_uploaded", 0)
+        shadow_errors = result.get("shadow_errors", [])
         err_note = ""
         if errors:
             err_lines = "\n".join(f"  • {e[:120]}" for e in errors[:5])
             err_note = f"\n⚠️ Errors ({len(errors)}):\n<code>{err_lines}</code>"
+        if shadow_errors:
+            sh_lines = "\n".join(f"  • {e[:120]}" for e in shadow_errors[:5])
+            err_note += f"\n⚠️ Shadow errors ({len(shadow_errors)}):\n<code>{sh_lines}</code>"
         await update.message.reply_text(
             f"✅ <b>gdrive_upload_missing</b>\n"
             f"  📤 Uploaded: {uploaded}\n"
             f"  ✔ Already on Drive: {already}\n"
-            f"  ⏭ Missing locally: {skipped}"
+            f"  ⏭ Missing locally: {skipped}\n"
+            f"  🔀 Shadow (dual-apply) uploaded: {shadow_uploaded}"
             f"{err_note}",
             parse_mode=ParseMode.HTML,
         )

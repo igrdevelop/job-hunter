@@ -190,3 +190,45 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
     assert tracker.get_drive_url_by_url(url_new) == new_url
     # Already-uploaded row must remain unchanged
     assert tracker.get_drive_url_by_url(url_done) == "https://drive.google.com/drive/folders/done"
+
+
+# ---------------------------------------------------------------------------
+# upload_missing_folders: dual-apply shadow subfolders (no tracker row of their own)
+# ---------------------------------------------------------------------------
+
+def test_upload_missing_also_uploads_shadow_subfolder(tmp_path, tracker_db):
+    """A {company}/{shadow_profile}/ subfolder has no Drive URL column of its own —
+    it must still be picked up and uploaded even when the company row is already
+    marked as uploaded."""
+    job_url = "https://example.com/jobs/3"
+    folder = tmp_path / "Applications" / "2026-05-22" / "ShadowCorp"
+    folder.mkdir(parents=True)
+    (folder / "cv.pdf").write_bytes(b"x")
+    shadow_sub = folder / "deepseek-v3"
+    shadow_sub.mkdir()
+    (shadow_sub / "cv_ats88.pdf").write_bytes(b"y")
+
+    # Company already uploaded — primary upload_folder must NOT be called again.
+    _insert_row(
+        tracker_db, url=job_url, folder_rel=str(folder),
+        drive_url="https://drive.google.com/drive/folders/existing",
+    )
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gdrive_client.upload_folder") as mock_upload_folder,
+        patch(
+            "hunter.gdrive_sync.upload_shadow_folder",
+            return_value="https://drive.google.com/drive/folders/shadow",
+        ) as mock_upload_shadow,
+    ):
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_missing_folders(tmp_path))
+
+    mock_upload_folder.assert_not_called()  # company folder unchanged
+    mock_upload_shadow.assert_called_once_with(folder, shadow_sub)
+    assert result["uploaded"] == 0
+    assert result["already_uploaded"] == 1
+    assert result["shadow_uploaded"] == 1
+    assert result["shadow_errors"] == []
