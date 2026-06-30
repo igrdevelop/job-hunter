@@ -186,7 +186,10 @@ FILTER = {
     "exclude_patterns": [
         r"\bjava\b",
         r"\.net",
-        r"\bc#\b",
+        # NOTE: trailing \b after "#" never matches ("#" is a non-word char, so
+        # there is no word boundary between "#" and the following space). Use a
+        # leading boundary only so "C#", "(C#", "C#/Angular" are all caught.
+        r"\bc#",
         r"\bphp\b",
         r"\bqa\b",
         r"\bsdet\b",
@@ -234,10 +237,78 @@ FILTER = {
         r"\btech\s+lead\b",
         r"\bproject\s+lead\b",
         r"\bpart[- ]?time\b",
+        # Low-code / non-web-FE platforms and niche roles the candidate skips
+        r"\bmendix\b",
+        r"\boutsystems\b",
+        r"\blow[-\s]?code\b",
+        r"\bemail\s+developer\b",
+        r"\bui\s+designer\b",
+        # AI data-labeling / "AI training" gig roles (not real FE engineering)
+        r"\bai\s+train(?:ing|er)\b",
+        r"\bai\s+tutor\b",
+        r"\bdata\s+annotat\w*\b",
+        r"\bdata\s+label(?:l)?ing\b",
     ],
 
     # Skip jobs that mention React but NOT Angular (React-only roles)
     "exclude_react_without_angular": True,
+
+    # Fullstack policy: a "Full Stack / Fullstack" title with NO Angular is always
+    # blocked (handled in filters._is_unwanted_fullstack). When Angular IS present
+    # the role is blocked only if it is paired with a *heavy backend* stack below
+    # (checked in title AND body). Node/Nuxt are deliberately NOT in this list, so a
+    # JS/Node fullstack-with-Angular role still passes (per owner's preference).
+    "exclude_fullstack_with_backend": True,
+    "fullstack_backend_stacks": [
+        r"\bjava\b",
+        r"\bspring(?:\s+boot)?\b",
+        r"\.net\b",
+        r"\basp\.net\b",
+        r"\bc#",
+        r"\bpython\b",
+        r"\bdjango\b",
+        r"\bgolang\b",
+        r"\bphp\b",
+        r"\bruby\s+on\s+rails\b",
+    ],
+
+    # Disqualifiers hidden in the job BODY (title looks like clean FE, but the
+    # description reveals a stack/platform the candidate doesn't want). Checked
+    # against the full job text blob, mirroring the German/contract/relocation gates.
+    "exclude_body_disqualifiers": True,
+    "body_exclude_patterns": [
+        r"\bblazor\b",
+        r"\bmendix\b",
+        r"\boutsystems\b",
+        r"\blow[-\s]?code\b",
+        r"\bwordpress\b",
+        r"\bdrupal\b",
+        r"\bmagento\b",
+        r"\bsharepoint\b",
+    ],
+
+    # Reject when the BODY couples an on-site / hybrid signal with a city outside the
+    # Wrocław area (the listing's location field frequently says "remote"/"Poland"
+    # while the description demands N days/week in a Kraków/Warsaw/foreign office).
+    "exclude_body_onsite_city": True,
+
+    # Exception to the two location gates above: KEEP a hybrid role that only needs
+    # the office ~1 day/week, but ONLY for Warsaw / Kraków (commutable from Wrocław
+    # once a week). Detected from the body frequency phrasing. More than 1 day/week,
+    # an unspecified frequency, or any other far city → still rejected.
+    "allow_weekly_hybrid_warsaw_krakow": True,
+
+    # Reject AI-data-labeling / staffing-mill roles by company name (titles are often
+    # clean "Angular Developer" so only the company gives them away — micro1 fronts).
+    "exclude_ai_training": True,
+    "exclude_companies": [
+        "micro1",
+        "alignerr",
+        "quikhire",
+        "hirefeed",
+        "mercor",
+        "outlier ai",
+    ],
 
     # Drop roles that require German (checked in title + location + raw description-like fields).
     # Set false if you speak German or use boards where this produces false positives.
@@ -265,6 +336,8 @@ FILTER = {
         "bucharest",
         "sofia",
         "zagreb",
+        # Cyprus (recruiter posts / XM, GRS — hybrid in Limassol/Nicosia/Larnaca)
+        "limassol", "nicosia", "larnaca", "larnaka", "paphos", "pafos",
         # Non-EU / remote-but-actually-not regions
         "islamabad", "karachi", "lahore",   # Pakistan
         "bangalore", "mumbai", "delhi",     # India

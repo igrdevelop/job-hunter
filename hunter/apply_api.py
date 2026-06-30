@@ -257,6 +257,24 @@ def _run_main_api(
         print(f"[apply_agent] SKIP (pre-LLM) — backend-only job text: {url}")
         return
 
+    # Step 1.5e — Manual-apply "warn but allow" screen. A pasted URL bypasses the
+    # hunt-time filter, so re-run the body-level gates against the fetched text and
+    # warn (without aborting) if the posting would normally have been filtered out.
+    # Hunt/AUTO jobs already passed these gates, so this only fires on manual input.
+    try:
+        from hunter.filters import screen_job_text
+        screen_reason = screen_job_text(job_text)
+        if screen_reason:
+            notify(
+                f"⚠️ <b>Heads-up — this posting would normally be filtered</b>\n"
+                f"Reason: {screen_reason}\n"
+                f"🔗 {url}\n\n"
+                f"Generating documents anyway (manual override)…"
+            )
+            print(f"[apply_agent] WARN (manual screen) — {screen_reason}: {url}")
+    except Exception as e:  # noqa: BLE001 — best-effort, never block apply
+        print(f"[apply_agent] Warning: manual screen failed: {e}")
+
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "generation_rules.md"
     profile_path = PROMPTS_DIR / "candidate_profile.md"
