@@ -121,6 +121,47 @@ async def upload_application_folder(
         return None
 
 
+async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> str | None:
+    """
+    Upload a dual-apply shadow comparison subfolder, nested under the primary's
+    company folder on Drive:
+
+      Job Hunter / {date} / {company} / {shadow_name} / <files>
+
+    Unlike upload_application_folder this never writes back to tracker.xlsx —
+    the shadow run has no tracker row. Best-effort; returns the shadow folder's
+    Drive URL, or None if disabled / missing / error.
+    """
+    if not _ready():
+        return None
+    if not shadow_subfolder.exists() or not shadow_subfolder.is_dir():
+        return None
+
+    try:
+        from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+
+        svc = _get_service()
+        date_name = primary_folder.parent.name
+
+        if GDRIVE_ROOT_FOLDER_ID:
+            root_id = GDRIVE_ROOT_FOLDER_ID
+        else:
+            root_id = await asyncio.to_thread(
+                get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
+            )
+        date_id = await asyncio.to_thread(get_or_create_folder, svc, date_name, root_id)
+        company_id = await asyncio.to_thread(
+            get_or_create_folder, svc, primary_folder.name, date_id
+        )
+        shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
+        url = folder_url(shadow_id)
+        log.info("gdrive_sync: uploaded shadow %s → %s", shadow_subfolder, url)
+        return url
+    except Exception as e:
+        log.warning("gdrive_sync: shadow upload failed for %s: %s", shadow_subfolder, e)
+        return None
+
+
 async def delete_application_folder(drive_url: str) -> bool:
     """Delete a Drive folder by its URL (e.g. the one stored in tracker col 12).
 
@@ -268,6 +309,7 @@ async def upload_missing_folders(
         return {
             "uploaded": 0, "already_uploaded": 0, "skipped_missing": 0,
             "errors": ["GDRIVE_ENABLED is false or service not ready"],
+            "shadow_uploaded": 0, "shadow_errors": [],
         }
 
     from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
@@ -275,19 +317,18 @@ async def upload_missing_folders(
 
     rows = await asyncio.to_thread(read_all_tracker_rows)
 
-    # Collect folders that need uploading.
+    # Collect folders that need uploading, and (separately) every folder that
+    # exists locally — the latter feeds the shadow-subfolder scan below, which
+    # runs independently of the per-row "already uploaded" check (dual-apply
+    # shadow sets have no tracker row / Drive URL column of their own).
     to_upload: list[tuple[str, str, Path]] = []  # (company, job_url, folder_path)
+    existing_folders: set[Path] = set()
     already_uploaded = 0
     skipped_missing = 0
 
     for row in rows:
         folder_str = row.get("Folder", "").strip()
         if not folder_str:
-            continue
-        # Skip rows that already have a Drive URL.
-        existing_drive_url = row.get("Drive URL", "").strip()
-        if existing_drive_url and existing_drive_url not in ("-", "—"):
-            already_uploaded += 1
             continue
         folder_path = Path(folder_str)
         if not folder_path.is_absolute():
@@ -296,12 +337,22 @@ async def upload_missing_folders(
             skipped_missing += 1
             log.debug("gdrive_sync: folder not found locally, skipping: %s", folder_path)
             continue
+        existing_folders.add(folder_path)
+        # Skip rows that already have a Drive URL — folder itself doesn't need
+        # re-upload, but it's still scanned for shadow subfolders below.
+        existing_drive_url = row.get("Drive URL", "").strip()
+        if existing_drive_url and existing_drive_url not in ("-", "—"):
+            already_uploaded += 1
+            continue
         to_upload.append((row.get("Company", folder_path.name), row.get("URL", ""), folder_path))
+
+    shadow_uploaded, shadow_errors = await _upload_shadow_subfolders(existing_folders)
 
     if not to_upload:
         return {
             "uploaded": 0, "already_uploaded": already_uploaded,
             "skipped_missing": skipped_missing, "errors": [],
+            "shadow_uploaded": shadow_uploaded, "shadow_errors": shadow_errors,
         }
 
     svc = _get_service()
@@ -321,6 +372,7 @@ async def upload_missing_folders(
         return {
             "uploaded": 0, "already_uploaded": already_uploaded,
             "skipped_missing": skipped_missing, "errors": [f"root folder: {e}"],
+            "shadow_uploaded": shadow_uploaded, "shadow_errors": shadow_errors,
         }
 
     total = len(to_upload)
@@ -356,4 +408,35 @@ async def upload_missing_folders(
         "already_uploaded": already_uploaded,
         "skipped_missing": skipped_missing,
         "errors": errors,
+        "shadow_uploaded": shadow_uploaded,
+        "shadow_errors": shadow_errors,
     }
+
+
+async def _upload_shadow_subfolders(folders: set[Path]) -> tuple[int, list[str]]:
+    """Upload any dual-apply shadow subfolder found under the given company folders.
+
+    Shadow sets (``{company}/{shadow_profile_name}/``) have no tracker row, so
+    they're invisible to the company-level Drive URL check in
+    upload_missing_folders. This scans every locally-present company folder
+    for a subdirectory matching a known LLM profile name and uploads it —
+    idempotent (Drive upserts by name), so re-running is safe.
+    """
+    from hunter.llm_profiles import PROFILES
+
+    uploaded = 0
+    errors: list[str] = []
+    for folder_path in folders:
+        for name in PROFILES:
+            sub = folder_path / name
+            if not sub.is_dir() or not any(f.is_file() for f in sub.iterdir()):
+                continue
+            try:
+                url = await upload_shadow_folder(folder_path, sub)
+                if url:
+                    uploaded += 1
+                else:
+                    errors.append(f"{folder_path.name}/{name}: upload failed")
+            except Exception as e:
+                errors.append(f"{folder_path.name}/{name}: {e}")
+    return uploaded, errors

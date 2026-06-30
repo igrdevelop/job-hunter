@@ -300,3 +300,123 @@ def test_upload_log_file_returns_none_on_error(tmp_path):
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
     assert result is None  # best-effort — error swallowed
+
+
+# ---------------------------------------------------------------------------
+# upload_shadow_folder — dual-apply comparison subfolder nested under company
+# ---------------------------------------------------------------------------
+
+def test_upload_shadow_folder_noop_when_disabled(tmp_path):
+    with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_shadow_folder(tmp_path / "Acme", tmp_path / "Acme" / "deepseek-v3"))
+    assert result is None
+
+
+def test_upload_shadow_folder_noop_when_missing(tmp_path):
+    primary = tmp_path / "2026-05-15" / "Acme"
+    primary.mkdir(parents=True)
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+    ):
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_shadow_folder(primary, primary / "deepseek-v3"))
+    assert result is None
+
+
+def test_upload_shadow_folder_nests_under_company(tmp_path):
+    primary = tmp_path / "2026-05-15" / "Acme"
+    shadow = primary / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    (shadow / "cv_ats88.pdf").write_bytes(b"x")
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", ""),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_NAME", "Job Hunter"),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gdrive_client.get_or_create_folder") as mock_goc,
+        patch("hunter.gdrive_client.upload_folder", return_value="shadow_id") as mock_uf,
+        patch("hunter.gdrive_client.folder_url", return_value="https://drive.google.com/drive/folders/shadow_id"),
+    ):
+        mock_goc.side_effect = ["root_id", "date_id", "company_id"]
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_shadow_folder(primary, shadow))
+
+    # root -> date -> company (3 get_or_create calls), then upload_folder(shadow) under company_id
+    assert mock_goc.call_count == 3
+    assert mock_goc.call_args_list[1].args[1] == "2026-05-15"
+    assert mock_goc.call_args_list[2].args[1] == "Acme"
+    mock_uf.assert_called_once()
+    assert mock_uf.call_args.args[1] == shadow
+    assert mock_uf.call_args.args[2] == "company_id"
+    assert result == "https://drive.google.com/drive/folders/shadow_id"
+
+
+def test_upload_shadow_folder_returns_none_on_error(tmp_path):
+    primary = tmp_path / "2026-05-15" / "Acme"
+    shadow = primary / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    (shadow / "cv.pdf").write_bytes(b"x")
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", "root"),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gdrive_client.get_or_create_folder", side_effect=RuntimeError("API down")),
+    ):
+        from hunter import gdrive_sync
+        result = run(gdrive_sync.upload_shadow_folder(primary, shadow))
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _upload_shadow_subfolders — scan helper used by upload_missing_folders
+# ---------------------------------------------------------------------------
+
+def test_upload_shadow_subfolders_finds_known_profile_dirs(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    shadow = company / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    (shadow / "cv.pdf").write_bytes(b"x")
+    # Unrelated subfolder must be ignored (not a known profile name).
+    (company / "random_dir").mkdir()
+    (company / "random_dir" / "junk.txt").write_bytes(b"x")
+
+    with patch("hunter.gdrive_sync.upload_shadow_folder", return_value="https://drive.google.com/drive/folders/x") as mock_upload:
+        from hunter import gdrive_sync
+        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+
+    assert uploaded == 1
+    assert errors == []
+    mock_upload.assert_called_once_with(company, shadow)
+
+
+def test_upload_shadow_subfolders_skips_empty_dirs(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    (company / "deepseek-v3").mkdir(parents=True)  # empty — no files inside
+
+    with patch("hunter.gdrive_sync.upload_shadow_folder") as mock_upload:
+        from hunter import gdrive_sync
+        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+
+    assert uploaded == 0
+    assert errors == []
+    mock_upload.assert_not_called()
+
+
+def test_upload_shadow_subfolders_records_failure(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    shadow = company / "gpt-4o"
+    shadow.mkdir(parents=True)
+    (shadow / "cv.pdf").write_bytes(b"x")
+
+    with patch("hunter.gdrive_sync.upload_shadow_folder", return_value=None):
+        from hunter import gdrive_sync
+        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+
+    assert uploaded == 0
+    assert len(errors) == 1
+    assert "gpt-4o" in errors[0]
