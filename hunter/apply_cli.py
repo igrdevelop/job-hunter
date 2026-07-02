@@ -555,6 +555,15 @@ def main_cli(
                         )
                     except Exception as _vc_err:
                         print(f"[apply_agent] Warning: could not persist ats_verdict: {_vc_err}")
+                    # Stamp the tracker row (same contract as apply_api Step 7.7:
+                    # DB only — the bot process mirrors Sheet column N later).
+                    # Paste flow has no URL to match a row by — skip.
+                    if url and "paste://" not in url:
+                        try:
+                            from hunter.tracker import set_ats_verdict
+                            set_ats_verdict(url, float(verdict["score"]))
+                        except Exception as _tr_err:
+                            print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
                     pdf_summary += "\n" + format_verdict(verdict)
                     print(f"[apply_agent] {format_verdict(verdict)}")
             except Exception as e:

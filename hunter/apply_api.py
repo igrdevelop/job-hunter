@@ -762,6 +762,17 @@ def _run_main_api(
             if verdict is not None:
                 content["ats_verdict"] = verdict
                 print(f"[apply_agent] {format_verdict(verdict)}")
+                # Stamp the score on the tracker row (created by generate_docs
+                # in Step 7, so it already exists). The Sheets column-N cell is
+                # mirrored later by the bot process (gsheets_sync.mirror_new_row
+                # reads ats_verdict from the DB). Paste flow has no URL to match
+                # a row by — skip the stamp there.
+                if url and url != PASTE_NO_URL_PLACEHOLDER:
+                    try:
+                        from hunter.tracker import set_ats_verdict
+                        set_ats_verdict(url, float(verdict["score"]))
+                    except Exception as _tr_err:
+                        print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
                 # Re-price so content.json + the Telegram summary include the
                 # verdict call. The tracker row (written by generate_docs in
                 # Step 7, before this call) keeps the pre-verdict figure — the

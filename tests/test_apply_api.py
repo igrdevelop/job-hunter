@@ -129,3 +129,34 @@ def test_main_api_no_shared_global_state(monkeypatch) -> None:
         main_api("https://example.com/job/b", skip_dedup=True)
 
     assert results == [False, True], "Each call must use its own skip_dedup value"
+
+
+# ── Verdict tracker stamp (Phase 2 M3) ───────────────────────────────────────
+# Full-pipeline execution of Step 7.7 needs a dozen mocked stages; the repo's
+# precedent for wiring guarantees is source inspection (see
+# test_apply_dispatcher.test_apply_agent_is_thin). These guards assert the
+# stamp exists, lives inside the verdict block, and skips the paste flow.
+
+def _source_of(module_name: str) -> str:
+    import importlib
+    import inspect
+    return inspect.getsource(importlib.import_module(module_name))
+
+
+def test_api_pipeline_stamps_verdict_on_tracker() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "set_ats_verdict" in src
+    # The stamp must be guarded against the paste flow (no URL to match).
+    verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
+    stamp_pos = verdict_block.index("set_ats_verdict")
+    guard_pos = verdict_block.index("PASTE_NO_URL_PLACEHOLDER")
+    assert guard_pos < stamp_pos
+
+
+def test_cli_pipeline_stamps_verdict_on_tracker() -> None:
+    src = _source_of("hunter.apply_cli")
+    assert "set_ats_verdict" in src
+    verdict_block = src.split("run_llm_verdict(folder=folder_path")[1]
+    stamp_pos = verdict_block.index("set_ats_verdict")
+    guard_pos = verdict_block.index("paste://")
+    assert guard_pos < stamp_pos
