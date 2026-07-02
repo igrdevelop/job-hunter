@@ -585,7 +585,15 @@ def _run_main_api(
 
     # Step 6 — Write content.json + job_posting.txt
     content_path = output_folder / "content.json"
-    content_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _persist_content() -> None:
+        """Serialize the live `content` dict to content.json. Single write
+        path for Steps 6/6.5/7.5/7.7 so the serialization can't diverge."""
+        content_path.write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    _persist_content()
     print(f"[apply_agent] Wrote {content_path}")
 
     # Audit trail for tuning the judge prompt: persist findings whenever any.
@@ -633,10 +641,7 @@ def _run_main_api(
         cost_dict = _price_usage(_usage_log)
         content["cost"] = cost_dict
         try:
-            content_path.write_text(
-                json.dumps(content, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            _persist_content()
         except Exception as _save_err:
             print(f"[apply_agent] Warning: could not persist cost to content.json: {_save_err}")
     except Exception as e:
@@ -700,12 +705,6 @@ def _run_main_api(
                 run_pdf_roundtrip,
             )
 
-            def _save_content():
-                content_path.write_text(
-                    json.dumps(content, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-
             pdf_check = run_pdf_roundtrip(
                 folder=output_folder,
                 job_text=job_text,
@@ -721,7 +720,7 @@ def _run_main_api(
                         f"[apply_agent] PDF Δ={delta:+.1f}pp — "
                         f"patched {patches} multi-word keyword(s) with NBSP, regenerating"
                     )
-                    _save_content()
+                    _persist_content()
                     try:
                         subprocess.run(
                             gen_cmd,
@@ -744,17 +743,58 @@ def _run_main_api(
 
             if pdf_check is not None:
                 content["ats_check_pdf"] = pdf_check
-                _save_content()
+                _persist_content()
                 pdf_summary = " | " + format_summary(pdf_check)
                 print(f"[apply_agent] {format_summary(pdf_check)}")
         except Exception as e:
             print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
+
+    # Step 7.7 — Final independent ATS verdict: one cheap-LLM (judge model) call
+    # over the text extracted from the delivered EN CV PDF. This is the number
+    # the user sees in Telegram — an assessor that did not write the resume,
+    # scoring exactly what a real ATS parses. Informational, never blocks.
+    verdict = None
+    if gen_ok:
+        try:
+            from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+            verdict = run_llm_verdict(folder=output_folder, job_text=job_text)
+            if verdict is not None:
+                content["ats_verdict"] = verdict
+                print(f"[apply_agent] {format_verdict(verdict)}")
+                # Stamp the score on the tracker row (created by generate_docs
+                # in Step 7, so it already exists). The Sheets column-N cell is
+                # mirrored later by the bot process (gsheets_sync.mirror_new_row
+                # reads ats_verdict from the DB). Paste flow has no URL to match
+                # a row by — skip the stamp there.
+                if url and url != PASTE_NO_URL_PLACEHOLDER:
+                    try:
+                        from hunter.tracker import set_ats_verdict
+                        set_ats_verdict(url, float(verdict["score"]))
+                    except Exception as _tr_err:
+                        print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
+                # Re-price so content.json + the Telegram summary include the
+                # verdict call. The tracker row (written by generate_docs in
+                # Step 7, before this call) keeps the pre-verdict figure — the
+                # delta is one Haiku call (~$0.02), acceptable drift.
+                try:
+                    from hunter.llm_cost import price_usage as _price_usage2
+                    cost_dict = _price_usage2(_usage_log)
+                    content["cost"] = cost_dict
+                except Exception as _cost_err:
+                    print(f"[apply_agent] Warning: verdict re-pricing failed: {_cost_err}")
+                _persist_content()
+        except Exception as e:
+            print(f"[apply_agent] Warning: ATS verdict failed (continuing): {e}")
 
     # Step 8 — Notify success (cost was already priced + persisted in Step 6.5).
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:
         file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
         ats = content.get("ats_score", "?")
+        if verdict is not None:
+            ats_line = f"ATS: {verdict.get('score')}% (independent, PDF) | self: {ats}%"
+        else:
+            ats_line = f"ATS: {ats}%"
         cost_line = ""
         if cost_dict is not None:
             from hunter.llm_cost import format_summary as _cost_summary
@@ -770,7 +810,7 @@ def _run_main_api(
             f"✅ <b>Docs ready!</b>\n\n"
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
-            f"ATS: {ats}%{pdf_summary} | Stack: {content.get('stack', '?')}\n"
+            f"{ats_line}{pdf_summary} | Stack: {content.get('stack', '?')}\n"
             f"Via: API ({_llm_prof.model}){cost_line}\n"
             f"Review and send when ready."
             f"{issues_note}"

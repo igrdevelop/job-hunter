@@ -65,6 +65,27 @@ def find_en_cv_pdf(folder: Path) -> Optional[Path]:
     return None
 
 
+def _en_cv_pdf_text(folder: Path, log_prefix: str) -> tuple[Optional[Path], str]:
+    """Locate the EN CV PDF in `folder` and extract its text.
+
+    Shared by run_pdf_roundtrip and run_llm_verdict so the locate+extract
+    logic can't diverge. Returns (pdf_path, text); pdf_path is None when no
+    PDF was found, text is "" when extraction produced nothing (both cases
+    are logged with the caller's prefix).
+    """
+    pdf_path = find_en_cv_pdf(folder)
+    if pdf_path is None:
+        logger.info("[%s] no EN CV PDF found in %s — skipping", log_prefix, folder)
+        return None, ""
+    pdf_text = extract_pdf_text(pdf_path)
+    if not pdf_text.strip():
+        logger.info(
+            "[%s] PDF text extraction empty for %s — skipping", log_prefix, pdf_path.name
+        )
+        return pdf_path, ""
+    return pdf_path, pdf_text
+
+
 def run_pdf_roundtrip(
     folder: Path,
     job_text: str,
@@ -81,14 +102,8 @@ def run_pdf_roundtrip(
         logger.info("[ats_pdf] empty job_text — skipping roundtrip")
         return None
 
-    pdf_path = find_en_cv_pdf(folder)
-    if pdf_path is None:
-        logger.info("[ats_pdf] no EN CV PDF found in %s — skipping roundtrip", folder)
-        return None
-
-    pdf_text = extract_pdf_text(pdf_path)
-    if not pdf_text.strip():
-        logger.info("[ats_pdf] PDF text extraction empty for %s — skipping", pdf_path.name)
+    pdf_path, pdf_text = _en_cv_pdf_text(folder, "ats_pdf")
+    if pdf_path is None or not pdf_text.strip():
         return None
 
     # Heuristic-only — no LLM. The roundtrip's job is to measure what *we*
@@ -105,6 +120,49 @@ def run_pdf_roundtrip(
     if json_ats_score is not None:
         out["delta_from_json"] = round(out["score"] - float(json_ats_score), 1)
     return out
+
+
+def run_llm_verdict(folder: Path, job_text: str) -> Optional[dict]:
+    """Final independent ATS verdict: one cheap-LLM call over the rendered PDF.
+
+    Uses the judge configuration (JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_KEY —
+    a cheap model that did NOT write the resume) to score the text extracted
+    from the delivered EN CV PDF against the job posting. This is the only LLM
+    scoring pass in the pipeline: the rewrite loop is purely deterministic.
+
+    Informational only — returns None on any failure (disabled, no key, no
+    PDF, empty extraction, LLM error) and must never block delivery.
+    """
+    from hunter import config
+
+    if not getattr(config, "ATS_VERDICT_ENABLED", True):
+        return None
+    if not job_text.strip():
+        return None
+    if not config.JUDGE_API_KEY:
+        logger.info("[ats_verdict] no judge API key — skipping verdict")
+        return None
+
+    pdf_path, pdf_text = _en_cv_pdf_text(folder, "ats_verdict")
+    if pdf_path is None or not pdf_text.strip():
+        return None
+
+    verdict = ats_checker.llm_verdict(
+        job_text=job_text,
+        resume_text=pdf_text,
+        provider=config.JUDGE_PROVIDER,
+        model=config.JUDGE_MODEL,
+        api_key=config.JUDGE_API_KEY,
+    )
+    if verdict is not None:
+        verdict["pdf_file"] = pdf_path.name
+    return verdict
+
+
+def format_verdict(verdict: dict) -> str:
+    """One-line Telegram summary for the independent PDF verdict."""
+    score = verdict.get("score", "?")
+    return f"ATS verdict (independent, PDF): {score}%"
 
 
 def format_summary(pdf_check: dict) -> str:

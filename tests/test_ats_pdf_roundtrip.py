@@ -166,3 +166,76 @@ def test_run_pdf_roundtrip_stores_content_payload(tmp_path: Path) -> None:
     assert result is not None
     # Round-trips through JSON unchanged.
     assert json.loads(json.dumps(result)) == result
+
+
+# ── Final independent LLM verdict (PDF) ───────────────────────────────────────
+
+def _verdict_env(monkeypatch, *, enabled: bool = True, key: str = "test-key") -> None:
+    from hunter import config
+    monkeypatch.setattr(config, "ATS_VERDICT_ENABLED", enabled, raising=False)
+    monkeypatch.setattr(config, "JUDGE_API_KEY", key)
+    monkeypatch.setattr(config, "JUDGE_PROVIDER", "anthropic")
+    monkeypatch.setattr(config, "JUDGE_MODEL", "claude-haiku-4-5-20251001")
+
+
+def test_run_llm_verdict_disabled_returns_none(tmp_path: Path, monkeypatch) -> None:
+    from hunter.ats_pdf_roundtrip import run_llm_verdict
+    _verdict_env(monkeypatch, enabled=False)
+    (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
+    assert run_llm_verdict(tmp_path, job_text="need Angular") is None
+
+
+def test_run_llm_verdict_no_key_returns_none(tmp_path: Path, monkeypatch) -> None:
+    from hunter.ats_pdf_roundtrip import run_llm_verdict
+    _verdict_env(monkeypatch, key="")
+    (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
+    assert run_llm_verdict(tmp_path, job_text="need Angular") is None
+
+
+def test_run_llm_verdict_no_pdf_returns_none(tmp_path: Path, monkeypatch) -> None:
+    from hunter.ats_pdf_roundtrip import run_llm_verdict
+    _verdict_env(monkeypatch)
+    assert run_llm_verdict(tmp_path, job_text="need Angular") is None
+
+
+def test_run_llm_verdict_happy_path(tmp_path: Path, monkeypatch) -> None:
+    """One LLM call over the extracted PDF text → dict with score + pdf_file."""
+    from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+    _verdict_env(monkeypatch)
+    (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
+    llm_json = {
+        "ats_score": 91,
+        "missing_keywords": ["GraphQL"],
+        "recommendations": ["Add GraphQL"],
+        "gap_report": "Minor gaps.",
+    }
+    with patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular TypeScript"), \
+         patch("llm_client.call_llm", return_value=llm_json) as llm_mock:
+        verdict = run_llm_verdict(tmp_path, job_text="need Angular + GraphQL")
+    assert verdict is not None
+    assert verdict["score"] == 91.0
+    assert verdict["missing_keywords"] == ["GraphQL"]
+    assert verdict["model"] == "claude-haiku-4-5-20251001"
+    assert verdict["pdf_file"].endswith("_EN.pdf")
+    assert llm_mock.call_count == 1
+    # The judge model/provider is used — never the main generation profile.
+    assert llm_mock.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert "91" in format_verdict(verdict)
+    # JSON-serializable so callers can persist it on content.json.
+    assert json.loads(json.dumps(verdict)) == verdict
+
+
+def test_run_llm_verdict_llm_failure_returns_none(tmp_path: Path, monkeypatch) -> None:
+    from hunter.ats_pdf_roundtrip import run_llm_verdict
+    _verdict_env(monkeypatch)
+    (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
+    with patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular"), \
+         patch("llm_client.call_llm", side_effect=RuntimeError("boom")):
+        assert run_llm_verdict(tmp_path, job_text="need Angular") is None
+
+
+def test_llm_verdict_requires_inputs() -> None:
+    from hunter import ats_checker
+    assert ats_checker.llm_verdict("", "resume", api_key="k") is None
+    assert ats_checker.llm_verdict("job", "", api_key="k") is None
+    assert ats_checker.llm_verdict("job", "resume", api_key="") is None

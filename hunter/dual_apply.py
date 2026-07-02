@@ -51,14 +51,17 @@ def _read_job_text(primary_folder: Path) -> str:
 
 
 def _ats_suffix(content: dict) -> str:
-    """'_ats88' from content['ats_check']['score'], or '' if unavailable."""
-    try:
-        score = content.get("ats_check", {}).get("score")
-        if score is None:
-            return ""
-        return f"_ats{round(float(score))}"
-    except Exception:
-        return ""
+    """'_ats88' for the doc filenames — prefers the independent PDF verdict
+    (same judge model as the primary, so A/B filenames compare like-for-like);
+    falls back to the deterministic ats_check score; '' if neither exists."""
+    for key in ("ats_verdict", "ats_check"):
+        try:
+            score = content.get(key, {}).get("score")
+            if score is not None:
+                return f"_ats{round(float(score))}"
+        except Exception:
+            continue
+    return ""
 
 
 def _suffix_docs(folder: Path, suffix: str) -> int:
@@ -277,6 +280,23 @@ def _generate_shadow(
             print("[dual] generate_docs STDERR:", result.stderr, file=sys.stderr)
     except subprocess.TimeoutExpired:
         print("[dual] generate_docs timed out (120s) — keeping content.json only")
+
+    # Independent PDF verdict — same judge as the primary (JUDGE_* config), so
+    # the A/B filename suffixes compare like-for-like. set_override() does NOT
+    # affect this call: run_llm_verdict reads hunter.config.JUDGE_* directly,
+    # never llm_profiles. Runs BEFORE suffixing so the suffix can carry it.
+    # Comparison-only: NO tracker stamp, NO Sheets, NO Telegram for the shadow.
+    try:
+        from hunter.ats_pdf_roundtrip import run_llm_verdict
+        verdict = run_llm_verdict(folder=sub, job_text=job_text)
+        if verdict is not None:
+            content["ats_verdict"] = verdict
+            content_path.write_text(
+                json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print(f"[dual] shadow verdict: {verdict.get('score')}%")
+    except Exception as e:
+        print(f"[dual] shadow verdict failed (continuing): {e}")
 
     # Suffix the rendered docs with the ATS score for at-a-glance comparison.
     suffix = _ats_suffix(content)

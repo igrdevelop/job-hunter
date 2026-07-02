@@ -1275,12 +1275,23 @@ Current resume JSON:
 
 
 def _ats_check_loop(content: dict, job_text: str) -> dict:
-    """Run independent ATS check; rewrite resume up to 4 times if score < 95%.
+    """Deterministic ATS keyword loop: rewrite the resume only while the
+    checker reports actionable missing keywords.
 
     Round 1-2: honest rewrite ("do NOT invent facts").
     Round 3:   soft-liar pass — synonyms, adjacent tech, exact JD phrasing.
-    Round 4:   aggressive pass — inject all missing keywords into Skills directly.
-    Round 5:   final check only; if still failing → warn and proceed.
+    Round 4-5: aggressive pass — inject all missing keywords into Skills directly.
+
+    Exit conditions (checked before every rewrite):
+    - combined score ≥ threshold, OR
+    - no actionable missing keywords (after the employer-credential blocklist).
+      A rewrite can only ADD keywords; once none are missing the combined
+      score is capped by TF-IDF, which no wording change meaningfully moves —
+      prod data showed 88% of runs burning all 5 rewrites at keyword=100%.
+
+    No LLM review runs inside this loop (pure regex + TF-IDF): the independent
+    LLM verdict now happens ONCE, on the rendered PDF, after generate_docs
+    (ats_pdf_roundtrip.run_llm_verdict).
     """
     from hunter import ats_checker
 
@@ -1315,14 +1326,10 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     _rewrite_job_text = _COMPLIANCE_CLAIM_RE.sub("", job_text)[:3000]
 
     for attempt in range(1, _TOTAL_ROUNDS + 2):
-        run_llm = attempt == 1 and bool(_llm_p().api_key)
         result = ats_checker.check(
             job_text=job_text,
             resume_text=resume_text_for_ats,
-            provider=_llm_p().provider,
-            model=_llm_p().model,
-            api_key=_llm_p().api_key,
-            run_llm_review=run_llm,
+            run_llm_review=False,
         )
         print(f"[apply_agent] ATS check (attempt {attempt}):\n{result.summary()}")
         content["ats_check"] = result.to_dict()
@@ -1330,11 +1337,21 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         if result.passed(_ATS_THRESHOLD):
             break
 
+        _missing_kw = _filter_self_description_keywords(result.missing_keywords)
+        if not _missing_kw:
+            print(
+                "[apply_agent] ATS loop: all actionable keywords present "
+                f"(keyword score {result.keyword_score:.1f}%) — no rewrite can "
+                "improve the score, stopping"
+            )
+            break
+
         if attempt > _TOTAL_ROUNDS:
             break
 
-        _missing_kw = _filter_self_description_keywords(result.missing_keywords)
-        missing_str = "\n".join(f"  - {k}" for k in _missing_kw[:20]) or "  (none identified)"
+        # _missing_kw is guaranteed non-empty here (the early-exit above breaks
+        # when it's empty), so no "(none identified)" fallback is needed.
+        missing_str = "\n".join(f"  - {k}" for k in _missing_kw[:20])
         recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
         # The ATS check only scores the English resume, so only resume_en is sent
         # for rewriting (resume_pl is untouched here). The cap must comfortably fit
@@ -1354,7 +1371,9 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 threshold=_ATS_THRESHOLD,
                 missing=missing_str,
                 recs=recs_str,
-                gap=result.llm_gap_report or "N/A",
+                # No LLM review runs inside this loop anymore, so llm_gap_report
+                # is always empty — the placeholder is a constant by design.
+                gap="N/A",
                 job_text=_rewrite_job_text,
                 content_json=content_json_str,
             )

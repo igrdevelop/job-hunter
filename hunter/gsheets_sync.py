@@ -126,10 +126,16 @@ async def mirror_new_row(row: dict) -> None:
     Called after: add_applied, add_skipped, add_manual_jobleads_pending.
 
     After the A–K append lands, this also pokes column M (`Cost $`) via
-    hunter.cost_writer — that column is outside COLUMNS by design so the
-    bot never overwrites it with empty strings on subsequent A–K pushes.
-    Cost is best-effort; a failure there doesn't dirty the row (cost is
-    not part of the user-visible workflow state).
+    hunter.cost_writer and column N (`ATS Verdict`) via hunter.verdict_writer
+    — both columns are outside COLUMNS by design so the bot never overwrites
+    them with empty strings on subsequent A–K pushes. Both are best-effort;
+    a failure there doesn't dirty the row (neither is workflow state).
+
+    Timing note (verdict): the apply subprocess stamps ats_verdict on the DB
+    row (tracker.set_ats_verdict, apply Step 7.7) BEFORE it exits, and this
+    mirror runs from the bot process after the subprocess completes — so by
+    the time the A–K append assigns sheets_row, the verdict is already in
+    the DB and the cell write below lands in the same pass.
     """
     if not _ready():
         return
@@ -139,6 +145,7 @@ async def mirror_new_row(row: dict) -> None:
 
     from hunter.cost_writer import mirror_cost_cell_sync
     from hunter.gsheets_client import append_rows
+    from hunter.verdict_writer import mirror_verdict_cell_sync
 
     try:
         indices = await asyncio.to_thread(
@@ -163,6 +170,15 @@ async def mirror_new_row(row: dict) -> None:
         )
     except Exception as e:
         log.warning("gsheets cost mirror failed for %s (non-fatal): %s", row_id, e)
+
+    # Mirror the independent PDF-verdict score into column N. Same best-effort
+    # contract as cost above; tools/sync_verdicts.py backfills any misses.
+    try:
+        await asyncio.to_thread(
+            mirror_verdict_cell_sync, _get_service(), _sheet_id(), row_id
+        )
+    except Exception as e:
+        log.warning("gsheets verdict mirror failed for %s (non-fatal): %s", row_id, e)
 
 
 # ---------------------------------------------------------------------------

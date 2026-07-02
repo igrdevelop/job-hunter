@@ -196,6 +196,9 @@ def _llm_review(
     provider: str,
     model: str,
     api_key: str,
+    *,
+    job_cap: int = 4000,
+    resume_cap: int = 3000,
 ) -> tuple[float, list[str], list[str], str]:
     """Returns (score 0–100, missing_keywords, recommendations, gap_report)."""
     try:
@@ -204,8 +207,8 @@ def _llm_review(
         result = call_llm(
             system_prompt=_LLM_SYSTEM,
             user_message=_LLM_PROMPT.format(
-                job_text=job_text[:4000],
-                resume_text=resume_text[:3000],
+                job_text=job_text[:job_cap],
+                resume_text=resume_text[:resume_cap],
             ),
             provider=provider,
             model=model,
@@ -222,6 +225,45 @@ def _llm_review(
     except Exception as e:
         print(f"[ats_checker] LLM review error: {e}")
         return -1.0, [], [], ""
+
+
+def llm_verdict(
+    job_text: str,
+    resume_text: str,
+    provider: str = "",
+    model: str = "",
+    api_key: str = "",
+) -> dict | None:
+    """Final independent ATS verdict: ONE LLM call scoring a rendered document.
+
+    Intended for the text extracted from the delivered EN CV PDF (what a real
+    ATS actually parses), scored by a model that did not write the resume.
+    Wider caps than the in-check review so a full CV is judged, not a prefix.
+
+    Returns {"score", "missing_keywords", "recommendations", "gap_report",
+    "model"} or None when the call fails / no API key — callers treat None
+    as "no signal" and never block delivery on it.
+    """
+    if not api_key or not job_text.strip() or not resume_text.strip():
+        return None
+    score, missing, recs, gap = _llm_review(
+        job_text,
+        resume_text,
+        provider,
+        model,
+        api_key,
+        job_cap=6000,
+        resume_cap=9000,
+    )
+    if score < 0:
+        return None
+    return {
+        "score": round(score, 1),
+        "missing_keywords": missing,
+        "recommendations": recs,
+        "gap_report": gap,
+        "model": model,
+    }
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

@@ -232,6 +232,91 @@ def test_ats_loop_restores_dropped_roles() -> None:
     assert out["resume_en"]["summary"] == "s2"
 
 
+# ── ATS loop deterministic exit ───────────────────────────────────────────────
+
+def _fake_ats_result(
+    *,
+    score: float,
+    keyword_score: float,
+    missing: list[str],
+) -> MagicMock:
+    r = MagicMock()
+    r.summary.return_value = f"ATS {score}%"
+    r.to_dict.return_value = {"score": score, "keyword_score": keyword_score}
+    r.passed.return_value = score >= 95.0
+    r.score = score
+    r.keyword_score = keyword_score
+    r.missing_keywords = list(missing)
+    r.recommendations = []
+    r.llm_gap_report = ""
+    return r
+
+
+def test_ats_loop_exits_early_when_no_missing_keywords() -> None:
+    """kw=100 but combined score < 95 (TF-IDF drag): a rewrite can only add
+    keywords, so with none missing the loop must stop after ONE check with
+    ZERO LLM calls — this was the 5-wasted-rewrites bug (88% of prod runs)."""
+    from hunter.apply_shared import _ats_check_loop
+
+    content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
+    fake = _fake_ats_result(score=86.0, keyword_score=100.0, missing=[])
+
+    with patch("hunter.ats_checker.check", return_value=fake) as check_mock, \
+         patch("llm_client.call_llm") as llm_mock:
+        _ats_check_loop(content, "job text")
+
+    assert check_mock.call_count == 1
+    llm_mock.assert_not_called()
+
+
+def test_ats_loop_exits_when_only_blocklisted_keywords_missing() -> None:
+    """Employer-credential terms (DORA/RODO/ISO...) are never injected, so a
+    missing list containing only them is not actionable — no rewrite."""
+    from hunter.apply_shared import _ats_check_loop
+
+    content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
+    fake = _fake_ats_result(score=88.0, keyword_score=97.0, missing=["DORA", "ISO 27001"])
+
+    with patch("hunter.ats_checker.check", return_value=fake), \
+         patch("llm_client.call_llm") as llm_mock:
+        _ats_check_loop(content, "job text")
+
+    llm_mock.assert_not_called()
+
+
+def test_ats_loop_rewrites_until_keywords_covered() -> None:
+    """Real missing keywords → one rewrite; next check reports none missing →
+    loop stops (exactly 1 LLM call, 2 checks)."""
+    from hunter.apply_shared import _ats_check_loop
+
+    content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
+    first = _fake_ats_result(score=80.0, keyword_score=82.0, missing=["Docker", "GraphQL"])
+    second = _fake_ats_result(score=87.0, keyword_score=100.0, missing=[])
+    boosted = {"resume_en": {"summary": "s2", "skills": {"tools": "Docker, GraphQL"}, "experience": []}}
+
+    with patch("hunter.ats_checker.check", side_effect=[first, second]) as check_mock, \
+         patch("llm_client.call_llm", return_value=boosted) as llm_mock:
+        out = _ats_check_loop(content, "job text")
+
+    assert llm_mock.call_count == 1
+    assert check_mock.call_count == 2
+    assert out["resume_en"]["summary"] == "s2"
+
+
+def test_ats_loop_never_runs_inline_llm_review() -> None:
+    """The in-loop LLM reviewer was removed (the independent verdict now runs
+    once on the rendered PDF) — every check must be deterministic-only."""
+    from hunter.apply_shared import _ats_check_loop
+
+    content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
+    fake = _fake_ats_result(score=99.0, keyword_score=100.0, missing=[])
+
+    with patch("hunter.ats_checker.check", return_value=fake) as check_mock:
+        _ats_check_loop(content, "job text")
+
+    assert check_mock.call_args.kwargs.get("run_llm_review") is False
+
+
 # ── Compliance-claim scrubbing ────────────────────────────────────────────────
 
 def test_filter_self_description_keywords_drops_regulatory() -> None:
