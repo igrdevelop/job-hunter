@@ -111,6 +111,25 @@ html_fallback — a logged-out permalink returns a stub, better to fail loudly.
 Keep every regex list a module-level tuple so tests can pin behavior; follow the
 `filters.py` style.
 
+**Location policy (owner requirement: remote | hybrid Wrocław | office Wrocław).**
+Posts rarely state a location, so the gate is three-way, applied to the POST TEXT:
+
+1. *Explicit match* — text mentions remote (`remote|zdalnie|praca zdalna|fully remote`)
+   or Wrocław in any arrangement → keep.
+2. *Explicit mismatch* — on-site/hybrid signal tied to a non-Wrocław city → reject.
+   Do NOT reimplement this: reuse the existing body-level machinery in
+   `hunter/filters.py` (`_is_unwanted_onsite_location` + the anti-hybrid city set,
+   incl. the Warsaw/Kraków weekly-hybrid exception) by running the post text through
+   `filters.screen_job_text(post_text)`-style checks inside the source.
+3. *Unknown* — no location info at all → KEEP and send the card. "Unknown" is the
+   normal case for recruiter posts ("hiring Angular devs — DM me"); auto-rejecting it
+   would drop most real finds. The human decides at the Apply/Skip card.
+
+This also shapes the default queries: add Polish ones that surface the
+Wrocław/remote-PL segment the English query misses —
+`LINKEDIN_POSTS_KEYWORDS` default becomes
+`angular hiring,angular developer,angular praca zdalna,angular Wrocław`.
+
 ### 4.3 Config (`hunter/config.py` + `.env.example` + CLAUDE.md table)
 
 | Var | Default | Meaning |
@@ -149,6 +168,37 @@ Nothing to do: registering in `ALL_SOURCES` + the config toggle wires it into th
 staggered JobQueue automatically (3 runs/day like every source). Volume caps (4.1)
 are the throttle. If the session gets flagged in practice, a follow-up can add a
 runs-per-day limit — out of scope here.
+
+## 4.6 LIVE PROBE FINDINGS (2026-07-02/03) — read before touching selectors
+
+A live probe with the owner's real session established facts that OVERRIDE the
+selector guidance in 4.1:
+
+1. **The goal is real.** The very first rendered result for `angular hiring` was a
+   genuine hiring post (Deloitte TA, Java/React/Angular, "let's schedule a call").
+2. **The classic selectors are DEAD on the content-search surface.** The rebuilt
+   LinkedIn UI ("Chameleon") ships hashed CSS classes (`_54361ba7 …`), no
+   `data-urn`, no `.feed-shared-update-v2`, no `.update-components-text`.
+3. **Network interception found NOTHING.** No Voyager/GraphQL XHR carries the posts —
+   the results arrive server-side-rendered into **shadow DOM**. `page.content()`
+   does not serialize it; `document.body.innerText` DOES expose the post text.
+   → Extraction strategy: a recursive **shadow-root walker** in `page.evaluate`
+   (descend `el.shadowRoot`, collect `a[href*="/feed/update/"]` for permalinks +
+   per-card composed innerText), NOT class selectors, NOT response interception.
+4. **Anti-bot is aggressive.** Naive headless Chromium was flagged within 2–3 page
+   loads: `li.protechts.net … uc=scraping` + reCAPTCHA, and LinkedIn **invalidated
+   the whole session** — which also breaks the production LinkedIn detail fetches
+   (shared `LINKEDIN_STORAGE_STATE`). Hard requirements for the implementation:
+   - launch the REAL installed Chrome (`channel="chrome"`), **headed** where
+     possible; `--disable-blink-features=AutomationControlled`; hide
+     `navigator.webdriver` via init script;
+   - ONE page load per keyword per run, human-pace waits, no parallelism;
+   - treat a login/checkpoint redirect as "session burned": log loudly, return [],
+     and Telegram-notify the owner to re-run `tools/linkedin_login.py` (reuse the
+     session-expired messaging pattern from `linkedin.py::fetch_text`);
+   - if headed real-Chrome still gets flagged during M5 live verification, demote
+     the feature: manual `/hunt linkedin_posts` only (no schedule), or shelve —
+     the shared session powering prod fetches is worth more than source #22.
 
 ## 5. Risks — read before implementing
 
