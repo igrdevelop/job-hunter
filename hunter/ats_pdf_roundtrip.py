@@ -107,6 +107,55 @@ def run_pdf_roundtrip(
     return out
 
 
+def run_llm_verdict(folder: Path, job_text: str) -> Optional[dict]:
+    """Final independent ATS verdict: one cheap-LLM call over the rendered PDF.
+
+    Uses the judge configuration (JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_KEY —
+    a cheap model that did NOT write the resume) to score the text extracted
+    from the delivered EN CV PDF against the job posting. This is the only LLM
+    scoring pass in the pipeline: the rewrite loop is purely deterministic.
+
+    Informational only — returns None on any failure (disabled, no key, no
+    PDF, empty extraction, LLM error) and must never block delivery.
+    """
+    from hunter import config
+
+    if not getattr(config, "ATS_VERDICT_ENABLED", True):
+        return None
+    if not job_text.strip():
+        return None
+    if not config.JUDGE_API_KEY:
+        logger.info("[ats_verdict] no judge API key — skipping verdict")
+        return None
+
+    pdf_path = find_en_cv_pdf(folder)
+    if pdf_path is None:
+        logger.info("[ats_verdict] no EN CV PDF found in %s — skipping", folder)
+        return None
+
+    pdf_text = extract_pdf_text(pdf_path)
+    if not pdf_text.strip():
+        logger.info("[ats_verdict] PDF text extraction empty for %s — skipping", pdf_path.name)
+        return None
+
+    verdict = ats_checker.llm_verdict(
+        job_text=job_text,
+        resume_text=pdf_text,
+        provider=config.JUDGE_PROVIDER,
+        model=config.JUDGE_MODEL,
+        api_key=config.JUDGE_API_KEY,
+    )
+    if verdict is not None:
+        verdict["pdf_file"] = pdf_path.name
+    return verdict
+
+
+def format_verdict(verdict: dict) -> str:
+    """One-line Telegram summary for the independent PDF verdict."""
+    score = verdict.get("score", "?")
+    return f"ATS verdict (independent, PDF): {score}%"
+
+
 def format_summary(pdf_check: dict) -> str:
     """One-line summary for the Telegram notification.
 

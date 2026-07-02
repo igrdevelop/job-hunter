@@ -538,6 +538,28 @@ def main_cli(
             except Exception as e:
                 print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
 
+        # Final independent ATS verdict — mirror of the API pipeline Step 7.7:
+        # one cheap-LLM (judge model) call over the rendered EN CV PDF text.
+        # Informational only; failures log + continue.
+        if job_text:
+            try:
+                from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+                verdict = run_llm_verdict(folder=folder_path, job_text=job_text)
+                if verdict is not None:
+                    try:
+                        _vc = json.loads(content_json_path.read_text(encoding="utf-8"))
+                        _vc["ats_verdict"] = verdict
+                        content_json_path.write_text(
+                            json.dumps(_vc, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                    except Exception as _vc_err:
+                        print(f"[apply_agent] Warning: could not persist ats_verdict: {_vc_err}")
+                    pdf_summary += "\n" + format_verdict(verdict)
+                    print(f"[apply_agent] {format_verdict(verdict)}")
+            except Exception as e:
+                print(f"[apply_agent] Warning: ATS verdict failed (continuing): {e}")
+
         # Stamp a "mode=cli" cost record on content.json so the tracker /
         # Sheets column stays consistent across API and CLI runs. The CLI
         # runs through the Claude Pro subscription — we have no per-token

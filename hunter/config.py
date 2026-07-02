@@ -54,6 +54,14 @@ JUDGE_API_KEY: str = (
     or LLM_API_KEY  # last resort: if only one key is configured
 )
 
+# Final independent ATS verdict: after generate_docs, ONE cheap-LLM call
+# (JUDGE_MODEL/JUDGE_PROVIDER/JUDGE_API_KEY) scores the text extracted from
+# the rendered EN CV PDF — i.e. what a real ATS actually parses — against the
+# job posting. Informational only (shown in Telegram, stored on content.json),
+# never blocks delivery. The in-loop LLM review it replaces was removed from
+# _ats_check_loop.
+ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
