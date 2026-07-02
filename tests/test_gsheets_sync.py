@@ -105,6 +105,29 @@ def test_mirror_new_row_appends_row_and_caches_index():
     mock_dirty.assert_not_called()
 
 
+def test_mirror_new_row_mirrors_cost_and_verdict_cells():
+    """After the A–K append, mirror_new_row pokes column M (cost) and
+    column N (ATS verdict) via their dedicated writers — three to_thread
+    calls total: append_rows, mirror_cost_cell_sync, mirror_verdict_cell_sync."""
+    to_thread = AsyncMock(return_value=[5])
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch("hunter.gsheets_sync.asyncio.to_thread", new=to_thread),
+        patch("hunter.gsheets_sync.set_sheets_row"),
+        patch("hunter.gsheets_sync.mark_sheets_clean"),
+    ):
+        from hunter import gsheets_sync
+        run(gsheets_sync.mirror_new_row(_make_row()))
+
+    from hunter.cost_writer import mirror_cost_cell_sync
+    from hunter.verdict_writer import mirror_verdict_cell_sync
+    called_fns = [c.args[0] for c in to_thread.call_args_list]
+    assert mirror_cost_cell_sync in called_fns
+    assert mirror_verdict_cell_sync in called_fns
+
+
 def test_mirror_new_row_marks_dirty_on_exception():
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),

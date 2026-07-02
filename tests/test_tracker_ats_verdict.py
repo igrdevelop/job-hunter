@@ -1,4 +1,4 @@
-"""Tests for the ats_verdict DB column + tracker.set_ats_verdict / get_row_id_by_url.
+"""Tests for the ats_verdict DB column + tracker.set_ats_verdict.
 
 Phase 2 of the ATS-verdict work (docs/ATS_VERDICT_PHASE2_PLAN.md, M1): the
 independent PDF-verdict score is stamped on the tracker row post-hoc (the row
@@ -79,19 +79,3 @@ def test_set_ats_verdict_never_raises(tracker_db, monkeypatch):
         raise RuntimeError("db locked")
     monkeypatch.setattr(tracker, "get_db", _boom)
     assert tracker.set_ats_verdict("https://example.com/jobs/1", 90.0) is False
-
-
-# ── get_row_id_by_url ─────────────────────────────────────────────────────────
-
-def test_get_row_id_by_url_found(tracker_db):
-    _insert_row(tracker_db, url="https://example.com/jobs/1", row_id="dead0001")
-    assert tracker.get_row_id_by_url("https://example.com/jobs/1") == "dead0001"
-
-
-def test_get_row_id_by_url_not_found(tracker_db):
-    _insert_row(tracker_db, url="https://example.com/jobs/1")
-    assert tracker.get_row_id_by_url("https://example.com/jobs/99") is None
-
-
-def test_get_row_id_by_url_empty_url(tracker_db):
-    assert tracker.get_row_id_by_url("") is None

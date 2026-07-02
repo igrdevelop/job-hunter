@@ -1040,21 +1040,6 @@ def set_ats_verdict(url: str, score: float) -> bool:
         return False
 
 
-def get_row_id_by_url(url: str) -> str | None:
-    """Return the row id (8-char hex) for the first row matching this job URL."""
-    if not url:
-        return None
-    norm = normalize_url(url)
-    if not norm:
-        return None
-    with get_db(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT id FROM applications WHERE url_norm=? AND id != '' LIMIT 1",
-            (norm,),
-        ).fetchone()
-    return row["id"] if row and row["id"] else None
-
-
 # ── Google Sheets sync helpers ────────────────────────────────────────────────
 
 def read_all_tracker_rows() -> list[dict]:

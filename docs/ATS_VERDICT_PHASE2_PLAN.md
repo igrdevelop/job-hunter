@@ -118,63 +118,55 @@ Copy the structure of `hunter/cost_writer.py` (same helpers, same defensive styl
   row with a non-NULL `ats_verdict` + non-NULL `sheets_row` into column N. Needed after
   outages and for rows whose mirror failed.
 
-### 3.5 gsheets_sync wiring
+### 3.5 gsheets_sync wiring — AS BUILT (differs from the original draft)
 
-File: `hunter/gsheets_sync.py`.
+The original draft proposed a standalone `mirror_verdict_for_url(url)` called from the
+apply subprocess. Reading the actual call topology killed that idea:
 
-1. Find where `mirror_new_row` calls `cost_writer.mirror_cost_cell_sync` (~line 140–162).
-   Do **not** add verdict there — at `mirror_new_row` time the verdict doesn't exist yet
-   (it is computed after generate_docs, and mirror_new_row fires from inside generate_docs'
-   tracker write). Instead add a standalone entry point:
+- The A–K append (`mirror_new_row`) does NOT run inside the apply subprocess — it runs
+  in the **bot process** (`hunter/bot/apply_runner.py`, `hunter/main.py`,
+  `hunter/commands/url_message.py`) *after* the subprocess exits.
+- Therefore at apply Step 7.7 the row's `sheets_row` is still NULL, and a subprocess-side
+  cell mirror would always no-op for fresh applies.
+- Conversely, by the time `mirror_new_row` runs in the bot process, `set_ats_verdict`
+  (called in the subprocess before exit) has already landed in the DB.
 
-```python
-def mirror_verdict_for_url(url: str) -> bool:
-    """Best-effort: push the ats_verdict of the row matching `url` into Sheet
-    column N. Called from the apply pipelines right after the verdict is
-    computed and set_ats_verdict() stored it. Safe no-op when GSHEETS_ENABLED
-    is false / service unavailable / row not mirrored yet."""
-```
+So the mirror simply **rides `mirror_new_row`**, exactly like cost: after the A–K append
+and the `mirror_cost_cell_sync` poke, a second `asyncio.to_thread(mirror_verdict_cell_sync,
+_get_service(), _sheet_id(), row_id)` writes column N. Best-effort, never dirties the row.
+The header is written lazily by `mirror_verdict_cell_sync` itself (once per process per
+sheet), mirroring cost_writer — no bootstrap change needed.
 
-   Implementation: guard on `GSHEETS_ENABLED`, resolve the row id by `url_norm` (tracker
-   helper — reuse whatever `set_drive_url` uses to find the row, or add a small
-   `get_row_id_by_url(url)` to tracker.py), get service + sheet id the way the cost mirror
-   does (`_get_service()`, `_sheet_id()`), call `verdict_writer.mirror_verdict_cell_sync`.
-   Wrap everything in try/except — a Sheets failure must never fail an apply.
+### 3.6 Pipeline call sites — AS BUILT
 
-2. Wire `write_verdict_header_sync` next to the existing `write_cost_header_sync` call
-   (bootstrap / ensure-header path), so a fresh spreadsheet gets the N header.
+The pipelines only need the **DB stamp** (no Sheets code in the subprocess):
 
-### 3.6 Pipeline call sites
-
-**`hunter/apply_api.py`, Step 7.7** — inside the existing `if verdict is not None:` branch
-(added by PR #112), after `content["ats_verdict"] = verdict`:
+**`hunter/apply_api.py`, Step 7.7** — inside the existing `if verdict is not None:` branch,
+after `content["ats_verdict"] = verdict`:
 
 ```python
-try:
+if url and url != PASTE_NO_URL_PLACEHOLDER:
     from hunter.tracker import set_ats_verdict
-    from hunter.gsheets_sync import mirror_verdict_for_url
-    if url and url != PASTE_NO_URL_PLACEHOLDER:
-        set_ats_verdict(url, float(verdict["score"]))
-        mirror_verdict_for_url(url)
-except Exception as _sheet_err:
-    print(f"[apply_agent] Warning: verdict Sheets mirror failed (continuing): {_sheet_err}")
+    set_ats_verdict(url, float(verdict["score"]))
 ```
 
 Paste-only flow (`PASTE_NO_URL_PLACEHOLDER`): there is no URL key to find the row —
-`add_applied` still creates a row (blank URL). Acceptable gap for now: skip the mirror and
-log. Do NOT try to match by company+title (ambiguous).
+`add_applied` still creates a row (blank URL). Acceptable gap: skip the stamp and log.
+Do NOT try to match by company+title (ambiguous).
 
-**`hunter/apply_cli.py`** — mirror of the above, inside its verdict block (the one that
-persists `ats_verdict` into content.json), same guards. Note the CLI pipeline has `url`
-in scope; use the same skip-on-paste guard.
+**`hunter/apply_cli.py`** — same stamp inside its verdict block, same skip-on-paste guard.
 
-### 3.7 Backfill entry point
+**Timing caveat that makes this correct:** `add_applied` (which creates the row) runs from
+the `generate_docs` subprocess in apply Step 7, i.e. BEFORE Step 7.7 — so the row always
+exists when `set_ats_verdict` fires. The Sheets append happens later still (bot process),
+picking the verdict up from the DB (3.5).
 
-Extend the existing `/gsheets_push_missing`-family command file `hunter/commands/gsheets.py`
-with the verdict backfill, OR (cheaper) add it to the existing `scheduled_gsheets_resync`
-path — pick ONE, do not build a new command unless the diff stays small. Recommended:
-call `backfill_all_verdicts_sync` at the end of `gsheets_resync`'s happy path (it is
-idempotent and one batchUpdate). Document the choice in CLAUDE.md.
+### 3.7 Backfill entry point — AS BUILT
+
+`tools/sync_verdicts.py` — a clone of `tools/sync_costs.py` (dry-run + `--apply`-less
+one-shot semantics, same CLI shape) calling `backfill_all_verdicts_sync`. Chosen over
+hooking `scheduled_gsheets_resync` to keep scheduled paths untouched; run it manually
+after outages or once after this feature deploys.
 
 ### 3.8 Interactions to double-check (known sharp edges)
 
