@@ -240,6 +240,67 @@ validated). Additional findings that change the design:**
    the `• 3rd+ … • Follow` header noise between author and body must be stripped
    (drop lines up to and including the `Follow`/`Connect` line).
 
+## 4.7 DEPLOYMENT ARCHITECTURE — Variant A (server-side), owner's choice
+
+The probes ran on the owner's Windows desktop (headed real Chrome, residential IP)
+and survived. Production is the Docker bot on a server — three stealth factors
+degrade there (no display, datacenter IP, container fingerprint). The owner chose
+**Variant A: run the scraper inside the bot container** (rejected for now:
+B = Windows-side scout writing JSON to Drive; C = digest-only). Variant A ships
+with MANDATORY safety rails; if they trip repeatedly, demote to B (see below).
+
+### A.1 Infra (Dockerfile + entrypoint)
+
+- Install `google-chrome-stable` (Playwright `channel="chrome"` requires the real
+  Chrome binary — NOT the bundled chromium), `xvfb`, `fonts-liberation` +
+  `fonts-noto` (fingerprint: a font-poor container is a tell), `--no-install-recommends`.
+- Entrypoint starts `Xvfb :99 -screen 0 1920x1080x24` as a background process and
+  exports `DISPLAY=:99` before launching the bot. Keep it running for the container
+  lifetime (cheap); do NOT wrap the whole bot in `xvfb-run` (signal handling).
+- Container env: `TZ=Europe/Warsaw` and Chrome launched with `--lang=en-US` or
+  `pl-PL` consistent with the owner's real browser. Timezone mismatch vs the
+  session's origin is a flag signal.
+- **Persistent browser profile**: mount a volume for `~/.li-posts-profile` and use
+  `playwright.chromium.launch_persistent_context(user_data_dir=..., channel="chrome",
+  headless=False, args=[...])`. A browser with history/localStorage looks real; a
+  fresh context every run does not. Seed the profile ONCE by importing cookies from
+  `LINKEDIN_STORAGE_STATE` on first run (copy li_at etc. into the context), then let
+  the profile own them.
+- RAM: budget ~600MB per run; runs are serialized (one keyword at a time, one run
+  per day) so no concurrent browsers.
+
+### A.2 Safety rails (non-negotiable, implement in M2)
+
+1. **Circuit breaker with auto-disable.** On ANY login/checkpoint/authwall redirect
+   or a `protechts.net`/captcha response during a run: abort immediately, write
+   DB config key `linkedin_posts_tripped = <iso timestamp>`, Telegram-alert the
+   owner ("LinkedIn flagged the server browser — source auto-disabled; prod detail
+   fetches may be affected; re-run tools/linkedin_login.py and /linkedin_posts_reset
+   to re-enable"). `search()` returns [] while tripped — no retries, ever, until
+   the owner explicitly resets.
+2. **Self-throttle: max ONE run per 20h** regardless of the 3×/day source schedule —
+   `search()` checks its last-run timestamp (own DB config key) and no-ops otherwise,
+   with a jittered ±90min window so runs don't land at identical times daily.
+3. **One keyword per run**, rotating through `LINKEDIN_POSTS_KEYWORDS` round-robin
+   (persisted index) — minimal surface per day, full coverage over the week.
+4. **Two trips in 14 days → permanent demotion**: the second trip sets
+   `linkedin_posts_demoted=true`; the source stays off and the Telegram alert says
+   "switching to Variant B (Windows scout) is recommended — see plan §4.7". This
+   criterion is agreed with the owner in advance; no re-litigating at 2 a.m.
+5. **Staged rollout**: after deploy, the first runs are MANUAL ONLY
+   (`/hunt linkedin_posts` while watching logs); enable the schedule only after
+   3 consecutive clean manual runs on the server.
+
+### A.3 Accepted residual risks (owner sign-off)
+
+- Datacenter IP + geo-jump from the session's origin can trip an account-security
+  checkpoint independent of scraping behavior.
+- A flag kills the SHARED session → prod LinkedIn detail fetches fail until the
+  owner re-logs in from the desktop. The circuit breaker limits repetition but
+  cannot prevent the first hit.
+- Repeated flags can escalate to an account restriction on the owner's primary
+  professional profile. This is the owner's explicit call.
+
 ## 5. Risks — read before implementing
 
 - **ToS / ban risk:** authenticated feed scraping is against LinkedIn ToS; the
@@ -256,22 +317,21 @@ validated). Additional findings that change the design:**
 - **Empty results ≠ broken:** without `LINKEDIN_STORAGE_STATE` the source logs and
   returns `[]` — never raises (mirrors Inhire-without-Playwright behavior).
 
-## 6. Milestones (one commit each, tests in the same commit)
+## 6. Milestones (one commit each, tests in the same commit) — Variant A revision
 
 | M | Scope | Files |
 |---|---|---|
-| M1 | Pure logic: hiring heuristic + URN→permalink + title builder + `matches_url`; module skeleton with search() stub returning [] | `hunter/sources/linkedin_posts.py`, `tests/test_linkedin_posts.py` |
-| M2 | Playwright `search()` (DOM parse, scroll, login-redirect guard) + fixture-based parse tests (parse function takes HTML/eval output, testable without Playwright) | same |
-| M3 | `fetch_text()` for permalinks + dispatcher registration BEFORE LinkedInSource + precedence test | `hunter/sources/__init__.py` |
-| M4 | Routing: `manual_only` on BaseSource + main.py partition + filters exemption(s), each with a test | `hunter/sources/base.py`, `hunter/main.py`, `hunter/filters.py` |
-| M5 | Config vars + `.env.example` + CLAUDE.md (sources table 21→22, config table, Scraper Health row, work log) + live verification with the owner's real session | config, docs |
+| M1 | Pure logic: hiring heuristic (incl. US-staffing negatives + Angular-prominence gate + szukam/szukamy distinction), innerText block parser ("Feed post" splitter, author extraction, header-noise strip), synthetic URL builder, location three-way gate; module skeleton with search() stub | `hunter/sources/linkedin_posts.py`, `tests/test_linkedin_posts.py` (fixtures from the live probes: `tests/fixtures/linkedin_posts/*.txt`) |
+| M2 | Playwright `search()`: persistent-context launch (channel=chrome, headed under Xvfb), shadow-walker innerText capture, circuit breaker + auto-disable + trip alerts + self-throttle + keyword rotation (A.2) | same + DB config keys |
+| M3 | Apply routing: `manual_only` on BaseSource + main.py partition; paste-flow Apply for posts jobs (post text from Job.raw → paste_file); `matches_url`/`fetch_text` for the synthetic URL (raise with clear message); filters exemption(s) with tests | `hunter/sources/base.py`, `hunter/main.py`, `hunter/commands/url_message.py` or `bot/apply_runner.py`, `hunter/filters.py` |
+| M4 | Infra: Dockerfile (google-chrome-stable, xvfb, fonts), entrypoint Xvfb + DISPLAY, profile volume in docker-compose, profile seeding from LINKEDIN_STORAGE_STATE | `Dockerfile`, `docker-compose.yml`, entrypoint |
+| M5 | Config vars + `.env.example` + CLAUDE.md (sources 21→22, config table, Scraper Health row, work log) + staged live verification: dev-machine run first, then 3 clean MANUAL `/hunt linkedin_posts` runs on the server before enabling the schedule | config, docs |
 
-**Live verification (M5, needs the owner's machine/session):** run
-`python -c "from hunter.sources.linkedin_posts import LinkedInPostsSource; print(LinkedInPostsSource().search())"`
-with a fresh `tools/linkedin_login.py` session; confirm ≥1 real hiring post parsed;
-then `/hunt linkedin_posts` in Telegram and confirm the card renders and Apply
-generates docs from the permalink. Update the Scraper Health table with the verified
-date and the chosen parse strategy (DOM vs Voyager interception).
+**Live verification (M5):** dev first —
+`python -c "from hunter.sources.linkedin_posts import LinkedInPostsSource; print(len(LinkedInPostsSource().search()))"`
+on the owner's Windows machine (headed, no Xvfb); then deploy, seed the profile,
+and do the staged server rollout per A.2.5. Update the Scraper Health table with
+the verified date and note "Variant A + rails; demotion criterion active".
 
 ## 7. Definition of done
 
