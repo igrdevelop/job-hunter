@@ -200,6 +200,46 @@ selector guidance in 4.1:
      the feature: manual `/hunt linkedin_posts` only (no schedule), or shelve —
      the shared session powering prod fetches is worth more than source #22.
 
+**Probe round 2 (headed real Chrome — SURVIVED 3 consecutive runs, stealth approach
+validated). Additional findings that change the design:**
+
+5. **No permalinks exist in the rendered page.** 138 anchors collected across all
+   shadow roots — zero contain `/feed/update/`, `activity`, or `ugcPost`. Post
+   permalinks are only reachable via the "⋯ → Copy link" JS menu (clicking it per
+   post = more bot surface; rejected). **Design change — the permalink-based Apply
+   flow (4.1 "key simplification") is DEAD:**
+   - `Job.url` becomes a synthetic stable key: `https://linkedin.com/posts/#p{md5(author + text_head)[:16]}`
+     — good enough for tracker URL-dedup; reposts with edited text create a new key
+     (acceptable; company+title dedup won't help here either).
+   - The full post text is captured AT SEARCH TIME into `Job.raw["post_text"]`.
+   - **Apply routes through the existing paste flow**, not fetch: the Apply handler
+     for `linkedin_posts` jobs writes `raw["post_text"]` to a temp file and invokes
+     the apply subprocess with `paste_file` (the exact mechanism
+     `bot/apply_runner.py::_handle_paste` already uses). `fetch_text()` on the
+     synthetic URL raises with a clear message (nothing to fetch).
+   - `matches_url` matches only the synthetic prefix — the dispatcher-precedence
+     concern vs `linkedin.py` disappears (no real linkedin.com post URLs flow).
+6. **EN query noise profile.** `angular hiring` (global, sorted by date) is dominated
+   by US staffing-mill posts (Java/.NET fullstack, W2/C2C/H1B, US on-site cities)
+   that mention Angular only inside a stack dump. Live calibration: 9/13 passed the
+   naive heuristic but only ~2 were genuinely relevant. Required extra negatives:
+   `\b(W2|C2C|H1B|USC|GC|green card)\b`, US-state on-site patterns
+   (`\bon-?site\b.*\b(VA|NJ|NY|TX|SC|CA|GA|FL|IL)\b` and full-city forms), and an
+   **Angular-prominence gate**: `angular` must appear in the first ~200 chars OR the
+   text must match `angular (developer|engineer|frontend)` — a bare stack-dump
+   mention is not enough. Reuse `filters.py` body-level gates (backend-primary,
+   React-only) on the post text as well.
+7. **PL query works as intended.** `angular praca zdalna` returned mostly
+   candidate-side posts ("Szukam nowego projektu…" — correctly rejected: no
+   `szukamy/zatrudnimy` hiring signal, singular `szukam` ≠ plural `szukamy`) plus a
+   genuine hiring post ("Szukamy osoby od frontendu na rolę Senior Frontend
+   Engineer…" — correctly passed). The singular/plural distinction is load-bearing;
+   pin it with tests.
+8. **Author extraction from innerText blocks**: posts are separated by `Feed post`
+   marker lines in `document.body.innerText`; author = the next non-empty line;
+   the `• 3rd+ … • Follow` header noise between author and body must be stripped
+   (drop lines up to and including the `Follow`/`Connect` line).
+
 ## 5. Risks — read before implementing
 
 - **ToS / ban risk:** authenticated feed scraping is against LinkedIn ToS; the
