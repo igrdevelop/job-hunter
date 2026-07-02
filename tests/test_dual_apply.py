@@ -409,3 +409,112 @@ def test_maybe_run_shadow_delegates_to_launch_detached(monkeypatch):
     apply_agent._maybe_run_shadow("/app/Applications/2026-06-28/Acme", full=True)
     assert captured["folder"] == "/app/Applications/2026-06-28/Acme"
     assert captured["full"] is True
+
+
+# ── Shadow PDF verdict (Phase 2 M4) ─────────────────────────────────────────────
+
+def test_ats_suffix_prefers_verdict_over_ats_check():
+    content = {"ats_verdict": {"score": 91.0}, "ats_check": {"score": 87.5}}
+    assert dual_apply._ats_suffix(content) == "_ats91"
+
+
+def test_ats_suffix_falls_back_when_verdict_malformed():
+    content = {"ats_verdict": {"score": "n/a"}, "ats_check": {"score": 87.5}}
+    assert dual_apply._ats_suffix(content) == "_ats88"
+
+
+def _shadow_harness(monkeypatch, tmp_path):
+    """Shared setup for _generate_shadow orchestration tests (mirrors
+    test_generate_shadow_writes_subfolder_no_tracker)."""
+    shadow = lp.PROFILES["deepseek-v3"]
+    active = lp.PROFILES["sonnet"]
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-o")
+    monkeypatch.setattr(lp, "dual_enabled", lambda: True)
+    monkeypatch.setattr(lp, "shadow_profile", lambda: shadow)
+    monkeypatch.setattr(lp, "get_active", lambda: active)
+
+    job_text = "We are hiring a Senior Angular developer. " * 10
+    (tmp_path / "job_posting.txt").write_text(f"URL: https://x/y\n\n{job_text}", encoding="utf-8")
+    (tmp_path / "content.json").write_text(
+        json.dumps({"apply_url": "https://x/y"}), encoding="utf-8"
+    )
+
+    generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
+    monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
+
+    import hunter.apply_shared as ash
+    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(
+        ash, "_ats_check_loop",
+        lambda content, jt: {**content, "ats_check": {"score": 88.0}},
+    )
+    monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
+    monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
+    monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
+    monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
+    monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
+
+    def fake_run(cmd, **kw):
+        sub = tmp_path / shadow.name
+        (sub / "Ihar_CV_Angular_EN.pdf").write_text("pdf", encoding="utf-8")
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
+    return shadow
+
+
+def test_generate_shadow_stores_verdict_and_suffixes_with_it(monkeypatch, tmp_path):
+    """The shadow gets its own independent PDF verdict (same judge as the
+    primary); it is persisted in the shadow content.json and preferred for
+    the _ats{NN} filename suffix over the deterministic ats_check score."""
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "hunter.ats_pdf_roundtrip.run_llm_verdict",
+        lambda folder, job_text: {"score": 91.0, "model": "judge", "pdf_file": "x.pdf"},
+    )
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    sub = tmp_path / shadow.name
+    assert result == sub
+    written = json.loads((sub / "content.json").read_text(encoding="utf-8"))
+    assert written["ats_verdict"]["score"] == 91.0
+    names = {p.name for p in sub.iterdir()}
+    assert "Ihar_CV_Angular_EN_ats91.pdf" in names  # verdict wins over 88
+
+
+def test_generate_shadow_verdict_none_falls_back_to_ats_check(monkeypatch, tmp_path):
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "hunter.ats_pdf_roundtrip.run_llm_verdict", lambda folder, job_text: None
+    )
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    sub = tmp_path / shadow.name
+    assert result == sub
+    written = json.loads((sub / "content.json").read_text(encoding="utf-8"))
+    assert "ats_verdict" not in written
+    names = {p.name for p in sub.iterdir()}
+    assert "Ihar_CV_Angular_EN_ats88.pdf" in names
+
+
+def test_generate_shadow_verdict_error_never_breaks_shadow(monkeypatch, tmp_path):
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+
+    def _boom(folder, job_text):
+        raise RuntimeError("judge down")
+
+    monkeypatch.setattr("hunter.ats_pdf_roundtrip.run_llm_verdict", _boom)
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    sub = tmp_path / shadow.name
+    assert result == sub  # shadow completed despite the verdict failure
+    names = {p.name for p in sub.iterdir()}
+    assert "Ihar_CV_Angular_EN_ats88.pdf" in names
