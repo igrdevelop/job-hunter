@@ -1,11 +1,10 @@
 # ATS Verdict — Phase 2: Google Sheets column + dual-apply shadow coverage
 
-**Status:** PLANNED (this document is the implementation spec)
-**Audience:** implementing agent (Claude Code or similar) — self-contained, no chat context needed
-**Prerequisite:** PR #112 (`feat/ats-deterministic-loop-pdf-verdict`) **must be merged into master first**.
-Branch for this work AFTER it merges: `git fetch origin && git checkout -b feat/ats-verdict-phase2 origin/master`.
-If #112 is not merged yet, STOP and wait (or coordinate with the owner) — every step below
-builds on symbols introduced there.
+**Status:** IMPLEMENTED — M1–M5 landed in the SAME branch/PR as Phase 1
+(`feat/ats-deterministic-loop-pdf-verdict`, PR #112), one commit per milestone, per the
+owner's single-PR requirement. Sections 3.5–3.7 were revised to as-built during
+implementation (see the "AS BUILT" markers). This document remains the reference spec.
+**Audience:** any agent touching the verdict feature — self-contained, no chat context needed.
 
 ---
 

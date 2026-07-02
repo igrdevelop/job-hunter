@@ -287,7 +287,7 @@ Applications/               Generated documents (gitignored)
 | `JUDGE_API_KEY` | — | Judge API key (reads `ANTHROPIC_API_KEY` first; falls back to `LLM_API_KEY`) |
 | `JUDGE_MODE` | `warn` | Rollout: `report` (artifact only) / `warn` (+Telegram) / `block` (+abort on surviving fabrication) |
 | `JUDGE_MAX_REPAIR_ROUNDS` | `1` | Repair rounds before warn/block |
-| `ATS_VERDICT_ENABLED` | `true` | Final independent ATS verdict: after generate_docs, ONE `JUDGE_MODEL` (Haiku) call scores the text extracted from the rendered EN CV PDF against the posting. Stored as `ats_verdict` on content.json; the Telegram "ATS:" line shows this verdict (generator self-score demoted to secondary). Informational only — never blocks delivery. |
+| `ATS_VERDICT_ENABLED` | `true` | Final independent ATS verdict: after generate_docs, ONE `JUDGE_MODEL` (Haiku) call scores the text extracted from the rendered EN CV PDF against the posting. Stored as `ats_verdict` on content.json + tracker row (`set_ats_verdict`), mirrored to Sheet column **N** (`hunter.verdict_writer`), shown as the main "ATS:" number in Telegram (generator self-score demoted to secondary), and computed for dual-apply shadows too (verdict-based `_ats{NN}` filename suffix). Informational only — never blocks delivery. |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
@@ -396,8 +396,11 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
    then ONE independent `JUDGE_MODEL` (Haiku) call scores that same PDF text against
    the posting (`ats_pdf_roundtrip.run_llm_verdict`, gated by `ATS_VERDICT_ENABLED`).
    The verdict — from a model that did NOT write the resume, on what a real ATS
-   actually parses — is stored as `ats_verdict` in content.json and shown as the
-   main "ATS:" number in Telegram (generator self-score shown as `self:`).
+   actually parses — is stored as `ats_verdict` in content.json, stamped on the
+   tracker row (`tracker.set_ats_verdict`; the row exists since Step 7/8), and
+   shown as the main "ATS:" number in Telegram (generator self-score as `self:`).
+   The Sheet column-N cell is written later by the bot process (step 9 below):
+   `mirror_new_row` reads `ats_verdict` from the DB after the A–K append.
    Informational only; never blocks delivery.
 8. `tracker_service.record_successful_apply()` -> tracker.xlsx row
 9. `gsheets_sync.mirror_new_row()` -> Google Sheets (best-effort)
@@ -423,8 +426,14 @@ calls `run_shadow(folder)`: a second generation with the **shadow** profile
 reuses the saved `job_posting.txt` (no re-fetch) and the same pipeline building blocks
 (`call_llm` → `_ats_check_loop` → scrubs → lang gate → `generate_docs --no-tracker`),
 forcing the shadow model for every step via `llm_profiles.set_override()`. It is
-**comparison-only**: NO tracker row, NO Telegram, NO Sheets mirror. Rendered CV/CL
-filenames carry the shadow's ATS score (`..._EN_ats88.pdf`). Both pipelines (`main_api`
+**comparison-only**: NO tracker row, NO Telegram, NO Sheets mirror. After
+generate_docs the shadow gets its own **independent PDF verdict**
+(`ats_pdf_roundtrip.run_llm_verdict` on the shadow's rendered EN CV PDF — always
+the Anthropic `JUDGE_*` judge, unaffected by `set_override()`, so primary and
+shadow are scored by the SAME yardstick); it is persisted in the shadow
+content.json and preferred for the filename suffix. Rendered CV/CL
+filenames carry that score (`..._EN_ats91.pdf`; falls back to the deterministic
+`ats_check` score when the verdict is unavailable). Both pipelines (`main_api`
 / `main_cli`) now return the output folder on success so the single hook in `main()`
 covers CLI (Sonnet via Pro subscription) and API alike. Best-effort throughout — any
 shadow failure logs and returns; the real application is never touched.
@@ -461,6 +470,7 @@ command's reply (`shadow_uploaded` count, `shadow_errors` list).
 | 11 | ID | Short UUID (8-char hex) — Google Sheets sync key |
 | 12 | Drive URL | Google Drive folder URL after upload (local-only, not synced to Sheets) |
 | 15 | Cost $ | Per-vacancy LLM USD spend (API mode). Blank for CLI mode (Pro subscription, no per-token visibility) and for pre-tracking rows. Mirrored to Sheet column **M** by `hunter.cost_writer` — separate writer (not part of the A–K push), parallel to `sent_normalizer` on column L. |
+| — | ATS Verdict (`ats_verdict` DB column) | Independent PDF-verdict score (0–100): one `JUDGE_MODEL` (Haiku) call over the text extracted from the rendered EN CV PDF. Stamped post-hoc by `tracker.set_ats_verdict` (apply Step 7.7; the row already exists). NULL = no verdict. Mirrored to Sheet column **N** by `hunter.verdict_writer` when the bot-process `mirror_new_row` runs (the verdict is in the DB by then); `tools/sync_verdicts.py` backfills misses. Four non-overlapping Sheet writers: A–K main push, L sent_normalizer, M cost_writer, N verdict_writer. |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
@@ -708,6 +718,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-07-02 | fable | ATS verdict Phase 2 (same branch/PR as Phase 1 below, spec in docs/ATS_VERDICT_PHASE2_PLAN.md). **M1** `ats_verdict REAL` DB column (lazy migration) + `tracker.set_ats_verdict(url, score)` post-hoc stamp. **M2** `hunter/verdict_writer.py` — Sheet column **N** "ATS Verdict" (cost_writer/column-M pattern: cell mirror + lazy header + one-batch backfill via `tools/sync_verdicts.py`), wired into `gsheets_sync.mirror_new_row` after the cost poke; timing works because the apply subprocess stamps the DB before exiting and the A–K append runs later in the bot process. Four non-overlapping Sheet writers: A–K push, L sent_normalizer, M cost_writer, N verdict_writer. **M3** both pipelines stamp the tracker row in the verdict block (paste flow skipped — no URL key). **M4** dual-apply shadows get their own verdict on the shadow PDF (same Anthropic judge regardless of `set_override`, so the A/B is like-for-like); `_ats_suffix` prefers verdict over `ats_check` for the `_ats{NN}` filenames. 26 new tests across M1–M4; suite 1603 green; ruff clean. |
 | 2026-07-02 | fable | ATS loop made deterministic + final independent PDF verdict (branch feat/ats-deterministic-loop-pdf-verdict). Data-driven root cause from 713 content.json on Drive: 88% of June–July runs burned ALL 5 ATS rewrite rounds with keyword_score already 100% — the 95% combined threshold was mathematically unreachable because the post-round-1 formula (`keyword×0.75 + TF-IDF×0.25`) is capped by TF-IDF (median 51, needs ≥80), which no rewrite moves. Avg 8.3 LLM calls / $0.38 per vacancy, ~5 of them wasted. Fixes: (1) `_ats_check_loop` exits as soon as the blocklist-filtered missing-keyword list is empty (rewrites can only ADD keywords); the in-loop LLM reviewer (attempt-1, 30% weight) removed — the loop is now pure regex+TF-IDF. (2) New final verdict: `ats_checker.llm_verdict()` (wider caps: job 6k / resume 9k chars) called by `ats_pdf_roundtrip.run_llm_verdict()` — ONE cheap `JUDGE_MODEL` (Haiku) call scoring the text extracted from the **rendered EN CV PDF** (what a real ATS parses), by a model that didn't write the resume. Wired into apply_api (Step 7.7, re-prices cost so content.json/Telegram include the verdict call; tracker row keeps pre-verdict figure, ~$0.02 drift) and apply_cli (after roundtrip; line rides pdf_summary). Telegram now leads with the verdict (`ATS: 91% (independent, PDF) | self: 97%`) instead of the generator's self-score. Config: `ATS_VERDICT_ENABLED` (default true). Expected: ~8.3 → ~3-4 calls/vacancy, ~$0.38 → ~$0.13-0.17. 10 new tests (deterministic-exit ×4, verdict ×6); suite 1577 green; ruff clean. |
 | 2026-06-30 | sonnet | Dual-apply shadow → Google Drive (branch from `claude/gifted-einstein-d1c3df`). Owner reported shadow CVs (dual-apply A/B comparison) never appeared on Drive — by design the shadow has no tracker row, and Drive upload always rode the tracker-row hook, so it was structurally unreachable, not broken. Two-part fix: (1) `gdrive_sync.upload_shadow_folder(primary_folder, shadow_subfolder)` nests the upload under the primary's own company folder (`Job Hunter/{date}/{company}/{shadow_name}/`) instead of writing to tracker; wired into `dual_apply._generate_shadow()` as a best-effort call right after doc rendering, gated by `GDRIVE_ENABLED`. (2) `/gdrive_upload_missing` (`gdrive_sync.upload_missing_folders`) extended with `_upload_shadow_subfolders()` — scans every locally-present company folder (regardless of the company's own already-uploaded status, since shadow has no Drive-URL column to check) for a subfolder matching a known `llm_profiles.PROFILES` name and uploads it; idempotent via Drive's upsert-by-name, so safe to re-run and backfills shadow sets generated before this existed. Reply text shows a new "Shadow (dual-apply) uploaded" count + separate shadow error list. 16 new tests (gdrive_sync shadow helpers + missing-folders integration + dual_apply upload/failure paths); full suite 1567 green; ruff clean. |
 | 2026-06-28 | sonnet | Reliability fixes (branch `fix/reliability-fixes`; plan in docs/RELIABILITY_FIXES_PLAN.md). Investigated a reported tracker FAIL flood — prod log `2026-06-28.log` + `git diff` cleared PR #107 (it never touched tracker/filters/main/sources; active model was sonnet) and pinned the real, pre-existing causes: LinkedIn fetch 429 without a session, pracuj Cloudflare 403, a 237× gmail_enricher 429 storm, flaky remote boards — all at the fetch stage. **Fix A** (`fix(dual)`): the dual-apply shadow used to run inline inside the primary's apply subprocess under the 900s bot timeout, so a slow shadow could get an already-successful apply killed + marked FAIL. Now launched fire-and-forget detached (`dual_apply.launch_detached` + `python -m hunter.dual_apply` entry with a `DUAL_SHADOW_TIMEOUT_SEC` watchdog) — the shadow can never touch the primary's exit code/timeout. **Fix B** (`fix(gmail)`): `GMAIL_ENRICH_SKIP_HOSTS` (default `linkedin.com,pracuj.pl`) — `_enrich_one` keeps the email stub for hard-blocking hosts instead of fetching (kills the 429 storm; dedup unaffected). **Fix C** (`docs`): documented `LINKEDIN_STORAGE_STATE` setup (biggest FAIL source) + new vars in `.env.example`/CLAUDE.md. **Fix D** (`fix(apply)`): new `is_transient_fetch_error()` — 403/Cloudflare blocks on known anti-bot hosts (pracuj/linkedin/theprotocol) now classify as transient like 429, so they retry quietly and clear on success instead of escalating to permanent "gave up" dead rows (plain 403 on other hosts stays permanent). 15 new tests across the four fixes; full suite 1505 green; ruff clean. apply_agent.py stays a ≤200-line shim. |
