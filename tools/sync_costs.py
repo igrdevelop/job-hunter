@@ -40,9 +40,9 @@ def main() -> int:
 
     if args.dry_run:
         import sqlite3
-        from hunter.db import DB_PATH
+        from hunter.config import TRACKER_DB_PATH
         from hunter.tracker import _format_cost
-        con = sqlite3.connect(str(DB_PATH))
+        con = sqlite3.connect(str(TRACKER_DB_PATH))
         con.row_factory = sqlite3.Row
         rows = con.execute(
             "SELECT id, company, title, sheets_row, cost_usd "

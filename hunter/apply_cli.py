@@ -541,20 +541,12 @@ def main_cli(
         # Final independent ATS verdict — mirror of the API pipeline Step 7.7:
         # one cheap-LLM (judge model) call over the rendered EN CV PDF text.
         # Informational only; failures log + continue.
+        verdict = None
         if job_text:
             try:
                 from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
                 verdict = run_llm_verdict(folder=folder_path, job_text=job_text)
                 if verdict is not None:
-                    try:
-                        _vc = json.loads(content_json_path.read_text(encoding="utf-8"))
-                        _vc["ats_verdict"] = verdict
-                        content_json_path.write_text(
-                            json.dumps(_vc, ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
-                    except Exception as _vc_err:
-                        print(f"[apply_agent] Warning: could not persist ats_verdict: {_vc_err}")
                     # Stamp the tracker row (same contract as apply_api Step 7.7:
                     # DB only — the bot process mirrors Sheet column N later).
                     # Paste flow has no URL to match a row by — skip.
@@ -569,20 +561,22 @@ def main_cli(
             except Exception as e:
                 print(f"[apply_agent] Warning: ATS verdict failed (continuing): {e}")
 
-        # Stamp a "mode=cli" cost record on content.json so the tracker /
-        # Sheets column stays consistent across API and CLI runs. The CLI
-        # runs through the Claude Pro subscription — we have no per-token
-        # visibility, and dividing $20/month by call count would be
-        # misleading. total_usd=None means "not measured" downstream.
+        # Persist the verdict + a "mode=cli" cost record on content.json in ONE
+        # read-modify-write (the adjacent blocks above used to each re-read the
+        # file). Cost semantics: the CLI runs through the Claude Pro
+        # subscription — no per-token visibility, and dividing $20/month by
+        # call count would be misleading. total_usd=None means "not measured".
         try:
             _cli_content = json.loads(content_json_path.read_text(encoding="utf-8"))
+            if verdict is not None:
+                _cli_content["ats_verdict"] = verdict
             _cli_content["cost"] = {"mode": "cli", "total_usd": None}
             content_json_path.write_text(
                 json.dumps(_cli_content, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception as e:
-            print(f"[apply_agent] Warning: could not stamp CLI cost record: {e}")
+            print(f"[apply_agent] Warning: could not stamp verdict/cost on content.json: {e}")
 
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:

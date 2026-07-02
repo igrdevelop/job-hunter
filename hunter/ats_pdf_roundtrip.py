@@ -65,6 +65,27 @@ def find_en_cv_pdf(folder: Path) -> Optional[Path]:
     return None
 
 
+def _en_cv_pdf_text(folder: Path, log_prefix: str) -> tuple[Optional[Path], str]:
+    """Locate the EN CV PDF in `folder` and extract its text.
+
+    Shared by run_pdf_roundtrip and run_llm_verdict so the locate+extract
+    logic can't diverge. Returns (pdf_path, text); pdf_path is None when no
+    PDF was found, text is "" when extraction produced nothing (both cases
+    are logged with the caller's prefix).
+    """
+    pdf_path = find_en_cv_pdf(folder)
+    if pdf_path is None:
+        logger.info("[%s] no EN CV PDF found in %s — skipping", log_prefix, folder)
+        return None, ""
+    pdf_text = extract_pdf_text(pdf_path)
+    if not pdf_text.strip():
+        logger.info(
+            "[%s] PDF text extraction empty for %s — skipping", log_prefix, pdf_path.name
+        )
+        return pdf_path, ""
+    return pdf_path, pdf_text
+
+
 def run_pdf_roundtrip(
     folder: Path,
     job_text: str,
@@ -81,14 +102,8 @@ def run_pdf_roundtrip(
         logger.info("[ats_pdf] empty job_text — skipping roundtrip")
         return None
 
-    pdf_path = find_en_cv_pdf(folder)
-    if pdf_path is None:
-        logger.info("[ats_pdf] no EN CV PDF found in %s — skipping roundtrip", folder)
-        return None
-
-    pdf_text = extract_pdf_text(pdf_path)
-    if not pdf_text.strip():
-        logger.info("[ats_pdf] PDF text extraction empty for %s — skipping", pdf_path.name)
+    pdf_path, pdf_text = _en_cv_pdf_text(folder, "ats_pdf")
+    if pdf_path is None or not pdf_text.strip():
         return None
 
     # Heuristic-only — no LLM. The roundtrip's job is to measure what *we*
@@ -128,14 +143,8 @@ def run_llm_verdict(folder: Path, job_text: str) -> Optional[dict]:
         logger.info("[ats_verdict] no judge API key — skipping verdict")
         return None
 
-    pdf_path = find_en_cv_pdf(folder)
-    if pdf_path is None:
-        logger.info("[ats_verdict] no EN CV PDF found in %s — skipping", folder)
-        return None
-
-    pdf_text = extract_pdf_text(pdf_path)
-    if not pdf_text.strip():
-        logger.info("[ats_verdict] PDF text extraction empty for %s — skipping", pdf_path.name)
+    pdf_path, pdf_text = _en_cv_pdf_text(folder, "ats_verdict")
+    if pdf_path is None or not pdf_text.strip():
         return None
 
     verdict = ats_checker.llm_verdict(

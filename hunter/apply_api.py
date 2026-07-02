@@ -585,7 +585,15 @@ def _run_main_api(
 
     # Step 6 — Write content.json + job_posting.txt
     content_path = output_folder / "content.json"
-    content_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _persist_content() -> None:
+        """Serialize the live `content` dict to content.json. Single write
+        path for Steps 6/6.5/7.5/7.7 so the serialization can't diverge."""
+        content_path.write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    _persist_content()
     print(f"[apply_agent] Wrote {content_path}")
 
     # Audit trail for tuning the judge prompt: persist findings whenever any.
@@ -633,10 +641,7 @@ def _run_main_api(
         cost_dict = _price_usage(_usage_log)
         content["cost"] = cost_dict
         try:
-            content_path.write_text(
-                json.dumps(content, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            _persist_content()
         except Exception as _save_err:
             print(f"[apply_agent] Warning: could not persist cost to content.json: {_save_err}")
     except Exception as e:
@@ -700,12 +705,6 @@ def _run_main_api(
                 run_pdf_roundtrip,
             )
 
-            def _save_content():
-                content_path.write_text(
-                    json.dumps(content, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-
             pdf_check = run_pdf_roundtrip(
                 folder=output_folder,
                 job_text=job_text,
@@ -721,7 +720,7 @@ def _run_main_api(
                         f"[apply_agent] PDF Δ={delta:+.1f}pp — "
                         f"patched {patches} multi-word keyword(s) with NBSP, regenerating"
                     )
-                    _save_content()
+                    _persist_content()
                     try:
                         subprocess.run(
                             gen_cmd,
@@ -744,7 +743,7 @@ def _run_main_api(
 
             if pdf_check is not None:
                 content["ats_check_pdf"] = pdf_check
-                _save_content()
+                _persist_content()
                 pdf_summary = " | " + format_summary(pdf_check)
                 print(f"[apply_agent] {format_summary(pdf_check)}")
         except Exception as e:
@@ -783,10 +782,7 @@ def _run_main_api(
                     content["cost"] = cost_dict
                 except Exception as _cost_err:
                     print(f"[apply_agent] Warning: verdict re-pricing failed: {_cost_err}")
-                content_path.write_text(
-                    json.dumps(content, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _persist_content()
         except Exception as e:
             print(f"[apply_agent] Warning: ATS verdict failed (continuing): {e}")
 

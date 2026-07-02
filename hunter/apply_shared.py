@@ -1349,7 +1349,9 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
         if attempt > _TOTAL_ROUNDS:
             break
 
-        missing_str = "\n".join(f"  - {k}" for k in _missing_kw[:20]) or "  (none identified)"
+        # _missing_kw is guaranteed non-empty here (the early-exit above breaks
+        # when it's empty), so no "(none identified)" fallback is needed.
+        missing_str = "\n".join(f"  - {k}" for k in _missing_kw[:20])
         recs_str = "\n".join(f"  - {r}" for r in result.recommendations) or "  (none)"
         # The ATS check only scores the English resume, so only resume_en is sent
         # for rewriting (resume_pl is untouched here). The cap must comfortably fit
@@ -1369,7 +1371,9 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 threshold=_ATS_THRESHOLD,
                 missing=missing_str,
                 recs=recs_str,
-                gap=result.llm_gap_report or "N/A",
+                # No LLM review runs inside this loop anymore, so llm_gap_report
+                # is always empty — the placeholder is a constant by design.
+                gap="N/A",
                 job_text=_rewrite_job_text,
                 content_json=content_json_str,
             )
