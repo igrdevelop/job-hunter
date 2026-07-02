@@ -1015,6 +1015,46 @@ def set_drive_url(url: str, drive_url: str) -> None:
         )
 
 
+def set_ats_verdict(url: str, score: float) -> bool:
+    """Stamp the independent PDF-verdict score on the row matching `url`.
+
+    The verdict is computed AFTER the tracker row exists (apply Step 7.7,
+    while the row is written by generate_docs in Step 7), so this is a
+    post-hoc UPDATE by normalized URL — same shape as set_drive_url.
+    Returns True if a row was updated. Never raises (best-effort caller).
+    """
+    if not url:
+        return False
+    try:
+        norm = normalize_url(url)
+        if not norm:
+            return False
+        with get_db(DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE applications SET ats_verdict=? WHERE url_norm=?",
+                (float(score), norm),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        print(f"[tracker] set_ats_verdict failed (continuing): {e}")
+        return False
+
+
+def get_row_id_by_url(url: str) -> str | None:
+    """Return the row id (8-char hex) for the first row matching this job URL."""
+    if not url:
+        return None
+    norm = normalize_url(url)
+    if not norm:
+        return None
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT id FROM applications WHERE url_norm=? AND id != '' LIMIT 1",
+            (norm,),
+        ).fetchone()
+    return row["id"] if row and row["id"] else None
+
+
 # ── Google Sheets sync helpers ────────────────────────────────────────────────
 
 def read_all_tracker_rows() -> list[dict]:

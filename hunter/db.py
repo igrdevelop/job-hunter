@@ -127,6 +127,12 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # tracking row, or a CLI-mode run (Pro subscription, no per-token
         # visibility). The Sheets mirror renders NULL as an empty cell.
         ("cost_usd",     "REAL"),
+        # ats_verdict is the independent PDF-verdict score (0-100): one cheap
+        # judge-model call scoring the text extracted from the rendered EN CV
+        # PDF. NULL means "no verdict" (feature disabled, no judge key, PDF
+        # unreadable, or a pre-verdict row). Mirrored to Sheet column N by
+        # hunter.verdict_writer (parallel to cost_usd -> column M).
+        ("ats_verdict",  "REAL"),
     ]
     for col, definition in migrations:
         if col not in existing:
