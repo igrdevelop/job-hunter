@@ -547,6 +547,69 @@ def main_cli(
                 from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
                 verdict = run_llm_verdict(folder=folder_path, job_text=job_text)
                 if verdict is not None:
+                    # Verdict refine loop (mirror of apply_api Step 7.7b): rewrite
+                    # resume_en against the verdict's own feedback when below
+                    # target, re-render, re-verdict — keeping only strict
+                    # improvements. Silently skipped (with a log line) when
+                    # there's no API key for the rewrite call — the CLI
+                    # pipeline's own generation goes through the Pro
+                    # subscription, not the API. See docs/VERDICT_REFINE_PLAN.md.
+                    from hunter.config import (
+                        ATS_VERDICT_MAX_REFINES,
+                        ATS_VERDICT_TARGET,
+                        LLM_API_KEY,
+                    )
+                    if (
+                        float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
+                        and ATS_VERDICT_MAX_REFINES > 0
+                    ):
+                        if not LLM_API_KEY:
+                            print(
+                                "[apply_agent] verdict refine loop skipped — no "
+                                "LLM_API_KEY configured for the rewrite call (CLI mode)"
+                            )
+                        else:
+                            try:
+                                _refine_content = json.loads(
+                                    content_json_path.read_text(encoding="utf-8")
+                                )
+                            except Exception as _read_err:
+                                _refine_content = None
+                                print(
+                                    f"[apply_agent] verdict refine: could not read "
+                                    f"content.json: {_read_err}"
+                                )
+                            if _refine_content is not None:
+                                from hunter.verdict_refine import refine_loop
+
+                                def _regen_for_refine(_folder: Path) -> None:
+                                    _cmd = build_generate_docs_cmd(
+                                        generate_docs_script=GENERATE_DOCS_PATH,
+                                        content_json_path=content_json_path,
+                                        use_full=full_mode,
+                                        force=skip_dedup,
+                                        python_executable=sys.executable,
+                                    )
+                                    subprocess.run(
+                                        _cmd,
+                                        cwd=str(PROJECT_DIR),
+                                        capture_output=True,
+                                        text=True,
+                                        encoding="utf-8",
+                                        errors="replace",
+                                        timeout=120,
+                                    )
+
+                                _refine_content, verdict = refine_loop(
+                                    _refine_content, job_text, "", folder_path, verdict,
+                                    regenerate_docs=_regen_for_refine,
+                                    target=ATS_VERDICT_TARGET,
+                                    max_rounds=ATS_VERDICT_MAX_REFINES,
+                                )
+                                content_json_path.write_text(
+                                    json.dumps(_refine_content, ensure_ascii=False, indent=2),
+                                    encoding="utf-8",
+                                )
                     # Stamp the tracker row (same contract as apply_api Step 7.7:
                     # DB only — the bot process mirrors Sheet column N later).
                     # Paste flow has no URL to match a row by — skip.
