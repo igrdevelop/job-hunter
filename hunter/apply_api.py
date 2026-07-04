@@ -823,11 +823,13 @@ def _run_main_api(
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:
         file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
-        ats = content.get("ats_score", "?")
+        # Only the independent verdict is user-facing (owner request — the
+        # generator's own self-score was noisy: "self-scored myself 96%").
+        # It stays on content.json for diagnostics, just not in Telegram.
         if verdict is not None:
-            ats_line = f"ATS: {verdict.get('score')}% (independent, PDF) | self: {ats}%"
+            ats_line = f"ATS: {verdict.get('score')}% (independent, PDF)"
         else:
-            ats_line = f"ATS: {ats}%"
+            ats_line = f"ATS: {content.get('ats_score', '?')}%"
         cost_line = ""
         if cost_dict is not None:
             from hunter.llm_cost import format_summary as _cost_summary
