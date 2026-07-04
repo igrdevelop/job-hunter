@@ -1,7 +1,7 @@
 # Verdict Refine Loop — дожать независимый вердикт честными правками
 
 **Branch:** `feat/verdict-refine-loop` (from `origin/master` @ 1f969ed)
-**Status:** PLANNED — ready for implementation
+**Status:** DONE — implemented M1–M6 (see CLAUDE.md Work Log, 2026-07-04)
 **Scope:** new `hunter/verdict_refine.py`, wiring in `apply_api.py` + `apply_cli.py`, config, tests, CLAUDE.md
 
 ---
