@@ -160,3 +160,35 @@ def test_cli_pipeline_stamps_verdict_on_tracker() -> None:
     stamp_pos = verdict_block.index("set_ats_verdict")
     guard_pos = verdict_block.index("paste://")
     assert guard_pos < stamp_pos
+
+
+# ── Verdict-only interfaces (VERDICT_REFINE_PLAN M4) ─────────────────────────
+# The owner asked for a single ATS number in Telegram: the independent verdict,
+# not "verdict | self: self-score". The generator's self-score stays in
+# content.json only.
+
+def test_api_pipeline_telegram_has_no_self_score_suffix() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "(independent, PDF)" in src
+    assert "self:" not in src
+
+
+def test_api_pipeline_wires_refine_loop_before_verdict_stamp() -> None:
+    """Step 7.7b: the refine loop must run (when applicable) BEFORE the
+    verdict is stamped on the tracker / persisted, so the tracker/Telegram
+    always see the FINAL (possibly refined) verdict."""
+    src = _source_of("hunter.apply_api")
+    assert "from hunter.verdict_refine import refine_loop" in src
+    verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
+    refine_pos = verdict_block.index("refine_loop(")
+    stamp_pos = verdict_block.index("set_ats_verdict")
+    assert refine_pos < stamp_pos
+
+
+def test_cli_pipeline_wires_refine_loop_before_verdict_stamp() -> None:
+    src = _source_of("hunter.apply_cli")
+    assert "from hunter.verdict_refine import refine_loop" in src
+    verdict_block = src.split("run_llm_verdict(folder=folder_path")[1]
+    refine_pos = verdict_block.index("refine_loop(")
+    stamp_pos = verdict_block.index("set_ats_verdict")
+    assert refine_pos < stamp_pos

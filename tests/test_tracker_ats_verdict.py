@@ -3,6 +3,10 @@
 Phase 2 of the ATS-verdict work (docs/ATS_VERDICT_PHASE2_PLAN.md, M1): the
 independent PDF-verdict score is stamped on the tracker row post-hoc (the row
 already exists when the verdict is computed), matched by normalized URL.
+
+docs/VERDICT_REFINE_PLAN.md (M4) extended the same stamp to also overwrite
+`ats_status` (the "ATS %" column) so every interface shows one number: the
+independent verdict, not the generator's own self-score.
 """
 
 from hunter import tracker
@@ -28,6 +32,14 @@ def _verdict_of(tracker_db, row_id: str):
             "SELECT ats_verdict FROM applications WHERE id=?", (row_id,)
         ).fetchone()
     return row["ats_verdict"] if row else None
+
+
+def _status_of(tracker_db, row_id: str):
+    with get_db(tracker_db) as conn:
+        row = conn.execute(
+            "SELECT ats_status FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    return row["ats_status"] if row else None
 
 
 # ── Schema migration ──────────────────────────────────────────────────────────
@@ -71,6 +83,24 @@ def test_set_ats_verdict_overwrites_previous(tracker_db):
     tracker.set_ats_verdict("https://example.com/jobs/1", 80.0)
     tracker.set_ats_verdict("https://example.com/jobs/1", 92.0)
     assert _verdict_of(tracker_db, "abc12345") == 92.0
+
+
+# ── ats_status overwrite (VERDICT_REFINE_PLAN M4) ─────────────────────────────
+# The owner asked for a single ATS number across every interface: the
+# tracker/Sheet "ATS %" column should show the independent verdict, not the
+# generator's own self-assessment, once the verdict has been stamped.
+
+def test_set_ats_verdict_overwrites_ats_status(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    assert _status_of(tracker_db, "abc12345") == "97%"  # generator self-score
+    tracker.set_ats_verdict("https://example.com/jobs/1", 91.0)
+    assert _status_of(tracker_db, "abc12345") == "91%"  # replaced by the verdict
+
+
+def test_set_ats_verdict_ats_status_rounds_to_int_percent(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    tracker.set_ats_verdict("https://example.com/jobs/1", 88.6)
+    assert _status_of(tracker_db, "abc12345") == "89%"
 
 
 def test_set_ats_verdict_never_raises(tracker_db, monkeypatch):
