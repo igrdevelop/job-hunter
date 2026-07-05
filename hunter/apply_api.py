@@ -759,6 +759,67 @@ def _run_main_api(
             from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
             verdict = run_llm_verdict(folder=output_folder, job_text=job_text)
             if verdict is not None:
+                # Step 7.7b — Verdict refine loop: if the independent verdict is
+                # below target, rewrite resume_en (honest, then stretch) against
+                # its own feedback, re-render, and re-verdict — keeping only
+                # strict improvements. See docs/VERDICT_REFINE_PLAN.md.
+                from hunter.config import ATS_VERDICT_MAX_REFINES, ATS_VERDICT_TARGET
+                if (
+                    float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
+                    and ATS_VERDICT_MAX_REFINES > 0
+                ):
+                    print(
+                        f"[apply_agent] Verdict {verdict.get('score')}% < target "
+                        f"{ATS_VERDICT_TARGET}% — running refine loop "
+                        f"(max {ATS_VERDICT_MAX_REFINES} round(s))..."
+                    )
+                    from hunter.verdict_refine import refine_loop
+
+                    # Own command — NOT the Step 7 `gen_cmd`: the tracker row
+                    # already exists (created by Step 7's generate_docs run),
+                    # so every refine-loop re-render must skip the tracker
+                    # write (--no-tracker) and never pass --force, or a
+                    # force-mode apply would DELETE+INSERT the row on every
+                    # round/rollback (new sync ID, false Re-application flag).
+                    def _regen_for_refine(_folder: Path) -> None:
+                        _refine_cmd = build_generate_docs_cmd(
+                            generate_docs_script=GENERATE_DOCS_PATH,
+                            content_json_path=content_path,
+                            use_full=full_mode,
+                            force=False,
+                            no_tracker=True,
+                            python_executable=sys.executable,
+                        )
+                        subprocess.run(
+                            _refine_cmd,
+                            cwd=str(PROJECT_DIR),
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            timeout=120,
+                        )
+
+                    _to_learn_before_refine = content.get("to_learn")
+                    content, verdict = refine_loop(
+                        content, job_text, base_cv, output_folder, verdict,
+                        regenerate_docs=_regen_for_refine,
+                        target=ATS_VERDICT_TARGET,
+                        max_rounds=ATS_VERDICT_MAX_REFINES,
+                    )
+                    # Round-2 stretch additions land in content["to_learn"]
+                    # AFTER the tracker row was created (Step 7, with the
+                    # pre-loop value) — stamp the change post-hoc, same
+                    # contract as the verdict stamp below.
+                    if (
+                        url and url != PASTE_NO_URL_PLACEHOLDER
+                        and content.get("to_learn") != _to_learn_before_refine
+                    ):
+                        try:
+                            from hunter.tracker import set_to_learn
+                            set_to_learn(url, content.get("to_learn") or "")
+                        except Exception as _tl_err:
+                            print(f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}")
                 content["ats_verdict"] = verdict
                 print(f"[apply_agent] {format_verdict(verdict)}")
                 # Stamp the score on the tracker row (created by generate_docs
@@ -790,11 +851,13 @@ def _run_main_api(
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:
         file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))
-        ats = content.get("ats_score", "?")
+        # Only the independent verdict is user-facing (owner request — the
+        # generator's own self-score was noisy: "self-scored myself 96%").
+        # It stays on content.json for diagnostics, just not in Telegram.
         if verdict is not None:
-            ats_line = f"ATS: {verdict.get('score')}% (independent, PDF) | self: {ats}%"
+            ats_line = f"ATS: {verdict.get('score')}% (independent, PDF)"
         else:
-            ats_line = f"ATS: {ats}%"
+            ats_line = f"ATS: {content.get('ats_score', '?')}%"
         cost_line = ""
         if cost_dict is not None:
             from hunter.llm_cost import format_summary as _cost_summary

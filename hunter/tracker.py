@@ -1021,7 +1021,41 @@ def set_ats_verdict(url: str, score: float) -> bool:
     The verdict is computed AFTER the tracker row exists (apply Step 7.7,
     while the row is written by generate_docs in Step 7), so this is a
     post-hoc UPDATE by normalized URL — same shape as set_drive_url.
-    Returns True if a row was updated. Never raises (best-effort caller).
+
+    Also overwrites `ats_status` (the "ATS %" column) with the same score,
+    formatted like the self-score it replaces (e.g. "92%"). The owner asked
+    for a single number across every interface — the tracker/Sheet "ATS %"
+    column and the Telegram card should both show the independent verdict,
+    not the generator's own self-assessment (see docs/VERDICT_REFINE_PLAN.md
+    M4). Returns True if a row was updated. Never raises (best-effort caller).
+    """
+    if not url:
+        return False
+    try:
+        norm = normalize_url(url)
+        if not norm:
+            return False
+        ats_display = f"{int(round(float(score)))}%"
+        with get_db(DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE applications SET ats_verdict=?, ats_status=? WHERE url_norm=?",
+                (float(score), ats_display, norm),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        print(f"[tracker] set_ats_verdict failed (continuing): {e}")
+        return False
+
+
+def set_to_learn(url: str, to_learn: str) -> bool:
+    """Overwrite the "To Learn" column for the row matching `url`.
+
+    The verdict refine loop (hunter.verdict_refine) may append round-2
+    stretch-tech additions to content["to_learn"] AFTER the tracker row
+    already exists (it's created in Step 7, generate_docs -> add_applied,
+    with the PRE-loop value) — so this is a post-hoc UPDATE by normalized
+    URL, same shape as set_ats_verdict. Returns True if a row was updated.
+    Never raises (best-effort caller).
     """
     if not url:
         return False
@@ -1031,12 +1065,12 @@ def set_ats_verdict(url: str, score: float) -> bool:
             return False
         with get_db(DB_PATH) as conn:
             cur = conn.execute(
-                "UPDATE applications SET ats_verdict=? WHERE url_norm=?",
-                (float(score), norm),
+                "UPDATE applications SET to_learn=? WHERE url_norm=?",
+                (str(to_learn or ""), norm),
             )
             return cur.rowcount > 0
     except Exception as e:
-        print(f"[tracker] set_ats_verdict failed (continuing): {e}")
+        print(f"[tracker] set_to_learn failed (continuing): {e}")
         return False
 
 
