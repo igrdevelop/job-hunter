@@ -261,7 +261,10 @@ def test_refine_loop_exception_in_rewrite_returns_original(tmp_path, monkeypatch
 
 # ── refine_loop: PL mirroring ─────────────────────────────────────────────────
 
-def test_refine_loop_mirrors_to_pl_when_primary_lang_pl(tmp_path, monkeypatch):
+def test_refine_loop_mirrors_to_pl_once_after_accepted_round(tmp_path, monkeypatch):
+    """PL mirroring happens ONCE, after the loop, and only for an accepted
+    round — not per round (Fix 4: a translate call on a rolled-back round is
+    wasted money)."""
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
     monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
@@ -277,14 +280,20 @@ def test_refine_loop_mirrors_to_pl_when_primary_lang_pl(tmp_path, monkeypatch):
 
     monkeypatch.setattr(apply_shared, "_translate_resume", _fake_translate)
 
+    regen_calls = []
     content = _base_content(primary_lang="PL")
     content["resume_pl"] = _resume()
     verdict = _v(80, missing=["Docker"])
-    refine_loop(
+    out_content, _ = refine_loop(
         content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        regenerate_docs=lambda f: regen_calls.append(f), target=95, max_rounds=1,
     )
     assert translate_calls == ["PL"]
+    assert "resume_pl" in out_content
+    # Round render + final mirror render = 2 regen calls.
+    assert len(regen_calls) == 2
+    saved = json.loads((tmp_path / "content.json").read_text(encoding="utf-8"))
+    assert saved["resume_pl"] == out_content["resume_pl"]
 
 
 def test_refine_loop_does_not_mirror_when_primary_lang_en(tmp_path, monkeypatch):
@@ -306,6 +315,32 @@ def test_refine_loop_does_not_mirror_when_primary_lang_en(tmp_path, monkeypatch)
         content, "job", "", tmp_path, verdict,
         regenerate_docs=lambda f: None, target=95, max_rounds=1,
     )
+
+
+def test_refine_loop_does_not_mirror_pl_on_full_rollback(tmp_path, monkeypatch):
+    """A PL posting whose only round gets rolled back (verdict didn't
+    improve) must not spend a translate call — no round was ever accepted."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+    monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
+    monkeypatch.setattr(
+        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(75)
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("must not translate when every round was rolled back")
+
+    monkeypatch.setattr(apply_shared, "_translate_resume", _boom)
+
+    content = _base_content(primary_lang="PL")
+    content["resume_pl"] = _resume()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+    )
+    assert out_content is content
+    assert out_verdict is verdict
 
 
 # ── refine_loop: escalation (round 1 honest, round 2 stretch) ────────────────

@@ -67,9 +67,10 @@ ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in 
 # own feedback (up to ATS_VERDICT_MAX_REFINES escalating rounds — round 1
 # honest, round 2+ stretch), re-render, and re-verdict, keeping only strict
 # improvements. 0 = disabled (byte-for-byte the old one-shot behaviour); 1 =
-# honest round only. See docs/VERDICT_REFINE_PLAN.md.
+# honest round only; 2 (default, owner-approved) = honest + stretch.
+# See docs/VERDICT_REFINE_PLAN.md.
 ATS_VERDICT_TARGET: float = float(os.getenv("ATS_VERDICT_TARGET", "95"))
-ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "1"))
+ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "2"))
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")

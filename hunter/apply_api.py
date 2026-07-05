@@ -775,9 +775,23 @@ def _run_main_api(
                     )
                     from hunter.verdict_refine import refine_loop
 
+                    # Own command — NOT the Step 7 `gen_cmd`: the tracker row
+                    # already exists (created by Step 7's generate_docs run),
+                    # so every refine-loop re-render must skip the tracker
+                    # write (--no-tracker) and never pass --force, or a
+                    # force-mode apply would DELETE+INSERT the row on every
+                    # round/rollback (new sync ID, false Re-application flag).
                     def _regen_for_refine(_folder: Path) -> None:
+                        _refine_cmd = build_generate_docs_cmd(
+                            generate_docs_script=GENERATE_DOCS_PATH,
+                            content_json_path=content_path,
+                            use_full=full_mode,
+                            force=False,
+                            no_tracker=True,
+                            python_executable=sys.executable,
+                        )
                         subprocess.run(
-                            gen_cmd,
+                            _refine_cmd,
                             cwd=str(PROJECT_DIR),
                             capture_output=True,
                             text=True,
@@ -786,12 +800,26 @@ def _run_main_api(
                             timeout=120,
                         )
 
+                    _to_learn_before_refine = content.get("to_learn")
                     content, verdict = refine_loop(
                         content, job_text, base_cv, output_folder, verdict,
                         regenerate_docs=_regen_for_refine,
                         target=ATS_VERDICT_TARGET,
                         max_rounds=ATS_VERDICT_MAX_REFINES,
                     )
+                    # Round-2 stretch additions land in content["to_learn"]
+                    # AFTER the tracker row was created (Step 7, with the
+                    # pre-loop value) — stamp the change post-hoc, same
+                    # contract as the verdict stamp below.
+                    if (
+                        url and url != PASTE_NO_URL_PLACEHOLDER
+                        and content.get("to_learn") != _to_learn_before_refine
+                    ):
+                        try:
+                            from hunter.tracker import set_to_learn
+                            set_to_learn(url, content.get("to_learn") or "")
+                        except Exception as _tl_err:
+                            print(f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}")
                 content["ats_verdict"] = verdict
                 print(f"[apply_agent] {format_verdict(verdict)}")
                 # Stamp the score on the tracker row (created by generate_docs

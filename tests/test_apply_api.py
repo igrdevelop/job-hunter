@@ -192,3 +192,66 @@ def test_cli_pipeline_wires_refine_loop_before_verdict_stamp() -> None:
     refine_pos = verdict_block.index("refine_loop(")
     stamp_pos = verdict_block.index("set_ats_verdict")
     assert refine_pos < stamp_pos
+
+
+# ── Review Fix 1: to_learn stamp (VERDICT_REFINE_PLAN review) ────────────────
+# The tracker row already exists (Step 7) when the refine loop's round-2
+# stretch additions land in content["to_learn"] — the row must be patched
+# post-hoc, same shape as the verdict stamp.
+
+def test_api_pipeline_stamps_to_learn_after_refine_loop() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "from hunter.tracker import set_to_learn" in src
+    verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
+    refine_pos = verdict_block.index("refine_loop(")
+    to_learn_pos = verdict_block.index("set_to_learn(")
+    assert refine_pos < to_learn_pos
+    # Gated on an actual change vs. the pre-loop value.
+    assert "_to_learn_before_refine" in verdict_block
+    assert 'content.get("to_learn") != _to_learn_before_refine' in verdict_block
+
+
+def test_cli_pipeline_stamps_to_learn_after_refine_loop() -> None:
+    src = _source_of("hunter.apply_cli")
+    assert "from hunter.tracker import set_to_learn" in src
+    verdict_block = src.split("run_llm_verdict(folder=folder_path")[1]
+    refine_pos = verdict_block.index("refine_loop(")
+    to_learn_pos = verdict_block.index("set_to_learn(")
+    assert refine_pos < to_learn_pos
+    assert "_to_learn_before_refine" in verdict_block
+
+
+# ── Review Fix 2: refine-loop regen must be tracker-row-safe ────────────────
+# The tracker row already exists when a refine round re-renders — the regen
+# command must pass --no-tracker (skip the row write) and never --force (a
+# force-mode apply would otherwise DELETE+INSERT the row on every round).
+
+def test_api_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
+    src = _source_of("hunter.apply_api")
+    verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
+    regen_block = verdict_block.split("def _regen_for_refine")[1].split("def ")[0]
+    assert "no_tracker=True" in regen_block
+    assert "force=False" in regen_block
+    # Must build its OWN command, not reuse the Step 7 `gen_cmd` (built with
+    # force=skip_dedup).
+    assert "gen_cmd," not in regen_block
+    assert "build_generate_docs_cmd(" in regen_block
+
+
+def test_cli_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
+    src = _source_of("hunter.apply_cli")
+    verdict_block = src.split("run_llm_verdict(folder=folder_path")[1]
+    regen_block = verdict_block.split("def _regen_for_refine")[1].split("def ")[0]
+    assert "no_tracker=True" in regen_block
+    assert "force=False" in regen_block
+    assert "force=skip_dedup" not in regen_block
+    assert "build_generate_docs_cmd(" in regen_block
+
+
+# ── Review Fix 3: default is 2 (honest + stretch), owner-approved ───────────
+
+def test_ats_verdict_max_refines_default_is_two() -> None:
+    """docs/VERDICT_REFINE_PLAN.md decision #1: ship with round 1 (honest) +
+    round 2 (stretch) enabled by default, not honest-only."""
+    src = _source_of("hunter.config")
+    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "2")' in src

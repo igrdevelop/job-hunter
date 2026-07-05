@@ -582,12 +582,19 @@ def main_cli(
                             if _refine_content is not None:
                                 from hunter.verdict_refine import refine_loop
 
+                                # Own command — NOT the Step 4 cmd: the tracker
+                                # row already exists, so every refine-loop
+                                # re-render must skip the tracker write
+                                # (--no-tracker) and never pass --force, or a
+                                # force-mode apply would DELETE+INSERT the row
+                                # on every round/rollback.
                                 def _regen_for_refine(_folder: Path) -> None:
                                     _cmd = build_generate_docs_cmd(
                                         generate_docs_script=GENERATE_DOCS_PATH,
                                         content_json_path=content_json_path,
                                         use_full=full_mode,
-                                        force=skip_dedup,
+                                        force=False,
+                                        no_tracker=True,
                                         python_executable=sys.executable,
                                     )
                                     subprocess.run(
@@ -600,6 +607,7 @@ def main_cli(
                                         timeout=120,
                                     )
 
+                                _to_learn_before_refine = _refine_content.get("to_learn")
                                 _refine_content, verdict = refine_loop(
                                     _refine_content, job_text, "", folder_path, verdict,
                                     regenerate_docs=_regen_for_refine,
@@ -610,6 +618,19 @@ def main_cli(
                                     json.dumps(_refine_content, ensure_ascii=False, indent=2),
                                     encoding="utf-8",
                                 )
+                                # Round-2 stretch additions land in to_learn
+                                # AFTER the tracker row was created — stamp
+                                # the change post-hoc (same contract as the
+                                # verdict stamp below).
+                                if (
+                                    url and "paste://" not in url
+                                    and _refine_content.get("to_learn") != _to_learn_before_refine
+                                ):
+                                    try:
+                                        from hunter.tracker import set_to_learn
+                                        set_to_learn(url, _refine_content.get("to_learn") or "")
+                                    except Exception as _tl_err:
+                                        print(f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}")
                     # Stamp the tracker row (same contract as apply_api Step 7.7:
                     # DB only — the bot process mirrors Sheet column N later).
                     # Paste flow has no URL to match a row by — skip.

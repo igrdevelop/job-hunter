@@ -329,17 +329,6 @@ def refine_loop(
                 print(f"[verdict_refine] round {round_num}: language gate blocked — discarding round")
                 continue
 
-            if str(best_content.get("primary_lang") or "").upper() == "PL":
-                try:
-                    from hunter.apply_shared import _translate_resume
-                    mirrored = _translate_resume(
-                        candidate["resume_en"], "PL", expected_roles=_exp_len(candidate["resume_en"])
-                    )
-                    if mirrored:
-                        candidate["resume_pl"] = mirrored
-                except Exception as e:  # noqa: BLE001 — best-effort
-                    print(f"[verdict_refine] round {round_num}: PL mirror failed (continuing): {e}")
-
             if len(validate_content(candidate)) > len(validate_content(best_content)):
                 print(f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round")
                 continue
@@ -363,5 +352,26 @@ def refine_loop(
         except Exception as e:  # noqa: BLE001 — best-effort: stop, keep current best
             print(f"[verdict_refine] round {round_num} failed unexpectedly (keeping best): {e}")
             break
+
+    # PL mirror — ONCE, after the loop, and only if at least one round was
+    # actually accepted (best_content is no longer the object the caller
+    # passed in). Doing this per-round (as before) spent a translation call
+    # on rounds that got rolled back anyway; the local re-render below is
+    # free, so it's cheaper to mirror once at the end than to translate on
+    # every round.
+    if best_content is not content and str(best_content.get("primary_lang") or "").upper() == "PL":
+        try:
+            from hunter.apply_shared import _translate_resume
+            mirrored = _translate_resume(
+                best_content["resume_en"], "PL", expected_roles=_exp_len(best_content.get("resume_en"))
+            )
+            if mirrored:
+                best_content["resume_pl"] = mirrored
+                content_path.write_text(
+                    json.dumps(best_content, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                regenerate_docs(folder)
+        except Exception as e:  # noqa: BLE001 — best-effort
+            print(f"[verdict_refine] final PL mirror failed (continuing): {e}")
 
     return best_content, best_verdict

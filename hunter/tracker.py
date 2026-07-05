@@ -1047,6 +1047,33 @@ def set_ats_verdict(url: str, score: float) -> bool:
         return False
 
 
+def set_to_learn(url: str, to_learn: str) -> bool:
+    """Overwrite the "To Learn" column for the row matching `url`.
+
+    The verdict refine loop (hunter.verdict_refine) may append round-2
+    stretch-tech additions to content["to_learn"] AFTER the tracker row
+    already exists (it's created in Step 7, generate_docs -> add_applied,
+    with the PRE-loop value) — so this is a post-hoc UPDATE by normalized
+    URL, same shape as set_ats_verdict. Returns True if a row was updated.
+    Never raises (best-effort caller).
+    """
+    if not url:
+        return False
+    try:
+        norm = normalize_url(url)
+        if not norm:
+            return False
+        with get_db(DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE applications SET to_learn=? WHERE url_norm=?",
+                (str(to_learn or ""), norm),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        print(f"[tracker] set_to_learn failed (continuing): {e}")
+        return False
+
+
 # ── Google Sheets sync helpers ────────────────────────────────────────────────
 
 def read_all_tracker_rows() -> list[dict]:

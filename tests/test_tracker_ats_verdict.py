@@ -109,3 +109,54 @@ def test_set_ats_verdict_never_raises(tracker_db, monkeypatch):
         raise RuntimeError("db locked")
     monkeypatch.setattr(tracker, "get_db", _boom)
     assert tracker.set_ats_verdict("https://example.com/jobs/1", 90.0) is False
+
+
+# ── set_to_learn (VERDICT_REFINE_PLAN review Fix 1) ───────────────────────────
+# The tracker row is created (Step 7, generate_docs -> add_applied) BEFORE the
+# verdict refine loop's round-2 stretch additions land in content["to_learn"]
+# — so this is the same post-hoc-UPDATE-by-URL contract as set_ats_verdict.
+
+def _to_learn_of(tracker_db, row_id: str):
+    with get_db(tracker_db) as conn:
+        row = conn.execute(
+            "SELECT to_learn FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    return row["to_learn"] if row else None
+
+
+def test_set_to_learn_writes_value(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    assert tracker.set_to_learn("https://example.com/jobs/1", "Vitest, GraphQL") is True
+    assert _to_learn_of(tracker_db, "abc12345") == "Vitest, GraphQL"
+
+
+def test_set_to_learn_normalizes_url(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    assert tracker.set_to_learn(
+        "https://example.com/jobs/1/?utm_source=x", "Vitest"
+    ) is True
+    assert _to_learn_of(tracker_db, "abc12345") == "Vitest"
+
+
+def test_set_to_learn_overwrites_previous(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    tracker.set_to_learn("https://example.com/jobs/1", "Vitest")
+    tracker.set_to_learn("https://example.com/jobs/1", "Vitest, GraphQL")
+    assert _to_learn_of(tracker_db, "abc12345") == "Vitest, GraphQL"
+
+
+def test_set_to_learn_false_when_url_not_found(tracker_db):
+    _insert_row(tracker_db, url="https://example.com/jobs/1")
+    assert tracker.set_to_learn("https://example.com/jobs/99", "Vitest") is False
+
+
+def test_set_to_learn_false_on_empty_url(tracker_db):
+    assert tracker.set_to_learn("", "Vitest") is False
+
+
+def test_set_to_learn_never_raises(tracker_db, monkeypatch):
+    """Best-effort contract: DB failure logs and returns False."""
+    def _boom(*a, **k):
+        raise RuntimeError("db locked")
+    monkeypatch.setattr(tracker, "get_db", _boom)
+    assert tracker.set_to_learn("https://example.com/jobs/1", "Vitest") is False

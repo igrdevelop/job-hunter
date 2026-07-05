@@ -289,7 +289,7 @@ Applications/               Generated documents (gitignored)
 | `JUDGE_MAX_REPAIR_ROUNDS` | `1` | Repair rounds before warn/block |
 | `ATS_VERDICT_ENABLED` | `true` | Final independent ATS verdict: after generate_docs, ONE `JUDGE_MODEL` (Haiku) call scores the text extracted from the rendered EN CV PDF against the posting. Stored as `ats_verdict` on content.json + tracker row (`set_ats_verdict`, which now also overwrites `ats_status`/"ATS %"), mirrored to Sheet column **N** (`hunter.verdict_writer`), and shown as the **only** "ATS:" number in Telegram (generator self-score stays in content.json only), and computed for dual-apply shadows too (verdict-based `_ats{NN}` filename suffix). Informational only — never blocks delivery. |
 | `ATS_VERDICT_TARGET` | `95` | Target score (%) for the verdict refine loop (`hunter.verdict_refine`) — a verdict at or above this is left alone. |
-| `ATS_VERDICT_MAX_REFINES` | `1` | Max escalating rewrite rounds the refine loop runs when the verdict is below target (round 1 honest, round 2+ stretch). `0` disables the loop (old one-shot verdict). See docs/VERDICT_REFINE_PLAN.md. |
+| `ATS_VERDICT_MAX_REFINES` | `2` | Max escalating rewrite rounds the refine loop runs when the verdict is below target (round 1 honest, round 2+ stretch). Default `2` (owner-approved, decision #1) ships both rounds. `0` disables the loop (old one-shot verdict). See docs/VERDICT_REFINE_PLAN.md. |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
@@ -407,28 +407,40 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
    Informational only; never blocks delivery.
 7b. **Verdict refine loop** (`hunter.verdict_refine.refine_loop`, both pipelines,
    docs/VERDICT_REFINE_PLAN.md): if the Step 7a verdict is below
-   `ATS_VERDICT_TARGET` and `ATS_VERDICT_MAX_REFINES > 0`, rewrite `resume_en`
-   against the verdict's own `missing_keywords`/`recommendations` (deterministically
-   dropping unfixable ones — location/relocation/hybrid/on-site/cover-note/
-   LinkedIn/years-of-experience — via `build_refine_feedback`), re-render, and
-   re-verdict, for up to `ATS_VERDICT_MAX_REFINES` escalating rounds: **round 1
-   (honest)** — only candidate_profile.md-supported facts, nothing new; **round 2+
-   (stretch)** — may ADD posting technologies absent from the profile as plain
-   Skills/summary entries (no "familiar with" hedging), every addition also
-   appended to `content["to_learn"]`, optionally woven into ONE flexible Altoros
-   client project (2018–2022: E-commerce/Insurance/Healthcare/Grant Management),
-   NEVER into the recent/verifiable employers (Atruvia, Fairmarkit, Intel, SII,
-   SolbegSoft) and never inventing employers/projects/metrics/years on any round.
-   Each round re-runs the pipeline's own safety stages (sanitize, compliance/
-   prestige/gloss scrubs, claim judge capped to `warn`, language gate) before
-   re-rendering. **Keep-best guard:** a round is accepted only if the new verdict
-   is strictly higher than the current best; otherwise content.json + the
-   rendered docs are rolled back to the pre-round version — regression is
-   impossible by construction. In the CLI pipeline the loop is silently skipped
-   (with a log line) when `LLM_API_KEY` is unset, since the rewrite call goes
-   through the API regardless of how the base CV was generated.
-   `ATS_VERDICT_MAX_REFINES=0` reproduces the old one-shot-verdict behaviour
-   byte-for-byte.
+   `ATS_VERDICT_TARGET` and `ATS_VERDICT_MAX_REFINES > 0` (default **2** —
+   owner-approved decision #1: honest + stretch both ship by default), rewrite
+   `resume_en` against the verdict's own `missing_keywords`/`recommendations`
+   (deterministically dropping unfixable ones — location/relocation/hybrid/
+   on-site/cover-note/LinkedIn/years-of-experience — via `build_refine_feedback`),
+   re-render, and re-verdict, for up to `ATS_VERDICT_MAX_REFINES` escalating
+   rounds: **round 1 (honest)** — only candidate_profile.md-supported facts,
+   nothing new; **round 2+ (stretch)** — may ADD posting technologies absent
+   from the profile as plain Skills/summary entries (no "familiar with"
+   hedging), every addition also appended to `content["to_learn"]` (and, since
+   the tracker row already exists by this point — Step 7 — stamped post-hoc
+   on the row via `tracker.set_to_learn(url, ...)`, gated on the value actually
+   changing vs. before the loop; same contract as the verdict stamp), optionally
+   woven into ONE flexible Altoros client project (2018–2022: E-commerce/
+   Insurance/Healthcare/Grant Management), NEVER into the recent/verifiable
+   employers (Atruvia, Fairmarkit, Intel, SII, SolbegSoft) and never inventing
+   employers/projects/metrics/years on any round. Each round re-runs the
+   pipeline's own safety stages (sanitize, compliance/prestige/gloss scrubs,
+   claim judge capped to `warn`, language gate) before re-rendering — the
+   re-render itself passes `--no-tracker` and never `--force` (own
+   `build_generate_docs_cmd` call, NOT the Step 7 command): the tracker row
+   already exists, so a force-mode apply must not DELETE+INSERT it on every
+   round/rollback (new sync ID, false Re-application flag). **Keep-best guard:**
+   a round is accepted only if the new verdict is strictly higher than the
+   current best; otherwise content.json + the rendered docs are rolled back to
+   the pre-round version — regression is impossible by construction. If a PL
+   posting's best round after the loop differs from the input (at least one
+   round accepted) the PL CV is mirrored from the final `resume_en` exactly
+   ONCE, after the loop (not per round — a translate call on a rolled-back
+   round is wasted spend), with one extra local re-render. In the CLI pipeline
+   the loop is silently skipped (with a log line) when `LLM_API_KEY` is unset,
+   since the rewrite call goes through the API regardless of how the base CV
+   was generated. `ATS_VERDICT_MAX_REFINES=0` reproduces the old one-shot-verdict
+   behaviour byte-for-byte.
 8. `tracker_service.record_successful_apply()` -> tracker.xlsx row
 9. `gsheets_sync.mirror_new_row()` -> Google Sheets (best-effort)
 10. Telegram notification + file upload
@@ -745,7 +757,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
-| 2026-07-04 | sonnet | Verdict refine loop (branch feat/verdict-refine-loop, spec docs/VERDICT_REFINE_PLAN.md). The independent PDF verdict (Phase 2) was computed once and just recorded — half its "missing keyword" feedback is presentational (a real skill the resume didn't surface), so this closes the loop into rewrite → re-render → re-verdict. **M1** new `hunter/verdict_refine.py`: `build_refine_feedback` deterministically drops unfixable recommendations (location/relocation/hybrid/on-site/cover-note/LinkedIn/years-of-experience) before they reach the rewrite prompt; `refine_loop` runs up to `ATS_VERDICT_MAX_REFINES` escalating rounds — round 1 honest (candidate_profile.md facts only), round 2+ stretch (may add posting tech absent from the profile as plain skills/summary entries, logged to `to_learn`, optionally woven into one flexible Altoros project 2018–2022, never into Atruvia/Fairmarkit/Intel/SII/SolbegSoft) — re-running sanitize/scrubs/judge/language-gate each round and keeping a round only on a strict verdict improvement (otherwise content.json + docs roll back — regression impossible by construction). **M2/M3** wired into `apply_api.py`/`apply_cli.py` right after the first verdict, before the tracker stamp (CLI skips with a log line when `LLM_API_KEY` is unset). **M4** `tracker.set_ats_verdict` now also overwrites `ats_status`/"ATS %"; Telegram drops the `| self: NN%` suffix — only the independent verdict is user-facing anywhere (self-score stays in content.json for diagnostics). **M5** `ATS_VERDICT_TARGET`/`ATS_VERDICT_MAX_REFINES` config (default 95/1; 0 = old one-shot behaviour byte-for-byte). 12+ new tests (test_verdict_refine.py) covering feedback filtering, accept/rollback, language-gate block, exception best-effort, escalation prompts, to_learn tracking, and the tracker/Telegram format changes. |
+| 2026-07-04 | sonnet | Verdict refine loop (branch feat/verdict-refine-loop, spec docs/VERDICT_REFINE_PLAN.md). The independent PDF verdict (Phase 2) was computed once and just recorded — half its "missing keyword" feedback is presentational (a real skill the resume didn't surface), so this closes the loop into rewrite → re-render → re-verdict. **M1** new `hunter/verdict_refine.py`: `build_refine_feedback` deterministically drops unfixable recommendations (location/relocation/hybrid/on-site/cover-note/LinkedIn/years-of-experience) before they reach the rewrite prompt; `refine_loop` runs up to `ATS_VERDICT_MAX_REFINES` escalating rounds — round 1 honest (candidate_profile.md facts only), round 2+ stretch (may add posting tech absent from the profile as plain skills/summary entries, logged to `to_learn`, optionally woven into one flexible Altoros project 2018–2022, never into Atruvia/Fairmarkit/Intel/SII/SolbegSoft) — re-running sanitize/scrubs/judge/language-gate each round and keeping a round only on a strict verdict improvement (otherwise content.json + docs roll back — regression impossible by construction). **M2/M3** wired into `apply_api.py`/`apply_cli.py` right after the first verdict, before the tracker stamp (CLI skips with a log line when `LLM_API_KEY` is unset). **M4** `tracker.set_ats_verdict` now also overwrites `ats_status`/"ATS %"; Telegram drops the `| self: NN%` suffix — only the independent verdict is user-facing anywhere (self-score stays in content.json for diagnostics). **M5** `ATS_VERDICT_TARGET`/`ATS_VERDICT_MAX_REFINES` config (default 95/2; 0 = old one-shot behaviour byte-for-byte). 12+ new tests (test_verdict_refine.py) covering feedback filtering, accept/rollback, language-gate block, exception best-effort, escalation prompts, to_learn tracking, and the tracker/Telegram format changes. **Post-review fixes (same day):** independent review flagged 4 findings, all fixed before merge — (1) round-2 `to_learn` stretch additions never reached the tracker row (created earlier, in Step 7, with the pre-loop value): new `tracker.set_to_learn(url, to_learn)` (same shape as `set_ats_verdict`), wired into both pipelines right after `refine_loop` returns, gated on the value actually differing from its pre-loop snapshot; (2) every refine-round regen reused the Step 7 `gen_cmd` (built with `force=skip_dedup`), so a force-mode apply DELETE+INSERTed the tracker row on every round/rollback (new sync ID, false Re-application flag) — both `_regen_for_refine` callbacks now build their OWN `build_generate_docs_cmd(..., force=False, no_tracker=True)`; (3) default `ATS_VERDICT_MAX_REFINES` was `1` (honest-only) instead of the plan's owner-approved `2` (honest+stretch) — fixed in config/.env.example/CLAUDE.md; (4) PL mirroring ran inside every round before the keep-best decision, wasting a translate call on rolled-back rounds — moved to run once, after the loop, only if a round was actually accepted, followed by one extra local re-render. 12 new/updated tests (to_learn stamp × 6, no-tracker-regen wiring × 2, PL-mirror-once × 3, config-default × 1); full suite green except the 3 known-preexisting tracker.xlsx-migration failures (test_cost_writer/test_verdict_writer, unrelated); ruff clean. |
 | 2026-07-02 | fable | ATS verdict Phase 2 (same branch/PR as Phase 1 below, spec in docs/ATS_VERDICT_PHASE2_PLAN.md). **M1** `ats_verdict REAL` DB column (lazy migration) + `tracker.set_ats_verdict(url, score)` post-hoc stamp. **M2** `hunter/verdict_writer.py` — Sheet column **N** "ATS Verdict" (cost_writer/column-M pattern: cell mirror + lazy header + one-batch backfill via `tools/sync_verdicts.py`), wired into `gsheets_sync.mirror_new_row` after the cost poke; timing works because the apply subprocess stamps the DB before exiting and the A–K append runs later in the bot process. Four non-overlapping Sheet writers: A–K push, L sent_normalizer, M cost_writer, N verdict_writer. **M3** both pipelines stamp the tracker row in the verdict block (paste flow skipped — no URL key). **M4** dual-apply shadows get their own verdict on the shadow PDF (same Anthropic judge regardless of `set_override`, so the A/B is like-for-like); `_ats_suffix` prefers verdict over `ats_check` for the `_ats{NN}` filenames. 26 new tests across M1–M4; suite 1603 green; ruff clean. |
 | 2026-07-02 | fable | ATS loop made deterministic + final independent PDF verdict (branch feat/ats-deterministic-loop-pdf-verdict). Data-driven root cause from 713 content.json on Drive: 88% of June–July runs burned ALL 5 ATS rewrite rounds with keyword_score already 100% — the 95% combined threshold was mathematically unreachable because the post-round-1 formula (`keyword×0.75 + TF-IDF×0.25`) is capped by TF-IDF (median 51, needs ≥80), which no rewrite moves. Avg 8.3 LLM calls / $0.38 per vacancy, ~5 of them wasted. Fixes: (1) `_ats_check_loop` exits as soon as the blocklist-filtered missing-keyword list is empty (rewrites can only ADD keywords); the in-loop LLM reviewer (attempt-1, 30% weight) removed — the loop is now pure regex+TF-IDF. (2) New final verdict: `ats_checker.llm_verdict()` (wider caps: job 6k / resume 9k chars) called by `ats_pdf_roundtrip.run_llm_verdict()` — ONE cheap `JUDGE_MODEL` (Haiku) call scoring the text extracted from the **rendered EN CV PDF** (what a real ATS parses), by a model that didn't write the resume. Wired into apply_api (Step 7.7, re-prices cost so content.json/Telegram include the verdict call; tracker row keeps pre-verdict figure, ~$0.02 drift) and apply_cli (after roundtrip; line rides pdf_summary). Telegram now leads with the verdict (`ATS: 91% (independent, PDF) | self: 97%`) instead of the generator's self-score. Config: `ATS_VERDICT_ENABLED` (default true). Expected: ~8.3 → ~3-4 calls/vacancy, ~$0.38 → ~$0.13-0.17. 10 new tests (deterministic-exit ×4, verdict ×6); suite 1577 green; ruff clean. |
 | 2026-06-30 | sonnet | Dual-apply shadow → Google Drive (branch from `claude/gifted-einstein-d1c3df`). Owner reported shadow CVs (dual-apply A/B comparison) never appeared on Drive — by design the shadow has no tracker row, and Drive upload always rode the tracker-row hook, so it was structurally unreachable, not broken. Two-part fix: (1) `gdrive_sync.upload_shadow_folder(primary_folder, shadow_subfolder)` nests the upload under the primary's own company folder (`Job Hunter/{date}/{company}/{shadow_name}/`) instead of writing to tracker; wired into `dual_apply._generate_shadow()` as a best-effort call right after doc rendering, gated by `GDRIVE_ENABLED`. (2) `/gdrive_upload_missing` (`gdrive_sync.upload_missing_folders`) extended with `_upload_shadow_subfolders()` — scans every locally-present company folder (regardless of the company's own already-uploaded status, since shadow has no Drive-URL column to check) for a subfolder matching a known `llm_profiles.PROFILES` name and uploads it; idempotent via Drive's upsert-by-name, so safe to re-run and backfills shadow sets generated before this existed. Reply text shows a new "Shadow (dual-apply) uploaded" count + separate shadow error list. 16 new tests (gdrive_sync shadow helpers + missing-folders integration + dual_apply upload/failure paths); full suite 1567 green; ruff clean. |
