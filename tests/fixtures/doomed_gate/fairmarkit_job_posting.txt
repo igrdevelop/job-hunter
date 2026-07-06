@@ -1,0 +1,430 @@
+URL: https://www.linkedin.com/jobs/view/4416898758
+
+URL: https://www.linkedin.com/jobs/view/4416898758
+
+Fairmarkit hiring Senior Frontend Engineer (Design Systems) in Warsaw, Mazowieckie, Poland | LinkedIn
+LinkedIn respects your privacy
+LinkedIn and 3rd parties use essential and non-essential cookies to provide, secure, analyze and improve our Services, and to show you relevant ads (including
+professional and job ads
+) on and off LinkedIn. Learn more in our
+Cookie Policy
+.
+Select Accept to consent or Reject to decline non-essential cookies for this use. You can update your choices at any time in your
+settings
+.
+Accept
+Reject
+Skip to main content
+Senior Frontend Engineer (Design Systems)
+Fairmarkit
+Warsaw, Mazowieckie, Poland
+Apply
+Join or sign in to find your next job
+Join to apply for the
+Senior Frontend Engineer (Design Systems)
+role at
+Fairmarkit
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Senior Frontend Engineer (Design Systems)
+Fairmarkit
+Warsaw, Mazowieckie, Poland
+1 hour ago
+82 applicants
+See who Fairmarkit has hired for this role
+Apply
+Join or sign in to find your next job
+Join to apply for the
+Senior Frontend Engineer (Design Systems)
+role at
+Fairmarkit
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Save
+Report this job
+Use AI to assess how you fit
+Get AI-powered advice on this job and more exclusive features.
+Am I a good fit for this job?
+Tailor my resume
+Sign in to access AI-powered advices
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Sign in to evaluate your skills
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Sign in to tailor your resume
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Fairmarkit is the #1 autonomous sourcing platform revolutionizing the way all organizations buy & sell. Fairmarkit equips procurement teams with automation, AI, and GenAI so they can source more competitively at scale. Our solutions for tail spend and strategic sourcing help innovative procurement teams reduce cycle times, drive out costs, meet ESG/Diversity targets, and provide a better stakeholder experience to internal partners and suppliers. Fairmarkit has been recognized with awards by organizations such as Gartner and IDC, and is backed by strategic investors like Notable Capital, Insight Partners, 1984.VC, and Newfund.
+We're looking for a skilled and independent
+Software engineer
+with a strong focus on frontend development
+(Angular, Design Systems)
+to join our team. In this role, you will be responsible for designing and building a wide variety of platform features, reusable and high-performance components, and core functionalities that are used across various teams and applications within the organization. This includes features like notifications system, chats, internal and customer-facing admin panels, translations, and other critical platform components that enable other engineering teams to deliver value to our customers efficiently.
+As part of the platform team, you will work closely with product managers, designers and other engineers to ensure that the core building blocks of our platform are robust, maintainable and scalable.
+Key responsibilities:
+Working as part of a cross-functional development team, you will employ a wide-range of skills to deliver features from early design through iterative development, and out to production.
+Provide technical leadership, defining, developing, and evolving software in a fast-paced, agile environment using the latest technologies and infrastructure.
+Collaborate with product managers, technical architects and fellow software engineers to translate requirements and vision into prioritized user stories, delivering to timelines and quality standards.
+Write high-quality code that delivers desired functionality.
+Qualifications:
+5+ years of frontend development experience, with a strong focus on Angular and Typescript.
+Excellent proficiency in:
+TypeScript, RxJS
+Angular (DI, change detection, modules, standalone components, signals)
+HTML, modern CSS (SASS), rxjs
+Solid understanding of API services and core Javascript/Typescript concepts.
+Solid understanding of Accessibility levels and principles
+Performance optimisation experience
+Experience building common UI components
+You know and care about modern engineering practices and techniques.
+Excellent communication skills and the ability to perform effectively in an agile environment within a team and/or as an individual contributor.
+Nice to have:
+Experience working with Angular Material
+Experience with Nx and monorepo setups
+Advantages of working with us:
+Flexible working hours
+Highest level of development and pure DevOps culture - top technology stack
+Skilled and highly motivated teammates, passionate about technologies
+Fast decision making process in a company and effective interaction between teams and departments
+Possibility to improve the development process and bring your ideas, knowledge sharing between colleagues and teams
+Latest MacOs work equipment (macbook)
+100% salary sick leaves covering, 20 days of paid vacation
+Referral program: we appreciate your recommendations and reward every successful hire
+Professional trainings & courses, attendance of conferences & meetups are paid by Fairmarkit
+Cute office with a cozy workplace, drinks and snacks
+#Poland #Europe #Serbia
+Headquartered in Boston, and backed by a $35.6M Series C co-led by OMERS, Highland, Notable Capital, Insight Partners, and ServiceNow. We are looking for exceptional candidates who want to help grow our company into a global enterprise and make their mark on the B2B tech industry. Come soar to new heights with us!
+Fairmarkit is an equal opportunity employer, and selects individuals best matched for the job based upon job-related qualifications regardless of race, religion, color, creed, sex, sexual orientation, age, ancestry, national origin, gender identity, genetic information, disability, pregnancy, veteran or military status or any other status or characteristic protected by law.
+Show more
+Show less
+Seniority level
+Mid-Senior level
+Employment type
+Full-time
+Job function
+Engineering and Information Technology
+Industries
+Software Development
+Referrals increase your chances of interviewing at Fairmarkit by 2x
+See who you know
+Get notified when a new job is posted.
+Set alert
+Sign in to set job alerts for “Senior Frontend Developer” roles.
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Similar jobs
+Senior Engineer, UI/UX
+Senior Engineer, UI/UX
+Balyasny Asset Management L.P.
+Warsaw, Mazowieckie, Poland
+3 days ago
+Design Engineer
+Design Engineer
+Authologic
+Warsaw, Mazowieckie, Poland
+$47,500.00
+            -
+            $67,500.00
+3 weeks ago
+Senior Product Designer, Design Systems
+Senior Product Designer, Design Systems
+Netflix
+Warsaw, Mazowieckie, Poland
+2 weeks ago
+Senior UI Engineer 4/5 - Client and Partner Technologies
+Senior UI Engineer 4/5 - Client and Partner Technologies
+Netflix
+Warsaw, Mazowieckie, Poland
+1 week ago
+Senior Frontend Developer (UI/UX) for NATO
+Senior Frontend Developer (UI/UX) for NATO
+Work Life Group NL
+Warsaw, Mazowieckie, Poland
+3 weeks ago
+Senior Frontend Engineer (React)
+Senior Frontend Engineer (React)
+N-iX
+Warsaw, Mazowieckie, Poland
+1 month ago
+Senior Frontend Engineer, Consumer Alliance (f/m/x)
+Senior Frontend Engineer, Consumer Alliance (f/m/x)
+HelloFresh
+Warsaw, Mazowieckie, Poland
+1 week ago
+Senior Frontend Engineer (React)
+Senior Frontend Engineer (React)
+Software Mind
+Warsaw, Mazowieckie, Poland
+1 day ago
+Mid/Senior Frontend Developer
+Mid/Senior Frontend Developer
+Sensor Tower
+Warsaw, Mazowieckie, Poland
+1 week ago
+Senior React Developer
+Senior React Developer
+ALTEN Polska
+Warsaw Metropolitan Area
+3 weeks ago
+Frontend Engineer
+Frontend Engineer
+Newcode.ai
+Warsaw, Mazowieckie, Poland
+2 weeks ago
+Senior Front End Software Engineer
+Senior Front End Software Engineer
+HBK - Hottinger Brüel & Kjær
+Warsaw, Mazowieckie, Poland
+1 week ago
+Frontend Engineer (UI & Product-Focused)
+Frontend Engineer (UI & Product-Focused)
+Authologic
+Warsaw, Mazowieckie, Poland
+$49,500.00
+            -
+            $67,500.00
+3 weeks ago
+Senior Frontend Developer
+Senior Frontend Developer
+Empik Group
+Warsaw Metropolitan Area
+1 day ago
+Senior React Developer
+Senior React Developer
+Billennium
+Warsaw, Mazowieckie, Poland
+3 weeks ago
+Senior Front-End Developer (React and WebGL) for NATO
+Senior Front-End Developer (React and WebGL) for NATO
+Work Life Group NL
+Warsaw, Mazowieckie, Poland
+3 weeks ago
+Senior Frontend Engineer
+Senior Frontend Engineer
+Fairmarkit
+Warsaw, Mazowieckie, Poland
+1 month ago
+Senior Frontend Developer with React&TypeScript (hybrid work in Warsaw)
+Senior Frontend Developer with React&TypeScript (hybrid work in Warsaw)
+Synergetica
+Warsaw, Mazowieckie, Poland
+4 weeks ago
+Software Architect – React (f/m/x)
+Software Architect – React (f/m/x)
+Sii Poland
+Warsaw, Mazowieckie, Poland
+2 weeks ago
+Senior UI Desiger (digital assets)
+Senior UI Desiger (digital assets)
+Publicis Production EMEA Hub
+Warsaw, Mazowieckie, Poland
+3 weeks ago
+Senior Frontend (React/Angular)
+Senior Frontend (React/Angular)
+Jit Team
+Warsaw, Mazowieckie, Poland
+1 year ago
+Senior Full Stack Engineer
+Senior Full Stack Engineer
+Complexio
+Warsaw, Mazowieckie, Poland
+6 months ago
+Senior Front End/Web Developer
+Senior Front End/Web Developer
+Neota Logic
+Warsaw, Mazowieckie, Poland
+1 month ago
+Senior Full-Stack Engineer
+Senior Full-Stack Engineer
+Procter & Gamble
+Warsaw, Mazowieckie, Poland
+2 weeks ago
+Senior Full Stack Engineer, Platform
+Senior Full Stack Engineer, Platform
+Bolt
+Warsaw, Mazowieckie, Poland
+2 weeks ago
+Software Engineer
+Software Engineer
+Nearmap
+Warsaw, Mazowieckie, Poland
+2 months ago
+Senior Frontend Developer (React + React Native)
+Senior Frontend Developer (React + React Native)
+ipracujzdalnie.pl
+Warsaw, Mazowieckie, Poland
+5 days ago
+Show more jobs like this
+Show fewer jobs like this
+People also viewed
+Senior Frontend Engineer
+Senior Frontend Engineer
+Jit Team
+Warsaw, Mazowieckie, Poland
+6 months ago
+React Developer
+React Developer
+Base.com
+Warsaw, Mazowieckie, Poland
+3 months ago
+Frontend React Engineer
+Frontend React Engineer
+CLOUDFIDE
+Warsaw, Mazowieckie, Poland
+2 months ago
+Senior Software Engineer, E-Commerce
+Senior Software Engineer, E-Commerce
+Peloton Interactive
+Warsaw, Mazowieckie, Poland
+1 week ago
+Full-stack Engineer, GenAI Technology
+Full-stack Engineer, GenAI Technology
+Point72
+Warsaw, Mazowieckie, Poland
+1 year ago
+Frontend Developer
+Frontend Developer
+emagine
+Warsaw, Mazowieckie, Poland
+2 days ago
+React Developer @ Accenture Song
+React Developer @ Accenture Song
+Accenture Poland
+Warsaw, Mazowieckie, Poland
+15 hours ago
+Senior Full Stack Engineer - Documents Team
+Senior Full Stack Engineer - Documents Team
+Readdle
+Warsaw, Mazowieckie, Poland
+2 months ago
+Senior UI Designer (projekt zagraniczny)
+Senior UI Designer (projekt zagraniczny)
+Altkom Software
+Warsaw, Mazowieckie, Poland
+2 months ago
+Senior Angular Software Engineer
+Senior Angular Software Engineer
+XTB online investing
+Warsaw, Mazowieckie, Poland
+2 days ago
+Explore top content on LinkedIn
+Find curated posts and insights for relevant topics all in one place.
+View top content
+LinkedIn
+Know when new jobs open up
+Never miss a job alert with the new LinkedIn app for Windows.
+Get the app
+Agree & Join LinkedIn
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Sign in to see who you already know at Fairmarkit
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+LinkedIn
+LinkedIn is better on the app
+Don’t have the app? Get it in the Microsoft Store.
+Open the app

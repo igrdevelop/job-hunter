@@ -1,5 +1,6 @@
 import html
 import re
+from dataclasses import dataclass
 
 from hunter.models import Job
 from hunter.config import FILTER
@@ -321,6 +322,29 @@ def _job_plain_text_blob(job: Job, max_chars: int = 24_000) -> str:
     return blob if len(blob) <= max_chars else blob[:max_chars]
 
 
+# "Nice to have" / optional-section markers (EN + PL). A language match sitting
+# shortly after one of these is a bonus, not a requirement — real M4 calibration
+# false positive (docs/DOOMED_GATE_PLAN.md): a real SENT theprotocol.it posting
+# (DHCBusinessSolutions) listed "Nice to have — Optional, ... German language
+# skills" under an explicit optional heading.
+_OPTIONAL_CONTEXT_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bnice\s+to\s+have\b",
+        r"\boptional\b",
+        r"\bbonus\b",
+        r"\ba\s+plus\b",
+        r"\bmile\s+widzian\w*\b",
+        r"\bdodatkow\w*\s+atut\w*\b",
+    )
+)
+
+
+def _is_optional_context(blob: str, pos: int, window: int = 150) -> bool:
+    """True if an explicit nice-to-have/optional marker sits shortly before pos."""
+    return any(p.search(blob[max(0, pos - window):pos]) for p in _OPTIONAL_CONTEXT_RES)
+
+
 def _is_german_language_required(job: Job) -> bool:
     """True → skip job (German appears to be a hard requirement)."""
     if not FILTER.get("exclude_german_language_required", False):
@@ -330,7 +354,11 @@ def _is_german_language_required(job: Job) -> bool:
         return False
     if any(p.search(blob) for p in _GERMAN_NOT_REQUIRED_RES):
         return False
-    return any(p.search(blob) for p in _GERMAN_REQUIRED_RES)
+    for p in _GERMAN_REQUIRED_RES:
+        for m in p.finditer(blob):
+            if not _is_optional_context(blob, m.start()):
+                return True
+    return False
 
 
 # Cities where hybrid work is NOT acceptable (too far from Wrocław).
@@ -460,7 +488,45 @@ _ONSITE_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# Perks/benefits-list noise that reuses "on-site"/"onsite" for something that has
+# nothing to do with where the CANDIDATE must work (free onsite lunch, a gym on
+# the premises, an office dog …). Real example from calibration (docs/DOOMED_GATE_
+# PLAN.md M4, real SENT+relocated BitPanda posting): "Fuel and focus on-site –
+# Pandas in Vienna, Bucharest, Barcelona, and Berlin can enjoy free onsite dining"
+# is a perks bullet, not a work-location requirement, but it sat within 120 chars
+# of four foreign cities and falsely tripped the HARD foreign-onsite rule. An
+# "on-site"/"onsite" occurrence followed shortly by one of these words is dropped
+# before the city-proximity check runs (both the foreign-location HARD rule and
+# the PL anti-hybrid-city SOFT rule reuse this).
+_ONSITE_PERKS_CONTEXT_RE = re.compile(
+    r"\b(?:dining|lunch(?:es)?|snacks?|cafeteria|canteen|coffee|breakfast|"
+    r"free\s+food|kitchen|parking|bike\s+storage|gym(?:\s+membership)?|"
+    r"office\s+dog|perks?\s+and\s+rewards?)\b",
+    re.IGNORECASE,
+)
+
+
+def _onsite_signal_positions(blob: str) -> list[int]:
+    """Match starts of _ONSITE_SIGNAL_RES, minus perks-bullet noise (see above)."""
+    return [
+        m.start()
+        for p in _ONSITE_SIGNAL_RES
+        for m in p.finditer(blob)
+        if not _ONSITE_PERKS_CONTEXT_RE.search(blob[m.start(): m.start() + 100])
+    ]
+
+
 # Strong fully-remote signals — if present, do NOT block on a body city mention.
+#
+# theprotocol.it's "Parametry oferty" block renders a per-listing "tryb pracy:"
+# (work mode) value that is real, listing-specific data — NOT boilerplate — but
+# it can enumerate several modes together (e.g. "zdalna • hybrydowa •
+# stacjonarna" / "zdalna • hybrydowa"). Calibration (docs/DOOMED_GATE_PLAN.md
+# M4) found several real SENT theprotocol.it jobs (NASK, B2BNet, IdeoSpZoO…)
+# falsely hard-blocked because "stacjonarna"/"hybrydowa" sat next to the city —
+# but "zdalna" was ALSO offered, meaning the candidate could simply pick the
+# remote option. Whenever "zdalna" appears as (one of) the offered mode(s) in
+# that facet, remote is available → veto the on-site block.
 _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -469,6 +535,8 @@ _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bremote[-\s]first\b",
         r"\bwork\s+from\s+anywhere\b",
         r"\bw\s+pełni\s+zdaln\w*",   # PL: fully remote
+        r"\b100\s*%\s*zdaln\w*",    # PL: 100% remote
+        r"tryb\s+pracy:?\s*\n?\s*\[?\s*(?:100\s*%\s*)?zdaln\w*",  # PL: theprotocol.it work-mode facet offering remote
     )
 )
 
@@ -532,7 +600,7 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
         return False
     if any(p.search(blob) for p in _FULLY_REMOTE_RES):
         return False
-    onsite_pos = [m.start() for p in _ONSITE_SIGNAL_RES for m in p.finditer(blob)]
+    onsite_pos = _onsite_signal_positions(blob)
     if not onsite_pos:
         return False
     city_pos: list[int] = []
@@ -720,15 +788,329 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
 
 # Human-readable labels for the manual-apply "warn but allow" screen. Maps each
 # body-level gate to a short message shown in Telegram before docs are generated.
-_MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = (
+# screen_job_text() (paste path) treats ALL of these uniformly — its existing
+# warn-but-allow contract is unaffected by the HARD/SOFT split below, which only
+# matters for the NEW doomed gate (assess_job_text / apply_api / apply_cli).
+#
+# M4 calibration (docs/DOOMED_GATE_PLAN.md, docs/DOOMED_GATE_CALIBRATION.md)
+# against ~375 real postings + owner Sent ground truth split these two ways:
+# fullstack/German/contract/relocation/AI-mill never misfired on a row the
+# owner actually sent → safe to SKIP generation outright (HARD). But
+# has_body_disqualifier and is_unwanted_onsite_location (Polish-city version)
+# DID hard-block real sent rows on genuine (non-artifact) content — a "Mile
+# widziane: WordPress" nice-to-have among a dozen other optional tools
+# (NASK_2), a "Magento or React/Vue" listing (AdvoxStudio), a flexible-hybrid
+# Warsaw office the owner judged acceptable anyway (Bayer, PeopleVibe, Codest,
+# TechRecruitmentAgency). Both checks stay high-value signals — just not
+# precise enough to silently skip generation on — so they degrade to SOFT
+# (warn, still generate) in the new gate instead.
+_MANUAL_SCREEN_CHECKS_HARD: tuple[tuple[str, str], ...] = (
     ("_is_unwanted_fullstack", "fullstack role paired with a backend stack"),
-    ("_has_body_disqualifier", "excluded tech/platform in the description"),
     ("_is_ai_training_or_mill", "AI-training / staffing-mill company"),
-    ("_is_unwanted_onsite_location", "on-site / hybrid outside Wrocław"),
     ("_is_german_language_required", "German language required"),
     ("_is_unacceptable_contract", "part-time / very short contract"),
     ("_requires_relocation", "relocation required"),
 )
+_MANUAL_SCREEN_CHECKS_SOFT: tuple[tuple[str, str], ...] = (
+    ("_has_body_disqualifier", "excluded tech/platform in the description"),
+    ("_is_unwanted_onsite_location", "on-site / hybrid outside Wrocław"),
+)
+# screen_job_text() (paste-path warn-but-allow) checks both tiers uniformly.
+_MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = _MANUAL_SCREEN_CHECKS_HARD + _MANUAL_SCREEN_CHECKS_SOFT
+
+
+# ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ────────────────────────────
+# Deterministic, zero-LLM full-text screen that runs between fetch and the first
+# LLM call. Two severities:
+#   hard — high precision, skips generation entirely (see decision #2a-c in the
+#          plan): non-Poland on-site/hybrid, non-EU work-authorization demands,
+#          an unsupported required language, plus the reused _MANUAL_SCREEN_CHECKS.
+#   soft — lower precision, judgment call: primary-stack mismatch (Vue/Svelte/
+#          Ember-first posting with neither Angular nor React anywhere).
+
+
+@dataclass(frozen=True)
+class GateFinding:
+    rule: str
+    severity: str  # "hard" | "soft"
+    evidence: str  # short human-readable quote/label for Telegram + logs
+
+
+def _context_snippet(blob: str, start: int, end: int, pad: int = 40) -> str:
+    """Short evidence quote around a regex match, trimmed of surrounding noise."""
+    snippet = blob[max(0, start - pad):min(len(blob), end + pad)]
+    return re.sub(r"\s+", " ", snippet).strip()
+
+
+# On-site/hybrid coupled with a location OUTSIDE Poland — no commute is possible
+# for a Wrocław-based candidate, unlike the PL anti-hybrid cities above (which at
+# least share a country and, for Warsaw/Kraków, an acceptable weekly exception).
+# Deliberately conservative (word-boundary, no bare state abbreviations like "VA")
+# to keep the false-positive rate near zero — see M4 calibration in the plan.
+_FOREIGN_LOCATION_RE = re.compile(
+    r"\b(?:"
+    # US states (spelled out only — abbreviations are too ambiguous)
+    r"virginia|california|texas|massachusetts|illinois|colorado|florida|"
+    r"north\s+carolina|pennsylvania|ohio|michigan|arizona|new\s+jersey|"
+    # US / Canada cities
+    r"mclean|arlington|washington,?\s*d\.?c\.?|austin|san\s+francisco|"
+    r"san\s+jose|seattle|chicago|boston|los\s+angeles|dallas|denver|atlanta|"
+    r"miami|houston|phoenix|philadelphia|detroit|minneapolis|charlotte|"
+    r"san\s+diego|portland|nashville|raleigh|new\s+york\s+city|"
+    r"toronto|vancouver|montreal|ottawa|"
+    # UK
+    r"london|manchester|birmingham|edinburgh|glasgow|"
+    # Western Europe (non-PL)
+    r"berlin|munich|münchen|frankfurt|hamburg|cologne|köln|paris|amsterdam|"
+    r"rotterdam|dublin|zurich|zürich|geneva|vienna|brussels|madrid|barcelona|"
+    r"milan|milano|rome|stockholm|copenhagen|oslo|helsinki|lisbon|"
+    # Country / region names
+    r"united\s+states|u\.s\.a\.?|united\s+kingdom|canada|england|scotland|"
+    r"germany|france|netherlands|switzerland|austria|belgium|spain|italy|"
+    r"sweden|denmark|norway|finland|ireland"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
+    """HARD (a): on-site/hybrid signal sitting near a non-Poland location.
+
+    Mirrors _is_unwanted_onsite_location's windowing (~120 chars) but against a
+    location OUTSIDE Poland instead of the PL anti-hybrid city set. Vetoed by a
+    strong fully-remote signal, any Wrocław mention (candidate's own city), or
+    the acceptable ~1-day/week Warsaw/Kraków hybrid exception.
+    """
+    if any(p.search(blob) for p in _FULLY_REMOTE_RES):
+        return None
+    if "wroc" in blob:
+        return None
+    if _is_acceptable_weekly_hybrid(job):
+        return None
+    onsite_pos = _onsite_signal_positions(blob)
+    if not onsite_pos:
+        return None
+    for m in _FOREIGN_LOCATION_RE.finditer(blob):
+        if any(abs(m.start() - o) <= 120 for o in onsite_pos):
+            return GateFinding(
+                rule="foreign_onsite_hybrid",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    return None
+
+
+# Non-EU work-authorization / citizenship demands the candidate cannot satisfy
+# (Polish/EU national, needs sponsorship-free EU work eligibility, not US/UK).
+_WORK_AUTH_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bw-?2\s+(?:employee|employment|only|status)\b",
+        r"\bc2c\b",
+        r"\b1099\s+contractor\b",
+        r"\bh-?1b\b",
+        r"\bmust\s+be\s+a\s+(?:us|u\.s\.)\s+citizen\b",
+        r"\b(?:us|u\.s\.)\s+citizenship\s+(?:is\s+)?required\b",
+        r"\bgreen\s+card\s+(?:holder|required)\b",
+        r"\bsecurity\s+clearance\s+required\b",
+        r"\bactive\s+(?:secret|top\s+secret)\s+clearance\b",
+        r"\bmust\s+(?:be\s+)?(?:located|based|reside|residing)\s+in\s+the\s+"
+        r"(?:us|u\.s\.|united\s+states|uk|united\s+kingdom)\b",
+        r"\bauthoriz(?:ed|ation)\s+to\s+work\s+in\s+the\s+(?:us|u\.s\.|united\s+states)"
+        r"\s+without\s+sponsorship\b",
+        r"\bno\s+visa\s+sponsorship\b",
+        r"\bvisa\s+sponsorship\s+(?:is\s+)?not\s+(?:available|provided|offered)\b",
+    )
+)
+
+
+def _assess_work_authorization(blob: str) -> "GateFinding | None":
+    """HARD (b): posting demands work authorization the candidate cannot meet."""
+    for p in _WORK_AUTH_RES:
+        m = p.search(blob)
+        if m:
+            return GateFinding(
+                rule="unsupported_work_authorization",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    return None
+
+
+# Required-language detection for languages the candidate does NOT speak, beyond
+# German (already covered end-to-end by _is_german_language_required). Narrow,
+# high-precision list — same "required/native/fluent/CEFR level" pattern shape.
+_UNSUPPORTED_LANG_REQUIRED_RES: dict[str, tuple[re.Pattern[str], ...]] = {
+    "French": tuple(
+        re.compile(p, re.IGNORECASE)
+        for p in (
+            r"\bwith\s+french\b",
+            r"\(french\)",
+            r"\bfrench\s+speaking\b",
+            r"\bspeaking\s+french\b",
+            r"\bfluent\s+in\s+french\b",
+            r"\bnative(?:[-\s]+level)?\s+french\b",
+            r"\bfrench\s+native\b",
+            r"\bfrench\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
+            r"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?french\b",
+            r"\bfrench\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
+            r"\bcourant\s+en\s+français\b",
+        )
+    ),
+    "Dutch": tuple(
+        re.compile(p, re.IGNORECASE)
+        for p in (
+            r"\bwith\s+dutch\b",
+            r"\(dutch\)",
+            r"\bdutch\s+speaking\b",
+            r"\bspeaking\s+dutch\b",
+            r"\bfluent\s+in\s+dutch\b",
+            r"\bnative(?:[-\s]+level)?\s+dutch\b",
+            r"\bdutch\s+native\b",
+            r"\bdutch\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
+            r"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?dutch\b",
+            r"\bdutch\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
+        )
+    ),
+}
+
+# English-as-working-language vetoes any required-foreign-language finding
+# (shared with the German check's not-required set).
+_ENGLISH_ONLY_WORKPLACE_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\benglish\s+is\s+(?:the\s+)?(?:working|company|office)\s+language\b", re.IGNORECASE),
+    re.compile(r"\bworking\s+language\s*[:\s]+\s*english\b", re.IGNORECASE),
+)
+
+
+def _assess_unsupported_language(job: Job) -> "GateFinding | None":
+    """HARD (c): a required language (French/Dutch) the candidate doesn't speak.
+
+    German is intentionally excluded — already covered end-to-end by
+    _is_german_language_required (listing-level filter + manual-screen reuse
+    above); this only extends the same pattern shape to a narrow extra list.
+    """
+    blob = _job_plain_text_blob(job)
+    if not blob.strip():
+        return None
+    if any(p.search(blob) for p in _ENGLISH_ONLY_WORKPLACE_RES):
+        return None
+    for lang_name, patterns in _UNSUPPORTED_LANG_REQUIRED_RES.items():
+        if any(p.search(blob) for p in patterns):
+            return GateFinding(
+                rule="unsupported_language_required",
+                severity="hard",
+                evidence=f"{lang_name} language required",
+            )
+    return None
+
+
+# SOFT — primary-stack mismatch: a Vue/Svelte/Ember-first posting where neither
+# Angular nor React appears anywhere in the text. "Angular or Vue" / "React or
+# Vue" postings are NOT flagged (both frameworks present → not a mismatch).
+_OTHER_FRAMEWORK_RE = re.compile(r"\b(?:vue(?:\.?js)?|sveltekit|svelte|ember(?:\.?js)?)\b", re.IGNORECASE)
+_CANDIDATE_FRAMEWORK_RE = re.compile(r"\b(?:angular|react(?:\.?js)?)\b", re.IGNORECASE)
+
+
+def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
+    """SOFT — primary stack isn't Angular/React (Vue/Svelte/Ember-first role)."""
+    other = _OTHER_FRAMEWORK_RE.search(blob)
+    if not other:
+        return None
+    if _CANDIDATE_FRAMEWORK_RE.search(blob):
+        return None
+    return GateFinding(
+        rule="stack_mismatch_non_candidate_framework",
+        severity="soft",
+        evidence=_context_snippet(blob, other.start(), other.end()),
+    )
+
+
+# Full-page dumps append unrelated recommendation/navigation blocks that don't
+# describe THIS job at all — real examples from calibration (docs/DOOMED_GATE_
+# PLAN.md M4):
+#   - LinkedIn "Similar jobs"/"People also viewed": a Fairmarkit dump contained
+#     an unrelated "... (hybrid work in Warsaw) — Synergetica" sidebar entry
+#     that falsely tripped the on-site/hybrid check for Fairmarkit itself.
+#   - theprotocol.it renders a sitewide SEO footer starting at "Praca w
+#     miastach:" (jobs by city) listing dozens of cities/positions/technologies
+#     as "<term> praca" links (e.g. "Wordpress praca", "Praca IT Kraków") that
+#     have nothing to do with the listing — falsely tripped both the body-
+#     disqualifier and on-site-city checks on real SENT jobs (NASK, ProcomSystem,
+#     B2BNet, Devapo, EdgeOneSolutions, ConsdataSA, IdeoSpZoO, GetItTogether…).
+#   - pracuj.pl appends a "Sprawdź podobne oferty" (check similar offers) block.
+# Cut the text at the first such marker before any body-level check runs.
+_RECOMMENDATION_TAIL_RE = re.compile(
+    # No trailing \b: "praca w miastach:" ends in ':' (non-word), so a \b right
+    # after it never matches (': ' and ':\n' are both non-word→non-word — the
+    # same class of bug as the historical `\bc#\b` miss on "C#", see CLAUDE.md).
+    r"\n\s*(?:similar jobs\b|people also viewed\b|show more jobs like this\b"
+    r"|praca w miastach:|sprawdź podobne oferty\b)",
+    re.IGNORECASE,
+)
+
+
+def _strip_recommendation_tail(text: str) -> str:
+    m = _RECOMMENDATION_TAIL_RE.search(text or "")
+    return text[: m.start()] if m else text
+
+
+def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> list[GateFinding]:
+    """Deterministic, zero-LLM doomed-vacancy gate over the full fetched job text.
+
+    Returns every finding (hard + soft, in check order); callers decide what to
+    do with them (see hunter.apply_api / hunter.apply_cli wiring). Reuses the
+    existing _MANUAL_SCREEN_CHECKS body-level filters (split HARD/SOFT per M4
+    calibration, see the comment above _MANUAL_SCREEN_CHECKS_HARD), plus three
+    new HARD rule families (non-Poland on-site/hybrid, unsupported work
+    authorization, unsupported required language) and one SOFT rule (primary-
+    stack mismatch). No network calls, no LLM calls — pure regex.
+    """
+    job_text = _strip_recommendation_tail(job_text or "")
+    job = Job(
+        title=title or "",
+        company=company or "",
+        location="",
+        salary=None,
+        url="",
+        source="manual",
+        raw={"description": job_text or ""},
+    )
+    blob = f"{job.title}\n{_job_plain_text_blob(job)}".lower()
+
+    findings: list[GateFinding] = []
+    for checks, severity in ((_MANUAL_SCREEN_CHECKS_HARD, "hard"), (_MANUAL_SCREEN_CHECKS_SOFT, "soft")):
+        for fn_name, label in checks:
+            fn = globals().get(fn_name)
+            try:
+                if fn and fn(job):
+                    findings.append(GateFinding(rule=fn_name.strip("_"), severity=severity, evidence=label))
+            except Exception:  # noqa: BLE001 — one bad check must not sink the others
+                continue
+
+    for assess in (_assess_foreign_onsite,):
+        try:
+            finding = assess(job, blob)
+            if finding:
+                findings.append(finding)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        finding = _assess_unsupported_language(job)
+        if finding:
+            findings.append(finding)
+    except Exception:  # noqa: BLE001
+        pass
+
+    for assess_blob in (_assess_work_authorization, _assess_stack_mismatch):
+        try:
+            finding = assess_blob(blob)
+            if finding:
+                findings.append(finding)
+        except Exception:  # noqa: BLE001
+            pass
+
+    return findings
 
 
 def screen_job_text(
@@ -740,29 +1122,17 @@ def screen_job_text(
 ) -> str | None:
     """Body-level screen for the manual URL/paste 'warn but allow' path.
 
-    A manually pasted URL bypasses the hunt-time filter entirely. This runs the
-    gates that work on the fetched full text (plus the supplied title/company when
-    known) and returns a short human-readable reason if the posting *would* have
-    been filtered — so the bot can warn the user before generating docs, while
-    still letting it through. Returns None when nothing fires.
+    A manually pasted URL bypasses the hunt-time filter entirely. This runs
+    assess_job_text() (plus the supplied title/company when known) and returns
+    the first finding's evidence — regardless of severity — as a short
+    human-readable reason, so the bot can warn the user before generating docs
+    while still letting it through. Returns None when nothing fires.
 
     Deliberately does NOT enforce the title-keyword whitelist: a manual paste is
     an intentional override, so we only flag disqualifiers we're confident about.
+    `location` is accepted for backward compatibility but unused (no call site
+    has ever passed a meaningful value; assess_job_text derives geography from
+    the body text itself).
     """
-    job = Job(
-        title=title or "",
-        company=company or "",
-        location=location or "",
-        salary=None,
-        url="",
-        source="manual",
-        raw={"description": job_text or ""},
-    )
-    for fn_name, label in _MANUAL_SCREEN_CHECKS:
-        fn = globals().get(fn_name)
-        try:
-            if fn and fn(job):
-                return label
-        except Exception:  # noqa: BLE001 — best-effort warning, never block apply
-            continue
-    return None
+    findings = assess_job_text(job_text, title=title, company=company)
+    return findings[0].evidence if findings else None

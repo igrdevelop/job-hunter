@@ -1,0 +1,40 @@
+# NOTE (docs/DOOMED_GATE_PLAN.md M1 fixtures): the real Megaport posting text at
+# generation time (2026-06-09, tracker row ATS 98%/JS stack, To Learn: "Tanstack
+# Query, Vite advanced configuration, Tailwind component patterns, Nuxt.js SSR
+# optimization") is not recoverable from this dev machine — Applications/ here
+# only has current-run data, and re-fetching the live URL today returns a
+# posting that has since been edited to also list the candidate's own primary
+# frameworks as acceptable alternatives (verified live 2026-07-06), so it no
+# longer reproduces the stack-mismatch condition this fixture targets. This
+# fixture reconstructs the real, unchanged "About Megaport" company boilerplate
+# (byte-identical across both the 2026-06-09 and 2026-07-02 live fetches) plus
+# a requirements section built from the candidate's actual recorded skills-gap
+# ("To Learn") for that row — Vue 3, Nuxt, Vitest, Playwright, Tailwind,
+# TanStack, Vite — with none of the candidate's own frameworks mentioned,
+# matching the real SOFT stack-mismatch case the plan cites.
+URL: https://www.workingnomads.com/jobs/senior-frontend-software-engineer-megaport-1638359
+
+Senior Frontend Software Engineer
+Megaport
+Full-time
+Remote (Europe)
+
+About Megaport
+We're not your typical tech company – and we don't want to be. Megaport is the global leader in Network as a Service (NaaS), and has transformed the way businesses connect to the cloud, data centers, and each other. We're publicly listed on the Australian Stock Exchange and partnered with the biggest names in tech like Amazon, Microsoft, Google, Oracle, IBM, and more. Headquartered in Brisbane with a crew of over 400 people spread across Asia-Pacific, Europe, and the Americas, our employees enjoy an environment that is collaborative, supportive, and (actually) fun.
+
+The Role
+We are looking for a Senior Frontend Engineer to join our Engineering team to build and evolve the Megaport Portal, our highest-value customer-facing web property.
+
+What You'll Be Doing
+Build new functionality using our modern frontend stack: Vue 3, Nuxt, TypeScript, Vite, Tailwind CSS.
+Write and maintain unit and e2e tests with Vitest and Playwright.
+Manage server state with TanStack Query and client-side routing with TanStack Router.
+Collaborate with backend engineers, designers and product managers in an agile team.
+
+What We're Looking For
+Strong commercial experience building production applications with Vue 3 and Nuxt.
+Solid TypeScript and modern JavaScript fundamentals.
+Experience with Vite build tooling and component-driven development.
+Familiarity with Tailwind CSS utility-first styling.
+Comfortable writing automated tests (Vitest, Playwright).
+Excellent communication skills and a collaborative mindset.

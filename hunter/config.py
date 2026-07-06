@@ -72,6 +72,21 @@ ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in 
 ATS_VERDICT_TARGET: float = float(os.getenv("ATS_VERDICT_TARGET", "95"))
 ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "2"))
 
+# ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ───────────────────────────
+# Deterministic (regex-only, zero LLM cost) full-text screen run right after
+# expired-check, before the first LLM call in both pipelines
+# (`hunter.apply_shared.run_doomed_gate` → `hunter.filters.assess_job_text`).
+# HARD findings (high precision — non-Poland onsite/hybrid, non-EU work
+# authorization, unsupported required language) write a SKIP tracker row and
+# abort generation for $0.00; SOFT findings (e.g. stack mismatch) just warn in
+# Telegram and generation continues. Force-mode/manual-paste always degrades
+# HARD to warn (the owner explicitly asked to generate this one).
+DOOMED_GATE_ENABLED: bool = os.getenv("DOOMED_GATE_ENABLED", "true").lower() in ("true", "1", "yes")
+# "skip" (default) aborts generation on a HARD finding; "warn" is an emergency
+# lever to downgrade every HARD finding to a warning without disabling the
+# gate entirely, e.g. if live-data precision turns out worse than calibration.
+DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").strip().lower()
+
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")

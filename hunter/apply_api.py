@@ -34,6 +34,7 @@ from hunter.apply_shared import (
     is_backend_only_job_text,
     is_react_only_job_text,
     notify,
+    run_doomed_gate,
     send_telegram_documents,
     validate_content,
 )
@@ -274,6 +275,18 @@ def _run_main_api(
             print(f"[apply_agent] WARN (manual screen) — {screen_reason}: {url}")
     except Exception as e:  # noqa: BLE001 — best-effort, never block apply
         print(f"[apply_agent] Warning: manual screen failed: {e}")
+
+    # Step 1.5f — Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md). Deterministic
+    # full-text screen that can actually ABORT generation on a HARD finding
+    # (non-Poland onsite/hybrid, non-EU work authorization, unsupported
+    # required language) — unlike Step 1.5e above, which only ever warns.
+    # Force-mode/paste degrades HARD to warn (owner explicitly said generate).
+    if run_doomed_gate(
+        job_text, url,
+        title=jobleads_title, company=jobleads_company,
+        is_manual_override=bool(paste_text) or skip_dedup,
+    ):
+        return
 
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "generation_rules.md"

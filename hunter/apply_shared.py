@@ -190,6 +190,81 @@ def _already_processed(url: str, skip_dedup: bool = False) -> bool:
         return False
 
 
+# ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ──────────────────────────────
+
+def run_doomed_gate(
+    job_text: str,
+    url: str,
+    *,
+    title: str = "",
+    company: str = "",
+    is_manual_override: bool = False,
+) -> bool:
+    """Deterministic full-text screen run right after expired-check, before any
+    LLM call (Step 1.5f in both pipelines). Zero-cost (regex only) — see
+    `hunter.filters.assess_job_text` for the rule families.
+
+    Returns True when the caller should ABORT generation — a SKIP row has
+    already been written to the tracker and Telegram notified. Returns False
+    to continue (SOFT findings only, a HARD finding degraded to warn because
+    of `is_manual_override`, the gate is disabled, or it errored — best-effort,
+    a gate failure never blocks an apply).
+
+    `is_manual_override`: True for force-mode (`skip_dedup`) or a manual paste
+    — the owner explicitly said "generate this one anyway", so a HARD finding
+    degrades to the same warn-but-allow behavior as SOFT (existing semantics
+    shared with `screen_job_text`).
+    """
+    from hunter.config import DOOMED_GATE_ENABLED, DOOMED_GATE_HARD_ACTION
+    if not DOOMED_GATE_ENABLED:
+        return False
+
+    try:
+        from hunter.filters import assess_job_text
+        findings = assess_job_text(job_text, title=title, company=company)
+    except Exception as e:  # noqa: BLE001 — best-effort, never block apply
+        print(f"[apply_agent] Warning: doomed gate failed (continuing): {e}")
+        return False
+
+    if not findings:
+        return False
+
+    hard = [f for f in findings if f.severity == "hard"]
+    soft = [f for f in findings if f.severity == "soft"]
+
+    if hard and DOOMED_GATE_HARD_ACTION == "skip" and not is_manual_override:
+        finding = hard[0]
+        reason = f'{finding.rule} — "{finding.evidence}"'
+        notify(
+            f"⛔ <b>Skipped before generation</b>\n"
+            f"Reason: {reason}\n🔗 {url}"
+        )
+        print(f"[apply_agent] SKIP (doomed gate, HARD) — {reason}: {url}")
+        try:
+            from hunter.models import Job
+            from hunter.tracker import add_skipped
+            add_skipped(Job(
+                title=title, company=company, location="", salary=None,
+                url=url, source="doomed_gate",
+            ))
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write doomed-gate SKIP to tracker: {e}")
+        return True
+
+    # SOFT findings, or HARD degraded to warn (manual override / DOOMED_GATE_HARD_ACTION=warn):
+    # generate anyway, just surface every finding in one Telegram message.
+    warn_findings = hard + soft
+    lines = "\n".join(f"• {f.rule}: {f.evidence}" for f in warn_findings[:5])
+    degraded_note = " (manual override — generating anyway)" if hard and is_manual_override else ""
+    notify(
+        f"⚠️ <b>Heads-up — doomed-gate finding(s)</b>{degraded_note}\n"
+        f"{lines}\n🔗 {url}\n\n"
+        f"Generating documents anyway…"
+    )
+    print(f"[apply_agent] WARN (doomed gate) — {len(warn_findings)} finding(s): {url}")
+    return False
+
+
 # ── Telegram helpers ──────────────────────────────────────────────────────────
 
 def notify(message: str) -> None:
