@@ -322,6 +322,29 @@ def _job_plain_text_blob(job: Job, max_chars: int = 24_000) -> str:
     return blob if len(blob) <= max_chars else blob[:max_chars]
 
 
+# "Nice to have" / optional-section markers (EN + PL). A language match sitting
+# shortly after one of these is a bonus, not a requirement — real M4 calibration
+# false positive (docs/DOOMED_GATE_PLAN.md): a real SENT theprotocol.it posting
+# (DHCBusinessSolutions) listed "Nice to have — Optional, ... German language
+# skills" under an explicit optional heading.
+_OPTIONAL_CONTEXT_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bnice\s+to\s+have\b",
+        r"\boptional\b",
+        r"\bbonus\b",
+        r"\ba\s+plus\b",
+        r"\bmile\s+widzian\w*\b",
+        r"\bdodatkow\w*\s+atut\w*\b",
+    )
+)
+
+
+def _is_optional_context(blob: str, pos: int, window: int = 150) -> bool:
+    """True if an explicit nice-to-have/optional marker sits shortly before pos."""
+    return any(p.search(blob[max(0, pos - window):pos]) for p in _OPTIONAL_CONTEXT_RES)
+
+
 def _is_german_language_required(job: Job) -> bool:
     """True → skip job (German appears to be a hard requirement)."""
     if not FILTER.get("exclude_german_language_required", False):
@@ -331,7 +354,11 @@ def _is_german_language_required(job: Job) -> bool:
         return False
     if any(p.search(blob) for p in _GERMAN_NOT_REQUIRED_RES):
         return False
-    return any(p.search(blob) for p in _GERMAN_REQUIRED_RES)
+    for p in _GERMAN_REQUIRED_RES:
+        for m in p.finditer(blob):
+            if not _is_optional_context(blob, m.start()):
+                return True
+    return False
 
 
 # Cities where hybrid work is NOT acceptable (too far from Wrocław).
@@ -461,6 +488,34 @@ _ONSITE_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# Perks/benefits-list noise that reuses "on-site"/"onsite" for something that has
+# nothing to do with where the CANDIDATE must work (free onsite lunch, a gym on
+# the premises, an office dog …). Real example from calibration (docs/DOOMED_GATE_
+# PLAN.md M4, real SENT+relocated BitPanda posting): "Fuel and focus on-site –
+# Pandas in Vienna, Bucharest, Barcelona, and Berlin can enjoy free onsite dining"
+# is a perks bullet, not a work-location requirement, but it sat within 120 chars
+# of four foreign cities and falsely tripped the HARD foreign-onsite rule. An
+# "on-site"/"onsite" occurrence followed shortly by one of these words is dropped
+# before the city-proximity check runs (both the foreign-location HARD rule and
+# the PL anti-hybrid-city SOFT rule reuse this).
+_ONSITE_PERKS_CONTEXT_RE = re.compile(
+    r"\b(?:dining|lunch(?:es)?|snacks?|cafeteria|canteen|coffee|breakfast|"
+    r"free\s+food|kitchen|parking|bike\s+storage|gym(?:\s+membership)?|"
+    r"office\s+dog|perks?\s+and\s+rewards?)\b",
+    re.IGNORECASE,
+)
+
+
+def _onsite_signal_positions(blob: str) -> list[int]:
+    """Match starts of _ONSITE_SIGNAL_RES, minus perks-bullet noise (see above)."""
+    return [
+        m.start()
+        for p in _ONSITE_SIGNAL_RES
+        for m in p.finditer(blob)
+        if not _ONSITE_PERKS_CONTEXT_RE.search(blob[m.start(): m.start() + 100])
+    ]
+
+
 # Strong fully-remote signals — if present, do NOT block on a body city mention.
 #
 # theprotocol.it's "Parametry oferty" block renders a per-listing "tryb pracy:"
@@ -545,7 +600,7 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
         return False
     if any(p.search(blob) for p in _FULLY_REMOTE_RES):
         return False
-    onsite_pos = [m.start() for p in _ONSITE_SIGNAL_RES for m in p.finditer(blob)]
+    onsite_pos = _onsite_signal_positions(blob)
     if not onsite_pos:
         return False
     city_pos: list[int] = []
@@ -832,7 +887,7 @@ def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
         return None
     if _is_acceptable_weekly_hybrid(job):
         return None
-    onsite_pos = [m.start() for p in _ONSITE_SIGNAL_RES for m in p.finditer(blob)]
+    onsite_pos = _onsite_signal_positions(blob)
     if not onsite_pos:
         return None
     for m in _FOREIGN_LOCATION_RE.finditer(blob):

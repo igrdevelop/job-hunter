@@ -2,8 +2,8 @@
 
 **Branch:** `feat/doomed-vacancy-gate` (from `origin/master` @ 75c38ad, поверх
 смерженного verdict-refine-loop PR #115)
-**Status:** PLANNED — ready for implementation (реализация в ЭТОЙ ветке/PR,
-один коммит на милстоун)
+**Status:** M1–M4 DONE — ready for PR (см. docs/DOOMED_GATE_CALIBRATION.md для
+результата калибровки)
 **Scope:** `hunter/filters.py`, wiring в `apply_api.py`/`apply_cli.py`,
 `tools/screen_calibrate.py`, config, tests, CLAUDE.md
 
@@ -146,13 +146,13 @@ owner_note` + сводка: сколько hard/soft/чисто, список в
 
 ## Definition of done
 
-- [ ] `python -m pytest tests/ -q` зелёный, КРОМЕ 3 известных pre-existing
+- [x] `python -m pytest tests/ -q` зелёный, КРОМЕ 3 известных pre-existing
       падений на этой машине (test_cost_writer ×2 + test_verdict_writer ×1 —
       из-за локального tracker.xlsx; их не чинить, задача заведена отдельно).
-- [ ] `python -m ruff check .` чистый; `python -m compileall .` ок.
-- [ ] Калибровка M4 прогнана, критерии выполнены, отчёт в
+- [x] `python -m ruff check .` чистый; `python -m compileall .` ок.
+- [x] Калибровка M4 прогнана, критерии выполнены, отчёт в
       docs/DOOMED_GATE_CALIBRATION.md + краткая выжимка в PR.
-- [ ] CLAUDE.md обновлён в том же PR (конфиг-таблица, Pipeline Flow, Work Log).
+- [x] CLAUDE.md обновлён в том же PR (конфиг-таблица, Pipeline Flow, Work Log).
 - [ ] Один коммит на милстоун, `git push -u origin feat/doomed-vacancy-gate`,
       PR на master через `gh pr create` (в конце тела:
       `🤖 Generated with [Claude Code](https://claude.com/claude-code)`).

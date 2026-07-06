@@ -51,6 +51,16 @@ from hunter.tracker import normalize_url  # noqa: E402
 # skip in the live sample rather than burn the run on guaranteed failures.
 _SKIP_LIVE_HOSTS = ("linkedin.com",)
 
+# Rules that are an exact-name lookup against an owner-curated blocklist
+# (hunter.config.FILTER["exclude_companies"]), not a regex heuristic over the
+# posting text — there is no pattern to "narrow" here, the rule fires because
+# the owner already decided (PR #110, 2026-06-30) that this specific company
+# is unwanted. A HARD hit on a Sent row for one of these rules only means the
+# row predates that decision (e.g. Micro1 applies from 2026-05-13/2026-06-19,
+# weeks before exclude_companies gained "micro1" on 2026-06-30) — it is not a
+# gate false positive and must not be "fixed" by loosening the list.
+_OWNER_BLOCKLIST_RULES = frozenset({"is_ai_training_or_mill"})
+
 
 @dataclass
 class Posting:
@@ -255,7 +265,8 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
         return classify(note) == "applied"
 
     sent_hard = [r for r in rows if r.severity == "hard" and _sent_true(r.owner_note)]
-    false_positives = [r for r in sent_hard if not r.stale]
+    blocklist_excluded = [r for r in sent_hard if not r.stale and r.rule in _OWNER_BLOCKLIST_RULES]
+    false_positives = [r for r in sent_hard if not r.stale and r.rule not in _OWNER_BLOCKLIST_RULES]
     stale_excluded = [r for r in sent_hard if r.stale]
     print(f"\nHARD findings on rows the owner actually SENT (must be zero): {len(false_positives)}")
     for r in false_positives:
@@ -268,6 +279,15 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
         )
         for r in stale_excluded:
             print(f"  (stale) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
+    if blocklist_excluded:
+        print(
+            f"\n({len(blocklist_excluded)} additional HARD hit(s) on sent rows excluded — the "
+            "rule is an exact-name lookup against the owner-curated exclude_companies "
+            "list (PR #110, 2026-06-30), not a text heuristic; these Sent dates predate "
+            "that decision, so the row is stale ground truth, not a gate false positive):"
+        )
+        for r in blocklist_excluded:
+            print(f"  (pre-policy) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
 
     bigbear = [r for r in rows if "bigbear" in r.company.lower() and r.severity == "hard"]
     megaport = [r for r in rows if "megaport" in r.company.lower() and r.severity == "soft"]

@@ -111,6 +111,33 @@ def test_foreign_onsite_hybrid_polish_remote_facet_veto() -> None:
     assert "foreign_onsite_hybrid" not in _rules(findings)
 
 
+def test_foreign_onsite_hybrid_vetoed_by_perks_bullet() -> None:
+    """Real M4 calibration false positive: BitPanda (a real SENT+relocated
+    posting, location 'Barcelona, Remote') lists a benefits bullet — 'Fuel and
+    focus on-site – Pandas in Vienna, Bucharest, Barcelona, and Berlin can
+    enjoy free onsite dining' — that used to trip the HARD rule purely because
+    four foreign cities sit within 120 chars of the word 'on-site'/'onsite'."""
+    text = (
+        "Reward for your impact - a competitive total compensation package. "
+        "Fuel and focus on-site - Pandas in Vienna, Bucharest, Barcelona, and Berlin "
+        "can enjoy free onsite dining, with freshly prepared lunches and snacks."
+    )
+    findings = assess_job_text(text)
+    assert "foreign_onsite_hybrid" not in _rules(findings)
+
+
+def test_foreign_onsite_hybrid_not_vetoed_by_unrelated_perks_word_elsewhere() -> None:
+    """The perks veto only suppresses the SPECIFIC on-site occurrence it sits
+    next to — a genuine foreign on-site requirement elsewhere in the same
+    posting must still fire."""
+    text = (
+        "Free coffee and snacks in our kitchen every day. "
+        "This is an on-site role based in our Berlin office, 5 days a week."
+    )
+    findings = assess_job_text(text)
+    assert "foreign_onsite_hybrid" in _rules(findings)
+
+
 # ── HARD rule (b): work authorization ───────────────────────────────────────
 
 @pytest.mark.parametrize("text", [
@@ -154,6 +181,32 @@ def test_german_still_covered_via_reused_manual_check() -> None:
     findings = assess_job_text(text)
     assert "is_german_language_required" in _rules(findings)
     assert all(f.severity == "hard" for f in findings if f.rule == "is_german_language_required")
+
+
+def test_german_vetoed_when_listed_as_nice_to_have() -> None:
+    """Real M4 calibration false positive: a real SENT theprotocol.it posting
+    (DHCBusinessSolutions) lists 'Nice to have — Optional, 5+ years of
+    commercial experience, German language skills, Usage of Nx' — a bonus, not
+    a hard requirement."""
+    text = (
+        "Requirements: 5+ years Angular, TypeScript, RxJS, excellent communication skills.\n"
+        "Nice to have: Optional, 5+ years of commercial experience, "
+        "German language skills, Usage of Nx.\n"
+        "What we offer: Personal development budget."
+    )
+    findings = assess_job_text(text)
+    assert "is_german_language_required" not in _rules(findings)
+
+
+def test_german_still_hard_when_actually_required_near_nice_to_have_section() -> None:
+    """The optional-context veto must not blanket-suppress a genuine requirement
+    stated elsewhere in the same posting."""
+    text = (
+        "Requirements: fluent in German for daily client calls.\n"
+        "Nice to have: experience with Nx monorepos."
+    )
+    findings = assess_job_text(text)
+    assert "is_german_language_required" in _rules(findings)
 
 
 # ── SOFT rule: primary-stack mismatch ───────────────────────────────────────
