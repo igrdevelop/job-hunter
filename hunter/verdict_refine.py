@@ -8,14 +8,14 @@ just recorded. Half of its "missing keyword" feedback is presentational
 clearly), so this module closes the loop: rewrite → re-render → re-verdict,
 keeping only improvements.
 
-Two escalating rounds (see key decisions in the plan doc):
-  round 1 (honest)  — only facts already supported by candidate_profile.md.
-  round 2 (stretch) — may add posting technologies absent from the profile,
-                       as plain skills/summary entries; every addition is
-                       tracked in content["to_learn"]. May be woven into ONE
-                       flexible Altoros project (2018-2022); never into the
-                       recent/verifiable employers (Atruvia, Fairmarkit,
-                       Intel, SII, SolbegSoft).
+Escalating rounds (owner decision 2026-07-07: max 3, stretch on the last):
+  rounds 1-2 (honest) — only facts already supported by candidate_profile.md.
+  round 3+ (stretch)  — may add posting technologies absent from the profile,
+                        as plain skills/summary entries; every addition is
+                        tracked in content["to_learn"]. May be woven into ONE
+                        flexible Altoros project (2018-2022); never into the
+                        recent/verifiable employers (Atruvia, Fairmarkit,
+                        Intel, SII, SolbegSoft).
 
 Both functions are pure orchestration: no Telegram, no tracker writes. The
 caller (apply_api / apply_cli) decides what to notify and persists the
@@ -42,10 +42,14 @@ _DROP_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Recent, verifiable employers — never touched by a round-2 stretch addition.
+# First round that runs as STRETCH (may add posting tech absent from the
+# profile). Rounds below this are HONEST (visibility-only rewrites).
+STRETCH_FROM_ROUND = 3
+
+# Recent, verifiable employers — never touched by a stretch-round addition.
 _PROTECTED_EMPLOYERS = ("Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft")
 
-# Flexible Altoros client projects a round-2 stretch tech MAY be woven into
+# Flexible Altoros client projects a stretch-round tech MAY be woven into
 # (2018-2022 — era-plausible, owner-approved precedent: React prototypes in
 # the E-commerce project).
 _ALTOROS_FLEXIBLE_PROJECTS = ("E-commerce", "Insurance", "Healthcare", "Grant Management")
@@ -177,7 +181,7 @@ def _rewrite_round(content: dict, job_text: str, feedback: str, *, round_num: in
 
 
 def _merge_to_learn(content: dict, additions: object) -> None:
-    """Append round-2 stretch additions to content["to_learn"] (deduped,
+    """Append stretch-round additions to content["to_learn"] (deduped,
     comma-joined) so they reach the tracker's To Learn column."""
     if not isinstance(additions, list) or not additions:
         return
@@ -265,12 +269,15 @@ def refine_loop(
     target: float = 95.0,
     max_rounds: int = 1,
 ) -> tuple[dict, dict]:
-    """Round N (1-based): round 1 = HONEST, round 2+ = STRETCH.
+    """Round N (1-based): rounds below STRETCH_FROM_ROUND (3) = HONEST,
+    round 3+ = STRETCH (owner decision 2026-07-07: two honest visibility
+    passes first; only the final round may add skills to score points).
 
     Keep-best guard: a round is accepted only if the new verdict score is
     STRICTLY greater than the current best; otherwise content.json + the
-    rendered docs are rolled back to the pre-round version. Round 2 always
-    starts from the best version so far, even if round 1 was rolled back.
+    rendered docs are rolled back to the pre-round version. Each round
+    always starts from the best version so far, even if the previous round
+    was rolled back.
 
     Best-effort: any exception inside a round aborts the WHOLE loop and
     returns the current best (content, verdict) pair — a round that merely
@@ -301,7 +308,7 @@ def refine_loop(
                 print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
                 break
 
-            kind = "honest" if round_num == 1 else "stretch"
+            kind = "stretch" if round_num >= STRETCH_FROM_ROUND else "honest"
             print(
                 f"[verdict_refine] round {round_num} ({kind}): "
                 f"verdict {score} < target {target} — rewriting..."

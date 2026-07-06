@@ -1047,11 +1047,41 @@ def set_ats_verdict(url: str, score: float) -> bool:
         return False
 
 
+def set_cost(url: str, cost_usd: float) -> bool:
+    """Re-stamp the per-vacancy LLM cost on the row matching `url`.
+
+    The row is created in apply Step 7 (generate_docs -> add_applied) with
+    the Step 6.5 figure — priced BEFORE the independent PDF verdict and the
+    verdict refine loop, which can more than double the real spend (rewrite
+    rounds, judge re-runs, re-verdicts, PL mirror). The pipeline re-prices
+    the full usage log after the verdict block and re-stamps here — post-hoc
+    UPDATE by normalized URL, same shape as set_ats_verdict. The Sheets
+    column-M mirror (hunter.cost_writer) reads cost_usd from the DB when the
+    bot process mirrors the row, so it picks this value up automatically.
+    Returns True if a row was updated. Never raises (best-effort caller).
+    """
+    if not url:
+        return False
+    try:
+        norm = normalize_url(url)
+        if not norm:
+            return False
+        with get_db(DB_PATH) as conn:
+            cur = conn.execute(
+                "UPDATE applications SET cost_usd=? WHERE url_norm=?",
+                (float(cost_usd), norm),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        print(f"[tracker] set_cost failed (continuing): {e}")
+        return False
+
+
 def set_to_learn(url: str, to_learn: str) -> bool:
     """Overwrite the "To Learn" column for the row matching `url`.
 
-    The verdict refine loop (hunter.verdict_refine) may append round-2
-    stretch-tech additions to content["to_learn"] AFTER the tracker row
+    The verdict refine loop (hunter.verdict_refine) may append stretch-round
+    tech additions to content["to_learn"] AFTER the tracker row
     already exists (it's created in Step 7, generate_docs -> add_applied,
     with the PRE-loop value) — so this is a post-hoc UPDATE by normalized
     URL, same shape as set_ats_verdict. Returns True if a row was updated.

@@ -64,13 +64,14 @@ ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in 
 
 # Verdict refine loop (hunter.verdict_refine): when the independent verdict
 # score is below ATS_VERDICT_TARGET, rewrite resume_en against the verdict's
-# own feedback (up to ATS_VERDICT_MAX_REFINES escalating rounds — round 1
-# honest, round 2+ stretch), re-render, and re-verdict, keeping only strict
-# improvements. 0 = disabled (byte-for-byte the old one-shot behaviour); 1 =
-# honest round only; 2 (default, owner-approved) = honest + stretch.
+# own feedback (up to ATS_VERDICT_MAX_REFINES escalating rounds — rounds 1-2
+# honest visibility passes, round 3+ stretch: openly adds posting tech absent
+# from the profile, tracked in To Learn), re-render, and re-verdict, keeping
+# only strict improvements. 0 = disabled (byte-for-byte the old one-shot
+# behaviour); 3 (default, owner decision 2026-07-07) = honest ×2 + stretch.
 # See docs/VERDICT_REFINE_PLAN.md.
 ATS_VERDICT_TARGET: float = float(os.getenv("ATS_VERDICT_TARGET", "95"))
-ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "2"))
+ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "3"))
 
 # ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ───────────────────────────
 # Deterministic (regex-only, zero LLM cost) full-text screen run right after

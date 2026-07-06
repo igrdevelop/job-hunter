@@ -847,13 +847,21 @@ def _run_main_api(
                     except Exception as _tr_err:
                         print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
                 # Re-price so content.json + the Telegram summary include the
-                # verdict call. The tracker row (written by generate_docs in
-                # Step 7, before this call) keeps the pre-verdict figure — the
-                # delta is one Haiku call (~$0.02), acceptable drift.
+                # verdict call AND everything the refine loop spent (rewrite
+                # rounds, judge re-runs, re-verdicts, PL mirror — rolled-back
+                # rounds cost the same as accepted ones). The tracker row was
+                # written in Step 7 with the pre-verdict Step 6.5 figure,
+                # which the loop can more than double — re-stamp it post-hoc
+                # (same contract as set_ats_verdict) so the DB and the Sheet
+                # column M show the real per-vacancy total. Paste flow has no
+                # URL to match a row by — skip the stamp there.
                 try:
                     from hunter.llm_cost import price_usage as _price_usage2
                     cost_dict = _price_usage2(_usage_log)
                     content["cost"] = cost_dict
+                    if url and url != PASTE_NO_URL_PLACEHOLDER:
+                        from hunter.tracker import set_cost
+                        set_cost(url, float(cost_dict.get("total_usd") or 0.0))
                 except Exception as _cost_err:
                     print(f"[apply_agent] Warning: verdict re-pricing failed: {_cost_err}")
                 _persist_content()
