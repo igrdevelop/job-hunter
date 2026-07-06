@@ -1,7 +1,7 @@
 """
 One-time cleanup of duplicate rows in the Google Sheets tracker.
 
-Background (see BOOTSTRAP_DEDUP_PLAN.md / DUPLICATE_INVESTIGATION.md): before the
+Background (see docs/archive/BOOTSTRAP_DEDUP_PLAN.md / DUPLICATE_INVESTIGATION.md): before the
 self-heal fix, a blind/empty tracker.db let the bot re-process live vacancies and
 append duplicate rows to the shared Sheet. The fix prevents *new* duplicates; this
 tool removes the *historical* ones already sitting in the Sheet.

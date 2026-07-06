@@ -48,9 +48,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# Gate covers the whole repo now: hunter/ + entry scripts + tests/ + tools/.
-# Only smoke_test_cl.py (a scratch script) stays excluded.
-extend-exclude = ["smoke_test_cl.py"]
+# Gate covers the whole repo: hunter/ + entry scripts + tests/ + tools/.
 
 [tool.ruff.lint]
 # Default rule set (pyflakes F + a focused pycodestyle E subset) plus warnings.

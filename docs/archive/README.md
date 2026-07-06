@@ -4,6 +4,6 @@ One-off plans and fix checklists for work that has already shipped to `master`.
 Kept for historical context only — not maintained. For current project state see
 [../../CLAUDE.md](../../CLAUDE.md).
 
-> Note: plan docs still referenced by live code (`BOOTSTRAP_DEDUP_PLAN.md`,
-> `DUPLICATE_INVESTIGATION.md`) and the deployment guide (`DEPLOY.md`) remain in
-> the repo root.
+> `BOOTSTRAP_DEDUP_PLAN.md`, `DUPLICATE_INVESTIGATION.md` and the original
+> deployment walkthrough (`DEPLOY_V1.md`) moved here from the repo root in
+> July 2026. The current deployment guide lives at [../DEPLOY.md](../DEPLOY.md).
