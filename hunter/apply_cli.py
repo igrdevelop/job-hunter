@@ -213,6 +213,17 @@ def main_cli(
         except Exception as e:  # noqa: BLE001 — best-effort, never block apply
             print(f"[apply_agent] Warning: manual screen failed: {e}")
 
+        # Step 1.5f — Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md; mirror of
+        # apply_api Step 1.5f). Unlike the warn-only screen above, a HARD
+        # finding here actually aborts generation (SKIP tracker row) — unless
+        # this is a manual paste or force-mode run, which degrades to warn.
+        from hunter.apply_shared import run_doomed_gate
+        if run_doomed_gate(
+            job_text, url,
+            is_manual_override=bool(paste_text) or skip_dedup,
+        ):
+            return
+
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
     print("[apply_agent] Running claude CLI...\n")
 
