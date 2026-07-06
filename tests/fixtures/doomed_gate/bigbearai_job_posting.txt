@@ -1,0 +1,33 @@
+# NOTE (docs/DOOMED_GATE_PLAN.md M1 fixtures): the real BigbearAI posting text at
+# generation time (2026-07-02, tracker row ATS 96%, owner note "гибрид в
+# америке") is not recoverable from this dev machine — the tracker's saved URL
+# is a LinkedIn "posts/..." share link (a social post *about* the opening, not
+# the job listing itself), and re-fetching it live returns only the ~3KB post
+# blurb with no location/work-mode details (verified live 2026-07-06).
+# The real job's location/work-mode is documented in
+# docs/DOOMED_GATE_PLAN.md ("гибрид в McLean, Virginia") and confirmed by the
+# owner's own tracker note. This fixture reconstructs a representative posting
+# using the real, publicly-known facts (company, title, McLean VA HQ, hybrid
+# policy) to exercise the foreign_onsite_hybrid HARD rule end-to-end.
+URL: https://www.linkedin.com/posts/jay-sales_senior-front-end-angular-engineer-in-mclean-share-7478194195011371008-9ezx
+
+Senior Front End Angular Engineer
+BigBear.ai
+McLean, Virginia — Hybrid
+
+About BigBear.ai
+BigBear.ai delivers AI-powered decision intelligence solutions for national security, digital identity, and supply chain management customers. Headquartered in McLean, Virginia, we help our customers turn data into actionable insight.
+
+The Role
+We are looking for a Senior Front End Angular Engineer to join our product engineering team at our McLean, Virginia headquarters. This is a hybrid role requiring on-site presence at the McLean office several days a week to collaborate closely with our design and backend teams.
+
+What You'll Do
+Build and maintain complex Angular applications for our digital-twin simulation platform.
+Collaborate on-site with cross-functional teams in McLean, VA.
+Own frontend architecture decisions for real-time 3D visualization features.
+
+Requirements
+5+ years of production Angular experience.
+Strong TypeScript, RxJS and NgRx skills.
+Must be able to work on-site at our McLean, Virginia office on a hybrid schedule.
+Experience with WebGL/Three.js is a plus.
