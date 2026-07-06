@@ -343,7 +343,7 @@ def test_refine_loop_does_not_mirror_pl_on_full_rollback(tmp_path, monkeypatch):
     assert out_verdict is verdict
 
 
-# ── refine_loop: escalation (round 1 honest, round 2 stretch) ────────────────
+# ── refine_loop: escalation (rounds 1-2 honest, round 3 stretch) ─────────────
 
 def test_round1_prompt_has_no_stretch_permission(monkeypatch):
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
@@ -363,7 +363,7 @@ def test_round1_prompt_has_no_stretch_permission(monkeypatch):
     assert "stretch_additions" not in msg
 
 
-def test_round2_prompt_has_stretch_permission_and_protected_employers(monkeypatch):
+def test_stretch_round_prompt_has_stretch_permission_and_protected_employers(monkeypatch):
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
     captured = {}
 
@@ -373,7 +373,7 @@ def test_round2_prompt_has_stretch_permission_and_protected_employers(monkeypatc
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
     verdict_refine._rewrite_round(
-        _base_content(), "job text", "feedback", round_num=2, kind="stretch"
+        _base_content(), "job text", "feedback", round_num=3, kind="stretch"
     )
     msg = captured["user_message"]
     assert "STRETCH ESCALATION" in msg
@@ -384,7 +384,7 @@ def test_round2_prompt_has_stretch_permission_and_protected_employers(monkeypatc
     assert "E-commerce" in msg
 
 
-def test_full_loop_round2_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypatch):
+def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypatch):
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
 
@@ -398,7 +398,9 @@ def test_full_loop_round2_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
 
-    verdict_sequence = iter([_v(80, missing=["Docker"]), _v(90)])
+    verdict_sequence = iter(
+        [_v(80, missing=["Docker"]), _v(85, missing=["Docker"]), _v(90)]
+    )
     monkeypatch.setattr(
         ats_pdf_roundtrip,
         "run_llm_verdict",
@@ -409,14 +411,46 @@ def test_full_loop_round2_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
     verdict = _v(70, missing=["Docker"])
     out_content, out_verdict = refine_loop(
         content, "job needs Docker", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        regenerate_docs=lambda f: None, target=95, max_rounds=3,
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert "STRETCH ESCALATION" not in calls[0]
-    assert "STRETCH ESCALATION" in calls[1]
+    assert "STRETCH ESCALATION" not in calls[1]
+    assert "STRETCH ESCALATION" in calls[2]
     assert out_content["to_learn"] == "Vitest"
     assert out_verdict["score"] == 90
+
+
+def test_two_round_loop_never_stretches(tmp_path, monkeypatch):
+    """With max_rounds=2 the loop stays honest — stretch only ever runs from
+    round STRETCH_FROM_ROUND (3), the owner's 'openly add skills' round."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    calls = []
+
+    def _fake_llm(system_prompt, user_message, **k):
+        calls.append(user_message)
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+
+    verdict_sequence = iter([_v(80, missing=["Docker"]), _v(85, missing=["Docker"])])
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content(to_learn="")
+    verdict = _v(70, missing=["Docker"])
+    refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+    )
+    assert len(calls) == 2
+    assert all("STRETCH ESCALATION" not in c for c in calls)
 
 
 def test_round2_not_run_when_round1_reaches_target(tmp_path, monkeypatch):

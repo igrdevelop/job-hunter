@@ -248,10 +248,28 @@ def test_cli_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
     assert "build_generate_docs_cmd(" in regen_block
 
 
-# ── Review Fix 3: default is 2 (honest + stretch), owner-approved ───────────
+# ── Default is 3 (honest ×2 + stretch), owner decision 2026-07-07 ───────────
 
-def test_ats_verdict_max_refines_default_is_two() -> None:
-    """docs/VERDICT_REFINE_PLAN.md decision #1: ship with round 1 (honest) +
-    round 2 (stretch) enabled by default, not honest-only."""
+def test_ats_verdict_max_refines_default_is_three() -> None:
+    """Owner decision 2026-07-07: max 3 rounds — two honest visibility passes,
+    stretch (openly add posting skills) only on the third."""
     src = _source_of("hunter.config")
-    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "2")' in src
+    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "3")' in src
+
+
+# ── Cost re-stamp: tracker row must get the post-refine total ────────────────
+# The row is created in Step 7 with the Step 6.5 (pre-verdict, pre-refine)
+# figure; the refine loop can more than double the real spend. The pipeline
+# must re-price the usage log AFTER refine_loop and re-stamp the row via
+# tracker.set_cost so the DB / Sheet column M show the true per-vacancy total.
+
+def test_api_pipeline_restamps_cost_after_refine_loop() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "from hunter.tracker import set_cost" in src
+    verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
+    refine_pos = verdict_block.index("refine_loop(")
+    reprice_pos = verdict_block.index("_price_usage2(_usage_log)")
+    stamp_pos = verdict_block.index("set_cost(")
+    assert refine_pos < reprice_pos < stamp_pos
+    # Paste flow has no URL to match a row by — the stamp must be gated.
+    assert "url != PASTE_NO_URL_PLACEHOLDER" in verdict_block
