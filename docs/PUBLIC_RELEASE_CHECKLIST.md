@@ -19,6 +19,23 @@ already done on the branch; **item 3 (history scrub) is manual and destructive
 
 - `README.md`, `LICENSE` (MIT), decluttered root.
 
+## 2.5. ⚠️ Before pulling this change into any existing checkout
+
+The untracking commit records the personal files as **deleted**. The checkout
+where the commit was made keeps them on disk, but every OTHER existing clone
+(e.g. the main dev working copy) will have `git pull` **delete
+`prompts/candidate_profile.md`, `base_cv_*.md`, `prompts/candidate/`,
+`prompts/examples/` from the working tree**.
+
+Back them up first, pull, then copy them back — after that they are ignored
+and safe:
+
+```powershell
+Copy-Item prompts -Destination ..\prompts-backup -Recurse
+git pull
+Copy-Item ..\prompts-backup\* -Destination prompts\ -Recurse -Force
+```
+
 ## 3. History scrub (manual, one-time, DESTRUCTIVE)
 
 The personal files above still exist in **every old commit**. Removing them
