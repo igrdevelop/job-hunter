@@ -254,6 +254,11 @@ tools/preview_judge.py      Run the claim-judge (+scrubs) on an existing content
 tools/dedup_sheet.py        One-time cleanup of duplicate rows in the Sheets tracker (--apply to delete)
 tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
 tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
+tools/screen_calibrate.py   Doomed-gate calibration (docs/DOOMED_GATE_PLAN.md M4): runs
+                            assess_job_text over the offline Applications/**/job_posting.txt
+                            corpus + a live Google Sheet sample, read-only/dry-run, reports
+                            hard/soft hit rate and flags any HARD finding on a row the owner
+                            actually sent (must be zero)
 
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
@@ -290,6 +295,8 @@ Applications/               Generated documents (gitignored)
 | `ATS_VERDICT_ENABLED` | `true` | Final independent ATS verdict: after generate_docs, ONE `JUDGE_MODEL` (Haiku) call scores the text extracted from the rendered EN CV PDF against the posting. Stored as `ats_verdict` on content.json + tracker row (`set_ats_verdict`, which now also overwrites `ats_status`/"ATS %"), mirrored to Sheet column **N** (`hunter.verdict_writer`), and shown as the **only** "ATS:" number in Telegram (generator self-score stays in content.json only), and computed for dual-apply shadows too (verdict-based `_ats{NN}` filename suffix). Informational only — never blocks delivery. |
 | `ATS_VERDICT_TARGET` | `95` | Target score (%) for the verdict refine loop (`hunter.verdict_refine`) — a verdict at or above this is left alone. |
 | `ATS_VERDICT_MAX_REFINES` | `2` | Max escalating rewrite rounds the refine loop runs when the verdict is below target (round 1 honest, round 2+ stretch). Default `2` (owner-approved, decision #1) ships both rounds. `0` disables the loop (old one-shot verdict). See docs/VERDICT_REFINE_PLAN.md. |
+| `DOOMED_GATE_ENABLED` | `true` | Deterministic (regex-only, zero LLM cost) full-text screen (`hunter.apply_shared.run_doomed_gate` → `hunter.filters.assess_job_text`), run right after expired-check and before the first LLM call in both pipelines (Step 1.5f). HARD findings (non-Poland onsite/hybrid, non-EU work authorization, unsupported required language) write a SKIP tracker row and abort generation for $0.00; SOFT findings (e.g. stack mismatch) warn in Telegram and generation continues. Force-mode/manual-paste always degrades HARD to warn. See docs/DOOMED_GATE_PLAN.md. |
+| `DOOMED_GATE_HARD_ACTION` | `skip` | `skip` aborts generation on a HARD finding; `warn` is an emergency lever to downgrade every HARD finding to a warning without disabling the gate entirely (e.g. if live-data precision turns out worse than calibration). |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
@@ -339,6 +346,30 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 1. `job_fetch.fetch_job_text(url)` — fetch full job description
 2. Save `job_posting.txt` to output folder
 3. `expired_check.is_job_expired(text)` — skip if expired
+3a. **Manual-apply "warn but allow" screen** (`filters.screen_job_text`, Step 1.5e):
+   re-runs the listing-level body gates against the fetched full text and warns
+   (never blocks) if a manually-pasted URL would normally have been filtered —
+   hunt/AUTO jobs already passed these at listing level.
+3b. **Doomed-vacancy gate** (`hunter.apply_shared.run_doomed_gate` →
+   `hunter.filters.assess_job_text`, Step 1.5f, docs/DOOMED_GATE_PLAN.md):
+   deterministic (regex-only, zero LLM cost) second line of defense on the
+   FULL job text — the listing-level filters (PR #110) can't see a hybrid/
+   location/authorization requirement buried in the body. Two rule families:
+   **HARD** (non-Poland onsite/hybrid tied to a US/Western-Europe/UK/Canada
+   city or state, vetoed by an explicit fully-remote signal or a Wrocław/
+   weekly-Warsaw-Kraków-hybrid mention; non-EU work authorization — W2/C2C/
+   H1B/US citizen/green card/security clearance; a required language the
+   candidate doesn't speak) writes a SKIP tracker row (`tracker.add_skipped`)
+   and aborts generation for $0.00 — `DOOMED_GATE_HARD_ACTION=skip` (default).
+   **SOFT** (primary stack isn't the candidate's — e.g. Vue/Svelte/Ember-first
+   with neither Angular nor React in the requirements) warns in Telegram and
+   generation continues. Force-mode (`skip_dedup`) and manual paste always
+   degrade HARD to warn (the owner explicitly said generate this one); a
+   HARD-but-degraded or SOFT finding surfaces in one Telegram message with
+   the rule + a short evidence quote. `DOOMED_GATE_ENABLED`/
+   `DOOMED_GATE_HARD_ACTION` gate/downgrade the whole thing without touching
+   listing-level filters. Calibrated against ~450 real postings + a live
+   Google Sheet sample — see `docs/DOOMED_GATE_CALIBRATION.md`.
 4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
 4a. **ATS keyword loop** (`_ats_check_loop`, deterministic): regex keyword check
    against the posting; the resume is rewritten ONLY while *actionable* keywords are
