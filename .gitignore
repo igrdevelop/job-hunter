@@ -77,3 +77,10 @@ tracker_broken.xlsx
 
 # Local machine config (personal paths)
 .mcp.json
+
+# Personal candidate data — never commit (create yours from *.example.md, see prompts/README.md)
+prompts/candidate_profile.md
+prompts/base_cv_*.md
+!prompts/*.example.md
+prompts/candidate/
+prompts/examples/

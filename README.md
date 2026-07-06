@@ -105,7 +105,11 @@ cd job-hunter
 pip install -r requirements.txt && pip install -e . --no-deps
 
 cp .env.example .env        # fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
-# edit prompts/candidate_profile.md — your experience, skills, preferences
+
+# Make it yours: personal candidate data is NOT in the repo — create it from templates
+cp prompts/candidate_profile.example.md prompts/candidate_profile.md
+cp prompts/base_cv_angular.example.md   prompts/base_cv_angular.md
+# fill both in with your real experience — see prompts/README.md for details
 
 python hunter.py            # starts the Telegram bot + scheduler
 ```
@@ -120,10 +124,12 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for the full VPS deployment guide and
 [CLAUDE.md](CLAUDE.md) for the complete architecture reference (config table,
 tracker schema, pipeline internals).
 
-> **Note:** the `prompts/` directory in this repo contains the author's own
-> candidate profile and base CVs — replace them with yours before running.
-> Optional integrations (Google Sheets mirror, Drive upload, Gmail alerts)
-> each need a one-time OAuth setup described in CLAUDE.md.
+> **Note:** all candidate-specific files (profile, base CVs, few-shot examples)
+> are gitignored — the repo ships only `.example` templates and system prompt
+> rules, so anyone can configure the bot for themselves
+> ([prompts/README.md](prompts/README.md)). Optional integrations (Google
+> Sheets mirror, Drive upload, Gmail alerts) each need a one-time OAuth setup
+> described in CLAUDE.md.
 
 ## Tech stack
 

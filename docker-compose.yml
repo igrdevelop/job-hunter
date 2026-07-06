@@ -25,6 +25,16 @@ services:
       # Fix: touch ./gsheets_state.json  (or echo '{}' > ./gsheets_state.json)
       - ./gsheets_state.json:/app/gsheets_state.json
       - ./logs:/app/logs
+      # Personal candidate data — gitignored, NOT in the image (see prompts/README.md).
+      # Copy your real files into ./prompts/ on the deploy host once; each file must
+      # EXIST before first run, or Docker auto-creates a directory in its place.
+      - ./prompts/candidate_profile.md:/app/prompts/candidate_profile.md:ro
+      - ./prompts/base_cv_angular.md:/app/prompts/base_cv_angular.md:ro
+      - ./prompts/base_cv_react.md:/app/prompts/base_cv_react.md:ro
+      - ./prompts/base_cv_ai.md:/app/prompts/base_cv_ai.md:ro
+      - ./prompts/base_cv_fullstack_angular_nest.md:/app/prompts/base_cv_fullstack_angular_nest.md:ro
+      - ./prompts/base_cv_fullstack_react_next.md:/app/prompts/base_cv_fullstack_react_next.md:ro
+      - ./prompts/examples:/app/prompts/examples:ro
     logging:
       driver: "json-file"
       options:
