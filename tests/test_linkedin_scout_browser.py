@@ -14,11 +14,13 @@ import json
 
 import linkedin_scout.browser as browser
 from linkedin_scout.browser import (
+    FEED_URL,
     AntiBotDetected,
     ScoutCandidate,
     build_search_url,
     is_blocked_url,
     looks_like_anti_bot,
+    run_feed_once,
     run_once,
     seed_profile_if_needed,
 )
@@ -271,3 +273,95 @@ def test_run_once_advances_keyword_rotation(tmp_path, monkeypatch):
     )
     run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
     assert seen_keywords == ["a"]
+
+
+# --- feed track (scout_feed / run_feed_once) ---------------------------------
+
+
+def test_feed_url_has_no_keyword_param():
+    assert FEED_URL == "https://www.linkedin.com/feed/"
+    assert "keywords" not in FEED_URL
+
+
+def test_run_feed_once_noop_when_tripped(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "feed_state.json")
+    state.trip("already flagged")
+
+    called = []
+    monkeypatch.setattr(browser, "scout_feed", lambda *a, **k: called.append(1))
+
+    result = run_feed_once(
+        profile_dir=tmp_path / "feed_profile",
+        storage_state_path=None,
+        state=state,
+    )
+
+    assert result == []
+    assert called == []
+
+
+def test_run_feed_once_trips_and_alerts_exactly_once_on_anti_bot(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "feed_state.json")
+
+    def _raise(*args, **kwargs):
+        raise AntiBotDetected("redirected to checkpoint")
+
+    monkeypatch.setattr(browser, "scout_feed", _raise)
+    alerts = []
+    monkeypatch.setattr(browser, "_send_circuit_breaker_alert", lambda reason: alerts.append(reason))
+
+    result = run_feed_once(
+        profile_dir=tmp_path / "feed_profile",
+        storage_state_path=None,
+        state=state,
+    )
+
+    assert result == []
+    assert state.is_tripped() is True
+    assert alerts == ["redirected to checkpoint"]
+
+
+def test_run_feed_once_filters_through_m1_and_labels_candidates_feed(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "feed_state.json")
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\n3rd+\nTalent Acquisition\n2h\nFollow\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+        "Like\nComment\nShare\n"
+    )
+    monkeypatch.setattr(browser, "scout_feed", lambda *a, **k: raw_text)
+
+    result = run_feed_once(
+        profile_dir=tmp_path / "feed_profile",
+        storage_state_path=None,
+        state=state,
+    )
+
+    assert len(result) == 1
+    candidate = result[0]
+    assert isinstance(candidate, ScoutCandidate)
+    assert candidate.author == "Deloitte Poland"
+    assert candidate.keyword == "feed"
+
+
+def test_feed_and_keyword_tracks_use_independent_state(tmp_path, monkeypatch):
+    """A trip on the feed track must not silence the keyword-search track."""
+    feed_state = ScoutState(tmp_path / "feed_state.json")
+    search_state = ScoutState(tmp_path / "search_state.json")
+
+    def _raise(*args, **kwargs):
+        raise AntiBotDetected("flagged")
+
+    monkeypatch.setattr(browser, "scout_feed", _raise)
+    run_feed_once(profile_dir=tmp_path / "feed_profile", storage_state_path=None, state=feed_state)
+
+    assert feed_state.is_tripped() is True
+    assert search_state.is_tripped() is False
+
+    monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: "")
+    result = run_once(
+        ["angular"],
+        profile_dir=tmp_path / "search_profile",
+        storage_state_path=None,
+        state=search_state,
+    )
+    assert result == []  # empty because raw_text is empty, not because tripped

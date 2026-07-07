@@ -44,6 +44,17 @@ SEARCH_URL_TEMPLATE = (
     "?keywords={kw}&sortBy=%22date_posted%22&datePosted=%22past-week%22"
 )
 
+# The home feed itself — no keyword, no content-search surface. Owner-requested
+# second track (2026-07-07): scroll the main feed for ANY post, filtered by the
+# same is_hiring_post()/check_location() gate as the keyword search (that gate
+# already requires "angular" to be prominent in the text, so this naturally
+# narrows to Angular-relevant posts without needing a query param).
+FEED_URL = "https://www.linkedin.com/feed/"
+
+# Feed scroll goes deeper than a single search page — "all posts", not one
+# page of results — so it gets its own (larger) scroll budget.
+_FEED_SCROLL_ITERATIONS = 8
+
 # Real installed Chrome (not bundled Chromium) + stealth flags — headless
 # Chromium got flagged within 2-3 loads in the live probe (plan §4.6 #4).
 STEALTH_CHROME_ARGS: tuple[str, ...] = (
@@ -215,17 +226,17 @@ class ScoutCandidate:
     scouted_at: str
 
 
-def scout_keyword(
-    keyword: str,
+def _open_scroll_extract(
+    url: str,
     *,
     profile_dir: Path,
     storage_state_path: Path | None,
-    headless: bool = False,
+    headless: bool,
+    scroll_iterations: int,
 ) -> str:
-    """Open ONE search page for `keyword` and return the captured page text.
-
-    Raises AntiBotDetected on a login/checkpoint/authwall redirect or a known
-    anti-bot interstitial — the caller must not retry.
+    """Shared mechanics: launch persistent context, seed, navigate, scroll,
+    extract text. Raises AntiBotDetected on any login/checkpoint/authwall
+    redirect or anti-bot interstitial — no retries, caller must not loop this.
     """
     from playwright.sync_api import sync_playwright
 
@@ -240,13 +251,13 @@ def scout_keyword(
             seed_profile_if_needed(context, profile_dir, storage_state_path)
             context.add_init_script(_HIDE_WEBDRIVER_INIT_SCRIPT)
             page = context.new_page()
-            page.goto(build_search_url(keyword), wait_until="domcontentloaded")
+            page.goto(url, wait_until="domcontentloaded")
             _sleep_human(_POST_LOAD_WAIT_RANGE_SEC)
 
             if is_blocked_url(page.url):
                 raise AntiBotDetected(f"redirected to {page.url}")
 
-            for _ in range(_SCROLL_ITERATIONS):
+            for _ in range(scroll_iterations):
                 page.mouse.wheel(0, 2000)
                 _sleep_human(_SCROLL_WAIT_RANGE_SEC)
                 if is_blocked_url(page.url):
@@ -260,6 +271,104 @@ def scout_keyword(
             context.close()
 
 
+def scout_keyword(
+    keyword: str,
+    *,
+    profile_dir: Path,
+    storage_state_path: Path | None,
+    headless: bool = False,
+) -> str:
+    """Open ONE content-search page for `keyword` and return the page text.
+
+    Raises AntiBotDetected on a login/checkpoint/authwall redirect or a known
+    anti-bot interstitial — the caller must not retry.
+    """
+    return _open_scroll_extract(
+        build_search_url(keyword),
+        profile_dir=profile_dir,
+        storage_state_path=storage_state_path,
+        headless=headless,
+        scroll_iterations=_SCROLL_ITERATIONS,
+    )
+
+
+def scout_feed(
+    *,
+    profile_dir: Path,
+    storage_state_path: Path | None,
+    headless: bool = False,
+) -> str:
+    """Open the home feed (no keyword) and return the page text.
+
+    Second, independent scout track (owner decision 2026-07-07): scrolls the
+    main feed for ANY post rather than a keyword search. Uses its own
+    (larger) scroll budget — "all posts" rather than one page of search
+    results. Same AntiBotDetected contract as scout_keyword.
+    """
+    return _open_scroll_extract(
+        FEED_URL,
+        profile_dir=profile_dir,
+        storage_state_path=storage_state_path,
+        headless=headless,
+        scroll_iterations=_FEED_SCROLL_ITERATIONS,
+    )
+
+
+def _filter_candidates(raw_text: str, label: str) -> list[ScoutCandidate]:
+    """Parse raw page text into posts and keep only ones passing M1's gate."""
+    posts: list[ParsedPost] = parse_posts(raw_text)
+    scouted_at = datetime.now(timezone.utc).isoformat()
+    candidates: list[ScoutCandidate] = []
+    for post in posts:
+        if not is_hiring_post(post.body):
+            continue
+        if check_location(post.body) is LocationVerdict.REJECT:
+            continue
+        candidates.append(
+            ScoutCandidate(
+                keyword=label,
+                author=post.author,
+                body=post.body,
+                scouted_at=scouted_at,
+            )
+        )
+    logger.info(
+        "[linkedin_scout] '%s': %d posts parsed, %d candidates",
+        label,
+        len(posts),
+        len(candidates),
+    )
+    return candidates
+
+
+def _run_with_breaker(
+    *,
+    label: str,
+    scout_call,
+    state,
+) -> list[ScoutCandidate]:
+    """Shared circuit-breaker wiring for both the keyword-search and feed
+    scout entry points: no-op while tripped, trip + alert exactly once on
+    AntiBotDetected, otherwise filter the raw text through M1."""
+    if state.is_tripped():
+        logger.warning(
+            "[linkedin_scout] circuit breaker is tripped (%s) — no-op until --reset",
+            state.trip_reason(),
+        )
+        return []
+
+    try:
+        raw_text = scout_call()
+    except AntiBotDetected as e:
+        first_trip = state.trip(str(e))
+        logger.error("[linkedin_scout] circuit breaker tripped: %s", e)
+        if first_trip:
+            _send_circuit_breaker_alert(str(e))
+        return []
+
+    return _filter_candidates(raw_text, label)
+
+
 def run_once(
     keywords: list[str],
     *,
@@ -268,7 +377,8 @@ def run_once(
     state,
     headless: bool = False,
 ) -> list[ScoutCandidate]:
-    """One scout invocation: pick the next keyword, search, filter through M1.
+    """One keyword-search scout invocation: pick the next rotation keyword,
+    search, filter through M1.
 
     Circuit breaker: on AntiBotDetected, trips `state` and sends exactly one
     Telegram alert (only on the trip that actually flips tripped=False->True).
@@ -285,40 +395,39 @@ def run_once(
     keyword = state.next_keyword(keywords)
     logger.info("[linkedin_scout] scouting keyword: %s", keyword)
 
-    try:
-        raw_text = scout_keyword(
+    return _run_with_breaker(
+        label=keyword,
+        scout_call=lambda: scout_keyword(
             keyword,
             profile_dir=profile_dir,
             storage_state_path=storage_state_path,
             headless=headless,
-        )
-    except AntiBotDetected as e:
-        first_trip = state.trip(str(e))
-        logger.error("[linkedin_scout] circuit breaker tripped: %s", e)
-        if first_trip:
-            _send_circuit_breaker_alert(str(e))
-        return []
-
-    posts: list[ParsedPost] = parse_posts(raw_text)
-    scouted_at = datetime.now(timezone.utc).isoformat()
-    candidates: list[ScoutCandidate] = []
-    for post in posts:
-        if not is_hiring_post(post.body):
-            continue
-        if check_location(post.body) is LocationVerdict.REJECT:
-            continue
-        candidates.append(
-            ScoutCandidate(
-                keyword=keyword,
-                author=post.author,
-                body=post.body,
-                scouted_at=scouted_at,
-            )
-        )
-    logger.info(
-        "[linkedin_scout] keyword '%s': %d posts parsed, %d candidates",
-        keyword,
-        len(posts),
-        len(candidates),
+        ),
+        state=state,
     )
-    return candidates
+
+
+def run_feed_once(
+    *,
+    profile_dir: Path,
+    storage_state_path: Path | None,
+    state,
+    headless: bool = False,
+) -> list[ScoutCandidate]:
+    """One home-feed scout invocation (owner's second track, 2026-07-07): no
+    keyword, no rotation — just scroll the main feed and filter through M1.
+
+    Uses its own `state`/`profile_dir` (a separate ScoutState instance and a
+    separate persistent Chrome profile from the keyword-search track), so the
+    two can run independently without fighting over the same profile lock or
+    circuit-breaker flag — a trip on one track does not silence the other.
+    """
+    return _run_with_breaker(
+        label="feed",
+        scout_call=lambda: scout_feed(
+            profile_dir=profile_dir,
+            storage_state_path=storage_state_path,
+            headless=headless,
+        ),
+        state=state,
+    )
