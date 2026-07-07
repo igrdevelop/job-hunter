@@ -198,7 +198,7 @@ async def _post_init(app: Application) -> None:
 
     # Self-heal dedup state: pull Sheets → DB once at startup. This inserts rows
     # present in the shared Sheet but missing from a fresh/empty tracker.db, so
-    # dedup is not "blind" after a container restart (see BOOTSTRAP_DEDUP_PLAN.md).
+    # dedup is not "blind" after a container restart (see docs/archive/BOOTSTRAP_DEDUP_PLAN.md).
     # Runs before cache.load_from_db() so the cache sees the restored rows.
     try:
         pull_res = await gsheets_sync.pull_full_snapshot()

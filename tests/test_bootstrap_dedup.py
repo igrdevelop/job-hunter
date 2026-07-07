@@ -3,7 +3,7 @@
 Covers tracker.insert_pulled_rows() (insert Sheets rows missing from a fresh DB)
 and the pull_full_snapshot() integration that wires it before the conflict matrix.
 
-See BOOTSTRAP_DEDUP_PLAN.md.
+See docs/archive/BOOTSTRAP_DEDUP_PLAN.md.
 """
 
 import asyncio

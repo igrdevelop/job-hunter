@@ -1,6 +1,7 @@
 @echo off
 title Job Hunter Bot
-cd /d D:\LearningProject\Claude
+rem Repo root = parent of this script's directory (works from any checkout path)
+cd /d %~dp0..
 
 :loop
 echo.
