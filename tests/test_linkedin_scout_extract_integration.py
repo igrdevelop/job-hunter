@@ -97,3 +97,27 @@ def test_extract_js_preserves_line_breaks_not_just_flat_textcontent():
     # If line breaks were lost, "Feed post" would be glued to the author name
     # on a single line instead of being its own line.
     assert not any(ln.startswith("Feed postDeloitte") for ln in lines)
+
+
+def test_open_scroll_extract_actually_triggers_lazy_loaded_content(tmp_path):
+    """Regression pin (2026-07-07, found during the owner's live verification):
+    page.mouse.wheel() is silently a no-op unless page.mouse.move() was called
+    at least once first — the owner's first two live runs against real
+    LinkedIn showed an identical posts-visible count before and after
+    scrolling. `infinite_scroll.html` only reveals its 2nd/3rd post in
+    response to a real browser 'scroll' event, so this exercises the FULL
+    `_open_scroll_extract` pipeline (not just a single `page.evaluate`) end to
+    end and would fail again if the mouse.move() fix ever regresses.
+    """
+    fixture_path = FIXTURES_DIR / "infinite_scroll.html"
+    text = browser._open_scroll_extract(
+        fixture_path.as_uri(),
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        headless=True,
+        scroll_iterations=3,
+    )
+    posts = parse_posts(text)
+    assert len(posts) == 3
+    authors = {p.author for p in posts}
+    assert authors == {"Author Number 1", "Author Number 2", "Author Number 3"}

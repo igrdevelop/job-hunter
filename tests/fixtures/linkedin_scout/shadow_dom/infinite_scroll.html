@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<body style="margin:0;">
+<div id="feed"></div>
+<script>
+// Regression fixture (2026-07-07): content that ONLY appears in response to a
+// real 'scroll' event, simulating LinkedIn's lazy-loaded infinite feed. This
+// caught a real bug: page.mouse.wheel() silently does nothing unless
+// page.mouse.move() was called at least once first — every post here beyond
+// the first stayed invisible until that fix landed in _open_scroll_extract.
+let loaded = 1;
+function renderPost(n) {
+  const d = document.createElement('div');
+  d.style.height = '900px';
+  d.innerText = 'Feed post\nAuthor Number ' + n + '\nFollow\n' +
+    'Hiring an Angular Developer number ' + n + ', remote work.';
+  return d;
+}
+function render() {
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+  for (let i = 1; i <= loaded; i++) feed.appendChild(renderPost(i));
+}
+render();
+window.addEventListener('scroll', () => {
+  if (loaded < 3) {
+    loaded++;
+    render();
+  }
+});
+</script>
+</body>
+</html>
