@@ -369,3 +369,72 @@ def test_feed_and_keyword_tracks_use_independent_state(tmp_path, monkeypatch):
         state=search_state,
     )
     assert result == []  # empty because raw_text is empty, not because tripped
+
+
+# --- off-screen window positioning (search track only) -----------------------
+
+
+class _FakeChromium:
+    def __init__(self) -> None:
+        self.launch_kwargs: dict | None = None
+
+    def launch_persistent_context(self, **kwargs):
+        self.launch_kwargs = kwargs
+
+        class _FakeContext:
+            def add_cookies(self, cookies):
+                pass
+
+            def add_init_script(self, script):
+                pass
+
+            def new_page(self):
+                raise AntiBotDetected("stop before any real navigation")
+
+            def close(self):
+                pass
+
+        return _FakeContext()
+
+
+class _FakePlaywright:
+    def __init__(self, chromium: _FakeChromium) -> None:
+        self.chromium = chromium
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_scout_keyword_launches_offscreen(tmp_path, monkeypatch):
+    fake_chromium = _FakeChromium()
+    monkeypatch.setattr(
+        "playwright.sync_api.sync_playwright", lambda: _FakePlaywright(fake_chromium)
+    )
+
+    try:
+        browser.scout_keyword(
+            "angular", profile_dir=tmp_path / "profile", storage_state_path=None
+        )
+    except AntiBotDetected:
+        pass  # expected — the fake context stops right after launch
+
+    assert fake_chromium.launch_kwargs is not None
+    assert "--window-position=-3000,0" in fake_chromium.launch_kwargs["args"]
+
+
+def test_scout_feed_does_not_launch_offscreen(tmp_path, monkeypatch):
+    fake_chromium = _FakeChromium()
+    monkeypatch.setattr(
+        "playwright.sync_api.sync_playwright", lambda: _FakePlaywright(fake_chromium)
+    )
+
+    try:
+        browser.scout_feed(profile_dir=tmp_path / "profile", storage_state_path=None)
+    except AntiBotDetected:
+        pass
+
+    assert fake_chromium.launch_kwargs is not None
+    assert "--window-position=-3000,0" not in fake_chromium.launch_kwargs["args"]

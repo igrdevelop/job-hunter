@@ -77,6 +77,15 @@ _FEED_SCROLL_MAX_DURATION_SEC = 600.0
 _FEED_SCROLL_WAIT_RANGE_SEC = (2.0, 5.0)
 _FEED_SCROLL_PLATEAU_LIMIT = 5
 
+# search track only (owner decision 2026-07-07): the run is a few seconds,
+# scheduled hourly, so it can fire while the owner is actively working. Move
+# the (still fully rendered, headed — not headless) window off the visible
+# desktop area instead of stealing focus every hour. Not used for the feed
+# track, which runs for up to 10 minutes and the owner accepted just leaving
+# visible-but-ignorable on screen (an off-screen window risks Chrome treating
+# a long session as occluded/backgrounded and throttling lazy-loaded content).
+_SEARCH_OFFSCREEN_ARGS: tuple[str, ...] = ("--window-position=-3000,0",)
+
 # Real installed Chrome (not bundled Chromium) + stealth flags — headless
 # Chromium got flagged within 2-3 loads in the live probe (plan §4.6 #4).
 STEALTH_CHROME_ARGS: tuple[str, ...] = (
@@ -287,6 +296,7 @@ def _open_scroll_extract(
     scroll_wait_range: tuple[float, float] = _SCROLL_WAIT_RANGE_SEC,
     max_duration_sec: float | None = None,
     plateau_limit: int | None = None,
+    extra_chrome_args: tuple[str, ...] = (),
 ) -> str:
     """Shared mechanics: launch persistent context, seed, navigate, scroll,
     extract text. Raises AntiBotDetected on any login/checkpoint/authwall
@@ -297,7 +307,10 @@ def _open_scroll_extract(
     intended for a long, slow feed-scroll session, not the short keyword-
     search burst. `plateau_limit` (if given) stops early once that many
     consecutive scrolls in a row surface no NEW posts (the feed ran out of
-    fresh content — no point continuing to scroll past that).
+    fresh content — no point continuing to scroll past that). `extra_chrome_args`
+    lets a caller (currently just the search track) append launch flags on top
+    of `STEALTH_CHROME_ARGS`, e.g. an off-screen `--window-position` so the
+    window doesn't steal focus during a short run.
     """
     from playwright.sync_api import sync_playwright
 
@@ -306,7 +319,7 @@ def _open_scroll_extract(
             user_data_dir=str(profile_dir),
             channel="chrome",
             headless=headless,
-            args=list(STEALTH_CHROME_ARGS),
+            args=[*STEALTH_CHROME_ARGS, *extra_chrome_args],
         )
         try:
             seed_profile_cookies(context, storage_state_path)
@@ -387,7 +400,9 @@ def scout_keyword(
     """Open ONE content-search page for `keyword` and return the page text.
 
     Raises AntiBotDetected on a login/checkpoint/authwall redirect or a known
-    anti-bot interstitial — the caller must not retry.
+    anti-bot interstitial — the caller must not retry. Launches the (still
+    headed) window off-screen (`_SEARCH_OFFSCREEN_ARGS`) so an hourly run
+    doesn't steal focus from whatever the owner is doing.
     """
     return _open_scroll_extract(
         build_search_url(keyword),
@@ -395,6 +410,7 @@ def scout_keyword(
         storage_state_path=storage_state_path,
         headless=headless,
         scroll_iterations=_SCROLL_ITERATIONS,
+        extra_chrome_args=_SEARCH_OFFSCREEN_ARGS,
     )
 
 
