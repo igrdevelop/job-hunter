@@ -1025,6 +1025,34 @@ def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
     )
 
 
+def _assess_mill_body(blob: str) -> "GateFinding | None":
+    """HARD — a known AI-training / staffing-mill name in the job BODY.
+
+    `_is_ai_training_or_mill` only sees `job.company`, which is blank for
+    Gmail-alert stubs (linkedin.com enrichment is skipped via
+    GMAIL_ENRICH_SKIP_HOSTS) — exactly how the micro1 fronts
+    (QuikHireStaffing, HireFeed) slipped through to generation on
+    2026-07-06. The mill's own name or its apply link (micro1.com) usually
+    appears in the posting text itself, so scan the full blob for every
+    `exclude_companies` entry. "micro1" also matches "micro1.com" (the
+    trailing lookahead only rejects word characters).
+    """
+    if not FILTER.get("exclude_ai_training", False):
+        return None
+    for name in FILTER.get("exclude_companies", []):
+        pattern = re.compile(
+            r"(?<!\w)" + re.escape(name.lower()).replace(r"\ ", r"\s+") + r"(?!\w)"
+        )
+        m = pattern.search(blob)
+        if m:
+            return GateFinding(
+                rule="ai_mill_body",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    return None
+
+
 # Full-page dumps append unrelated recommendation/navigation blocks that don't
 # describe THIS job at all — real examples from calibration (docs/DOOMED_GATE_
 # PLAN.md M4):
@@ -1102,7 +1130,7 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
     except Exception:  # noqa: BLE001
         pass
 
-    for assess_blob in (_assess_work_authorization, _assess_stack_mismatch):
+    for assess_blob in (_assess_work_authorization, _assess_mill_body, _assess_stack_mismatch):
         try:
             finding = assess_blob(blob)
             if finding:
