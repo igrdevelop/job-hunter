@@ -33,6 +33,11 @@ pytest
 playwright
 # playwright-stealth  # reduces bot-detection fingerprint for headless Playwright
 
+# linkedin_scout/ only (owner's desktop, not deployed with the bot): sends
+# /scoutfound via the owner's own Telegram user session (MTProto), since a
+# bot's own Bot-API messages never come back to it as an incoming update.
+telethon
+
 # Google APIs (pinned — breaking changes in minor versions)
 google-api-python-client==2.131.0
 google-auth==2.29.0

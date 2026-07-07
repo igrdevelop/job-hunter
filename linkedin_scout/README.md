@@ -6,18 +6,31 @@ residential IP**, via **Windows Task Scheduler** — the SCRAPING is intentional
 part of `hunter/`, NOT in the Docker image, and NOT on the bot's schedule. Full design
 rationale: `../docs/LINKEDIN_POSTS_SCOUT_TASK.md`.
 
-**It does not send Telegram messages directly** (owner decision 2026-07-08 — "this is
-just another job source, like the other 21"). Instead it writes matches to
-`linkedin_scout/pending_candidates.json`; `hunter/sources/linkedin_scout_relay.py` (a
-tiny, scrape-free source inside the bot) drains that file on the bot's own hunt cycle
-and turns each candidate into a normal Job — same central filters, same doomed-vacancy
-gate, same tracker dedup, same `AUTO_APPLY` handling as any other source (owner: "we
-dropped confirmation cards long ago, I never wait for them — there's already a full
-check pipeline other job-board postings go through, I want these to go through it
-too"). A HARD doomed-gate finding still aborts generation for $0.00, same as any other
-source; it just doesn't require a human to look at a card first. Apply (whichever code
-path runs) uses the saved post text automatically via the paste flow — no manual
-re-paste needed, and no real LinkedIn permalink exists to fetch instead.
+**It does not send Telegram messages as itself** (owner decision 2026-07-08 — "this is
+just another job source, like the other 21"). Instead, once it finds a candidate, it
+relays it to the bot as a `/scoutfound <payload>` command sent through **your own
+Telegram user session** (Telethon/MTProto — see below for why), which `hunter/commands/
+scoutfound.py` receives and queues into `hunter/sources/linkedin_scout_relay.py` (a
+tiny, scrape-free source inside the bot). That source drains the queue on the bot's own
+hunt cycle and turns each candidate into a normal Job — same central filters, same
+doomed-vacancy gate, same tracker dedup, same `AUTO_APPLY` handling as any other source
+(owner: "we dropped confirmation cards long ago, I never wait for them — there's
+already a full check pipeline other job-board postings go through, I want these to go
+through it too"). A HARD doomed-gate finding still aborts generation for $0.00, same as
+any other source; it just doesn't require a human to look at a card first. Apply
+(whichever code path runs) uses the saved post text automatically via the paste flow —
+no manual re-paste needed, and no real LinkedIn permalink exists to fetch instead.
+
+**Why a Telegram command instead of a shared file:** an earlier version of this wrote
+matches directly to a local JSON file the bot's source would read. That broke the
+moment it became clear the bot auto-deploys to its own server and does NOT share a
+filesystem with this script's Windows desktop — the bot could never see a file written
+locally here. **Why a user session instead of the bot's own token:** Telegram never
+delivers a bot's own outgoing `sendMessage` calls back to that same bot as an incoming
+update, so there is no way to make the bot's polling `Application` react to something
+it sent to itself. The command has to come from a genuinely different account — the
+owner's own — which requires a real Telegram *user* login (Telethon/MTProto), not just
+the bot token.
 
 ---
 
@@ -38,9 +51,22 @@ re-paste needed, and no real LinkedIn permalink exists to fetch instead.
    itself must also be installed: `pip install playwright` (already in
    `requirements.txt`).
 
-3. **Telegram configured** — `.env`'s `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`,
-   same as the main bot. The scout sends directly via the Bot API; it does not
-   need the bot process running.
+3. **A saved Telegram USER session** (this is the part that's different from the
+   main bot's setup — read carefully):
+   - Get `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from https://my.telegram.org
+     (log in with your own phone number → API development tools → create an app
+     if you don't have one). These identify an *application*, not a bot.
+   - Set `TELEGRAM_BOT_USERNAME` in `.env` to the bot's own `@username` (the
+     send target).
+   - Run `python tools/telegram_user_login.py` — interactive: your phone
+     number, the login code Telegram sends you, and your 2FA password if you
+     have one set. Saves a session file (path in `.env`'s
+     `TELEGRAM_USER_SESSION`).
+   - **Security note:** this session file grants full access to YOUR OWN
+     Telegram account (read/send messages as you) to whoever holds it — treat
+     it exactly like a password, same caution as `.secrets/
+     linkedin_storage_state.json`. It never leaves this machine and is
+     git-ignored.
 
 4. Optional tuning in `.env` (see `.env.example` for the full block):
    `LINKEDIN_SCOUT_KEYWORDS`, `LINKEDIN_SCOUT_SKIP_CHANCE`,
@@ -247,13 +273,13 @@ is worth acting on promptly (re-run `tools/linkedin_login.py`, then `--reset`).
   Chrome profile directories, one per track.
 - `linkedin_scout/search_state.json`, `linkedin_scout/feed_state.json` — circuit
   breaker + keyword rotation state, one per track.
-- `linkedin_scout/seen_posts.json` — dedup store, shared by both tracks.
-- `linkedin_scout/pending_candidates.json` — the queue the bot's
-  `linkedin_scout_relay` source drains on its own hunt cycle. Normally near-empty
-  (drained within one bot hunt cycle); don't delete it while the bot might be
-  mid-read, but losing it just means those candidates won't surface as cards
-  (they're already marked "seen" so they won't be re-queued either — safe but
-  they're gone; not expected to matter since drainage should be fast).
+- `linkedin_scout/seen_posts.json` — dedup store on THIS machine (prevents relaying
+  the same post twice across scout runs).
+- `.secrets/telegram_user_session.session` — your Telegram user login (Telethon).
+
+Note: `pending_candidates.json` (the actual relay queue) now lives on the BOT's
+own machine, not here — see `hunter/sources/linkedin_scout_relay.py` in the main
+repo. There is nothing to clean up for it on this side.
 
 Deleting any of these is safe (loses history/rotation-position/dedup memory, not
 your LinkedIn login — that always comes from `LINKEDIN_STORAGE_STATE`).

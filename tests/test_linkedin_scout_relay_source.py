@@ -8,7 +8,11 @@ import json
 
 import pytest
 
-from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource, URL_PREFIX
+from hunter.sources.linkedin_scout_relay import (
+    URL_PREFIX,
+    LinkedInScoutRelaySource,
+    append_to_queue,
+)
 
 
 @pytest.fixture
@@ -124,3 +128,42 @@ def test_missing_author_falls_back_to_unknown(relay):
     )
     jobs = source.search()
     assert jobs[0].company == "Unknown"
+
+
+# --- append_to_queue (the /scoutfound command handler's write path) ----------
+
+
+def test_append_to_queue_creates_file(relay):
+    _source, queue_path = relay
+    append_to_queue({"author": "Jane", "body": "We're hiring an Angular Developer."})
+
+    records = json.loads(queue_path.read_text(encoding="utf-8"))
+    assert len(records) == 1
+    assert records[0]["author"] == "Jane"
+
+
+def test_append_to_queue_appends_to_existing(relay):
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([{"author": "Old", "body": "x"}]), encoding="utf-8")
+
+    append_to_queue({"author": "New", "body": "We're hiring an Angular Developer."})
+
+    records = json.loads(queue_path.read_text(encoding="utf-8"))
+    authors = {r["author"] for r in records}
+    assert authors == {"Old", "New"}
+
+
+def test_append_then_search_drains_the_appended_record(relay):
+    source, _queue_path = relay
+    append_to_queue({"author": "Jane", "body": "We're hiring an Angular Developer."})
+
+    jobs = source.search()
+
+    assert len(jobs) == 1
+    assert jobs[0].company == "Jane"
+
+
+def test_append_to_queue_no_leftover_tmp_file(relay):
+    _source, queue_path = relay
+    append_to_queue({"author": "Jane", "body": "We're hiring an Angular Developer."})
+    assert not (queue_path.parent / (queue_path.name + ".tmp")).exists()

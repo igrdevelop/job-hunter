@@ -45,7 +45,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-from linkedin_scout import browser, notify, queue_writer  # noqa: E402
+from linkedin_scout import browser, notify, telegram_relay  # noqa: E402
 from linkedin_scout.browser import ScoutCandidate  # noqa: E402
 from linkedin_scout.heuristics import LocationVerdict, check_location, is_hiring_post  # noqa: E402
 from linkedin_scout.parser import parse_posts  # noqa: E402
@@ -74,9 +74,6 @@ FEED_PROFILE_DIR = _BASE_DIR / ".profile_feed"
 SEARCH_STATE_PATH = _BASE_DIR / "search_state.json"
 FEED_STATE_PATH = _BASE_DIR / "feed_state.json"
 SEEN_STORE_PATH = _BASE_DIR / "seen_posts.json"
-# Read by hunter/sources/linkedin_scout_relay.py on the bot's own hunt cycle —
-# this file (not Telegram) is how a scout candidate becomes a normal Job card.
-QUEUE_PATH = _BASE_DIR / "pending_candidates.json"
 DEFAULT_DRY_RUN_FIXTURE = (
     _REPO_ROOT / "tests" / "fixtures" / "linkedin_scout" / "feed_sample.txt"
 )
@@ -186,15 +183,18 @@ def _run_track(track: str, *, headless: bool) -> None:
         logger.info("[linkedin_scout] %s: 0 candidates this run", track)
         return
 
-    # Owner decision (2026-07-08): "this is just another job source" — enqueue
-    # for the bot's OWN hunt cycle to pick up (hunter/sources/
-    # linkedin_scout_relay.py), instead of a direct Telegram notification. The
-    # bot's normal filters/dedup/Apply-Skip card pipeline handles it from
-    # there — never auto-applied (manual_only on that source).
-    enqueued = queue_writer.enqueue_candidates(candidates, seen_store, QUEUE_PATH)
+    # Owner decision (2026-07-08): "this is just another job source" — relay
+    # to the bot over Telegram (the owner's own user session, not the bot's
+    # own token — see telegram_relay.py) so the bot's OWN hunt cycle picks it
+    # up (hunter/sources/linkedin_scout_relay.py) and runs it through the
+    # normal filters/dedup/AUTO_APPLY pipeline, exactly like any other source.
+    # A local queue file was tried first and abandoned once it became clear
+    # the bot auto-deploys to its own server and doesn't share a filesystem
+    # with this script's Windows desktop.
+    sent = telegram_relay.send_candidates(candidates, seen_store)
     logger.info(
-        "[linkedin_scout] %s: %d candidates, %d enqueued for the bot (rest already seen)",
-        track, len(candidates), enqueued,
+        "[linkedin_scout] %s: %d candidates, %d relayed to the bot (rest already seen)",
+        track, len(candidates), sent,
     )
 
 
