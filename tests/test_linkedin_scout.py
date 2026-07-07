@@ -49,6 +49,21 @@ def test_candidate_side_singular_szukam_rejected():
     assert is_hiring_post(text) is False
 
 
+def test_genuine_ru_hiring_post_passes():
+    text = "Ищем Angular разработчика в команду, удалённо, полная занятость."
+    assert is_hiring_post(text) is True
+
+
+def test_ru_candidate_side_rejected():
+    text = "Ищу работу Angular разработчиком, рассмотрю удалённый формат."
+    assert is_hiring_post(text) is False
+
+
+def test_ru_spam_rejected():
+    text = "Требуется Angular разработчик — запишись на наш вебинар и бесплатный курс!"
+    assert is_hiring_post(text) is False
+
+
 def test_szukam_does_not_match_inside_szukamy():
     """The singular/plural distinction is load-bearing (plan §4.6 round 2)."""
     hiring_text = "Szukamy Angular developera do zespołu, praca zdalna."
@@ -107,6 +122,11 @@ def test_location_explicit_remote_keeps():
     text = _read_fixture("hiring_post_no_location.txt").replace(
         "growing team.", "growing team, fully remote."
     )
+    assert check_location(text) is LocationVerdict.KEEP
+
+
+def test_location_explicit_ru_remote_keeps():
+    text = "Ищем Angular разработчика, работа полностью удалённо."
     assert check_location(text) is LocationVerdict.KEEP
 
 
