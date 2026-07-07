@@ -273,3 +273,13 @@ def test_api_pipeline_restamps_cost_after_refine_loop() -> None:
     assert refine_pos < reprice_pos < stamp_pos
     # Paste flow has no URL to match a row by — the stamp must be gated.
     assert "url != PASTE_NO_URL_PLACEHOLDER" in verdict_block
+
+
+# ── Verdict gap_report line in the Telegram success message ─────────────────
+# The owner asked to see WHY the verdict isn't higher, not just the number —
+# the judge's gap_report rides the success notification as its own line.
+
+def test_api_pipeline_sends_verdict_gap_report_line() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "format_gap_report" in src
+    assert "{gap_line}" in src

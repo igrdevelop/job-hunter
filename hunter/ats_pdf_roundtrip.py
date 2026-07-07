@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
+from html import escape as html_escape
 from pathlib import Path
 from typing import Optional
 
@@ -160,9 +161,27 @@ def run_llm_verdict(folder: Path, job_text: str) -> Optional[dict]:
 
 
 def format_verdict(verdict: dict) -> str:
-    """One-line Telegram summary for the independent PDF verdict."""
+    """Telegram summary for the independent PDF verdict: the score plus the
+    judge's own gap_report (trimmed), so the owner sees WHY the number isn't
+    higher — not just the number. HTML-escaped because the bot sends
+    notifications with parse_mode=HTML."""
     score = verdict.get("score", "?")
-    return f"ATS verdict (independent, PDF): {score}%"
+    text = f"ATS verdict (independent, PDF): {score}%"
+    gap = format_gap_report(verdict)
+    if gap:
+        text += f"\n{gap}"
+    return text
+
+
+def format_gap_report(verdict: dict, max_chars: int = 350) -> str:
+    """The verdict's gap_report as one trimmed, HTML-escaped Telegram line
+    (empty string when the verdict carries none)."""
+    gap = str(verdict.get("gap_report") or "").strip()
+    if not gap:
+        return ""
+    if len(gap) > max_chars:
+        gap = gap[: max_chars - 1].rstrip() + "…"
+    return f"📋 <i>{html_escape(gap)}</i>"
 
 
 def format_summary(pdf_check: dict) -> str:

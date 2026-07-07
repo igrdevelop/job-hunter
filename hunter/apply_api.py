@@ -875,8 +875,15 @@ def _run_main_api(
         # Only the independent verdict is user-facing (owner request — the
         # generator's own self-score was noisy: "self-scored myself 96%").
         # It stays on content.json for diagnostics, just not in Telegram.
+        # The verdict's gap_report rides along as its own line — the owner
+        # asked to see WHY the score isn't higher, not just the number.
+        gap_line = ""
         if verdict is not None:
             ats_line = f"ATS: {verdict.get('score')}% (independent, PDF)"
+            from hunter.ats_pdf_roundtrip import format_gap_report
+            gap = format_gap_report(verdict)
+            if gap:
+                gap_line = f"{gap}\n"
         else:
             ats_line = f"ATS: {content.get('ats_score', '?')}%"
         cost_line = ""
@@ -895,6 +902,7 @@ def _run_main_api(
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"{ats_line}{pdf_summary} | Stack: {content.get('stack', '?')}\n"
+            f"{gap_line}"
             f"Via: API ({_llm_prof.model}){cost_line}\n"
             f"Review and send when ready."
             f"{issues_note}"
