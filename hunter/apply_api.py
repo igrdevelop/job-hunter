@@ -276,15 +276,18 @@ def _run_main_api(
     except Exception as e:  # noqa: BLE001 — best-effort, never block apply
         print(f"[apply_agent] Warning: manual screen failed: {e}")
 
-    # Step 1.5f — Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md). Deterministic
-    # full-text screen that can actually ABORT generation on a HARD finding
-    # (non-Poland onsite/hybrid, non-EU work authorization, unsupported
-    # required language) — unlike Step 1.5e above, which only ever warns.
-    # Force-mode/paste degrades HARD to warn (owner explicitly said generate).
+    # Step 1.5f — Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md +
+    # docs/DOOMED_GATE_PASTE_PLAN.md). Deterministic full-text screen that can
+    # actually ABORT generation on a HARD finding (non-Poland onsite/hybrid,
+    # non-EU work authorization, unsupported required language, excluded
+    # backend stack in the title) — unlike Step 1.5e above, which only ever
+    # warns. Only `/force` (skip_dedup) degrades HARD to warn; a plain manual
+    # paste is treated the same as an auto-discovered job (real $ was wasted
+    # on pasted postings a HARD rule would have caught — see the paste plan).
     if run_doomed_gate(
         job_text, url,
         title=jobleads_title, company=jobleads_company,
-        is_manual_override=bool(paste_text) or skip_dedup,
+        is_force_override=skip_dedup,
     ):
         return
 

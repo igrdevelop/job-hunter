@@ -198,7 +198,7 @@ def run_doomed_gate(
     *,
     title: str = "",
     company: str = "",
-    is_manual_override: bool = False,
+    is_force_override: bool = False,
 ) -> bool:
     """Deterministic full-text screen run right after expired-check, before any
     LLM call (Step 1.5f in both pipelines). Zero-cost (regex only) — see
@@ -207,13 +207,19 @@ def run_doomed_gate(
     Returns True when the caller should ABORT generation — a SKIP row has
     already been written to the tracker and Telegram notified. Returns False
     to continue (SOFT findings only, a HARD finding degraded to warn because
-    of `is_manual_override`, the gate is disabled, or it errored — best-effort,
+    of `is_force_override`, the gate is disabled, or it errored — best-effort,
     a gate failure never blocks an apply).
 
-    `is_manual_override`: True for force-mode (`skip_dedup`) or a manual paste
-    — the owner explicitly said "generate this one anyway", so a HARD finding
+    `is_force_override`: True ONLY for `/force` (`skip_dedup`) — an explicit
+    owner command meaning "generate this one anyway", so a HARD finding
     degrades to the same warn-but-allow behavior as SOFT (existing semantics
-    shared with `screen_job_text`).
+    shared with `screen_job_text`). A plain manual URL/text paste is NOT an
+    override anymore (docs/DOOMED_GATE_PASTE_PLAN.md): a HARD finding on a
+    pasted job now blocks generation exactly like an auto-discovered one —
+    calibration showed real $ wasted on postings (Santander .NET+Angular,
+    QuantumBlackMcKinsey fullstack/AI) that were pasted, not force-applied,
+    and would have been caught by the new title-based HARD rule if paste had
+    been treated the same as any other source.
     """
     from hunter.config import DOOMED_GATE_ENABLED, DOOMED_GATE_HARD_ACTION
     if not DOOMED_GATE_ENABLED:
@@ -232,7 +238,7 @@ def run_doomed_gate(
     hard = [f for f in findings if f.severity == "hard"]
     soft = [f for f in findings if f.severity == "soft"]
 
-    if hard and DOOMED_GATE_HARD_ACTION == "skip" and not is_manual_override:
+    if hard and DOOMED_GATE_HARD_ACTION == "skip" and not is_force_override:
         finding = hard[0]
         reason = f'{finding.rule} — "{finding.evidence}"'
         notify(
@@ -255,7 +261,7 @@ def run_doomed_gate(
     # generate anyway, just surface every finding in one Telegram message.
     warn_findings = hard + soft
     lines = "\n".join(f"• {f.rule}: {f.evidence}" for f in warn_findings[:5])
-    degraded_note = " (manual override — generating anyway)" if hard and is_manual_override else ""
+    degraded_note = " (force override — generating anyway)" if hard and is_force_override else ""
     notify(
         f"⚠️ <b>Heads-up — doomed-gate finding(s)</b>{degraded_note}\n"
         f"{lines}\n🔗 {url}\n\n"

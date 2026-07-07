@@ -1,10 +1,12 @@
 """
-Tests for the doomed-vacancy gate wiring (docs/DOOMED_GATE_PLAN.md, milestone M2):
+Tests for the doomed-vacancy gate wiring (docs/DOOMED_GATE_PLAN.md, milestone M2;
+docs/DOOMED_GATE_PASTE_PLAN.md for the force-vs-paste split):
 
 1. `hunter.apply_shared.run_doomed_gate` — the shared gate-wiring helper used
-   by both pipelines (hard→skip+SKIP-row; hard+manual-override→warn+continue;
+   by both pipelines (hard→skip+SKIP-row; hard+force-override→warn+continue;
    soft→warn+continue; gate disabled→noop; assess_job_text failure→best-effort
-   continue).
+   continue). A manual paste is NOT an override anymore — only `/force`
+   (skip_dedup) degrades a HARD finding to a warning.
 2. `hunter.apply_api.main_api` — Step 1.5f sits after the manual screen
    (Step 1.5e) and before the first LLM call; a HARD finding aborts before
    Step 2, a False return lets the pipeline continue past it.
@@ -75,8 +77,8 @@ class TestRunDoomedGateHardSkip:
         assert result is True
 
 
-class TestRunDoomedGateManualOverride:
-    def test_hard_finding_with_manual_override_degrades_to_warn(self) -> None:
+class TestRunDoomedGateForceOverride:
+    def test_hard_finding_with_force_override_degrades_to_warn(self) -> None:
         from hunter.apply_shared import run_doomed_gate
         with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
              patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"), \
@@ -84,19 +86,19 @@ class TestRunDoomedGateManualOverride:
              patch("hunter.apply_shared.notify") as mock_notify, \
              patch("hunter.tracker.add_skipped") as mock_add_skipped:
             result = run_doomed_gate(
-                "job text", "https://example.com/4", is_manual_override=True,
+                "job text", "https://example.com/4", is_force_override=True,
             )
         assert result is False
         mock_add_skipped.assert_not_called()
         mock_notify.assert_called_once()
         msg = mock_notify.call_args[0][0]
         assert "Heads-up" in msg
-        assert "manual override" in msg
+        assert "force override" in msg
         assert "foreign_onsite_hybrid" in msg
 
-    def test_hard_action_warn_config_degrades_without_manual_override(self) -> None:
+    def test_hard_action_warn_config_degrades_without_force_override(self) -> None:
         """DOOMED_GATE_HARD_ACTION=warn is the emergency lever — degrades
-        every HARD finding to a warning even without force/paste."""
+        every HARD finding to a warning even without /force."""
         from hunter.apply_shared import run_doomed_gate
         with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
              patch("hunter.config.DOOMED_GATE_HARD_ACTION", "warn"), \
@@ -123,7 +125,7 @@ class TestRunDoomedGateSoft:
         mock_notify.assert_called_once()
         msg = mock_notify.call_args[0][0]
         assert "Heads-up" in msg
-        assert "manual override" not in msg
+        assert "force override" not in msg
         assert "stack_mismatch_non_candidate_framework" in msg
 
 
@@ -192,12 +194,15 @@ def test_api_pipeline_continues_past_gate_when_it_returns_false(monkeypatch) -> 
             main_api("https://example.com/api-continue")
 
 
-def test_api_pipeline_passes_manual_override_true_for_paste(monkeypatch) -> None:
+def test_api_pipeline_passes_force_override_false_for_paste(monkeypatch) -> None:
+    """A manual paste is NOT an override anymore (docs/DOOMED_GATE_PASTE_PLAN.md)
+    — a HARD finding on a pasted job blocks generation exactly like an
+    auto-discovered one."""
     _patch_api_pre_gate(monkeypatch)
     calls = {}
 
-    def _capture(job_text, url, *, title="", company="", is_manual_override=False):
-        calls["is_manual_override"] = is_manual_override
+    def _capture(job_text, url, *, title="", company="", is_force_override=False):
+        calls["is_force_override"] = is_force_override
         return True  # abort immediately, don't care about the rest
 
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", _capture)
@@ -207,15 +212,15 @@ def test_api_pipeline_passes_manual_override_true_for_paste(monkeypatch) -> None
     with patch("hunter.apply_api.notify"):
         main_api(PASTE_NO_URL_PLACEHOLDER, paste_text="Pasted job text " * 20)
 
-    assert calls["is_manual_override"] is True
+    assert calls["is_force_override"] is False
 
 
-def test_api_pipeline_passes_manual_override_true_for_skip_dedup(monkeypatch) -> None:
+def test_api_pipeline_passes_force_override_true_for_skip_dedup(monkeypatch) -> None:
     _patch_api_pre_gate(monkeypatch)
     calls = {}
 
-    def _capture(job_text, url, *, title="", company="", is_manual_override=False):
-        calls["is_manual_override"] = is_manual_override
+    def _capture(job_text, url, *, title="", company="", is_force_override=False):
+        calls["is_force_override"] = is_force_override
         return True
 
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", _capture)
@@ -224,15 +229,15 @@ def test_api_pipeline_passes_manual_override_true_for_skip_dedup(monkeypatch) ->
     with patch("hunter.apply_api.notify"):
         main_api("https://example.com/api-force", skip_dedup=True)
 
-    assert calls["is_manual_override"] is True
+    assert calls["is_force_override"] is True
 
 
-def test_api_pipeline_passes_manual_override_false_for_normal_hunt_job(monkeypatch) -> None:
+def test_api_pipeline_passes_force_override_false_for_normal_hunt_job(monkeypatch) -> None:
     _patch_api_pre_gate(monkeypatch)
     calls = {}
 
-    def _capture(job_text, url, *, title="", company="", is_manual_override=False):
-        calls["is_manual_override"] = is_manual_override
+    def _capture(job_text, url, *, title="", company="", is_force_override=False):
+        calls["is_force_override"] = is_force_override
         return True
 
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", _capture)
@@ -241,7 +246,7 @@ def test_api_pipeline_passes_manual_override_false_for_normal_hunt_job(monkeypat
     with patch("hunter.apply_api.notify"):
         main_api("https://example.com/api-normal")
 
-    assert calls["is_manual_override"] is False
+    assert calls["is_force_override"] is False
 
 
 def test_api_pipeline_gate_runs_after_manual_screen_source_order() -> None:
@@ -308,12 +313,13 @@ def test_cli_pipeline_reaches_subprocess_when_gate_returns_false(monkeypatch) ->
     assert called.get("reached") is True
 
 
-def test_cli_pipeline_passes_manual_override_true_for_paste(monkeypatch) -> None:
+def test_cli_pipeline_passes_force_override_false_for_paste(monkeypatch) -> None:
+    """A manual paste is NOT an override anymore (docs/DOOMED_GATE_PASTE_PLAN.md)."""
     _patch_cli_pre_gate(monkeypatch)
     calls = {}
 
-    def _capture(job_text, url, *, title="", company="", is_manual_override=False):
-        calls["is_manual_override"] = is_manual_override
+    def _capture(job_text, url, *, title="", company="", is_force_override=False):
+        calls["is_force_override"] = is_force_override
         return True
 
     monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", _capture)
@@ -322,15 +328,15 @@ def test_cli_pipeline_passes_manual_override_true_for_paste(monkeypatch) -> None
     with patch("hunter.apply_cli.notify"):
         main_cli("paste://no-url", paste_text="Pasted job text " * 20)
 
-    assert calls["is_manual_override"] is True
+    assert calls["is_force_override"] is False
 
 
-def test_cli_pipeline_passes_manual_override_true_for_skip_dedup(monkeypatch) -> None:
+def test_cli_pipeline_passes_force_override_true_for_skip_dedup(monkeypatch) -> None:
     _patch_cli_pre_gate(monkeypatch)
     calls = {}
 
-    def _capture(job_text, url, *, title="", company="", is_manual_override=False):
-        calls["is_manual_override"] = is_manual_override
+    def _capture(job_text, url, *, title="", company="", is_force_override=False):
+        calls["is_force_override"] = is_force_override
         return True
 
     monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", _capture)
@@ -339,7 +345,7 @@ def test_cli_pipeline_passes_manual_override_true_for_skip_dedup(monkeypatch) ->
     with patch("hunter.apply_cli.notify"):
         main_cli("paste://no-url", paste_text="Pasted job text " * 20, skip_dedup=True)
 
-    assert calls["is_manual_override"] is True
+    assert calls["is_force_override"] is True
 
 
 def test_cli_pipeline_gate_runs_after_manual_screen_source_order() -> None:

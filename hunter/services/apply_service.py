@@ -55,7 +55,15 @@ async def run_apply_agent_subprocess(
     Returns ``ok`` on exit 0, ``manual`` on JobLeads MANUAL flow (exit 44), ``fail`` otherwise.
     """
     cmd = [python_executable, str(apply_agent_path), job.url]
-    if "jobleads.com" in (job.url or "").lower():
+    # --company/--title used to be JobLeads-only (its detail pages are Cloudflare-
+    # blocked, so the MANUAL tracker row needs a listing-derived title/company).
+    # Passed for every auto-hunt job now (docs/DOOMED_GATE_PASTE_PLAN.md): without
+    # it, the doomed gate's title-based checks (title_exclude_pattern/
+    # off_domain_title) never see the REAL hunt-listing title and fall back to
+    # guessing one from the raw fetched text — noisy and unnecessary when the
+    # Job object already has a perfectly good title. Only a genuine manual paste
+    # (no Job object, just a typed URL/text) still needs the guess.
+    if job.title or job.company:
         safe_title = (job.title or "Unknown").replace("\r\n", " ").replace("\n", " ").strip()[:500]
         cmd.extend(["--company", job.company or "Unknown", "--title", safe_title])
 

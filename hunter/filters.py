@@ -1082,16 +1082,96 @@ def _strip_recommendation_tail(text: str) -> str:
     return text[: m.start()] if m else text
 
 
+# Boilerplate lines that precede the real title on common job-board dumps
+# (LinkedIn's raw HTML fetch starts with site chrome before the title).
+_TITLE_GUESS_JUNK_RE = re.compile(
+    r"^(?:skip to main content|sign in|home|menu|search|apply|save|"
+    r"see who .* has hired|\d+\s+(?:days?|weeks?|hours?|minutes?)\s+ago)$",
+    re.IGNORECASE,
+)
+
+
+def _guess_title_from_text(job_text: str) -> str:
+    """Best-effort job-title guess from the first meaningful line of raw text.
+
+    Used ONLY on the manual-paste path, where no title is known at gate time
+    (the LLM hasn't parsed the posting yet) — see docs/DOOMED_GATE_PASTE_PLAN.md.
+    A miss just means the title-based checks below find nothing (same as
+    today); it never overrides an explicitly known title, so a wrong guess
+    cannot turn into a false positive on a job whose real title is known.
+    """
+    for line in (job_text or "").splitlines():
+        line = line.strip()
+        if not line or len(line) < 4 or len(line) > 120:
+            continue
+        if _TITLE_GUESS_JUNK_RE.match(line):
+            continue
+        return line
+    return ""
+
+
+def _assess_title_exclude_pattern(effective_title: str) -> "GateFinding | None":
+    """HARD — the (explicit or guessed) title names an excluded backend/CMS
+    stack (.NET/Java/C#/PHP/Vue/Magento/…), same list as the listing-level
+    _matches_exclude_pattern. Real calibration case: Santander ".NET Developer
+    (Angular)" — no "fullstack" in the title (so _is_unwanted_fullstack never
+    applies), but ".NET" alone is exactly what the listing-level filter would
+    have caught had this not been a manual paste."""
+    if not effective_title:
+        return None
+    if _matches_exclude_pattern(effective_title):
+        return GateFinding(
+            rule="title_exclude_pattern",
+            severity="hard",
+            evidence=effective_title[:80],
+        )
+    return None
+
+
+def _assess_off_domain_title(effective_title: str, *, was_guessed: bool) -> "GateFinding | None":
+    """SOFT — the (explicit or guessed) title doesn't match the frontend
+    title-keyword whitelist. SOFT rather than HARD: a GUESSED title is
+    inherently less reliable than a known one (wrong-line risk), so an
+    incorrect hard block is too costly here — warn and let the owner decide.
+    Real calibration case: QuantumBlackMcKinsey "Software Engineer -
+    QuantumBlack, AI by McKinsey" — a full stack/AI role, not a frontend one."""
+    if not effective_title:
+        return None
+    if not _matches_title_keywords(effective_title):
+        return GateFinding(
+            rule="off_domain_title",
+            severity="soft",
+            evidence=effective_title[:80] + (" (guessed)" if was_guessed else ""),
+        )
+    return None
+
+
+# NOTE: an earlier iteration of this plan added a SOFT rule that flagged any
+# anti-hybrid city named near the top of the text (no onsite/hybrid wording
+# required) to catch header-only cases like Comarch ("Comarch Warsaw,
+# Mazowieckie, Poland" with no "hybrid"/"onsite" anywhere in the body).
+# Recalibration against the real corpus immediately proved it too noisy even
+# at SOFT: Fairmarkit — a real, fully described, SENT (98% ATS) Warsaw-office
+# EU role with no hybrid language of its own — tripped it exactly the same as
+# Comarch. A bare city mention in a header can't be told apart from "this is
+# just where the company's office happens to be"; the rule was removed
+# rather than shipped as noise on good jobs (docs/DOOMED_GATE_PASTE_PLAN.md).
+
+
 def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> list[GateFinding]:
     """Deterministic, zero-LLM doomed-vacancy gate over the full fetched job text.
 
     Returns every finding (hard + soft, in check order); callers decide what to
     do with them (see hunter.apply_api / hunter.apply_cli wiring). Reuses the
     existing _MANUAL_SCREEN_CHECKS body-level filters (split HARD/SOFT per M4
-    calibration, see the comment above _MANUAL_SCREEN_CHECKS_HARD), plus three
-    new HARD rule families (non-Poland on-site/hybrid, unsupported work
-    authorization, unsupported required language) and one SOFT rule (primary-
-    stack mismatch). No network calls, no LLM calls — pure regex.
+    calibration, see the comment above _MANUAL_SCREEN_CHECKS_HARD), plus HARD
+    rule families for non-Poland on-site/hybrid, unsupported work
+    authorization, unsupported required language, and an excluded backend/CMS
+    stack named in the title; SOFT rules for primary-stack mismatch and an
+    off-domain (non-frontend) title. The title-based rules
+    (docs/DOOMED_GATE_PASTE_PLAN.md) use the explicit `title` when known,
+    otherwise a best-effort guess from the raw text — see
+    `_guess_title_from_text`. No network calls, no LLM calls — pure regex.
     """
     job_text = _strip_recommendation_tail(job_text or "")
     job = Job(
@@ -1138,6 +1218,25 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
         except Exception:  # noqa: BLE001
             pass
 
+    # Title-based checks (docs/DOOMED_GATE_PASTE_PLAN.md) — reuse the explicit
+    # title when known (hunt/JobLeads), otherwise fall back to a best-effort
+    # guess from the raw text. Only meaningful on the manual-paste path, where
+    # no title is known at gate time; a guess miss just finds nothing.
+    was_guessed = not bool(title)
+    effective_title = title or _guess_title_from_text(job_text)
+    try:
+        finding = _assess_title_exclude_pattern(effective_title)
+        if finding:
+            findings.append(finding)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        finding = _assess_off_domain_title(effective_title, was_guessed=was_guessed)
+        if finding:
+            findings.append(finding)
+    except Exception:  # noqa: BLE001
+        pass
+
     return findings
 
 
@@ -1154,13 +1253,19 @@ def screen_job_text(
     assess_job_text() (plus the supplied title/company when known) and returns
     the first finding's evidence — regardless of severity — as a short
     human-readable reason, so the bot can warn the user before generating docs
-    while still letting it through. Returns None when nothing fires.
+    while still letting it through (always warn-only here — this function
+    never blocks; the actual blocking decision is `run_doomed_gate`'s, at
+    Step 1.5f). Returns None when nothing fires.
 
-    Deliberately does NOT enforce the title-keyword whitelist: a manual paste is
-    an intentional override, so we only flag disqualifiers we're confident about.
-    `location` is accepted for backward compatibility but unused (no call site
-    has ever passed a meaningful value; assess_job_text derives geography from
-    the body text itself).
+    Since docs/DOOMED_GATE_PASTE_PLAN.md, this DOES surface an off-domain-title
+    warning (the SOFT `off_domain_title` rule inside assess_job_text) when the
+    known/guessed title fails the frontend title-keyword whitelist — a plain
+    paste is no longer treated as "the owner already knows what they're
+    pasting" for that signal, since real calibration data (QuantumBlackMcKinsey,
+    a fullstack/AI role generated for $0.18 nobody wanted) showed that
+    assumption cost real money. `location` is accepted for backward
+    compatibility but unused (no call site has ever passed a meaningful value;
+    assess_job_text derives geography from the body text itself).
     """
     findings = assess_job_text(job_text, title=title, company=company)
     return findings[0].evidence if findings else None

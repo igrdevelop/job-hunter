@@ -51,15 +51,32 @@ from hunter.tracker import normalize_url  # noqa: E402
 # skip in the live sample rather than burn the run on guaranteed failures.
 _SKIP_LIVE_HOSTS = ("linkedin.com",)
 
-# Rules that are an exact-name lookup against an owner-curated blocklist
-# (hunter.config.FILTER["exclude_companies"]), not a regex heuristic over the
-# posting text — there is no pattern to "narrow" here, the rule fires because
-# the owner already decided (PR #110, 2026-06-30) that this specific company
-# is unwanted. A HARD hit on a Sent row for one of these rules only means the
-# row predates that decision (e.g. Micro1 applies from 2026-05-13/2026-06-19,
-# weeks before exclude_companies gained "micro1" on 2026-06-30) — it is not a
-# gate false positive and must not be "fixed" by loosening the list.
-_OWNER_BLOCKLIST_RULES = frozenset({"is_ai_training_or_mill"})
+# Rules whose HARD hits on an old Sent row are pre-existing, deliberate policy
+# — not a regex-precision bug to narrow — for two different reasons:
+#
+#   - is_ai_training_or_mill / ai_mill_body: an exact-name lookup against the
+#     owner-curated exclude_companies blocklist (PR #110, 2026-06-30; ai_mill_body
+#     is the same blocklist re-checked against the FULL body text, PR #118,
+#     2026-07-07 — company field is blank for Gmail-alert stubs). A hit on a
+#     Sent row predating that decision (e.g. Micro1, 2026-05-13/2026-06-19) is
+#     stale ground truth, not a false positive.
+#   - is_unwanted_fullstack / title_exclude_pattern: title-DEPENDENT rules that
+#     silently never fired for any non-JobLeads job before this same PR
+#     (docs/DOOMED_GATE_PASTE_PLAN.md) — apply_service.py only ever passed
+#     --company/--title for jobleads.com URLs, so run_doomed_gate always saw
+#     title="" for every other source and both rules were dead code in
+#     production. Now that every auto-hunt job carries its real title, they
+#     correctly fire for the first time on old Sent rows that only slipped
+#     through via that plumbing gap (Unide "Senior Fullstack Developer (Node)"
+#     — no Angular, matches the existing fullstack policy exactly; BCFSoftware
+#     "... (Tech Lead) M/K" — matches the existing \btech\s+lead\b exclude
+#     pattern). Both are the EXISTING, already-owner-approved policy working
+#     correctly, not new imprecision — narrowing them would only re-open the
+#     gap. New findings from these rules should still be scrutinized normally;
+#     this bucket exists only to not re-litigate old, now-unreachable rows.
+_PRE_EXISTING_POLICY_RULES = frozenset({
+    "is_ai_training_or_mill", "ai_mill_body", "is_unwanted_fullstack", "title_exclude_pattern",
+})
 
 
 @dataclass
@@ -125,6 +142,27 @@ def _sent_index(sheet_rows: list[dict]) -> dict[str, str]:
     return idx
 
 
+def _title_index(sheet_rows: list[dict]) -> dict[str, str]:
+    """url_norm -> Job Title, for the offline-corpus cross-check.
+
+    Mirrors what production now does after the apply_service.py fix
+    (docs/DOOMED_GATE_PASTE_PLAN.md): every auto-hunt job passes its real
+    title into the doomed gate, so offline replay should too when the Sheet
+    has one — only a genuinely title-less row (no Sheet match, i.e. the same
+    situation as a real manual paste) should exercise the title-guessing
+    fallback. Without this, EVERY offline corpus file looks like an unknown-
+    title paste, which is not what production actually does.
+    """
+    idx: dict[str, str] = {}
+    for row in sheet_rows:
+        url = (row.get("URL") or "").strip()
+        title = (row.get("Job Title") or "").strip()
+        if not url or not title:
+            continue
+        idx[normalize_url(url)] = title
+    return idx
+
+
 # ---------------------------------------------------------------------------
 # 1. Offline corpus
 # ---------------------------------------------------------------------------
@@ -137,7 +175,9 @@ def _extract_url(text: str) -> str:
     return ""
 
 
-def load_offline_corpus(sent_index: dict[str, str], base_dirs: list[Path]) -> list[Posting]:
+def load_offline_corpus(
+    sent_index: dict[str, str], title_index: dict[str, str], base_dirs: list[Path],
+) -> list[Posting]:
     postings: list[Posting] = []
     for base_dir in base_dirs:
         if not base_dir.exists():
@@ -152,9 +192,11 @@ def load_offline_corpus(sent_index: dict[str, str], base_dirs: list[Path]) -> li
                 continue
             company = path.parent.name
             url = _extract_url(text)
-            owner_note = sent_index.get(normalize_url(url), "") if url else ""
+            url_norm = normalize_url(url) if url else ""
+            owner_note = sent_index.get(url_norm, "") if url else ""
+            title = title_index.get(url_norm, "") if url else ""
             postings.append(Posting(
-                source="offline", company=company, title="", url=url,
+                source="offline", company=company, title=title, url=url,
                 owner_note=owner_note, text=text, stale=is_job_expired(text),
             ))
             found += 1
@@ -265,8 +307,8 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
         return classify(note) == "applied"
 
     sent_hard = [r for r in rows if r.severity == "hard" and _sent_true(r.owner_note)]
-    blocklist_excluded = [r for r in sent_hard if not r.stale and r.rule in _OWNER_BLOCKLIST_RULES]
-    false_positives = [r for r in sent_hard if not r.stale and r.rule not in _OWNER_BLOCKLIST_RULES]
+    policy_excluded = [r for r in sent_hard if not r.stale and r.rule in _PRE_EXISTING_POLICY_RULES]
+    false_positives = [r for r in sent_hard if not r.stale and r.rule not in _PRE_EXISTING_POLICY_RULES]
     stale_excluded = [r for r in sent_hard if r.stale]
     print(f"\nHARD findings on rows the owner actually SENT (must be zero): {len(false_positives)}")
     for r in false_positives:
@@ -279,14 +321,14 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
         )
         for r in stale_excluded:
             print(f"  (stale) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
-    if blocklist_excluded:
+    if policy_excluded:
         print(
-            f"\n({len(blocklist_excluded)} additional HARD hit(s) on sent rows excluded — the "
-            "rule is an exact-name lookup against the owner-curated exclude_companies "
-            "list (PR #110, 2026-06-30), not a text heuristic; these Sent dates predate "
-            "that decision, so the row is stale ground truth, not a gate false positive):"
+            f"\n({len(policy_excluded)} additional HARD hit(s) on sent rows excluded — "
+            "pre-existing, already-owner-approved policy (exact-name blocklist, or a "
+            "title-dependent rule that only just started reaching the gate this PR), "
+            "not a gate false positive — see _PRE_EXISTING_POLICY_RULES):"
         )
-        for r in blocklist_excluded:
+        for r in policy_excluded:
             print(f"  (pre-policy) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
 
     bigbear = [r for r in rows if "bigbear" in r.company.lower() and r.severity == "hard"]
@@ -319,8 +361,9 @@ def main() -> int:
 
     sheet_rows = _load_sheet_rows()
     sent_index = _sent_index(sheet_rows)
+    title_index = _title_index(sheet_rows)
 
-    postings = load_offline_corpus(sent_index, base_dirs)
+    postings = load_offline_corpus(sent_index, title_index, base_dirs)
     if args.live:
         if not sheet_rows:
             print("[calibrate] --live requested but no Sheet rows available — skipping")

@@ -161,6 +161,62 @@ def test_run_apply_agent_subprocess_returns_rate_limited_on_exit_45(monkeypatch)
     assert result == "rate_limited"
 
 
+def test_run_apply_agent_subprocess_passes_title_for_non_jobleads_job(monkeypatch) -> None:
+    """docs/DOOMED_GATE_PASTE_PLAN.md: --company/--title used to be JobLeads-only;
+    now passed for any auto-hunt job with a known title, so the doomed gate's
+    title-based checks see the real listing title instead of guessing one."""
+    captured = {}
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured["args"] = args
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    asyncio.run(
+        run_apply_agent_subprocess(
+            _job("https://www.linkedin.com/jobs/view/123"),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert "--company" in captured["args"]
+    assert "--title" in captured["args"]
+    idx = captured["args"].index("--title")
+    assert captured["args"][idx + 1] == "Senior Frontend Developer"
+
+
+def test_run_apply_agent_subprocess_omits_title_flags_when_unknown(monkeypatch) -> None:
+    """A Job with no title/company at all (shouldn't normally happen for a
+    real hunt job, but keeps the flag optional rather than sending 'Unknown')."""
+    captured = {}
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured["args"] = args
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    blank = Job(title="", company="", location="", salary=None, url="https://example.com/jobs/2", source="test")
+    asyncio.run(
+        run_apply_agent_subprocess(
+            blank,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert "--company" not in captured["args"]
+    assert "--title" not in captured["args"]
+
+
 def test_run_apply_agent_subprocess_returns_manual_on_exit_44(monkeypatch) -> None:
     async def _fake_create_subprocess_exec(program, *args, **kwargs):  # noqa: ANN002, ANN003
         assert "--company" in args
