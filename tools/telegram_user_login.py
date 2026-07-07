@@ -29,7 +29,11 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 PROJECT_DIR = Path(__file__).parent.parent
+load_dotenv(PROJECT_DIR / ".env")
+
 SECRETS_DIR = PROJECT_DIR / ".secrets"
 DEFAULT_SESSION_PATH = SECRETS_DIR / "telegram_user_session"
 
