@@ -250,9 +250,13 @@ def test_screen_clean_posting_returns_none() -> None:
     assert reason is None
 
 
-def test_screen_does_not_enforce_title_keyword() -> None:
-    """Manual override: a non-FE title alone must NOT trigger a warning."""
+def test_screen_now_warns_on_off_domain_title() -> None:
+    """Superseded by docs/DOOMED_GATE_PASTE_PLAN.md: a non-FE title now DOES
+    surface a (SOFT, warn-only) finding here too, since screen_job_text reuses
+    assess_job_text() and the paste-path extension added off_domain_title.
+    Real calibration case: QuantumBlackMcKinsey generated a CV for a fullstack/
+    AI role pasted manually, wasting $0.18 on an 82% match nobody wanted."""
     reason = screen_job_text(
         "Great backend-free role building dashboards.",
         title="Senior Software Engineer")
-    assert reason is None
+    assert reason is not None

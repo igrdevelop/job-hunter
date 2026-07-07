@@ -417,3 +417,76 @@ def test_assess_job_text_empty_input_returns_no_findings() -> None:
 def test_assess_job_text_never_raises_on_garbage_input() -> None:
     # Regex-only engine — must not blow up on odd unicode / control chars.
     assess_job_text("\x00\x01 weird \ufeff text \u200b" * 50)
+
+
+# ── Title-based checks (docs/DOOMED_GATE_PASTE_PLAN.md) ─────────────────────
+# Reused from listing-level filters, but now also applied on the manual-paste
+# path via a best-effort title guess when no explicit title is known.
+
+def test_title_exclude_pattern_hard_with_explicit_title() -> None:
+    """Real calibration case: Santander '.NET Developer (Angular)' - no
+    'fullstack' in the title (so _is_unwanted_fullstack never applies), but
+    '.NET' alone is exactly what the listing-level filter would have caught."""
+    findings = assess_job_text(
+        "5+ years Angular, TypeScript, RxJS. Great team.",
+        title=".NET Developer (Angular)",
+    )
+    assert "title_exclude_pattern" in _rules(findings)
+    assert all(f.severity == "hard" for f in findings if f.rule == "title_exclude_pattern")
+
+
+def test_title_exclude_pattern_hard_with_guessed_title() -> None:
+    """Same check, but the title is guessed from the raw text (paste path,
+    no explicit title known) - first meaningful line of the dump."""
+    text = (
+        "Skip to main content\n"
+        ".NET Developer (Angular)\n"
+        "Some Company Warsaw, Poland\n\n"
+        "5+ years Angular, TypeScript, RxJS. Great team."
+    )
+    findings = assess_job_text(text)
+    assert "title_exclude_pattern" in _rules(findings)
+
+
+def test_off_domain_title_soft_with_guessed_title() -> None:
+    """Real calibration case: QuantumBlackMcKinsey 'Software Engineer -
+    QuantumBlack, AI by McKinsey' - not a frontend title at all."""
+    text = (
+        "Skip to main content\n"
+        "Software Engineer - QuantumBlack, AI by McKinsey\n"
+        "McKinsey Warsaw, Poland\n\n"
+        "Angular, React and TypeScript experience is a plus for this AI role."
+    )
+    findings = assess_job_text(text)
+    assert "off_domain_title" in _rules(findings)
+    assert all(f.severity == "soft" for f in findings if f.rule == "off_domain_title")
+
+
+def test_off_domain_title_not_triggered_for_frontend_title() -> None:
+    text = "Skip to main content\nSenior Angular Developer\nSome Company\n\nAngular, RxJS, TypeScript."
+    findings = assess_job_text(text)
+    assert "off_domain_title" not in _rules(findings)
+
+
+def test_title_based_checks_do_not_override_a_known_title() -> None:
+    """A guessed title never runs when the real title is already known -
+    the guess is purely a paste-path fallback."""
+    text = "Skip to main content\n.NET Developer (Angular)\nSome Company\n\nAngular work."
+    findings = assess_job_text(text, title="Senior Angular Developer")
+    assert "title_exclude_pattern" not in _rules(findings)
+    assert "off_domain_title" not in _rules(findings)
+
+
+def test_guess_title_from_text_skips_boilerplate_lines() -> None:
+    from hunter.filters import _guess_title_from_text
+    text = "Skip to main content\nSign in\n\nAngular Developer\nComarch Warsaw, Poland"
+    assert _guess_title_from_text(text) == "Angular Developer"
+
+
+def test_header_location_rule_was_removed_not_just_disabled() -> None:
+    """Regression guard: a bare anti-hybrid city mention (no onsite/hybrid
+    wording) must never produce a finding - the header-location rule was
+    tried and dropped (real Fairmarkit false positive), not just gated off."""
+    text = "Angular Developer\nComarch Warsaw, Mazowieckie, Poland\n\nGreat Angular role, remote-friendly team."
+    findings = assess_job_text(text, title="Angular Developer", company="Comarch")
+    assert "header_location_anti_hybrid_city" not in _rules(findings)
