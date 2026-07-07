@@ -761,10 +761,14 @@ same via `_run_apply_agent(url, paste_file=...)`.
 
 **Safety rails:** circuit breaker (any login/checkpoint/authwall/captcha signal aborts
 immediately, trips state, sends exactly one Telegram alert, every later run no-ops
-until `--reset`); ~30% skip-chance + 0-45min jitter per invocation; ONE keyword per run
-(search track); headed real Chrome with stealth flags (never headless — that got
-flagged within 2-3 loads in the original live probe). See `linkedin_scout/README.md`
-for the Task Scheduler setup and the full safety-rail rationale.
+until `--reset`); ~30% skip-chance + 0-45min jitter per invocation; headed real Chrome
+with stealth flags (never headless — that got flagged within 2-3 loads in the original
+live probe). Search track originally did ONE rotation-keyword per run (full coverage
+over several days); owner decision 2026-07-08 changed `run_once()` to search the
+ENTIRE `LINKEDIN_SCOUT_KEYWORDS` list every invocation instead (10-30s human-paced
+pause between keywords, circuit breaker still aborts the whole run immediately on a
+trip — no further keywords attempted). See `linkedin_scout/README.md` for the Task
+Scheduler setup and the full safety-rail rationale.
 
 **Verification status (as of 2026-07-07):** the full launch → cookie-seed →
 navigate → scroll → extract pipeline has been run end-to-end against a REAL Chrome

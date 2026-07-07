@@ -101,6 +101,12 @@ _SCROLL_ITERATIONS = 3
 _SCROLL_WAIT_RANGE_SEC = (1.0, 2.0)
 _POST_LOAD_WAIT_RANGE_SEC = (1.5, 2.5)
 
+# Owner decision (2026-07-08): search runs through the ENTIRE keyword list in
+# one invocation now, not one keyword per run (the original anti-detection
+# design) — a human-paced pause between each keyword's search within the
+# same run.
+_BETWEEN_KEYWORD_WAIT_RANGE_SEC = (10.0, 30.0)
+
 
 class AntiBotDetected(Exception):
     """Raised the moment a login/checkpoint/authwall/captcha response is seen.
@@ -504,13 +510,19 @@ def run_once(
     state,
     headless: bool = False,
 ) -> list[ScoutCandidate]:
-    """One keyword-search scout invocation: pick the next rotation keyword,
-    search, filter through M1.
+    """One search-track invocation: searches EVERY keyword in `keywords`,
+    sequentially, in this one call (owner decision 2026-07-08 — the original
+    design searched only one rotation-keyword per run; the owner explicitly
+    asked for the full list every time instead).
 
-    Circuit breaker: on AntiBotDetected, trips `state` and sends exactly one
-    Telegram alert (only on the trip that actually flips tripped=False->True).
-    Returns [] on any abort. Never raises for anti-bot conditions — that's the
-    whole point of the breaker (log loudly, don't crash the scheduled task).
+    Each keyword still gets its own full scout_keyword() call (own persistent-
+    context launch/close), with a human-paced pause between keywords. Circuit
+    breaker: on AntiBotDetected, trips `state` and sends exactly one Telegram
+    alert (only on the trip that actually flips tripped=False->True), and the
+    loop stops immediately — no further keywords are attempted once tripped.
+    Returns whatever candidates were collected before that point. Never raises
+    for anti-bot conditions — that's the whole point of the breaker (log
+    loudly, don't crash the scheduled task).
     """
     if state.is_tripped():
         logger.warning(
@@ -519,19 +531,33 @@ def run_once(
         )
         return []
 
-    keyword = state.next_keyword(keywords)
-    logger.info("[linkedin_scout] scouting keyword: %s", keyword)
+    all_candidates: list[ScoutCandidate] = []
+    for i in range(len(keywords)):
+        keyword = state.next_keyword(keywords)
+        logger.info("[linkedin_scout] scouting keyword %d/%d: %s", i + 1, len(keywords), keyword)
 
-    return _run_with_breaker(
-        label=keyword,
-        scout_call=lambda: scout_keyword(
-            keyword,
-            profile_dir=profile_dir,
-            storage_state_path=storage_state_path,
-            headless=headless,
-        ),
-        state=state,
-    )
+        candidates = _run_with_breaker(
+            label=keyword,
+            scout_call=lambda kw=keyword: scout_keyword(
+                kw,
+                profile_dir=profile_dir,
+                storage_state_path=storage_state_path,
+                headless=headless,
+            ),
+            state=state,
+        )
+        all_candidates.extend(candidates)
+
+        if state.is_tripped():
+            logger.warning(
+                "[linkedin_scout] circuit breaker tripped mid-run — stopping remaining keywords"
+            )
+            break
+
+        if i < len(keywords) - 1:
+            _sleep_human(_BETWEEN_KEYWORD_WAIT_RANGE_SEC)
+
+    return all_candidates
 
 
 def run_feed_once(

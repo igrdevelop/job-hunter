@@ -263,20 +263,73 @@ def test_run_once_filters_through_m1_heuristic_and_location_gate(tmp_path, monke
     assert "We're hiring" in candidate.body
 
 
-def test_run_once_advances_keyword_rotation(tmp_path, monkeypatch):
+def test_run_once_searches_every_keyword_in_one_call(tmp_path, monkeypatch):
+    """Owner decision (2026-07-08): one run_once() call now searches the
+    ENTIRE keyword list, not one rotation-keyword per call."""
     state = ScoutState(tmp_path / "state.json")
+    monkeypatch.setattr(browser, "_sleep_human", lambda *a, **k: None)
+
+    seen_keywords = []
+    monkeypatch.setattr(
+        browser, "scout_keyword", lambda keyword, **k: seen_keywords.append(keyword) or ""
+    )
+
+    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+
+    assert seen_keywords == ["a", "b", "c"]
+
+
+def test_run_once_rotation_continues_across_separate_calls(tmp_path, monkeypatch):
+    """Even though one call now covers the whole list, the rotation index is
+    still persisted — a later call with a DIFFERENT (e.g. shorter) list picks
+    up from wherever the index last landed, not necessarily position 0."""
+    state = ScoutState(tmp_path / "state.json")
+    monkeypatch.setattr(browser, "_sleep_human", lambda *a, **k: None)
     monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: "")
 
     run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
-    run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+    # index is now 0 again (wrapped after 2 keywords) — next call starts at "a"
 
-    # Third call should be back to "a" — round robin advanced correctly.
     seen_keywords = []
     monkeypatch.setattr(
         browser, "scout_keyword", lambda keyword, **k: seen_keywords.append(keyword) or ""
     )
     run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
-    assert seen_keywords == ["a"]
+    assert seen_keywords == ["a", "b"]
+
+
+def test_run_once_sleeps_between_keywords_not_after_last(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "state.json")
+    monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: "")
+
+    sleep_calls = []
+    monkeypatch.setattr(browser, "_sleep_human", lambda range_sec: sleep_calls.append(range_sec))
+
+    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+
+    # 3 keywords -> 2 between-keyword pauses, none after the last one
+    assert len(sleep_calls) == 2
+    assert all(rng == browser._BETWEEN_KEYWORD_WAIT_RANGE_SEC for rng in sleep_calls)
+
+
+def test_run_once_stops_remaining_keywords_after_trip(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "state.json")
+    monkeypatch.setattr(browser, "_sleep_human", lambda *a, **k: None)
+    monkeypatch.setattr(browser, "_send_circuit_breaker_alert", lambda reason: None)
+
+    attempted = []
+
+    def _scout(keyword, **k):
+        attempted.append(keyword)
+        raise AntiBotDetected("flagged")
+
+    monkeypatch.setattr(browser, "scout_keyword", _scout)
+
+    result = run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+
+    assert result == []
+    assert attempted == ["a"]  # tripped on the first keyword, never tried b/c
+    assert state.is_tripped() is True
 
 
 # --- feed track (scout_feed / run_feed_once) ---------------------------------
