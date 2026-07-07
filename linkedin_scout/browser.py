@@ -224,6 +224,13 @@ class ScoutCandidate:
     author: str
     body: str
     scouted_at: str
+    # Only set when a plain `<a href="/in/...">` was readable on the actor
+    # element without any extra click (task spec §3.2) — the current DOM
+    # extraction (browser.py's document.body.innerText capture) doesn't carry
+    # hrefs, so this is always None for now; wiring it up is future work if the
+    # live DOM turns out to expose it cheaply. notify.py already renders it
+    # when present so no further change is needed there once it's populated.
+    author_profile_url: str | None = None
 
 
 def _open_scroll_extract(
