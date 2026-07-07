@@ -268,6 +268,11 @@ tools/screen_calibrate.py   Doomed-gate calibration (docs/DOOMED_GATE_PLAN.md M4
                             hard/soft hit rate and flags any HARD finding on a row the owner
                             actually sent (must be zero)
 
+linkedin_scout/             STANDALONE — not imported by hunter/, not in Docker, not on the bot's
+                            schedule. Runs on the owner's own desktop (residential IP, real Chrome)
+                            via Windows Task Scheduler. See "LinkedIn Posts Scout" section below +
+                            linkedin_scout/README.md.
+
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -660,6 +665,63 @@ GSHEETS_ENABLED=true
 # (see docker-compose.yml)
 ```
 
+## LinkedIn Posts Scout (standalone, owner's desktop only)
+
+**What it is:** many vacancies never reach LinkedIn Jobs — recruiters post them as
+ordinary feed content ("We're hiring an Angular dev — DM me"). `linkedin_scout/` is a
+standalone script (NOT part of `hunter/`, NOT in the Docker image, NOT on the bot's
+schedule) that scrapes LinkedIn content-search + the home feed for candidate hiring
+posts and sends matches to Telegram. The owner reads them and applies manually (paste
+flow) — this never runs the apply pipeline itself.
+
+**Why standalone:** an earlier design ran this inside the bot's Docker container
+(`docs/LINKEDIN_POSTS_SOURCE_PLAN.md`, branch `feat/linkedin-posts-source`, PR #114).
+Rejected: a datacenter IP + no display + a bare container fingerprint are exactly what
+gets a LinkedIn session flagged — and a flagged session also breaks the bot's own
+`LINKEDIN_STORAGE_STATE`-based detail-page fetches. This version runs on the owner's
+own Windows desktop, on his residential IP, via Task Scheduler, while he's away from
+the keyboard — see `docs/LINKEDIN_POSTS_SCOUT_TASK.md` for the full spec.
+
+**Two independent tracks** (owner decision 2026-07-07, after M2 shipped):
+- `--track search`: content-search by keyword, rotating one keyword per run
+  (`LINKEDIN_SCOUT_KEYWORDS`).
+- `--track feed`: scrolls the plain home feed, no keyword — relies on the same
+  `is_hiring_post()` gate (which already requires "angular" to be prominent) to narrow
+  results.
+
+Each track owns its own persistent Chrome profile + circuit-breaker state file, so a
+trip on one never silences the other.
+
+**Modules** (`linkedin_scout/`):
+| File | Role |
+|---|---|
+| `heuristics.py` | `is_hiring_post()` (stack + hiring-signal + candidate-side/spam/US-staffing negatives + Angular-prominence gate), `check_location()` (three-way gate, reuses `hunter.filters._is_unwanted_onsite_location` — not duplicated) |
+| `parser.py` | `parse_posts()` — splits captured `innerText` into (author, body) blocks on "Feed post" markers |
+| `seen_store.py` | `dedup_key()` + `SeenStore` — plain JSON, atomic write, independent of `tracker.db` |
+| `state.py` | `ScoutState` — circuit-breaker trip flag + round-robin keyword rotation, one JSON file per track |
+| `browser.py` | Playwright mechanics: persistent Chrome profile, cookie re-seeding, shadow-DOM-aware extraction JS, `scout_keyword()`/`scout_feed()`, `run_once()`/`run_feed_once()` (circuit breaker + M1 filter wiring) |
+| `notify.py` | Direct Telegram `sendMessage` (no bot `Application`/polling), message formatting, dedup-before-send |
+| `run.py` | CLI entry point + Task Scheduler glue: `--track`, `--reset`, `--dry-run`, skip-chance + jitter |
+
+**Safety rails:** circuit breaker (any login/checkpoint/authwall/captcha signal aborts
+immediately, trips state, sends exactly one Telegram alert, every later run no-ops
+until `--reset`); ~30% skip-chance + 0-45min jitter per invocation; ONE keyword per run
+(search track); headed real Chrome with stealth flags (never headless — that got
+flagged within 2-3 loads in the original live probe). See `linkedin_scout/README.md`
+for the Task Scheduler setup and the full safety-rail rationale.
+
+**Verification status (as of 2026-07-07):** the full launch → cookie-seed →
+navigate → scroll → extract pipeline has been run end-to-end against a REAL Chrome
+browser using local `file://` HTML fixtures with actual open shadow DOM (zero network,
+no LinkedIn contact) — see `tests/test_linkedin_scout_extract_integration.py`. This
+caught and fixed two real bugs a mocked unit test couldn't have: (1) the original plan
+claimed `document.body.innerText` renders shadow DOM content — verified FALSE against
+real Chrome; (2) cookies injected via Playwright's `add_cookies()` on a persistent
+context do NOT survive to the next process launch (checked the on-disk SQLite cookie
+store directly) — fixed by re-seeding every run instead of "once ever". What is still
+NOT verified: the actual live LinkedIn DOM shape and its anti-bot behavior — that
+requires a real run on the owner's own machine, which this repo cannot do.
+
 ## Git Workflow
 
 - **Active branch:** `develop` — all changes go here
@@ -809,6 +871,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-07-07 | sonnet | LinkedIn Posts Scout M1-M5 (standalone `linkedin_scout/`, docs/LINKEDIN_POSTS_SCOUT_TASK.md, branches feat/linkedin-posts-scout-impl-v2 (M1, PR #120 merged) + feat/linkedin-posts-scout-m2 (M2-M5, PR #122)). Replaces the earlier server-side design (`docs/LINKEDIN_POSTS_SOURCE_PLAN.md`, branch feat/linkedin-posts-source, PR #114 — rejected: datacenter IP + no display + container fingerprint risked flagging the shared `LINKEDIN_STORAGE_STATE` session that also powers the bot's own LinkedIn detail fetches) with a script that runs on the owner's own Windows desktop, his residential IP, via Task Scheduler. **M1** (pure logic, no browser): `heuristics.py` (`is_hiring_post` — stack/hiring-signal/candidate-side/spam/US-staffing regex families + Angular-prominence gate + `szukam`≠`szukamy` distinction; `check_location` — three-way gate reusing `hunter.filters._is_unwanted_onsite_location`), `parser.py` (`parse_posts` — splits captured innerText on "Feed post" markers), `seen_store.py` (dedup + atomic JSON). **M2** (Playwright): `state.py` (`ScoutState` circuit breaker + keyword rotation), `browser.py` (persistent Chrome profile, stealth flags, shadow-DOM extraction, `AntiBotDetected`). Mid-M2, owner requested a SECOND independent track: `scout_feed()`/`run_feed_once()` scrolls the plain home feed (no keyword) alongside the original `scout_keyword()`/`run_once()` search track — separate profile dirs + state files so a trip on one never silences the other. **M3**: `notify.py` — direct Telegram `sendMessage` (no bot Application/polling), message formatting, dedup-before-send. **M4**: `run.py` — CLI (`--track {search,feed}`, `--reset`, `--dry-run`, `--no-jitter`), skip-chance (~30%) + jitter (0-45min) per task spec §3.5, UTF-8 stdout reconfigure (Windows cp1252 crashed on the 🔎/👤/🕒 in dry-run output). **Post-M4 real-Chrome verification** (owner asked to verify as thoroughly as possible before M5): ran the full launch→seed→navigate→scroll→extract pipeline against REAL Chrome (`channel="chrome"`) using local `file://` HTML fixtures with actual open shadow DOM — zero network, no LinkedIn contact. Found and fixed 2 bugs no mocked unit test could have caught: (1) the source plan's claim that `document.body.innerText` renders shadow DOM content is FALSE on real Chrome — the shadow-walk in `_EXTRACT_JS` is the primary extraction mechanism now, not a "safety net"; (2) the shadow-walk fallback used `.textContent` (no line breaks — would have made every post unparseable by the "Feed post"-marker splitter), rewritten to call `.innerText` per subtree; (3) cookies injected via `context.add_cookies()` on a persistent Chrome context do NOT survive to the next process launch (checked the on-disk SQLite Cookies DB directly — 0 rows after close+reopen, despite being correctly sent on real requests during the live session) — `seed_profile_if_needed`'s "seed once" design renamed to `seed_profile_cookies`, now re-seeds every run. New `tests/test_linkedin_scout_extract_integration.py` (real-Chrome, auto-skips if Chrome unavailable) pins both fixes as regressions. **M5**: `linkedin_scout/README.md` (prerequisites, exact `schtasks` registration commands for both tracks, safety-rail summary), this CLAUDE.md section + Repository Layout entry, note in `docs/LINKEDIN_POSTS_SOURCE_PLAN.md` that PR #114's server-side variant is superseded (not closed/merged). 106 total linkedin_scout tests (heuristics/parser/seen_store/state/browser/notify/run/real-Chrome-integration) green; ruff clean; compileall clean. Explicitly NOT verified: the actual live LinkedIn DOM shape and its anti-bot behavior against a real session — that step is the owner's own machine, per the task spec. |
 | 2026-07-07 | sonnet | Doomed-gate paste-path extension (branch fix/doomed-gate-paste-path, docs/DOOMED_GATE_PASTE_PLAN.md, on top of merged PR #116/#117). Owner audit of tracker rows 2026-07-02…07-06 found 3 "should have been filtered" applies that slipped through specifically because they were manually pasted: `screen_job_text`'s "deliberately does NOT enforce the title-keyword whitelist" contract (manual paste = intentional override) let Santander (`.NET Developer (Angular)`, 72% ATS) and QuantumBlackMcKinsey (`Software Engineer - QuantumBlack, AI by McKinsey`, 82%) through untouched, and Comarch ×3 (`гибрид не вроцлав`) slipped past the location gate because the body never says "hybrid"/"onsite" at all — only "Comarch Warsaw, Mazowieckie, Poland" in the header. Fixes in `hunter/filters.py`: new HARD `title_exclude_pattern` (reuses listing-level `_matches_exclude_pattern` against the known/guessed title — catches Santander) and new SOFT `off_domain_title` (reuses `_matches_title_keywords` inverted — catches QuantumBlack), both fed by a new best-effort `_guess_title_from_text()` (first meaningful line, skips nav boilerplate) used only when no explicit title is known. Comarch is NOT caught: an earlier `header_location_anti_hybrid_city` SOFT rule (bare anti-hybrid city near the top of the text) was implemented then immediately reverted after calibration showed it also fired on Fairmarkit — a real, Sent, 98%-ATS Warsaw-office EU role with no hybrid language of its own; a bare city mention can't be told apart from "this is just the office address" even at SOFT, so it was dropped rather than shipped as noise. `hunter/apply_shared.py`: `run_doomed_gate`'s `is_manual_override` param split into `is_force_override` — only `/force` (`skip_dedup`) still degrades a HARD finding to warn; a plain manual paste is no longer an automatic override (real $ was wasted on pasted postings a HARD rule would have caught). Incidental but real bug fix in `hunter/services/apply_service.py`: `--company`/`--title` used to be passed to the apply subprocess ONLY for `jobleads.com` URLs, so `run_doomed_gate` always saw `title=""` for every other auto-hunt job — meaning the pre-existing title-dependent `_is_unwanted_fullstack` check (and now `title_exclude_pattern`) had silently never fired for any non-JobLeads job in production. Now passed for any job with a known title. Recalibration (`tools/screen_calibrate.py --live`, extended with a `_title_index` so offline replay uses real Sheet titles instead of always guessing — docs/DOOMED_GATE_PASTE_CALIBRATION.md) found 0 HARD false positives; the apply_service.py fix retroactively activated `is_unwanted_fullstack`/`title_exclude_pattern` on 3 old Sent rows (Unide ×2, BCFSoftware) that only ever got through via the plumbing gap — documented as pre-existing, already-owner-approved policy (`_PRE_EXISTING_POLICY_RULES`, same treatment as the M4 Micro1 pre-policy bucket) rather than "fixed" by loosening a correct pattern. 14 new/updated tests across `test_doomed_gate.py`, `test_doomed_gate_wiring.py`, `test_apply_service.py`, `test_filters_unwanted_2026_06.py`; full suite 1721 green; ruff clean. |
 | 2026-07-07 | fable | Public-repo prep 2: personal data out of git (same branch). All candidate-personal prompt files untracked + gitignored (`prompts/candidate_profile.md`, 5× `base_cv_*.md`, `prompts/candidate/`, `prompts/examples/`); repo now ships `.example` templates (`candidate_profile.example.md`, `base_cv_angular.example.md` — same section structure the resume_sanitizer parses) + `prompts/README.md` (system-vs-personal split, setup). Safe because tests never read the real files (they patch PROMPTS_DIR) and loaders degrade gracefully (missing base CV/examples → warning + empty string; missing profile → clean exit at apply time). **Deploy impact:** the GHCR image no longer contains personal prompts — docker-compose.yml now mounts them from `./prompts/` on the host (`:ro`, file-must-exist caveat documented); VPS needs the files copied once BEFORE next `docker compose up` (see docs/PUBLIC_RELEASE_CHECKLIST.md §5). New `docs/PUBLIC_RELEASE_CHECKLIST.md`: full go-public runbook incl. `git filter-repo` history-scrub commands (NOT run — owner action), verification greps, force-push caveats, GitHub settings. README quick-start updated with `cp *.example.md` step. |
 | 2026-07-07 | fable | Public-repo prep: README + root cleanup (branch claude/charming-goldwasser-ad5c3b). New root **README.md** (badges, mermaid architecture diagram, 7-layer quality-pipeline table, quick start, docs links — written for a public audience) + **LICENSE** (MIT). Root decluttered: `DEPLOY.md`→`docs/archive/DEPLOY_V1.md`, `DEPLOY_V2.md`→`docs/DEPLOY.md` (current guide), `BOOTSTRAP_DEDUP_PLAN.md`/`DUPLICATE_INVESTIGATION.md`→`docs/archive/` (code-comment references updated in telegram_bot.py / test_bootstrap_dedup.py / tools/dedup_sheet.py), scratch `smoke_test_cl.py` deleted (ruff extend-exclude removed from pyproject.toml — gate now truly whole-repo), `start_hunter.bat`→`tools/` (hardcoded `D:\LearningProject\Claude` path replaced with `%~dp0..` so it works from any checkout), `.mcp.json` untracked + gitignored (personal machine paths, unrelated MCP server). NOTE for going public: `prompts/` (candidate_profile.md, base CVs, examples/, candidate/) contains real personal data throughout git history — owner decision needed before flipping visibility. |
