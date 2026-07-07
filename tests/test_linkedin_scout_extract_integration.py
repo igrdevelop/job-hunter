@@ -97,3 +97,57 @@ def test_extract_js_preserves_line_breaks_not_just_flat_textcontent():
     # If line breaks were lost, "Feed post" would be glued to the author name
     # on a single line instead of being its own line.
     assert not any(ln.startswith("Feed postDeloitte") for ln in lines)
+
+
+def test_open_scroll_extract_actually_triggers_lazy_loaded_content(tmp_path):
+    """Regression pin (2026-07-07, found during the owner's live verification):
+    page.mouse.wheel() is silently a no-op unless page.mouse.move() was called
+    at least once first — the owner's first two live runs against real
+    LinkedIn showed an identical posts-visible count before and after
+    scrolling. `infinite_scroll.html` only reveals its 2nd/3rd post in
+    response to a real browser 'scroll' event, so this exercises the FULL
+    `_open_scroll_extract` pipeline (not just a single `page.evaluate`) end to
+    end and would fail again if the mouse.move() fix ever regresses.
+    """
+    fixture_path = FIXTURES_DIR / "infinite_scroll.html"
+    text = browser._open_scroll_extract(
+        fixture_path.as_uri(),
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        headless=True,
+        scroll_iterations=3,
+    )
+    posts = parse_posts(text)
+    assert len(posts) == 3
+    authors = {p.author for p in posts}
+    assert authors == {"Author Number 1", "Author Number 2", "Author Number 3"}
+
+
+def test_open_scroll_extract_plateau_stops_early(tmp_path):
+    """The feed track's plateau_limit must stop scrolling once the page
+    genuinely runs out of new content, rather than burning through the full
+    (up to ~10 minute) scroll_iterations/max_duration_sec budget for nothing.
+    `infinite_scroll.html` caps out at 3 posts, so with a high scroll_iterations
+    ceiling and a plateau_limit of 2, the loop must exit long before it would
+    time out on its own — this is what the real feed track's ~200-iteration
+    safety ceiling relies on to avoid a full 10-minute session every run.
+    """
+    import time
+
+    fixture_path = FIXTURES_DIR / "infinite_scroll.html"
+    start = time.monotonic()
+    text = browser._open_scroll_extract(
+        fixture_path.as_uri(),
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        headless=True,
+        scroll_iterations=200,
+        scroll_wait_range=(0.05, 0.1),
+        plateau_limit=2,
+    )
+    elapsed = time.monotonic() - start
+    posts = parse_posts(text)
+    assert len(posts) == 3
+    # 200 iterations at even the fastest wait range would take >10s; plateau
+    # detection must cut it off after a handful of scrolls instead.
+    assert elapsed < 5

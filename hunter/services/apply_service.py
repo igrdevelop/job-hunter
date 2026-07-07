@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -53,8 +54,29 @@ async def run_apply_agent_subprocess(
     """Run apply_agent.py as async subprocess.
 
     Returns ``ok`` on exit 0, ``manual`` on JobLeads MANUAL flow (exit 44), ``fail`` otherwise.
+
+    If `job.raw["post_text"]` is set (linkedin_scout_relay jobs — no real
+    fetchable URL), it's written to a temp file and passed via --paste-file
+    instead of relying on apply_agent.py to fetch job.url (which would raise
+    for a synthetic URL). job.url is still passed alongside for tracker dedup.
     """
+    paste_text = (job.raw or {}).get("post_text")
+    paste_path: Optional[Path] = None
+    if paste_text:
+        try:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", suffix=".txt", prefix="auto_apply_paste_", delete=False,
+            )
+            with tmp as fh:
+                fh.write(paste_text)
+            paste_path = Path(tmp.name)
+        except OSError as e:
+            logger.error(f"[auto-apply] failed to write paste temp file for {job.url}: {e}")
+            return "fail"
+
     cmd = [python_executable, str(apply_agent_path), job.url]
+    if paste_path:
+        cmd.extend(["--paste-file", str(paste_path)])
     # --company/--title used to be JobLeads-only (its detail pages are Cloudflare-
     # blocked, so the MANUAL tracker row needs a listing-derived title/company).
     # Passed for every auto-hunt job now (docs/DOOMED_GATE_PASTE_PLAN.md): without
@@ -68,44 +90,48 @@ async def run_apply_agent_subprocess(
         cmd.extend(["--company", job.company or "Unknown", "--title", safe_title])
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        logger.error(f"[auto-apply] failed to start subprocess for {job.url}: {e}")
-        return "fail"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.error(f"[auto-apply] failed to start subprocess for {job.url}: {e}")
+            return "fail"
 
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=timeout_sec,
-        )
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-        logger.error(f"[auto-apply] TIMEOUT ({timeout_sec}s) for {job.url}")
-        return "fail"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            logger.error(f"[auto-apply] TIMEOUT ({timeout_sec}s) for {job.url}")
+            return "fail"
 
-    if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
-        logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
-        return "manual"
+        if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
+            logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
+            return "manual"
 
-    if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
-        logger.warning(f"[auto-apply] RATE-LIMITED (429) {job.company} — {job.title}")
-        return "rate_limited"
+        if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
+            logger.warning(f"[auto-apply] RATE-LIMITED (429) {job.company} — {job.title}")
+            return "rate_limited"
 
-    if proc.returncode != 0:
-        logger.error(
-            f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
-        )
-        return "fail"
+        if proc.returncode != 0:
+            logger.error(
+                f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
+            )
+            return "fail"
 
-    if stdout:
-        logger.debug(f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}")
-    logger.info(f"[auto-apply] OK {job.company} — {job.title}")
-    return "ok"
+        if stdout:
+            logger.debug(f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}")
+        logger.info(f"[auto-apply] OK {job.company} — {job.title}")
+        return "ok"
+    finally:
+        if paste_path:
+            paste_path.unlink(missing_ok=True)
 
 
 async def run_apply_agent_for_url(

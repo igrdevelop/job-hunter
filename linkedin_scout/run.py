@@ -45,7 +45,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-from linkedin_scout import browser, notify  # noqa: E402
+from linkedin_scout import browser, notify, telegram_relay  # noqa: E402
 from linkedin_scout.browser import ScoutCandidate  # noqa: E402
 from linkedin_scout.heuristics import LocationVerdict, check_location, is_hiring_post  # noqa: E402
 from linkedin_scout.parser import parse_posts  # noqa: E402
@@ -183,9 +183,17 @@ def _run_track(track: str, *, headless: bool) -> None:
         logger.info("[linkedin_scout] %s: 0 candidates this run", track)
         return
 
-    sent = notify.notify_candidates(candidates, seen_store)
+    # Owner decision (2026-07-08): "this is just another job source" — relay
+    # to the bot over Telegram (the owner's own user session, not the bot's
+    # own token — see telegram_relay.py) so the bot's OWN hunt cycle picks it
+    # up (hunter/sources/linkedin_scout_relay.py) and runs it through the
+    # normal filters/dedup/AUTO_APPLY pipeline, exactly like any other source.
+    # A local queue file was tried first and abandoned once it became clear
+    # the bot auto-deploys to its own server and doesn't share a filesystem
+    # with this script's Windows desktop.
+    sent = telegram_relay.send_candidates(candidates, seen_store)
     logger.info(
-        "[linkedin_scout] %s: %d candidates, %d sent (rest already seen)",
+        "[linkedin_scout] %s: %d candidates, %d relayed to the bot (rest already seen)",
         track, len(candidates), sent,
     )
 

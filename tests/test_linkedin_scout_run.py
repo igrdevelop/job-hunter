@@ -226,7 +226,12 @@ def test_main_no_jitter_skips_skip_and_jitter(tmp_path, monkeypatch):
     assert called == []
 
 
-def test_main_sends_notifications_for_real_run_candidates(tmp_path, monkeypatch):
+def test_main_relays_candidates_via_telegram(tmp_path, monkeypatch):
+    """Owner decision (2026-07-08): candidates are relayed to the bot over
+    Telegram (the owner's own user session, not a shared queue file — the
+    bot auto-deploys to its own server and doesn't share a filesystem with
+    this script), not sent as a plain notification — "this is just another
+    job source"."""
     from linkedin_scout.browser import ScoutCandidate
 
     monkeypatch.setattr(run, "SEARCH_PROFILE_DIR", tmp_path / "profile")
@@ -238,10 +243,14 @@ def test_main_sends_notifications_for_real_run_candidates(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(run.browser, "run_once", lambda *a, **k: [candidate])
 
-    sent_texts = []
-    monkeypatch.setattr(run.notify, "_send_telegram", lambda text: sent_texts.append(text) or True)
+    relayed = []
+    monkeypatch.setattr(
+        run.telegram_relay,
+        "send_candidates",
+        lambda candidates, seen_store: relayed.append(candidates) or len(candidates),
+    )
 
     run.main(["--track", "search", "--no-jitter"])
 
-    assert len(sent_texts) == 1
-    assert "Jane" in sent_texts[0]
+    assert len(relayed) == 1
+    assert relayed[0][0].author == "Jane"
