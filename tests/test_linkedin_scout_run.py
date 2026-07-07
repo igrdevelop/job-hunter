@@ -226,22 +226,26 @@ def test_main_no_jitter_skips_skip_and_jitter(tmp_path, monkeypatch):
     assert called == []
 
 
-def test_main_sends_notifications_for_real_run_candidates(tmp_path, monkeypatch):
+def test_main_enqueues_candidates_for_the_bot(tmp_path, monkeypatch):
+    """Owner decision (2026-07-08): candidates are enqueued for the bot's own
+    hunt cycle (hunter/sources/linkedin_scout_relay.py), not sent directly to
+    Telegram — "this is just another job source"."""
+    import json
+
     from linkedin_scout.browser import ScoutCandidate
 
     monkeypatch.setattr(run, "SEARCH_PROFILE_DIR", tmp_path / "profile")
     monkeypatch.setattr(run, "SEARCH_STATE_PATH", tmp_path / "search_state.json")
     monkeypatch.setattr(run, "SEEN_STORE_PATH", tmp_path / "seen.json")
+    monkeypatch.setattr(run, "QUEUE_PATH", tmp_path / "pending_candidates.json")
 
     candidate = ScoutCandidate(
         keyword="angular hiring", author="Jane", body="We're hiring Angular devs", scouted_at="now"
     )
     monkeypatch.setattr(run.browser, "run_once", lambda *a, **k: [candidate])
 
-    sent_texts = []
-    monkeypatch.setattr(run.notify, "_send_telegram", lambda text: sent_texts.append(text) or True)
-
     run.main(["--track", "search", "--no-jitter"])
 
-    assert len(sent_texts) == 1
-    assert "Jane" in sent_texts[0]
+    queued = json.loads((tmp_path / "pending_candidates.json").read_text(encoding="utf-8"))
+    assert len(queued) == 1
+    assert queued[0]["author"] == "Jane"

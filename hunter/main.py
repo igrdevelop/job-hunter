@@ -281,6 +281,25 @@ async def _run_hunt_impl(
     if not new_jobs:
         return
 
+    # manual_only sources (e.g. linkedin_scout_relay — a regex-heuristic match,
+    # not a structured job-board listing) ALWAYS get a Telegram Apply/Skip
+    # card, even under AUTO_APPLY — a human should confirm before any LLM
+    # spend. Partition before the AUTO_APPLY branch so both paths honor it.
+    _sources_by_name = {s.name: s for s in active_sources}
+    manual_only_jobs: list[Job] = []
+    auto_eligible_jobs: list[Job] = []
+    for j in new_jobs:
+        if getattr(_sources_by_name.get(j.source), "manual_only", False):
+            manual_only_jobs.append(j)
+        else:
+            auto_eligible_jobs.append(j)
+
+    if manual_only_jobs:
+        await send_job_cards(context, manual_only_jobs)
+
+    if not auto_eligible_jobs:
+        return
+
     if AUTO_APPLY:
         auth_error = await asyncio.to_thread(_check_apply_ready)
         if auth_error:
@@ -292,8 +311,8 @@ async def _run_hunt_impl(
             )
             return
 
-        capped = new_jobs[:MAX_JOBS_PER_RUN]
-        skipped_count = len(new_jobs) - len(capped)
+        capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
+        skipped_count = len(auto_eligible_jobs) - len(capped)
 
         if skipped_count:
             await send_text(
@@ -305,7 +324,7 @@ async def _run_hunt_impl(
         # Retry previously failed jobs
         await _retry_failed(context)
     else:
-        await send_job_cards(context, new_jobs)
+        await send_job_cards(context, auto_eligible_jobs)
 
 
 # ── Scraper health ────────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ from hunter.config import (
     REMOTELEAF_ENABLED,
     ATS_AGGREGATOR_ENABLED,
     GMAIL_ENABLED,
+    LINKEDIN_SCOUT_RELAY_ENABLED,
 )
 
 # Registry — add new sources here as you build them
@@ -114,6 +115,10 @@ if GMAIL_ENABLED:
     from hunter.sources.gmail import GmailSource
     ALL_SOURCES.append(GmailSource())
 
+if LINKEDIN_SCOUT_RELAY_ENABLED:
+    from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource
+    ALL_SOURCES.append(LinkedInScoutRelaySource())
+
 
 # ── Detail-page dispatch ─────────────────────────────────────────────────────
 
@@ -156,6 +161,7 @@ def _fetch_roster() -> list:
     from hunter.sources.jobspresso import JobspressoSource
     from hunter.sources.builtin import BuiltInSource
     from hunter.sources.justremote import JustRemoteSource
+    from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource
 
     _FETCH_ROSTER = [
         JustJoinSource(),
@@ -179,6 +185,7 @@ def _fetch_roster() -> list:
         WeworkremotelySource(),
         RemoteleafSource(),
         AtsAggregatorSource(),
+        LinkedInScoutRelaySource(),
     ]
     return _FETCH_ROSTER
 

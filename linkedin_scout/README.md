@@ -1,13 +1,20 @@
 # LinkedIn Posts Scout
 
 Standalone script that scouts LinkedIn for Angular hiring posts made as ordinary
-feed content (not LinkedIn Jobs listings) and sends matches to Telegram. Runs on
-**your own desktop**, on **your residential IP**, via **Windows Task Scheduler** —
-it is intentionally NOT part of `hunter/`, NOT in the Docker image, and NOT on the
-bot's schedule. Full design rationale: `../docs/LINKEDIN_POSTS_SCOUT_TASK.md`.
+feed content (not LinkedIn Jobs listings). Runs on **your own desktop**, on **your
+residential IP**, via **Windows Task Scheduler** — the SCRAPING is intentionally NOT
+part of `hunter/`, NOT in the Docker image, and NOT on the bot's schedule. Full design
+rationale: `../docs/LINKEDIN_POSTS_SCOUT_TASK.md`.
 
-It never applies for you. It only sends a Telegram message with the author, a
-snippet of the post, and a timestamp — you read it and decide manually.
+**It does not send Telegram messages directly** (owner decision 2026-07-08 — "this is
+just another job source, like the other 21"). Instead it writes matches to
+`linkedin_scout/pending_candidates.json`; `hunter/sources/linkedin_scout_relay.py` (a
+tiny, scrape-free source inside the bot) drains that file on the bot's own hunt cycle
+and turns each candidate into a normal Job — same central filters, same tracker dedup,
+same Telegram Apply/Skip card as any other source. It never auto-applies even if
+`AUTO_APPLY=true` (`manual_only` on that source) — you still confirm before any LLM
+spend, you just confirm via the normal card instead of manually re-pasting the post
+text yourself.
 
 ---
 
@@ -238,6 +245,12 @@ is worth acting on promptly (re-run `tools/linkedin_login.py`, then `--reset`).
 - `linkedin_scout/search_state.json`, `linkedin_scout/feed_state.json` — circuit
   breaker + keyword rotation state, one per track.
 - `linkedin_scout/seen_posts.json` — dedup store, shared by both tracks.
+- `linkedin_scout/pending_candidates.json` — the queue the bot's
+  `linkedin_scout_relay` source drains on its own hunt cycle. Normally near-empty
+  (drained within one bot hunt cycle); don't delete it while the bot might be
+  mid-read, but losing it just means those candidates won't surface as cards
+  (they're already marked "seen" so they won't be re-queued either — safe but
+  they're gone; not expected to matter since drainage should be fast).
 
 Deleting any of these is safe (loses history/rotation-position/dedup memory, not
 your LinkedIn login — that always comes from `LINKEDIN_STORAGE_STATE`).

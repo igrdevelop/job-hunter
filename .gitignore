@@ -16,6 +16,7 @@ linkedin_scout/.profile_feed/
 linkedin_scout/search_state.json
 linkedin_scout/feed_state.json
 linkedin_scout/seen_posts.json
+linkedin_scout/pending_candidates.json
 
 # Python
 __pycache__/
