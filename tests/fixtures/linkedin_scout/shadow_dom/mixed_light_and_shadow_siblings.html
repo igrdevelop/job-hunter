@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div>label text <span id="host3"></span> trailing text</div>
+<script>
+// Regression fixture: a light-DOM text node sitting next to a
+// shadow-hosting sibling must not be lost by the extraction walker.
+const h = document.getElementById('host3').attachShadow({mode: 'open'});
+h.innerHTML =
+  '<div>Feed post</div>' +
+  '<div>Mixed Author</div>' +
+  '<div>Follow</div>' +
+  '<div>Hiring an Angular Developer, remote work.</div>';
+</script>
+</body>
+</html>

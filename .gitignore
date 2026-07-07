@@ -10,6 +10,13 @@ gsheets_state.json
 *.txt.secret
 github tokens.txt
 
+# linkedin_scout runtime artifacts (owner's desktop only — see linkedin_scout/README.md)
+linkedin_scout/.profile_search/
+linkedin_scout/.profile_feed/
+linkedin_scout/search_state.json
+linkedin_scout/feed_state.json
+linkedin_scout/seen_posts.json
+
 # Python
 __pycache__/
 *.pyc
