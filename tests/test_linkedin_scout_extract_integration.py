@@ -121,3 +121,33 @@ def test_open_scroll_extract_actually_triggers_lazy_loaded_content(tmp_path):
     assert len(posts) == 3
     authors = {p.author for p in posts}
     assert authors == {"Author Number 1", "Author Number 2", "Author Number 3"}
+
+
+def test_open_scroll_extract_plateau_stops_early(tmp_path):
+    """The feed track's plateau_limit must stop scrolling once the page
+    genuinely runs out of new content, rather than burning through the full
+    (up to ~10 minute) scroll_iterations/max_duration_sec budget for nothing.
+    `infinite_scroll.html` caps out at 3 posts, so with a high scroll_iterations
+    ceiling and a plateau_limit of 2, the loop must exit long before it would
+    time out on its own — this is what the real feed track's ~200-iteration
+    safety ceiling relies on to avoid a full 10-minute session every run.
+    """
+    import time
+
+    fixture_path = FIXTURES_DIR / "infinite_scroll.html"
+    start = time.monotonic()
+    text = browser._open_scroll_extract(
+        fixture_path.as_uri(),
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        headless=True,
+        scroll_iterations=200,
+        scroll_wait_range=(0.05, 0.1),
+        plateau_limit=2,
+    )
+    elapsed = time.monotonic() - start
+    posts = parse_posts(text)
+    assert len(posts) == 3
+    # 200 iterations at even the fastest wait range would take >10s; plateau
+    # detection must cut it off after a handful of scrolls instead.
+    assert elapsed < 5

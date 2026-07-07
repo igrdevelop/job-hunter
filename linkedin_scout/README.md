@@ -70,10 +70,25 @@ of both tracks has gone cleanly.
 
 ## Windows Task Scheduler registration
 
-Two independent tasks — one per track — each firing a few times a week, at times
-you're plausibly away from the keyboard (evenings, weekend afternoons). Replace
-`D:\LearningProject\Claude` and the `python.exe` path with your own; find your
-Python path with `where python` first.
+The two tracks have deliberately DIFFERENT cadences (owner decision
+2026-07-07) — they are not symmetric, so don't copy one schedule to the other:
+
+- **`search`**: a few times a week, at times you're plausibly away from the
+  keyboard (evenings, weekend afternoons). Keeps the built-in ~30% skip chance
+  + 0-45min jitter (see Safety rails) — a low, irregular cadence is the whole
+  point here.
+- **`feed`**: once an hour, every hour. Each run scrolls the plain feed for up
+  to ~10 minutes at a slow, randomized pace (`_FEED_SCROLL_MAX_DURATION_SEC`),
+  stopping early once the feed plateaus (no new posts for a few scrolls in a
+  row — `_FEED_SCROLL_PLATEAU_LIMIT`). Register this one with `--no-jitter`:
+  an hourly trigger is already a fixed, bot-like cadence no matter what, so
+  the skip-chance/jitter layer (designed to hide a LOW-frequency schedule)
+  doesn't buy anything here and would risk two runs overlapping near the top
+  of the hour instead. The realism for this track comes from the randomized
+  in-session scroll pace/distance, not from hiding the schedule itself.
+
+Replace `D:\LearningProject\Claude` and the `python.exe` path with your own;
+find your Python path with `where python` first.
 
 ```powershell
 schtasks /create /tn "LinkedInScout-Search" ^
@@ -82,8 +97,8 @@ schtasks /create /tn "LinkedInScout-Search" ^
   /ru "%USERNAME%" /rl LIMITED
 
 schtasks /create /tn "LinkedInScout-Feed" ^
-  /tr "\"C:\Path\To\python.exe\" \"D:\LearningProject\Claude\linkedin_scout\run.py\" --track feed" ^
-  /sc weekly /d TUE,SAT /st 20:30 ^
+  /tr "\"C:\Path\To\python.exe\" \"D:\LearningProject\Claude\linkedin_scout\run.py\" --track feed --no-jitter" ^
+  /sc hourly /mo 1 /st 00:00 ^
   /ru "%USERNAME%" /rl LIMITED
 ```
 
@@ -91,26 +106,40 @@ Flag-by-flag:
 - `/tn "<name>"` — task name shown in Task Scheduler's UI.
 - `/tr "<command>"` — the command line to run. Quote the executable and the
   script path separately since both may contain spaces.
-- `/sc weekly /d MON,WED,FRI` — schedule type + which days of the week. Pick 2-3
-  days per track; they don't need to match between tracks.
-- `/st 21:00` — start time (24h `HH:MM`). This is the Task Scheduler trigger
-  time, NOT when the browser actually opens — `run.py` itself still rolls its
-  own ~30% skip chance and then sleeps a random 0-45 minutes before doing
-  anything (see Safety rails below), so the real start time varies run to run
-  even with a fixed trigger.
+- `/sc weekly /d MON,WED,FRI` — (search track) schedule type + which days of
+  the week. Pick 2-3 days.
+- `/sc hourly /mo 1 /st 00:00` — (feed track) fires every 1 hour, all day,
+  starting from midnight (`/mo` is the hour-interval modifier for `/sc
+  hourly`, not a day count).
+- `/st 21:00` — start time (24h `HH:MM`). For the search track this is the
+  Task Scheduler trigger time, NOT when the browser actually opens — `run.py`
+  still rolls its own skip chance + jitter sleep first (see Safety rails), so
+  the real start time varies run to run even with a fixed trigger. The feed
+  track skips that layer (`--no-jitter`), so its trigger time IS roughly when
+  the browser opens.
 - `/ru "%USERNAME%"` — run as your own logged-in account (needed so the script
   can see your Chrome/session; a different service account would need its own
   login).
 - `/rl LIMITED` — run with standard (not elevated/admin) privileges.
 
+**A single ~10-minute feed session every hour, all day, is a much larger
+standing time-on-page commitment than the original few-times-a-week design.**
+This is a deliberate owner trade-off (favoring volume/coverage over the
+original "look infrequent" posture) — the circuit breaker, plateau early-
+stop, and randomized scroll pace are what's carrying the safety burden on
+this track now, not schedule irregularity. Watch the first several hourly
+runs' logs before leaving it fully unattended for days.
+
 To verify registration:
 ```
 schtasks /query /tn "LinkedInScout-Search" /v /fo LIST
+schtasks /query /tn "LinkedInScout-Feed" /v /fo LIST
 ```
 
 To remove a task:
 ```
 schtasks /delete /tn "LinkedInScout-Search" /f
+schtasks /delete /tn "LinkedInScout-Feed" /f
 ```
 
 **Task Scheduler must run under a session where the desktop is normally
@@ -132,9 +161,17 @@ This is deliberate, not a bug. In order:
 2. **0-45 minute jitter sleep.** If not skipped, it sleeps a random amount
    before opening the browser, so the Task Scheduler trigger time and the
    actual browser-open time never line up exactly. Tune via
-   `LINKEDIN_SCOUT_JITTER_MAX_MIN`. Bypass both with `--no-jitter` for manual
-   testing only — never use it in a scheduled task.
-3. **Circuit breaker (non-negotiable).** The instant a run sees a
+   `LINKEDIN_SCOUT_JITTER_MAX_MIN`. Use `--no-jitter` for manual testing of
+   EITHER track, and permanently in the `feed` track's scheduled task — an
+   hourly cadence is already fixed regardless, and jitter there risks two
+   runs overlapping near the top of the hour.
+3. **Feed-track scroll budget + plateau stop.** The `feed` track scrolls for
+   up to `_FEED_SCROLL_MAX_DURATION_SEC` (~10 minutes) at a randomized pace
+   and distance per scroll — but stops as soon as `_FEED_SCROLL_PLATEAU_LIMIT`
+   consecutive scrolls surface no NEW posts (the feed ran dry; no point
+   continuing). A run finishing in well under 10 minutes with a short log is
+   this working as intended, not a bug.
+4. **Circuit breaker (non-negotiable).** The instant a run sees a
    login/checkpoint/authwall redirect or a known anti-bot interstitial marker
    (captcha, `protechts.net`, "verify you're a human", …), it aborts
    immediately — no retries, ever — and writes a "tripped" flag to that
@@ -142,11 +179,11 @@ This is deliberate, not a bug. In order:
    you exactly ONE Telegram alert on the run that actually trips it. Every
    subsequent run of that track silently no-ops (logs, exits 0) until you run
    `--reset`. The other track is unaffected (separate state file).
-4. **One keyword per run (search track only).** `run.py --track search` never
+5. **One keyword per run (search track only).** `run.py --track search` never
    loops through the whole keyword list — it advances one step in a persisted
    round-robin rotation and searches only that one keyword, so full keyword
    coverage happens over several days, not one run.
-5. **Headed real Chrome only.** Never run with `--headless` except for your own
+6. **Headed real Chrome only.** Never run with `--headless` except for your own
    local debugging with no live LinkedIn navigation — the spec's live probe
    showed headless Chromium gets flagged within 2-3 page loads; a visible,
    real-Chrome window with stealth flags survived multiple consecutive runs.
