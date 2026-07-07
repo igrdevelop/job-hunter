@@ -242,6 +242,56 @@ def test_ai_training_mill_hard() -> None:
     assert all(f.severity == "hard" for f in findings if f.rule == "is_ai_training_or_mill")
 
 
+# ── ai_mill_body: mill name in the BODY, company field blank ─────────────────
+# The company-based check is blind for Gmail-alert stubs (linkedin.com
+# enrichment skipped → company empty) — exactly how QuikHireStaffing/HireFeed
+# reached generation on 2026-07-06. The mill's name / apply link is in the
+# posting text itself.
+
+def test_mill_name_in_body_hard_even_without_company() -> None:
+    text = (
+        "Angular Frontend Developer (Remote). Our client is hiring through "
+        "micro1's AI-vetted talent network. Apply today!"
+    )
+    findings = assess_job_text(text)  # no company passed — Gmail-stub scenario
+    matches = [f for f in findings if f.rule == "ai_mill_body"]
+    assert matches and all(f.severity == "hard" for f in matches)
+    assert "micro1" in matches[0].evidence
+
+
+def test_mill_apply_link_in_body_hard() -> None:
+    text = "Frontend Developer - TypeScript (Remote). Apply at https://micro1.com/apply/12345."
+    findings = assess_job_text(text)
+    assert "ai_mill_body" in _rules(findings)
+
+
+def test_mill_front_name_in_body_hard() -> None:
+    text = "This position is managed by QuikHire Staffing on behalf of our client."
+    findings = assess_job_text(text)
+    assert "ai_mill_body" in _rules(findings)
+
+
+def test_mill_body_no_false_positive_on_similar_words() -> None:
+    # "micro1" must not fire on "micro-frontends" / "microservices"; "mercor"
+    # must not fire inside a longer word.
+    text = (
+        "Angular role: micro-frontends, microservices, and Micro100 tooling "
+        "at Mercorp Solutions."
+    )
+    findings = assess_job_text(text)
+    assert "ai_mill_body" not in _rules(findings)
+
+
+def test_mill_body_respects_exclude_ai_training_flag(monkeypatch) -> None:
+    from hunter import filters as filters_mod
+    patched = dict(filters_mod.FILTER)
+    patched["exclude_ai_training"] = False
+    monkeypatch.setattr(filters_mod, "FILTER", patched)
+    text = "Hiring through micro1's talent network."
+    findings = assess_job_text(text)
+    assert "ai_mill_body" not in _rules(findings)
+
+
 def test_unacceptable_contract_hard() -> None:
     text = "This is a part-time position, 20 hours a week."
     findings = assess_job_text(text)

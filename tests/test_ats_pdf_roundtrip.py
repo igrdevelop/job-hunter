@@ -239,3 +239,34 @@ def test_llm_verdict_requires_inputs() -> None:
     assert ats_checker.llm_verdict("", "resume", api_key="k") is None
     assert ats_checker.llm_verdict("job", "", api_key="k") is None
     assert ats_checker.llm_verdict("job", "resume", api_key="") is None
+
+
+# ── format_verdict / format_gap_report: the owner sees WHY, not just the % ───
+
+def test_format_verdict_includes_gap_report_escaped() -> None:
+    from hunter.ats_pdf_roundtrip import format_verdict
+    v = {"score": 94.0, "gap_report": "Only negligible gaps: <minor> & style."}
+    out = format_verdict(v)
+    assert "94" in out
+    assert "negligible gaps" in out
+    # HTML-escaped — the bot sends notifications with parse_mode=HTML.
+    assert "&lt;minor&gt; &amp; style." in out
+
+
+def test_format_verdict_without_gap_is_single_line() -> None:
+    from hunter.ats_pdf_roundtrip import format_verdict
+    assert "\n" not in format_verdict({"score": 91.0})
+    assert "\n" not in format_verdict({"score": 91.0, "gap_report": "   "})
+
+
+def test_format_gap_report_truncates_long_text() -> None:
+    from hunter.ats_pdf_roundtrip import format_gap_report
+    out = format_gap_report({"gap_report": "x" * 1000})
+    assert len(out) < 400
+    assert out.endswith("…</i>")
+
+
+def test_format_gap_report_empty_for_missing_gap() -> None:
+    from hunter.ats_pdf_roundtrip import format_gap_report
+    assert format_gap_report({}) == ""
+    assert format_gap_report({"gap_report": None}) == ""
