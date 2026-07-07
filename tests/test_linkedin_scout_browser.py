@@ -22,7 +22,7 @@ from linkedin_scout.browser import (
     looks_like_anti_bot,
     run_feed_once,
     run_once,
-    seed_profile_if_needed,
+    seed_profile_cookies,
 )
 from linkedin_scout.state import ScoutState
 
@@ -73,85 +73,89 @@ def test_build_search_url_encodes_keyword():
     assert "datePosted=%22past-week%22" in url
 
 
-# --- seed_profile_if_needed (fake context, no Playwright) -------------------
+# --- seed_profile_cookies (fake context, no Playwright) ----------------------
+#
+# Design note (2026-07-07): cookies are re-seeded on EVERY call, not once —
+# verified empirically against a real Chrome persistent context that
+# Playwright's add_cookies() does NOT survive to the next process launch (see
+# browser.seed_profile_cookies docstring). These tests reflect that: there is
+# no "already seeded, skip" branch to test, only "seed every time there's
+# something to seed".
 
 
 class _FakeContext:
     def __init__(self) -> None:
-        self.added_cookies: list[dict] | None = None
+        self.add_cookies_calls: list[list[dict]] = []
 
     def add_cookies(self, cookies: list[dict]) -> None:
-        self.added_cookies = cookies
+        self.add_cookies_calls.append(cookies)
 
 
-def test_seed_profile_seeds_cookies_once(tmp_path):
+def test_seed_profile_cookies_seeds_from_storage_state(tmp_path):
     storage_state_path = tmp_path / "storage_state.json"
     storage_state_path.write_text(
         json.dumps({"cookies": [{"name": "li_at", "value": "abc"}], "origins": []}),
         encoding="utf-8",
     )
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
     ctx = _FakeContext()
 
-    result = seed_profile_if_needed(ctx, profile_dir, storage_state_path)
+    result = seed_profile_cookies(ctx, storage_state_path)
 
     assert result is True
-    assert ctx.added_cookies == [{"name": "li_at", "value": "abc"}]
-    assert (profile_dir / ".seeded").exists()
+    assert ctx.add_cookies_calls == [[{"name": "li_at", "value": "abc"}]]
 
 
-def test_seed_profile_skips_when_already_seeded(tmp_path):
+def test_seed_profile_cookies_seeds_every_call(tmp_path):
     storage_state_path = tmp_path / "storage_state.json"
-    storage_state_path.write_text(json.dumps({"cookies": [{"name": "li_at"}]}), encoding="utf-8")
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
-    (profile_dir / ".seeded").write_text("already", encoding="utf-8")
+    storage_state_path.write_text(
+        json.dumps({"cookies": [{"name": "li_at", "value": "abc"}]}), encoding="utf-8"
+    )
     ctx = _FakeContext()
 
-    result = seed_profile_if_needed(ctx, profile_dir, storage_state_path)
+    seed_profile_cookies(ctx, storage_state_path)
+    seed_profile_cookies(ctx, storage_state_path)
 
-    assert result is False
-    assert ctx.added_cookies is None
+    assert len(ctx.add_cookies_calls) == 2
 
 
-def test_seed_profile_no_storage_state_path(tmp_path):
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
+def test_seed_profile_cookies_no_storage_state_path():
     ctx = _FakeContext()
 
-    result = seed_profile_if_needed(ctx, profile_dir, None)
+    result = seed_profile_cookies(ctx, None)
 
     assert result is False
-    assert ctx.added_cookies is None
-    assert not (profile_dir / ".seeded").exists()
+    assert ctx.add_cookies_calls == []
 
 
-def test_seed_profile_missing_storage_state_file(tmp_path):
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
+def test_seed_profile_cookies_missing_storage_state_file(tmp_path):
     ctx = _FakeContext()
 
-    result = seed_profile_if_needed(ctx, profile_dir, tmp_path / "does_not_exist.json")
+    result = seed_profile_cookies(ctx, tmp_path / "does_not_exist.json")
 
     assert result is False
-    assert ctx.added_cookies is None
+    assert ctx.add_cookies_calls == []
 
 
-def test_seed_profile_corrupt_storage_state_marks_seeded_anyway(tmp_path):
+def test_seed_profile_cookies_empty_cookie_list(tmp_path):
+    storage_state_path = tmp_path / "storage_state.json"
+    storage_state_path.write_text(json.dumps({"cookies": []}), encoding="utf-8")
+    ctx = _FakeContext()
+
+    result = seed_profile_cookies(ctx, storage_state_path)
+
+    assert result is False
+    assert ctx.add_cookies_calls == []
+
+
+def test_seed_profile_cookies_corrupt_storage_state_is_best_effort(tmp_path):
     storage_state_path = tmp_path / "storage_state.json"
     storage_state_path.write_text("{ not valid json", encoding="utf-8")
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
     ctx = _FakeContext()
 
-    result = seed_profile_if_needed(ctx, profile_dir, storage_state_path)
+    result = seed_profile_cookies(ctx, storage_state_path)
 
     assert result is False
-    assert ctx.added_cookies is None
-    # Marked seeded even on failure so a permanently-malformed file doesn't
-    # retry (and log-spam) on every single invocation.
-    assert (profile_dir / ".seeded").exists()
+    assert ctx.add_cookies_calls == []
 
 
 # --- _send_circuit_breaker_alert ---------------------------------------------

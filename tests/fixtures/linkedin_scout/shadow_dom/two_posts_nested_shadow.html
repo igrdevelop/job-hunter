@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div id="host1"></div>
+<div id="host2"></div>
+<script>
+// Nested shadow root (shadow-inside-shadow), mirroring LinkedIn's "Chameleon"
+// UI structure described in docs/LINKEDIN_POSTS_SOURCE_PLAN.md §4.6.
+const h1 = document.getElementById('host1').attachShadow({mode: 'open'});
+h1.innerHTML = '<div id="nested"></div>';
+const nested = h1.getElementById('nested').attachShadow({mode: 'open'});
+nested.innerHTML =
+  '<div>Feed post</div>' +
+  '<div>Deloitte Poland</div>' +
+  '<div>3rd+</div>' +
+  '<div>Talent Acquisition</div>' +
+  '<div>2h</div>' +
+  '<div>Follow</div>' +
+  '<div>We are hiring an Angular Developer. Fully remote across Poland.</div>';
+
+const h2 = document.getElementById('host2').attachShadow({mode: 'open'});
+h2.innerHTML =
+  '<div>Feed post</div>' +
+  '<div>John Smith</div>' +
+  '<div>2nd</div>' +
+  '<div>Recruiter</div>' +
+  '<div>5h</div>' +
+  '<div>Connect</div>' +
+  '<div>Hiring NOW Full Stack Java .NET Angular React W2 only on-site Richmond VA.</div>';
+</script>
+</body>
+</html>

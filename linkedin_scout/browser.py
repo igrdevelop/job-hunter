@@ -4,8 +4,9 @@ Design per docs/LINKEDIN_POSTS_SCOUT_TASK.md §3.1/§3.5 and the live-probe
 findings in docs/LINKEDIN_POSTS_SOURCE_PLAN.md §4.6 (branch
 feat/linkedin-posts-source):
 
-- Persistent Chrome profile (channel="chrome", headed), seeded once from
-  LINKEDIN_STORAGE_STATE cookies.
+- Persistent Chrome profile (channel="chrome", headed), cookies re-seeded from
+  LINKEDIN_STORAGE_STATE on every run (see seed_profile_cookies — NOT "once
+  ever", that was tried and empirically disproved).
 - ONE page load per keyword per run, human-paced waits, no parallelism.
 - Circuit breaker: any login/checkpoint/authwall redirect or anti-bot response
   aborts immediately (no retries) and trips the persisted state (state.py) so
@@ -15,12 +16,25 @@ Playwright itself is imported lazily inside the functions that need it, so
 this module (and its pure helpers) can be imported and unit-tested in an
 environment without a real browser session available.
 
-IMPORTANT: the exact search-result selectors/behaviour below have NOT been
-verified against a live LinkedIn session in this change — the live-probe
-findings this module implements come from an earlier session (plan §4.6).
-Per the task spec, M2 is reviewed on paper first; a live run on the owner's
-machine is the actual verification step, and `docs/LINKEDIN_POSTS_SOURCE_PLAN.md`
-already documents that this DOM is the most fragile of any scraper in the repo.
+VERIFIED LOCALLY (2026-07-07, real Chrome via channel="chrome", zero network —
+file:// fixtures only, see tests/test_linkedin_scout_extract_integration.py):
+the full launch → seed → init-script → navigate → scroll → extract pipeline
+(_open_scroll_extract) runs end-to-end without error against a real browser,
+and _EXTRACT_JS correctly reads text out of real (including nested) open
+shadow DOM while preserving the line breaks parser.parse_posts() depends on.
+This caught and fixed two real bugs that unit tests (which mock the
+Playwright API) could not have caught: (1) the original extraction JS assumed
+`document.body.innerText` renders shadow DOM content — verified FALSE against
+real Chrome; (2) the shadow-root fallback used `.textContent`, which drops
+all line breaks and would have made every post unparseable.
+
+NOT YET VERIFIED: anything that requires an actual LinkedIn session — the
+real search-result DOM shape, whether cookie re-seeding is enough to pass
+LinkedIn's own auth checks, and whether the stealth measures hold up against
+LinkedIn's live anti-bot detection. Per the task spec, that verification is a
+live run on the owner's own machine, not something this change can do.
+`docs/LINKEDIN_POSTS_SOURCE_PLAN.md` documents that this DOM is the most
+fragile of any scraper in the repo — expect it to need adjustment.
 """
 
 from __future__ import annotations
@@ -70,8 +84,6 @@ _SCROLL_ITERATIONS = 3
 _SCROLL_WAIT_RANGE_SEC = (1.0, 2.0)
 _POST_LOAD_WAIT_RANGE_SEC = (1.5, 2.5)
 
-_SEEDED_MARKER_NAME = ".seeded"
-
 
 class AntiBotDetected(Exception):
     """Raised the moment a login/checkpoint/authwall/captcha response is seen.
@@ -117,72 +129,96 @@ def build_search_url(keyword: str) -> str:
     return SEARCH_URL_TEMPLATE.format(kw=quote(keyword))
 
 
-def seed_profile_if_needed(context, profile_dir: Path, storage_state_path: Path | None) -> bool:
-    """Seed a fresh persistent-context profile with cookies, exactly once.
+def seed_profile_cookies(context, storage_state_path: Path | None) -> bool:
+    """Inject cookies from LINKEDIN_STORAGE_STATE into the context.
 
-    A profile with history/cookies looks like a real returning user; a fresh
-    context every run does not (task spec §3.1). Only cookies are imported —
-    Playwright's persistent-context API has no supported way to seed
-    localStorage/origins ahead of a page load, and `li_at` (the session
-    cookie) is what actually authenticates the request, so that's the part
-    worth carrying over. Runs at most once per profile dir (marker file).
+    IMPORTANT — this runs on EVERY invocation, not just once per profile.
+    Empirically verified (2026-07-07, local no-network test against a real
+    Chrome persistent context): cookies injected via Playwright's
+    `add_cookies()` on a `launch_persistent_context()` browser ARE correctly
+    sent on real requests during the CURRENT session, but do NOT get written
+    to the profile's on-disk cookie store — a fresh `launch_persistent_context`
+    against the same `user_data_dir` comes back with zero cookies. So "seed
+    once, let the profile own it going forward" (the original plan) silently
+    produces an unauthenticated session on every run after the first. The
+    profile directory still earns its keep for what DOES persist to disk
+    normally (history, cache, localStorage) — it just isn't a substitute for
+    re-injecting the auth cookie fresh, every run, from the canonical
+    LINKEDIN_STORAGE_STATE file.
 
-    Returns True if seeding actually ran (for tests / logging), False if the
-    profile was already seeded or there was nothing to seed.
+    Returns True if cookies were injected, False if there was nothing to seed
+    (missing/absent storage_state, or a read/parse failure — best-effort).
     """
     import json
 
-    marker = Path(profile_dir) / _SEEDED_MARKER_NAME
-    if marker.exists():
-        return False
     if storage_state_path is None or not Path(storage_state_path).exists():
         logger.warning(
-            "[linkedin_scout] no LINKEDIN_STORAGE_STATE to seed the profile from — "
-            "run tools/linkedin_login.py first if this is a fresh profile."
+            "[linkedin_scout] no LINKEDIN_STORAGE_STATE to seed cookies from — "
+            "run tools/linkedin_login.py first."
         )
         return False
     try:
         data = json.loads(Path(storage_state_path).read_text(encoding="utf-8"))
         cookies = data.get("cookies", [])
-        if cookies:
-            context.add_cookies(cookies)
-            logger.info("[linkedin_scout] seeded %d cookies into new profile", len(cookies))
+        if not cookies:
+            return False
+        context.add_cookies(cookies)
+        logger.info("[linkedin_scout] seeded %d cookies for this run", len(cookies))
+        return True
     except Exception as e:  # noqa: BLE001 — best-effort seed, never fatal
-        logger.warning("[linkedin_scout] profile seeding failed: %s", e)
+        logger.warning("[linkedin_scout] cookie seed failed: %s", e)
         return False
-    finally:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
-    return True
 
 
-# JS run inside the page to extract post text. Per the live-probe finding
-# (plan §4.6 #3), `document.body.innerText` already renders open shadow DOM
-# content on this surface — that's the primary source. The shadow-root walk
-# below is a safety net for anything innerText might still miss, not the
-# primary mechanism (the permalink-collection use case for the walker was
-# ruled out in probe round 2 finding #5 — no permalinks are reachable at all).
+# JS run inside the page to extract post text.
+#
+# The plan's live-probe finding (§4.6 #3) claimed `document.body.innerText`
+# already renders open shadow DOM content on this surface. Empirically
+# verified FALSE (2026-07-07, local no-network test: a real open shadow root
+# attached under document.body was completely invisible to
+# `document.body.innerText`, which returned only the light-DOM text either
+# side of it). So this walker is the PRIMARY extraction mechanism, not a
+# safety net: it descends into `el.shadowRoot` wherever one exists, and calls
+# `.innerText` on any subtree that contains no shadow root at all (cheap,
+# preserves line breaks the parser's "Feed post" splitter depends on — plain
+# `.textContent` does not, and was the previous bug here). `ownText()` grabs a
+# shadow-hosting element's own direct text-node children before recursing, so
+# a light-DOM text node sitting next to a shadow-hosting sibling isn't lost.
 _EXTRACT_JS = """
 () => {
-  function collectShadowText(root, out) {
-    const all = root.querySelectorAll('*');
-    all.forEach((el) => {
+  function hasShadowDescendant(el) {
+    if (el.shadowRoot) return true;
+    const kids = el.children ? Array.from(el.children) : [];
+    return kids.some(hasShadowDescendant);
+  }
+  function ownText(el) {
+    return Array.from(el.childNodes)
+      .filter((n) => n.nodeType === 3)
+      .map((n) => n.textContent.trim())
+      .filter(Boolean)
+      .join(' ');
+  }
+  function collect(root, out) {
+    const children = root.children ? Array.from(root.children) : [];
+    children.forEach((el) => {
+      if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) return;
       if (el.shadowRoot) {
-        out.push(el.shadowRoot.textContent || '');
-        collectShadowText(el.shadowRoot, out);
+        collect(el.shadowRoot, out);
+        return;
+      }
+      if (hasShadowDescendant(el)) {
+        const own = ownText(el);
+        if (own) out.push(own);
+        collect(el, out);
+      } else {
+        const t = el.innerText !== undefined ? el.innerText : (el.textContent || '');
+        if (t && t.trim()) out.push(t.trim());
       }
     });
   }
-  const bodyText = document.body ? document.body.innerText : '';
-  const shadowParts = [];
-  if (document.body) {
-    collectShadowText(document.body, shadowParts);
-  }
-  const shadowText = shadowParts.join('\\n');
-  if (shadowText && !bodyText.includes(shadowText.slice(0, 40))) {
-    return bodyText + '\\n' + shadowText;
-  }
-  return bodyText;
+  const out = [];
+  collect(document.body, out);
+  return out.join('\\n');
 }
 """
 
@@ -255,7 +291,7 @@ def _open_scroll_extract(
             args=list(STEALTH_CHROME_ARGS),
         )
         try:
-            seed_profile_if_needed(context, profile_dir, storage_state_path)
+            seed_profile_cookies(context, storage_state_path)
             context.add_init_script(_HIDE_WEBDRIVER_INIT_SCRIPT)
             page = context.new_page()
             page.goto(url, wait_until="domcontentloaded")
