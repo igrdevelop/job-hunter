@@ -247,6 +247,7 @@ def build_application() -> Application:
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
     from hunter.commands.dual import cmd_dual
+    from hunter.commands.scoutfound import cmd_scoutfound
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
 
@@ -275,6 +276,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("health",               cmd_health))
     app.add_handler(CommandHandler("llm",                  cmd_llm))
     app.add_handler(CommandHandler("dual",                 cmd_dual))
+    app.add_handler(CommandHandler("scoutfound",           cmd_scoutfound))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
