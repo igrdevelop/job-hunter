@@ -64,6 +64,11 @@ HIRING_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bposzukujemy\b",
         r"\bzatrudnimy\b",
         r"\bpraca\s+dla\b",
+        r"\bищем\b",          # RU "we are looking (for)" — hiring
+        r"\bтребуется\b",
+        r"\bвакансия\b",
+        r"\bнабираем\b",
+        r"#вакансия\b",
     )
 )
 
@@ -80,6 +85,9 @@ CANDIDATE_SIDE_RES: tuple[re.Pattern[str], ...] = tuple(
         # round 2 live finding) — do not "fix" it into a looser stem match.
         r"\bszukam\b\s+pracy",
         r"#opentowork\b",
+        r"\bищу\s+работу\b",   # RU "I'm looking for work" — candidate-side
+        r"\bв\s+поиске\s+работы\b",
+        r"#ищу_?работу\b",
     )
 )
 
@@ -93,6 +101,9 @@ SPAM_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bbootcamp\b",
         r"\bszkolenie\b",
         r"\bkurs\w*\b",
+        r"\bкурс\w*\b",
+        r"\bвебинар\b",
+        r"\bбуткемп\b",
     )
 )
 
@@ -151,6 +162,8 @@ _REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bzdalnie\b",
         r"\bpraca\s+zdalna\b",
         r"\bzdaln\w*",
+        r"\bудал[её]нн?\w*",   # RU "remote(ly)" — удалённо/удаленка/удаленный
+        r"\bдистанцион\w*",   # RU "distance/remote work"
     )
 )
 
