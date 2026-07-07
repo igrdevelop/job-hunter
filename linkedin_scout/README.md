@@ -10,11 +10,14 @@ rationale: `../docs/LINKEDIN_POSTS_SCOUT_TASK.md`.
 just another job source, like the other 21"). Instead it writes matches to
 `linkedin_scout/pending_candidates.json`; `hunter/sources/linkedin_scout_relay.py` (a
 tiny, scrape-free source inside the bot) drains that file on the bot's own hunt cycle
-and turns each candidate into a normal Job — same central filters, same tracker dedup,
-same Telegram Apply/Skip card as any other source. It never auto-applies even if
-`AUTO_APPLY=true` (`manual_only` on that source) — you still confirm before any LLM
-spend, you just confirm via the normal card instead of manually re-pasting the post
-text yourself.
+and turns each candidate into a normal Job — same central filters, same doomed-vacancy
+gate, same tracker dedup, same `AUTO_APPLY` handling as any other source (owner: "we
+dropped confirmation cards long ago, I never wait for them — there's already a full
+check pipeline other job-board postings go through, I want these to go through it
+too"). A HARD doomed-gate finding still aborts generation for $0.00, same as any other
+source; it just doesn't require a human to look at a card first. Apply (whichever code
+path runs) uses the saved post text automatically via the paste flow — no manual
+re-paste needed, and no real LinkedIn permalink exists to fetch instead.
 
 ---
 

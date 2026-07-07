@@ -6,17 +6,25 @@ cadence — see linkedin_scout/README.md). That script writes candidates it
 found (already filtered through its own hiring heuristic) to a small JSON
 queue file. This source's job is only to drain that queue on the bot's own
 hunt schedule and turn each entry into a normal `Job`, so it goes through the
-EXACT same pipeline as every other source: central filters, tracker dedup,
-and a Telegram Apply/Skip card — never auto-applied (`manual_only = True`),
-since a regex-heuristic match deserves a human confirmation before any LLM
-spend, unlike a structured job-board listing.
+EXACT same pipeline as every other source: central filters, the doomed-
+vacancy gate, tracker dedup, and — per owner decision 2026-07-08 ("we dropped
+confirmation cards long ago, I never wait for them; there's already a full
+check pipeline other job-board postings go through, I want these to go
+through it too") — normal AUTO_APPLY handling, NOT `manual_only`. A HARD
+doomed-gate finding still aborts generation for $0.00 exactly like any other
+source (paste-mode does NOT downgrade HARD findings — only genuine `/force`
+does, see hunter/apply_shared.py::run_doomed_gate's `is_force_override`), so
+a bad heuristic match still gets caught downstream, just not by a human
+looking at a card first.
 
 There is no real fetchable URL for a LinkedIn feed post (verified in the
 scout's own design docs — no permalinks are reachable without extra clicking,
 which was rejected as added bot surface). So `fetch_text()` always raises;
-the Apply button for these jobs routes through the paste flow instead
-(`hunter/commands/url_message.py::_handle_apply`), using the saved
-`raw["post_text"]`.
+apply for these jobs routes through the paste flow instead — both the
+AUTO_APPLY path (`hunter.services.apply_service.run_apply_agent_subprocess`)
+and the manual Telegram-card path (`hunter/commands/url_message.py::
+_handle_apply`, kept for when AUTO_APPLY is off) detect `job.raw["post_text"]`
+and use it instead of fetching `job.url`.
 """
 
 from __future__ import annotations
@@ -41,7 +49,9 @@ URL_PREFIX = "https://linkedin.com/scout-posts/#p"
 
 class LinkedInScoutRelaySource(BaseSource):
     name = "linkedin_scout_relay"
-    manual_only = True
+    # NOT manual_only — see module docstring. Goes through AUTO_APPLY exactly
+    # like every other source; the doomed-vacancy gate + central filters are
+    # what's relied on to catch a bad heuristic match, not a human review step.
 
     def search(self) -> list[Job]:
         if not QUEUE_PATH.exists():
