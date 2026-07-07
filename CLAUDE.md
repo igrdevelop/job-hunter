@@ -89,7 +89,7 @@ With 21 sources, a full cycle spans ~12 hours from the base time.
 
 ---
 
-## Job Sources (21 active)
+## Job Sources (22 active)
 
 | Source | Module | Strategy | Notes |
 |--------|--------|----------|-------|
@@ -115,6 +115,7 @@ With 21 sources, a full cycle spans ~12 hours from the base time.
 | JobLeads | jobleads.py | HTML scraper | Cloudflare issues; MANUAL flow |
 | ATS Aggregator | ats_aggregator.py | Per-company ATS APIs | Workable/Greenhouse/Lever/Recruitee/Ashby |
 | Gmail | gmail.py | Gmail API email alerts | Parses LinkedIn/NoFluff/JustJoin/Pracuj alerts |
+| LinkedIn Scout relay | linkedin_scout_relay.py | Drains a JSON queue file | No scraping — reads what the standalone `linkedin_scout/` script found; `manual_only=True`, see below |
 
 ---
 
@@ -342,7 +343,9 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`,
 `REMOTIVE_ENABLED`, `WORKINGNOMADS_ENABLED`, `JOBSPRESSO_ENABLED`, `BUILTIN_ENABLED`,
 `JUSTREMOTE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`,
-`WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`.
+`WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`,
+`LINKEDIN_SCOUT_RELAY_ENABLED` (default `true` — no scraping, just drains a JSON queue
+file the standalone `linkedin_scout/` script writes; see "LinkedIn Posts Scout" below).
 
 ---
 
@@ -670,9 +673,18 @@ GSHEETS_ENABLED=true
 **What it is:** many vacancies never reach LinkedIn Jobs — recruiters post them as
 ordinary feed content ("We're hiring an Angular dev — DM me"). `linkedin_scout/` is a
 standalone script (NOT part of `hunter/`, NOT in the Docker image, NOT on the bot's
-schedule) that scrapes LinkedIn content-search + the home feed for candidate hiring
-posts and sends matches to Telegram. The owner reads them and applies manually (paste
-flow) — this never runs the apply pipeline itself.
+schedule — the SCRAPING never runs inside the bot process) that scrapes LinkedIn
+content-search + the home feed for candidate hiring posts. It never sends Telegram
+directly and never runs the apply pipeline itself (owner decision 2026-07-08: "this is
+just another job source, like the other 21"). Instead it writes matches to
+`linkedin_scout/pending_candidates.json`, which `hunter/sources/linkedin_scout_relay.py`
+(a tiny, scrape-free source INSIDE the bot) drains on the bot's own hunt cycle — from
+there a candidate goes through the exact same pipeline as any other source: central
+filters, tracker dedup, a Telegram Apply/Skip card. `manual_only=True` on that source
+means it NEVER auto-applies even under `AUTO_APPLY=true` — a regex-heuristic match
+deserves a human's confirmation before any LLM spend, unlike a structured job-board
+listing. Apply routes through the paste flow (no real LinkedIn post permalink exists —
+see below), using the saved post text automatically, no manual re-paste needed.
 
 **Why standalone:** an earlier design ran this inside the bot's Docker container
 (`docs/LINKEDIN_POSTS_SOURCE_PLAN.md`, branch `feat/linkedin-posts-source`, PR #114).
@@ -699,9 +711,25 @@ trip on one never silences the other.
 | `parser.py` | `parse_posts()` — splits captured `innerText` into (author, body) blocks on "Feed post" markers |
 | `seen_store.py` | `dedup_key()` + `SeenStore` — plain JSON, atomic write, independent of `tracker.db` |
 | `state.py` | `ScoutState` — circuit-breaker trip flag + round-robin keyword rotation, one JSON file per track |
-| `browser.py` | Playwright mechanics: persistent Chrome profile, cookie re-seeding, shadow-DOM-aware extraction JS, `scout_keyword()`/`scout_feed()`, `run_once()`/`run_feed_once()` (circuit breaker + M1 filter wiring) |
-| `notify.py` | Direct Telegram `sendMessage` (no bot `Application`/polling), message formatting, dedup-before-send |
+| `browser.py` | Playwright mechanics: persistent Chrome profile, cookie re-seeding, shadow-DOM-aware extraction JS, `scout_keyword()` (off-screen window) / `scout_feed()` (long randomized scroll + plateau stop), `run_once()`/`run_feed_once()` (circuit breaker + M1 filter wiring) |
+| `queue_writer.py` | `enqueue_candidates()` — dedup-before-write, appends to `pending_candidates.json` (atomic write) for the bot's relay source to drain |
+| `notify.py` | Direct Telegram `sendMessage` (no bot `Application`/polling) — now only used for `--dry-run` console preview formatting; real runs go through `queue_writer.py` instead (see below) |
 | `run.py` | CLI entry point + Task Scheduler glue: `--track`, `--reset`, `--dry-run`, skip-chance + jitter |
+
+**Bot-side relay** (`hunter/sources/linkedin_scout_relay.py`, inside the main repo —
+this piece IS in Docker/the bot process, since it does zero scraping, just reads a JSON
+file): `LinkedInScoutRelaySource.search()` reads+drains `pending_candidates.json` into
+normal `Job` objects (synthetic dedup-key URL `https://linkedin.com/scout-posts/#p...`,
+since no real permalink exists), registered in `ALL_SOURCES` behind
+`LINKEDIN_SCOUT_RELAY_ENABLED` (default true) and in the fetch-dispatch roster.
+`hunter/main.py`'s ACT step partitions `new_jobs` by each source's `manual_only` flag
+(new `BaseSource.manual_only: bool = False` attribute) — manual-only jobs always get
+`send_job_cards`, even under `AUTO_APPLY=true`. `hunter/commands/url_message.py::
+_handle_apply` special-cases `job.source == "linkedin_scout_relay"`: instead of the
+normal fetch-by-URL apply flow, it writes `job.raw["post_text"]` to a temp file and
+calls `_run_apply_agent(url, paste_file=...)` — the same paste-flow mechanism as a
+manually pasted job posting, just triggered automatically instead of requiring the
+owner to copy-paste.
 
 **Safety rails:** circuit breaker (any login/checkpoint/authwall/captcha signal aborts
 immediately, trips state, sends exactly one Telegram alert, every later run no-ops

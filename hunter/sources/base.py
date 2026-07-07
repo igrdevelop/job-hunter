@@ -19,6 +19,13 @@ from hunter.models import Job
 class BaseSource(ABC):
     name: str = "base"  # override in subclass
 
+    # True for sources whose Job objects must ALWAYS go to a Telegram
+    # Apply/Skip card, even when AUTO_APPLY=true — e.g. a regex-heuristic
+    # match (linkedin_scout_relay) isn't the same confidence level as a
+    # structured job-board listing, so a human should confirm before any LLM
+    # spend. See hunter/main.py's ACT step, which partitions new_jobs on this.
+    manual_only: bool = False
+
     @abstractmethod
     def search(self) -> list[Job]:
         """

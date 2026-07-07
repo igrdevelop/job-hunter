@@ -476,6 +476,15 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
     "yes",
 )
 
+# ── LinkedIn Scout relay (standalone linkedin_scout/ script -> bot pipeline) ──
+# Drains linkedin_scout/pending_candidates.json (written by the standalone
+# scout script on its own Windows Task Scheduler cadence) into normal Job
+# cards on the bot's own hunt schedule. No scraping happens here — see
+# hunter/sources/linkedin_scout_relay.py + linkedin_scout/README.md.
+LINKEDIN_SCOUT_RELAY_ENABLED: bool = os.getenv("LINKEDIN_SCOUT_RELAY_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+
 # ── Gmail source config ───────────────────────────────────────────────────────
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py

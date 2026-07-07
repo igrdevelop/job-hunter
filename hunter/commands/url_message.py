@@ -75,11 +75,48 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
         reply_markup=None,
     )
 
+    # linkedin_scout_relay jobs have no real fetchable URL (no LinkedIn feed
+    # post permalink survives without extra clicking — see
+    # hunter/sources/linkedin_scout_relay.py). Route through the paste flow
+    # instead, using the raw post text saved by the queue relay.
+    post_text = (job.raw or {}).get("post_text") if job.source == "linkedin_scout_relay" else None
+    if post_text:
+        paste_path = _write_paste_temp_file(post_text)
+        if paste_path is None:
+            await query.message.reply_text(
+                "❌ Failed to save the scouted post text to a temp file — apply aborted.",
+            )
+            return
+        logger.info(f"[Apply] Launching apply_agent (paste mode, linkedin_scout) for: {job.url}")
+        asyncio.create_task(_run_apply_agent(job.url, paste_file=paste_path))
+        return
+
     logger.info(f"[Apply] Launching apply_agent for: {job.url}")
 
     # Run apply_agent.py as a detached subprocess so bot stays responsive
     # apply_agent.py will send its own Telegram notification when done
     asyncio.create_task(_run_apply_agent(job.url))
+
+
+def _write_paste_temp_file(text: str) -> Optional[str]:
+    """Save `text` to a temp file for apply_agent's --paste-file flow.
+
+    Mirrors bot/apply_runner.py::_handle_paste's temp-file mechanics — kept
+    separate since that helper is driven by an `Update` (chat message reply),
+    not a button callback.
+    """
+    import tempfile
+
+    try:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".txt", prefix="li_scout_paste_", delete=False,
+        )
+        with tmp as fh:
+            fh.write(text)
+        return tmp.name
+    except OSError as e:
+        logger.exception("[Apply] failed to write linkedin_scout paste temp file: %s", e)
+        return None
 
 
 # ── URL message handler ───────────────────────────────────────────────────────
