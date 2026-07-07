@@ -66,8 +66,16 @@ SEARCH_URL_TEMPLATE = (
 FEED_URL = "https://www.linkedin.com/feed/"
 
 # Feed scroll goes deeper than a single search page — "all posts", not one
-# page of results — so it gets its own (larger) scroll budget.
-_FEED_SCROLL_ITERATIONS = 8
+# page of results (owner decision 2026-07-07): scroll for up to ~10 minutes at
+# a slower, more varied pace, stopping early once the feed plateaus (several
+# scrolls in a row surface no new posts — LinkedIn ran out of fresh content,
+# no point continuing). `_FEED_SCROLL_MAX_ITERATIONS` is only a hard safety
+# ceiling in case the duration/plateau logic is ever misconfigured; in
+# practice one of the other two limits fires first.
+_FEED_SCROLL_MAX_ITERATIONS = 200
+_FEED_SCROLL_MAX_DURATION_SEC = 600.0
+_FEED_SCROLL_WAIT_RANGE_SEC = (2.0, 5.0)
+_FEED_SCROLL_PLATEAU_LIMIT = 5
 
 # Real installed Chrome (not bundled Chromium) + stealth flags — headless
 # Chromium got flagged within 2-3 loads in the live probe (plan §4.6 #4).
@@ -276,10 +284,20 @@ def _open_scroll_extract(
     storage_state_path: Path | None,
     headless: bool,
     scroll_iterations: int,
+    scroll_wait_range: tuple[float, float] = _SCROLL_WAIT_RANGE_SEC,
+    max_duration_sec: float | None = None,
+    plateau_limit: int | None = None,
 ) -> str:
     """Shared mechanics: launch persistent context, seed, navigate, scroll,
     extract text. Raises AntiBotDetected on any login/checkpoint/authwall
     redirect or anti-bot interstitial — no retries, caller must not loop this.
+
+    `scroll_iterations` is always a hard cap. `max_duration_sec` (if given)
+    stops the loop early once that much wall-clock time has elapsed —
+    intended for a long, slow feed-scroll session, not the short keyword-
+    search burst. `plateau_limit` (if given) stops early once that many
+    consecutive scrolls in a row surface no NEW posts (the feed ran out of
+    fresh content — no point continuing to scroll past that).
     """
     from playwright.sync_api import sync_playwright
 
@@ -310,23 +328,49 @@ def _open_scroll_extract(
             viewport = page.viewport_size or {"width": 1280, "height": 800}
             page.mouse.move(viewport["width"] // 2, viewport["height"] // 2)
 
-            pre_scroll_text = page.evaluate(_EXTRACT_JS) or ""
-            pre_scroll_count = len(parse_posts(pre_scroll_text))
-            logger.info("[linkedin_scout] posts visible before scrolling: %d", pre_scroll_count)
+            text = page.evaluate(_EXTRACT_JS) or ""
+            post_count = len(parse_posts(text))
+            logger.info("[linkedin_scout] posts visible before scrolling: %d", post_count)
 
-            for _ in range(scroll_iterations):
-                page.mouse.wheel(0, 2000)
-                _sleep_human(_SCROLL_WAIT_RANGE_SEC)
+            start = time.monotonic()
+            plateau_streak = 0
+            iterations_done = 0
+            while iterations_done < scroll_iterations:
+                if max_duration_sec is not None and (time.monotonic() - start) >= max_duration_sec:
+                    logger.info(
+                        "[linkedin_scout] scroll time budget (%.0fs) reached after %d scroll(s)",
+                        max_duration_sec, iterations_done,
+                    )
+                    break
+
+                # Randomized scroll distance, not a robotic fixed step every time.
+                page.mouse.wheel(0, random.randint(1200, 2600))
+                _sleep_human(scroll_wait_range)
+                iterations_done += 1
                 if is_blocked_url(page.url):
                     raise AntiBotDetected(f"redirected to {page.url} during scroll")
 
-            text = page.evaluate(_EXTRACT_JS) or ""
-            if looks_like_anti_bot(text) or looks_like_anti_bot(page.url):
-                raise AntiBotDetected("anti-bot interstitial marker detected in page")
-            post_scroll_count = len(parse_posts(text))
+                text = page.evaluate(_EXTRACT_JS) or ""
+                if looks_like_anti_bot(text) or looks_like_anti_bot(page.url):
+                    raise AntiBotDetected("anti-bot interstitial marker detected in page")
+
+                new_count = len(parse_posts(text))
+                if plateau_limit is not None:
+                    plateau_streak = plateau_streak + 1 if new_count <= post_count else 0
+                    post_count = new_count
+                    if plateau_streak >= plateau_limit:
+                        logger.info(
+                            "[linkedin_scout] scroll plateaued (%d scroll(s) with no new posts) — "
+                            "stopping early after %d/%d",
+                            plateau_streak, iterations_done, scroll_iterations,
+                        )
+                        break
+                else:
+                    post_count = new_count
+
             logger.info(
-                "[linkedin_scout] posts visible after %d scroll(s): %d (was %d before)",
-                scroll_iterations, post_scroll_count, pre_scroll_count,
+                "[linkedin_scout] posts visible after %d scroll(s): %d",
+                iterations_done, post_count,
             )
             return text
         finally:
@@ -360,19 +404,24 @@ def scout_feed(
     storage_state_path: Path | None,
     headless: bool = False,
 ) -> str:
-    """Open the home feed (no keyword) and return the page text.
+    """Open the home feed (no keyword) and scroll it for an extended session.
 
     Second, independent scout track (owner decision 2026-07-07): scrolls the
-    main feed for ANY post rather than a keyword search. Uses its own
-    (larger) scroll budget — "all posts" rather than one page of search
-    results. Same AntiBotDetected contract as scout_keyword.
+    main feed for ANY post rather than a keyword search — up to
+    `_FEED_SCROLL_MAX_DURATION_SEC` (~10 minutes) at a slower, randomized
+    pace, stopping early if the feed plateaus (`_FEED_SCROLL_PLATEAU_LIMIT`
+    consecutive scrolls with no new posts). Same AntiBotDetected contract as
+    scout_keyword.
     """
     return _open_scroll_extract(
         FEED_URL,
         profile_dir=profile_dir,
         storage_state_path=storage_state_path,
         headless=headless,
-        scroll_iterations=_FEED_SCROLL_ITERATIONS,
+        scroll_iterations=_FEED_SCROLL_MAX_ITERATIONS,
+        scroll_wait_range=_FEED_SCROLL_WAIT_RANGE_SEC,
+        max_duration_sec=_FEED_SCROLL_MAX_DURATION_SEC,
+        plateau_limit=_FEED_SCROLL_PLATEAU_LIMIT,
     )
 
 
