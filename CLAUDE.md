@@ -765,10 +765,12 @@ until `--reset`); ~30% skip-chance + 0-45min jitter per invocation; headed real 
 with stealth flags (never headless — that got flagged within 2-3 loads in the original
 live probe). Search track originally did ONE rotation-keyword per run (full coverage
 over several days); owner decision 2026-07-08 changed `run_once()` to search the
-ENTIRE `LINKEDIN_SCOUT_KEYWORDS` list every invocation instead (10-30s human-paced
-pause between keywords, circuit breaker still aborts the whole run immediately on a
-trip — no further keywords attempted). See `linkedin_scout/README.md` for the Task
-Scheduler setup and the full safety-rail rationale.
+ENTIRE `LINKEDIN_SCOUT_KEYWORDS` list every invocation instead, in a freshly
+randomized order each call (`random.shuffle`, same owner decision) with a
+10-30s jittered pause between keywords, circuit breaker still aborting the
+whole run immediately on a trip — no further keywords attempted. See
+`linkedin_scout/README.md` for the Task Scheduler setup and the full
+safety-rail rationale.
 
 **Verification status (as of 2026-07-07):** the full launch → cookie-seed →
 navigate → scroll → extract pipeline has been run end-to-end against a REAL Chrome

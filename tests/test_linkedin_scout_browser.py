@@ -265,7 +265,8 @@ def test_run_once_filters_through_m1_heuristic_and_location_gate(tmp_path, monke
 
 def test_run_once_searches_every_keyword_in_one_call(tmp_path, monkeypatch):
     """Owner decision (2026-07-08): one run_once() call now searches the
-    ENTIRE keyword list, not one rotation-keyword per call."""
+    ENTIRE keyword list, not one rotation-keyword per call. Order is
+    randomized (see next test), so only the SET is asserted here."""
     state = ScoutState(tmp_path / "state.json")
     monkeypatch.setattr(browser, "_sleep_human", lambda *a, **k: None)
 
@@ -276,26 +277,28 @@ def test_run_once_searches_every_keyword_in_one_call(tmp_path, monkeypatch):
 
     run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
 
-    assert seen_keywords == ["a", "b", "c"]
+    assert sorted(seen_keywords) == ["a", "b", "c"]
+    assert len(seen_keywords) == 3  # each keyword searched exactly once
 
 
-def test_run_once_rotation_continues_across_separate_calls(tmp_path, monkeypatch):
-    """Even though one call now covers the whole list, the rotation index is
-    still persisted — a later call with a DIFFERENT (e.g. shorter) list picks
-    up from wherever the index last landed, not necessarily position 0."""
+def test_run_once_shuffles_keyword_order(tmp_path, monkeypatch):
+    """Owner decision (2026-07-08): keyword order must be freshly randomized
+    each call, not the same fixed round-robin sequence every time."""
     state = ScoutState(tmp_path / "state.json")
     monkeypatch.setattr(browser, "_sleep_human", lambda *a, **k: None)
     monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: "")
 
-    run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
-    # index is now 0 again (wrapped after 2 keywords) — next call starts at "a"
-
-    seen_keywords = []
+    shuffle_calls = []
+    original_shuffle = browser.random.shuffle
     monkeypatch.setattr(
-        browser, "scout_keyword", lambda keyword, **k: seen_keywords.append(keyword) or ""
+        browser.random,
+        "shuffle",
+        lambda seq: (shuffle_calls.append(list(seq)), original_shuffle(seq))[1],
     )
-    run_once(["a", "b"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
-    assert seen_keywords == ["a", "b"]
+
+    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+
+    assert len(shuffle_calls) == 1  # random.shuffle() was actually invoked
 
 
 def test_run_once_sleeps_between_keywords_not_after_last(tmp_path, monkeypatch):
@@ -328,7 +331,10 @@ def test_run_once_stops_remaining_keywords_after_trip(tmp_path, monkeypatch):
     result = run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
 
     assert result == []
-    assert attempted == ["a"]  # tripped on the first keyword, never tried b/c
+    # tripped on whichever keyword came first in the randomized order —
+    # exactly one attempt, the other two never tried.
+    assert len(attempted) == 1
+    assert attempted[0] in ("a", "b", "c")
     assert state.is_tripped() is True
 
 
