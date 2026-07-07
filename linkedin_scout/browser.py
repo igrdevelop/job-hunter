@@ -300,6 +300,20 @@ def _open_scroll_extract(
             if is_blocked_url(page.url):
                 raise AntiBotDetected(f"redirected to {page.url}")
 
+            # page.mouse.wheel() scrolls whatever is under the cursor — and
+            # Playwright's mouse position defaults to nowhere-on-page until
+            # mouse.move() is called at least once. Empirically verified
+            # (2026-07-07, local no-network test): without this move(), every
+            # subsequent wheel() call is silently a no-op — the page never
+            # scrolls at all, which is exactly what the owner's first two live
+            # runs showed (posts-visible count identical before/after scroll).
+            viewport = page.viewport_size or {"width": 1280, "height": 800}
+            page.mouse.move(viewport["width"] // 2, viewport["height"] // 2)
+
+            pre_scroll_text = page.evaluate(_EXTRACT_JS) or ""
+            pre_scroll_count = len(parse_posts(pre_scroll_text))
+            logger.info("[linkedin_scout] posts visible before scrolling: %d", pre_scroll_count)
+
             for _ in range(scroll_iterations):
                 page.mouse.wheel(0, 2000)
                 _sleep_human(_SCROLL_WAIT_RANGE_SEC)
@@ -309,6 +323,11 @@ def _open_scroll_extract(
             text = page.evaluate(_EXTRACT_JS) or ""
             if looks_like_anti_bot(text) or looks_like_anti_bot(page.url):
                 raise AntiBotDetected("anti-bot interstitial marker detected in page")
+            post_scroll_count = len(parse_posts(text))
+            logger.info(
+                "[linkedin_scout] posts visible after %d scroll(s): %d (was %d before)",
+                scroll_iterations, post_scroll_count, pre_scroll_count,
+            )
             return text
         finally:
             context.close()
