@@ -250,13 +250,15 @@ This is deliberate, not a bug. In order:
    you exactly ONE Telegram alert on the run that actually trips it. Every
    subsequent run of that track silently no-ops (logs, exits 0) until you run
    `--reset`. The other track is unaffected (separate state file).
-6. **Every keyword, every run (search track only, owner decision 2026-07-08).**
-   `run.py --track search` searches the ENTIRE `LINKEDIN_SCOUT_KEYWORDS` list in
-   one invocation — a 10-30s human-paced pause between each keyword's search,
-   the circuit breaker still stops the whole run immediately (no further
-   keywords attempted) if any single keyword's search trips it. This replaced
-   the original "one rotation-keyword per run, full coverage over several
-   days" design — a deliberate trade-off toward speed/coverage over looking
+6. **Every keyword, every run, in random order (search track only, owner
+   decision 2026-07-08).** `run.py --track search` searches the ENTIRE
+   `LINKEDIN_SCOUT_KEYWORDS` list in one invocation, in a freshly shuffled
+   order each time (not the same sequence every run) — a 10-30s jittered
+   pause between each keyword's search, the circuit breaker still stops the
+   whole run immediately (no further keywords attempted) if any single
+   keyword's search trips it. This replaced the original "one rotation-
+   keyword per run, full coverage over several days" design — a deliberate
+   trade-off toward speed/coverage over looking
    infrequent, on top of the hourly cadence from point 1 above.
 7. **Headed real Chrome only.** Never run with `--headless` except for your own
    local debugging with no live LinkedIn navigation — the spec's live probe

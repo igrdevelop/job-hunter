@@ -510,13 +510,16 @@ def run_once(
     state,
     headless: bool = False,
 ) -> list[ScoutCandidate]:
-    """One search-track invocation: searches EVERY keyword in `keywords`,
-    sequentially, in this one call (owner decision 2026-07-08 — the original
-    design searched only one rotation-keyword per run; the owner explicitly
-    asked for the full list every time instead).
+    """One search-track invocation: searches EVERY keyword in `keywords`, in a
+    freshly randomized order each call (owner decision 2026-07-08 — the
+    original design searched only one rotation-keyword per run in a fixed
+    round-robin order; the owner asked first for the full list every time,
+    then for that list to be in random order too, so consecutive runs don't
+    always start the batch on the same keyword).
 
     Each keyword still gets its own full scout_keyword() call (own persistent-
-    context launch/close), with a human-paced pause between keywords. Circuit
+    context launch/close), with a randomized human-paced pause between
+    keywords (jitter — see `_BETWEEN_KEYWORD_WAIT_RANGE_SEC`). Circuit
     breaker: on AntiBotDetected, trips `state` and sends exactly one Telegram
     alert (only on the trip that actually flips tripped=False->True), and the
     loop stops immediately — no further keywords are attempted once tripped.
@@ -531,10 +534,14 @@ def run_once(
         )
         return []
 
+    shuffled_keywords = list(keywords)
+    random.shuffle(shuffled_keywords)
+
     all_candidates: list[ScoutCandidate] = []
-    for i in range(len(keywords)):
-        keyword = state.next_keyword(keywords)
-        logger.info("[linkedin_scout] scouting keyword %d/%d: %s", i + 1, len(keywords), keyword)
+    for i, keyword in enumerate(shuffled_keywords):
+        logger.info(
+            "[linkedin_scout] scouting keyword %d/%d: %s", i + 1, len(shuffled_keywords), keyword
+        )
 
         candidates = _run_with_breaker(
             label=keyword,
@@ -554,7 +561,7 @@ def run_once(
             )
             break
 
-        if i < len(keywords) - 1:
+        if i < len(shuffled_keywords) - 1:
             _sleep_human(_BETWEEN_KEYWORD_WAIT_RANGE_SEC)
 
     return all_candidates
