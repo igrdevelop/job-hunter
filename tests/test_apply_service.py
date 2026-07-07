@@ -269,3 +269,90 @@ def test_run_apply_agent_subprocess_does_not_swallow_unexpected_errors(monkeypat
         pass
     else:
         raise AssertionError("RuntimeError should bubble up for unexpected failures")
+
+
+def _job_with_paste_text(url: str, post_text: str) -> Job:
+    return Job(
+        title="", company="Deloitte", location="", salary=None,
+        url=url, source="linkedin_scout_relay", raw={"post_text": post_text},
+    )
+
+
+def test_run_apply_agent_subprocess_uses_paste_file_when_post_text_present(monkeypatch) -> None:
+    captured_cmds = []
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_cmds.append(args)
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    job = _job_with_paste_text(
+        "https://linkedin.com/scout-posts/#pabc", "We're hiring an Angular Developer."
+    )
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+        )
+    )
+
+    assert result == "ok"
+    assert len(captured_cmds) == 1
+    cmd = captured_cmds[0]
+    assert "--paste-file" in cmd
+    paste_path = Path(cmd[cmd.index("--paste-file") + 1])
+    # temp file is cleaned up after the subprocess finishes — content already
+    # verified via a separate direct write-check below, so just prove no leak.
+    assert not paste_path.exists()
+
+
+def test_run_apply_agent_subprocess_paste_file_contains_post_text(monkeypatch) -> None:
+    written_paths = []
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        cmd = args
+        idx = cmd.index("--paste-file")
+        path = Path(cmd[idx + 1])
+        written_paths.append(path.read_text(encoding="utf-8"))
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    job = _job_with_paste_text(
+        "https://linkedin.com/scout-posts/#pxyz", "We're hiring an Angular Developer, remote."
+    )
+    asyncio.run(
+        run_apply_agent_subprocess(
+            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+        )
+    )
+
+    assert written_paths == ["We're hiring an Angular Developer, remote."]
+
+
+def test_run_apply_agent_subprocess_no_paste_file_for_normal_job(monkeypatch) -> None:
+    captured_cmds = []
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_cmds.append(args)
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    asyncio.run(
+        run_apply_agent_subprocess(
+            _job("https://example.com/jobs/6"),
+            timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+        )
+    )
+
+    assert "--paste-file" not in captured_cmds[0]

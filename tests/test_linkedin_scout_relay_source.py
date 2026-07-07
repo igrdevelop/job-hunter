@@ -20,8 +20,11 @@ def relay(tmp_path, monkeypatch):
     return mod.LinkedInScoutRelaySource(), queue_path
 
 
-def test_manual_only_is_true():
-    assert LinkedInScoutRelaySource.manual_only is True
+def test_not_manual_only():
+    """Owner decision 2026-07-08: goes through normal AUTO_APPLY handling,
+    relying on the doomed-vacancy gate + central filters (not a human review
+    card) to catch a bad heuristic match — see module docstring."""
+    assert LinkedInScoutRelaySource.manual_only is False
 
 
 def test_search_returns_empty_when_queue_file_missing(relay):
