@@ -54,6 +54,7 @@ def build_payload(candidate: ScoutCandidate) -> str:
         "body": body,
         "scouted_at": candidate.scouted_at,
         "author_profile_url": candidate.author_profile_url,
+        "permalink": candidate.permalink,
     }
     raw = json.dumps(record, ensure_ascii=False).encode("utf-8")
     return base64.b64encode(raw).decode("ascii")

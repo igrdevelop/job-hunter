@@ -50,6 +50,7 @@ from urllib.parse import quote
 from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from linkedin_scout.heuristics import LocationVerdict, check_location, is_hiring_post
 from linkedin_scout.parser import ParsedPost, parse_posts
+from linkedin_scout.seen_store import dedup_key
 
 logger = logging.getLogger("linkedin_scout.browser")
 
@@ -106,6 +107,31 @@ _POST_LOAD_WAIT_RANGE_SEC = (1.5, 2.5)
 # design) — a human-paced pause between each keyword's search within the
 # same run.
 _BETWEEN_KEYWORD_WAIT_RANGE_SEC = (10.0, 30.0)
+
+# Post permalink via LinkedIn's own "..." > "Copy link to post" menu (owner
+# discovery 2026-07-08, live-demonstrated: this menu item exists on EVERY
+# post, unlike the DOM-anchor capture in _EXTRACT_JS which only catches
+# share-type posts). Owner decision: only spend the extra clicks on posts
+# that already passed the M1 heuristic gate (is_hiring_post + check_location)
+# — clicking is slow and adds anti-bot surface, so it's not worth doing for
+# every post on the page, only the ones the scout would actually relay.
+# Exact selectors are best-effort and UNVERIFIED against a live LinkedIn
+# session (same caveat as every other DOM-shape assumption in this module —
+# see the module docstring); a failed lookup logs and moves on, it never
+# raises or blocks the run.
+_POST_CONTAINER_SELECTORS: tuple[str, ...] = ('[data-urn]', '[role="article"]')
+_MENU_BUTTON_SELECTORS: tuple[str, ...] = (
+    'button[aria-label*="Open control menu" i]',
+    'button[aria-label*="More actions" i]',
+    'button[aria-label*="More options" i]',
+)
+_COPY_LINK_ITEM_TEXT = "Copy link to post"
+_MENU_CLICK_WAIT_RANGE_SEC = (0.5, 1.2)
+_MENU_CLICK_TIMEOUT_MS = 3000
+# Cap per run — each attempt is several clicks + a clipboard read; a busy feed
+# scroll can surface dozens of hiring-shaped posts and this isn't worth
+# spending on all of them.
+_MAX_MENU_PERMALINK_ATTEMPTS = 5
 
 
 class AntiBotDetected(Exception):
@@ -207,6 +233,17 @@ def seed_profile_cookies(context, storage_state_path: Path | None) -> bool:
 # `.textContent` does not, and was the previous bug here). `ownText()` grabs a
 # shadow-hosting element's own direct text-node children before recursing, so
 # a light-DOM text node sitting next to a shadow-hosting sibling isn't lost.
+#
+# Post permalinks (owner discovery 2026-07-08, live-verified): SOME posts (not
+# all — appears tied to how LinkedIn renders that particular post, e.g.
+# shares) wrap their body text in a real `<a href="https://www.linkedin.com/
+# feed/update/urn:li:share:...">`. Before emitting a shadow-free subtree's own
+# text, `collect()` checks for such an anchor anywhere inside it and — if
+# found — emits a `LI_PERMALINK::<href>` marker line first, so it lands right
+# next to (before) the post body text in the document-order output stream.
+# parser.py's parse_posts() detects and strips that marker line per post
+# block, keeping the first one found (the post's own permalink, not some
+# unrelated link deeper in the same render pass).
 _EXTRACT_JS = """
 () => {
   function hasShadowDescendant(el) {
@@ -220,6 +257,13 @@ _EXTRACT_JS = """
       .map((n) => n.textContent.trim())
       .filter(Boolean)
       .join(' ');
+  }
+  function findPermalink(el) {
+    if (el.tagName === 'A' && el.href && el.href.indexOf('/feed/update/') !== -1) {
+      return el.href;
+    }
+    const anchors = el.querySelectorAll ? el.querySelectorAll('a[href*="/feed/update/"]') : [];
+    return anchors.length ? anchors[0].href : null;
   }
   function collect(root, out) {
     const children = root.children ? Array.from(root.children) : [];
@@ -235,7 +279,11 @@ _EXTRACT_JS = """
         collect(el, out);
       } else {
         const t = el.innerText !== undefined ? el.innerText : (el.textContent || '');
-        if (t && t.trim()) out.push(t.trim());
+        if (t && t.trim()) {
+          const link = findPermalink(el);
+          if (link) out.push('LI_PERMALINK::' + link);
+          out.push(t.trim());
+        }
       }
     });
   }
@@ -248,6 +296,76 @@ _EXTRACT_JS = """
 
 def _sleep_human(range_sec: tuple[float, float]) -> None:
     time.sleep(random.uniform(*range_sec))
+
+
+def _copy_link_via_menu(page, author: str, body: str) -> str | None:
+    """Best-effort: open a post's '...' control menu, click 'Copy link to
+    post', and read the resulting clipboard content.
+
+    Playwright locators pierce open shadow roots (unlike XPath), so this can
+    stay at the locator level instead of the manual walker `_EXTRACT_JS`
+    needs. Tries each container/button selector combination in order and
+    gives up quietly — a failed lookup must never raise or block the run,
+    it's strictly a bonus on top of the always-working text extraction.
+    """
+    snippet = body.strip()[:40]
+    if not snippet:
+        return None
+    for container_sel in _POST_CONTAINER_SELECTORS:
+        try:
+            container = page.locator(container_sel).filter(has_text=snippet).first
+            if container.count() == 0:
+                continue
+        except Exception as e:  # noqa: BLE001 — best-effort DOM probe
+            logger.debug("[linkedin_scout] permalink container probe failed: %s", e)
+            continue
+        for button_sel in _MENU_BUTTON_SELECTORS:
+            try:
+                button = container.locator(button_sel).first
+                if button.count() == 0:
+                    continue
+                button.click(timeout=_MENU_CLICK_TIMEOUT_MS)
+                _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
+                page.get_by_text(_COPY_LINK_ITEM_TEXT, exact=False).first.click(
+                    timeout=_MENU_CLICK_TIMEOUT_MS
+                )
+                _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
+                link = page.evaluate("() => navigator.clipboard.readText()")
+                if link and "linkedin.com" in link:
+                    return link.strip()
+            except Exception as e:  # noqa: BLE001 — best-effort, try next selector
+                logger.debug("[linkedin_scout] menu-click permalink attempt failed: %s", e)
+                try:
+                    page.keyboard.press("Escape")
+                except Exception:  # noqa: BLE001
+                    pass
+    return None
+
+
+def _fetch_menu_permalinks(page, raw_text: str) -> dict[str, str]:
+    """For posts in `raw_text` that pass the M1 hiring-post + location gate
+    and don't already have a DOM-marker permalink, best-effort capture one via
+    `_copy_link_via_menu` — capped at `_MAX_MENU_PERMALINK_ATTEMPTS` per run
+    (owner decision 2026-07-08: candidates only, not every post on the page).
+    Returns `{seen_store.dedup_key(author, body): permalink}` for lookup in
+    `_filter_candidates`.
+    """
+    result: dict[str, str] = {}
+    attempts = 0
+    for post in parse_posts(raw_text):
+        if post.permalink:
+            continue
+        if not is_hiring_post(post.body):
+            continue
+        if check_location(post.body) is LocationVerdict.REJECT:
+            continue
+        if attempts >= _MAX_MENU_PERMALINK_ATTEMPTS:
+            break
+        attempts += 1
+        link = _copy_link_via_menu(page, post.author, post.body)
+        if link:
+            result[dedup_key(post.author, post.body)] = link
+    return result
 
 
 def _send_circuit_breaker_alert(reason: str) -> bool:
@@ -290,6 +408,10 @@ class ScoutCandidate:
     # live DOM turns out to expose it cheaply. notify.py already renders it
     # when present so no further change is needed there once it's populated.
     author_profile_url: str | None = None
+    # Real LinkedIn post permalink (https://www.linkedin.com/feed/update/urn:li:
+    # share:...), when the post's DOM exposed one (see _EXTRACT_JS docstring).
+    # Best-effort — None for posts that don't wrap their body in such an anchor.
+    permalink: str | None = None
 
 
 def _open_scroll_extract(
@@ -303,6 +425,7 @@ def _open_scroll_extract(
     max_duration_sec: float | None = None,
     plateau_limit: int | None = None,
     extra_chrome_args: tuple[str, ...] = (),
+    permalink_sink: dict[str, str] | None = None,
 ) -> str:
     """Shared mechanics: launch persistent context, seed, navigate, scroll,
     extract text. Raises AntiBotDetected on any login/checkpoint/authwall
@@ -316,7 +439,11 @@ def _open_scroll_extract(
     fresh content — no point continuing to scroll past that). `extra_chrome_args`
     lets a caller (currently just the search track) append launch flags on top
     of `STEALTH_CHROME_ARGS`, e.g. an off-screen `--window-position` so the
-    window doesn't steal focus during a short run.
+    window doesn't steal focus during a short run. `permalink_sink`, when
+    given, is populated in-place (before the context closes, while the page
+    is still live) via `_fetch_menu_permalinks` — an out-parameter rather than
+    a return-type change so every existing caller/test that treats this
+    function's return value as a plain `str` keeps working unchanged.
     """
     from playwright.sync_api import sync_playwright
 
@@ -328,6 +455,11 @@ def _open_scroll_extract(
             args=[*STEALTH_CHROME_ARGS, *extra_chrome_args],
         )
         try:
+            if permalink_sink is not None:
+                try:
+                    context.grant_permissions(["clipboard-read", "clipboard-write"])
+                except Exception as e:  # noqa: BLE001 — best-effort, capture just no-ops without it
+                    logger.debug("[linkedin_scout] clipboard permission grant failed: %s", e)
             seed_profile_cookies(context, storage_state_path)
             context.add_init_script(_HIDE_WEBDRIVER_INIT_SCRIPT)
             page = context.new_page()
@@ -391,6 +523,13 @@ def _open_scroll_extract(
                 "[linkedin_scout] posts visible after %d scroll(s): %d",
                 iterations_done, post_count,
             )
+
+            if permalink_sink is not None:
+                try:
+                    permalink_sink.update(_fetch_menu_permalinks(page, text))
+                except Exception as e:  # noqa: BLE001 — bonus capture, never blocks the run
+                    logger.warning("[linkedin_scout] menu permalink capture failed: %s", e)
+
             return text
         finally:
             context.close()
@@ -402,13 +541,16 @@ def scout_keyword(
     profile_dir: Path,
     storage_state_path: Path | None,
     headless: bool = False,
+    permalink_sink: dict[str, str] | None = None,
 ) -> str:
     """Open ONE content-search page for `keyword` and return the page text.
 
     Raises AntiBotDetected on a login/checkpoint/authwall redirect or a known
     anti-bot interstitial — the caller must not retry. Launches the (still
     headed) window off-screen (`_SEARCH_OFFSCREEN_ARGS`) so an hourly run
-    doesn't steal focus from whatever the owner is doing.
+    doesn't steal focus from whatever the owner is doing. `permalink_sink`
+    (optional) is passed straight through to `_open_scroll_extract` — see its
+    docstring.
     """
     return _open_scroll_extract(
         build_search_url(keyword),
@@ -417,6 +559,7 @@ def scout_keyword(
         headless=headless,
         scroll_iterations=_SCROLL_ITERATIONS,
         extra_chrome_args=_SEARCH_OFFSCREEN_ARGS,
+        permalink_sink=permalink_sink,
     )
 
 
@@ -425,6 +568,7 @@ def scout_feed(
     profile_dir: Path,
     storage_state_path: Path | None,
     headless: bool = False,
+    permalink_sink: dict[str, str] | None = None,
 ) -> str:
     """Open the home feed (no keyword) and scroll it for an extended session.
 
@@ -433,7 +577,8 @@ def scout_feed(
     `_FEED_SCROLL_MAX_DURATION_SEC` (~10 minutes) at a slower, randomized
     pace, stopping early if the feed plateaus (`_FEED_SCROLL_PLATEAU_LIMIT`
     consecutive scrolls with no new posts). Same AntiBotDetected contract as
-    scout_keyword.
+    scout_keyword. `permalink_sink` (optional) is passed straight through to
+    `_open_scroll_extract` — see its docstring.
     """
     return _open_scroll_extract(
         FEED_URL,
@@ -444,11 +589,20 @@ def scout_feed(
         scroll_wait_range=_FEED_SCROLL_WAIT_RANGE_SEC,
         max_duration_sec=_FEED_SCROLL_MAX_DURATION_SEC,
         plateau_limit=_FEED_SCROLL_PLATEAU_LIMIT,
+        permalink_sink=permalink_sink,
     )
 
 
-def _filter_candidates(raw_text: str, label: str) -> list[ScoutCandidate]:
-    """Parse raw page text into posts and keep only ones passing M1's gate."""
+def _filter_candidates(
+    raw_text: str, label: str, menu_permalinks: dict[str, str] | None = None
+) -> list[ScoutCandidate]:
+    """Parse raw page text into posts and keep only ones passing M1's gate.
+
+    `menu_permalinks` (optional), keyed by `seen_store.dedup_key(author,
+    body)`, backfills a permalink for posts whose DOM had no `LI_PERMALINK::`
+    marker (see `_fetch_menu_permalinks`) — the marker-based one always wins
+    when both are present, since it required no extra clicks to get.
+    """
     posts: list[ParsedPost] = parse_posts(raw_text)
     scouted_at = datetime.now(timezone.utc).isoformat()
     candidates: list[ScoutCandidate] = []
@@ -457,12 +611,16 @@ def _filter_candidates(raw_text: str, label: str) -> list[ScoutCandidate]:
             continue
         if check_location(post.body) is LocationVerdict.REJECT:
             continue
+        permalink = post.permalink
+        if not permalink and menu_permalinks:
+            permalink = menu_permalinks.get(dedup_key(post.author, post.body))
         candidates.append(
             ScoutCandidate(
                 keyword=label,
                 author=post.author,
                 body=post.body,
                 scouted_at=scouted_at,
+                permalink=permalink,
             )
         )
     logger.info(
@@ -482,7 +640,12 @@ def _run_with_breaker(
 ) -> list[ScoutCandidate]:
     """Shared circuit-breaker wiring for both the keyword-search and feed
     scout entry points: no-op while tripped, trip + alert exactly once on
-    AntiBotDetected, otherwise filter the raw text through M1."""
+    AntiBotDetected, otherwise filter the raw text through M1.
+
+    `scout_call` takes a single `permalink_sink: dict[str, str]` argument
+    (populated in-place by `_open_scroll_extract` for M1 candidates — see its
+    docstring) and returns the raw page text.
+    """
     if state.is_tripped():
         logger.warning(
             "[linkedin_scout] circuit breaker is tripped (%s) — no-op until --reset",
@@ -490,8 +653,9 @@ def _run_with_breaker(
         )
         return []
 
+    menu_permalinks: dict[str, str] = {}
     try:
-        raw_text = scout_call()
+        raw_text = scout_call(menu_permalinks)
     except AntiBotDetected as e:
         first_trip = state.trip(str(e))
         logger.error("[linkedin_scout] circuit breaker tripped: %s", e)
@@ -499,7 +663,7 @@ def _run_with_breaker(
             _send_circuit_breaker_alert(str(e))
         return []
 
-    return _filter_candidates(raw_text, label)
+    return _filter_candidates(raw_text, label, menu_permalinks)
 
 
 def run_once(
@@ -545,11 +709,12 @@ def run_once(
 
         candidates = _run_with_breaker(
             label=keyword,
-            scout_call=lambda kw=keyword: scout_keyword(
+            scout_call=lambda sink, kw=keyword: scout_keyword(
                 kw,
                 profile_dir=profile_dir,
                 storage_state_path=storage_state_path,
                 headless=headless,
+                permalink_sink=sink,
             ),
             state=state,
         )
@@ -584,10 +749,11 @@ def run_feed_once(
     """
     return _run_with_breaker(
         label="feed",
-        scout_call=lambda: scout_feed(
+        scout_call=lambda sink: scout_feed(
             profile_dir=profile_dir,
             storage_state_path=storage_state_path,
             headless=headless,
+            permalink_sink=sink,
         ),
         state=state,
     )

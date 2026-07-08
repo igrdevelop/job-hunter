@@ -26,6 +26,8 @@ def format_message(candidate: ScoutCandidate) -> str:
     lines = [f"🔎 LinkedIn scout match — keyword: {candidate.keyword}", f"👤 {candidate.author}"]
     if candidate.author_profile_url:
         lines.append(candidate.author_profile_url)
+    if candidate.permalink:
+        lines.append(candidate.permalink)
 
     body = candidate.body.strip()
     snippet = body[:_SNIPPET_CHARS]

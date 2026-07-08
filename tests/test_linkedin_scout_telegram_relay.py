@@ -52,6 +52,20 @@ def test_build_payload_is_url_safe_base64_ascii():
     payload.encode("ascii")
 
 
+def test_build_payload_includes_permalink_when_present():
+    candidate = _candidate(permalink="https://www.linkedin.com/feed/update/urn:li:share:1/")
+    payload = build_payload(candidate)
+    decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
+    assert decoded["permalink"] == "https://www.linkedin.com/feed/update/urn:li:share:1/"
+
+
+def test_build_payload_permalink_none_when_absent():
+    candidate = _candidate()
+    payload = build_payload(candidate)
+    decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
+    assert decoded["permalink"] is None
+
+
 # --- send_candidates ------------------------------------------------------
 
 

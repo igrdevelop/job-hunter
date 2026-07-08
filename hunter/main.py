@@ -406,12 +406,15 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
     ok, failed, manual_n, consecutive_fails = 0, 0, 0, 0
 
     for i, job in enumerate(jobs, 1):
-        await send_text(
-            context,
+        text = (
             f"⏳ [{i}/{total}] <b>{job.company}</b> — {job.title}\n"
             f"📍 {job.location}\n"
-            f"🔗 {job.url}",
+            f"🔗 {job.url}"
         )
+        permalink = job.raw.get("permalink")
+        if permalink:
+            text += f"\n🔗 Post: {permalink}"
+        await send_text(context, text)
 
         outcome = await _run_apply_agent(job)
 
