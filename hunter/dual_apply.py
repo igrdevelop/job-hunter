@@ -147,6 +147,7 @@ def _generate_shadow(
         _dedup_skill_glosses,
         _strip_compliance_claims,
         _strip_prestige_claims,
+        build_ats_keyword_checklist,
         validate_content,
     )
     from hunter.llm_profiles import get_active
@@ -166,6 +167,7 @@ def _generate_shadow(
     base_cv = _load_base_cv(stack_hint)
 
     user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+    user_message += build_ats_keyword_checklist(job_text)
     if base_cv:
         user_message += (
             f"\n\n---\n\n## Base CV — {stack_hint} Track "

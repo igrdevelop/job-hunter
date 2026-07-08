@@ -16,8 +16,10 @@ from hunter.apply_shared import (
     _count_metrics,
     _count_words,
     _cta_banlist_hits,
+    _filter_self_description_keywords,
     _last_paragraph_text,
     _sanitize_folder_company,
+    build_ats_keyword_checklist,
     compute_output_folder,
     validate_content,
 )
@@ -480,3 +482,54 @@ def test_apply_agent_reexports_constants() -> None:
     import apply_agent
     assert apply_agent.APPLY_MANUAL_EXIT_CODE == 44
     assert apply_agent.PASTE_NO_URL_PLACEHOLDER == PASTE_NO_URL_PLACEHOLDER
+
+
+# ── build_ats_keyword_checklist (docs/LLM_COST_REDUCTION_PLAN.md M3) ──────────
+
+def test_build_ats_keyword_checklist_contains_keywords() -> None:
+    job_text = "We need a Senior Angular developer with strong TypeScript, RxJS and Docker skills."
+    block = build_ats_keyword_checklist(job_text)
+    assert "ATS keyword checklist" in block
+    assert "Angular" in block
+    assert "TypeScript" in block
+    assert "Docker" in block
+
+
+def test_build_ats_keyword_checklist_empty_when_no_keywords() -> None:
+    assert build_ats_keyword_checklist("Nothing technical here, just words.") == ""
+
+
+def test_build_ats_keyword_checklist_applies_self_description_filter() -> None:
+    # DORA/RODO/GDPR etc are employer credentials, not candidate skills —
+    # extract_job_keywords would surface "GDPR" but the checklist must not.
+    job_text = "We operate under GDPR and DORA compliance, using Angular and TypeScript daily."
+    block = build_ats_keyword_checklist(job_text)
+    assert "Angular" in block
+    assert "GDPR" not in block
+    assert "DORA" not in block
+
+
+def test_build_ats_keyword_checklist_caps_at_30() -> None:
+    from hunter import apply_shared
+
+    monkey_keywords = [f"Tech{i}" for i in range(50)]
+    orig_extract = apply_shared._filter_self_description_keywords
+    try:
+        apply_shared._filter_self_description_keywords = lambda kws: monkey_keywords
+        block = build_ats_keyword_checklist("irrelevant, extraction is monkeypatched")
+    finally:
+        apply_shared._filter_self_description_keywords = orig_extract
+    assert block.count("\n- ") == 30
+
+
+def test_build_ats_keyword_checklist_matches_extract_job_keywords() -> None:
+    """Regression guard on the ats_checker refactor: extract_job_keywords()
+    (public) must return the exact same list check() itself uses."""
+    from hunter.ats_checker import extract_job_keywords
+
+    job_text = "Angular, TypeScript, RxJS, Docker, AWS required. Nice to have: GraphQL."
+    keywords = extract_job_keywords(job_text)
+    filtered = _filter_self_description_keywords(keywords)
+    block = build_ats_keyword_checklist(job_text)
+    for kw in filtered[:30]:
+        assert kw in block

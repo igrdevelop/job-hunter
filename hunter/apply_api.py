@@ -29,6 +29,7 @@ from hunter.apply_shared import (
     _already_processed,
     _ats_check_loop,
     _handle_jobleads_fetch_blocked,
+    build_ats_keyword_checklist,
     is_transient_fetch_error,
     compute_output_folder,
     is_backend_only_job_text,
@@ -323,6 +324,7 @@ def _run_main_api(
             else "(none — text pasted directly by user)"
         )
         user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+        user_message += build_ats_keyword_checklist(job_text)
         if base_cv:
             user_message += f"\n\n---\n\n## Base CV — {stack_hint} Track (use as starting point for bullets)\n\n{base_cv}"
 

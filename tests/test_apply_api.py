@@ -283,3 +283,23 @@ def test_api_pipeline_sends_verdict_gap_report_line() -> None:
     src = _source_of("hunter.apply_api")
     assert "format_gap_report" in src
     assert "{gap_line}" in src
+
+
+# ── Deterministic ATS keyword checklist in the first generation prompt ──────
+# (docs/LLM_COST_REDUCTION_PLAN.md M3) — the checklist must be built from the
+# posting text and appended to user_message before the first call_llm().
+
+def test_api_pipeline_wires_ats_keyword_checklist_before_call_llm() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "build_ats_keyword_checklist" in src
+    checklist_pos = src.index("build_ats_keyword_checklist(job_text)")
+    call_pos = src.index("content = call_llm(")
+    assert checklist_pos < call_pos
+
+
+def test_dual_apply_shadow_wires_ats_keyword_checklist() -> None:
+    src = _source_of("hunter.dual_apply")
+    assert "build_ats_keyword_checklist" in src
+    checklist_pos = src.index("build_ats_keyword_checklist(job_text)")
+    call_pos = src.index("content = call_llm(")
+    assert checklist_pos < call_pos

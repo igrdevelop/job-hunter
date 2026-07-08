@@ -927,6 +927,43 @@ def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
     return [k for k in keywords if k.strip().lower() not in _ATS_KEYWORD_BLOCKLIST]
 
 
+# Cap on how many keywords go into the first-generation checklist (M3,
+# docs/LLM_COST_REDUCTION_PLAN.md) — keeps the prompt addition small even for
+# a keyword-dense posting.
+_ATS_CHECKLIST_CAP = 30
+
+
+def build_ats_keyword_checklist(job_text: str) -> str:
+    """Deterministic (regex-only, $0.00) keyword checklist for the FIRST
+    generation prompt.
+
+    The ATS keyword loop (_ats_check_loop) already extracts these same
+    keywords and rewrites the resume until they're covered — but only AFTER
+    a first draft that didn't see them misses them, burning 1-2 avoidable
+    rewrite rounds. Handing the same deterministic list to the first call
+    lets it get there in one shot most of the time; the rewrite loop remains
+    the safety net, unchanged.
+
+    Returns "" when no actionable keyword survives (posting has none, or
+    every hit is an employer-credential term filtered by
+    _filter_self_description_keywords) — callers should skip the block
+    entirely rather than inject an empty checklist.
+    """
+    from hunter.ats_checker import extract_job_keywords
+
+    keywords = _filter_self_description_keywords(extract_job_keywords(job_text))
+    if not keywords:
+        return ""
+    keywords = keywords[:_ATS_CHECKLIST_CAP]
+    bullet_list = "\n".join(f"- {k}" for k in keywords)
+    return (
+        "\n\n## ATS keyword checklist (deterministic scan of this posting)\n"
+        "Make sure EACH of these terms appears naturally in resume_en (skills "
+        "and/or experience bullets). Do not fabricate experience — place "
+        f"honestly:\n{bullet_list}"
+    )
+
+
 # Word-boundary matcher for regulatory/compliance terms that an employer lists as
 # its own credentials. Used to scrub fabricated claims the LLM may still write into
 # the summary / skills / about-me despite the generation_rules.md RED LINE.
