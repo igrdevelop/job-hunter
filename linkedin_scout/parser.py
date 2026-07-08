@@ -12,14 +12,19 @@ per docs/LINKEDIN_POSTS_SOURCE_PLAN.md §4.6 round 2 live-probe finding:
 
 Real post permalinks (owner discovery 2026-07-08, re-verified live against a
 current session — an earlier probe had found none reachable, which is no
-longer accurate): SOME posts (not all — appears tied to how LinkedIn renders
-that particular post, e.g. shares) wrap their body text in a real, working
-`<a href="https://www.linkedin.com/feed/update/urn:li:share:...">` — no extra
-click needed, it's already in the DOM. `browser._EXTRACT_JS` emits a
-`LI_PERMALINK::<url>` marker line right where that anchor sits in the
-document-order text stream; this parser extracts it into `ParsedPost.
-permalink` (best-effort, `None` when the post has no such link) and strips
-the marker line out of the body text.
+longer accurate): share-type posts wrap their body text in a real, working
+`<a href="https://www.linkedin.com/feed/update/urn:li:share:...">`; every
+post also has its own timestamp link ("2h"/"1d" under the author name — the
+element a real right-click > Copy link address would target) using LinkedIn's
+newer vanity URL (`linkedin.com/posts/<slug>-activity-<id>`) instead — no
+extra click needed either way, both are already in the DOM.
+`browser._EXTRACT_JS` emits a `LI_PERMALINK::<url>` marker line right where
+either anchor sits in the document-order text stream; this parser extracts it
+into `ParsedPost.permalink` (best-effort, `None` when the post has no such
+link) and strips the marker line out of the body text. The timestamp-link
+marker lands in the header-noise region (between the author line and
+Follow/Connect) rather than in the body, so it must be pulled out BEFORE the
+header strip below runs, not after — see the ordering in `parse_posts()`.
 """
 
 from __future__ import annotations
@@ -80,29 +85,34 @@ def parse_posts(inner_text: str) -> list[ParsedPost]:
             continue
         author, author_idx = author_match
 
-        # Look for the Follow/Connect header-end line within a short window
-        # after the author line; drop everything up to and including it.
-        header_scan_end = min(author_idx + 1 + _MAX_HEADER_LINES, block_end)
-        body_start = author_idx + 1
-        for i in range(author_idx + 1, header_scan_end):
-            if lines[i].strip().lower() in _HEADER_END_MARKERS:
-                body_start = i + 1
-                break
-
-        body_lines = [ln for ln in lines[body_start:block_end]]
-
-        # Pull out any LI_PERMALINK:: marker line(s) — first one wins, and the
-        # marker itself is never part of the actual post text.
+        # Pull out any LI_PERMALINK:: marker line(s) BEFORE the header-noise
+        # strip below — the marker for a post's own timestamp link ("2h"/"1d",
+        # the newer vanity-URL source) sits in the header region, between the
+        # author line and Follow/Connect, which the header-strip discards
+        # wholesale. Extracting it first (and closing the resulting gap so
+        # line indices stay contiguous for the Follow/Connect scan) keeps a
+        # timestamp-only permalink from being thrown away with the noise
+        # around it. First marker found wins; it's never part of the post text.
         permalink: str | None = None
-        filtered_body_lines: list[str] = []
-        for ln in body_lines:
+        block_lines: list[str] = []
+        for ln in lines[author_idx + 1 : block_end]:
             stripped = ln.strip()
             if stripped.startswith(_PERMALINK_MARKER_PREFIX):
                 if permalink is None:
-                    permalink = stripped[len(_PERMALINK_MARKER_PREFIX):].strip()
+                    permalink = stripped[len(_PERMALINK_MARKER_PREFIX) :].strip()
                 continue
-            filtered_body_lines.append(ln)
-        body_lines = filtered_body_lines
+            block_lines.append(ln)
+
+        # Look for the Follow/Connect header-end line within a short window
+        # after the author line; drop everything up to and including it.
+        header_scan_end = min(_MAX_HEADER_LINES, len(block_lines))
+        body_start = 0
+        for i in range(header_scan_end):
+            if block_lines[i].strip().lower() in _HEADER_END_MARKERS:
+                body_start = i + 1
+                break
+
+        body_lines = block_lines[body_start:]
 
         # Trim leading/trailing blank lines but keep internal structure.
         while body_lines and not body_lines[0].strip():

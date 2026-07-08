@@ -121,6 +121,36 @@ US_STAFFING_RES: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# --- India-staffing/recruiter-spam negatives (owner finding 2026-07-08: real
+# scout output relayed 3 India-market recruiter blasts — Hyderabad/Chennai/
+# "Remote India Only" — untouched by every other gate. This scout targets the
+# Poland/EU market; the anti-hybrid city list `_is_unwanted_onsite_location`
+# reuses only covers Western-commute-to-Wrocław cities, so Indian cities were
+# never in it, and `US_STAFFING_RES` only recognizes US-specific markers
+# (W2/C2C/H1B/state codes) — India has its own staffing-agency vocabulary that
+# slips past both. Also, `check_location`'s explicit-remote-anywhere -> KEEP
+# rule would let a "Remote (India Only)" post through location regardless, so
+# this must be a hard `is_hiring_post` disqualifier, not a location-gate tweak.)
+_INDIA_CITIES = (
+    "hyderabad", "chennai", "bangalore", "bengaluru", "pune", "mumbai",
+    "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "kochi", "jaipur",
+)
+
+INDIA_STAFFING_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bctc\b",
+        r"\blpa\b",
+        r"\bnotice\s+period\b",
+        r"₹",
+        r"\binr\b",
+        r"\bclient\s*id\s*:",
+        r"\bjob\s*id\s*:",
+        r"\bindia\s+only\b",
+        r"\b(?:" + "|".join(_INDIA_CITIES) + r")\b",
+    )
+)
+
 
 def is_hiring_post(text: str) -> bool:
     """True → the post reads like a genuine Angular hiring post worth a card.
@@ -140,6 +170,8 @@ def is_hiring_post(text: str) -> bool:
     if any(p.search(text) for p in SPAM_RES):
         return False
     if any(p.search(text) for p in US_STAFFING_RES):
+        return False
+    if any(p.search(text) for p in INDIA_STAFFING_RES):
         return False
     return any(p.search(text) for p in HIRING_SIGNAL_RES)
 

@@ -20,6 +20,7 @@ def _candidate(**overrides) -> ScoutCandidate:
         author="Deloitte Poland",
         body="We're hiring an Angular Developer. Fully remote.",
         scouted_at="2026-07-08T12:00:00+00:00",
+        permalink="https://www.linkedin.com/feed/update/urn:li:share:1/",
     )
     defaults.update(overrides)
     return ScoutCandidate(**defaults)
@@ -60,7 +61,7 @@ def test_build_payload_includes_permalink_when_present():
 
 
 def test_build_payload_permalink_none_when_absent():
-    candidate = _candidate()
+    candidate = _candidate(permalink=None)
     payload = build_payload(candidate)
     decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
     assert decoded["permalink"] is None
@@ -159,3 +160,29 @@ def test_send_candidates_skips_already_seen(tmp_path, monkeypatch):
 
     assert sent == 0
     assert _FakeTelethonClient.sent_messages == []
+
+
+def test_send_candidates_skips_candidate_without_permalink(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_API_ID", "123")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "abc")
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "@mybot")
+    session_path = tmp_path / "session"
+    (tmp_path / "session.session").write_text("", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_USER_SESSION", str(session_path))
+
+    _FakeTelethonClient.sent_messages = []
+    import telethon.sync as telethon_sync_module
+
+    monkeypatch.setattr(telethon_sync_module, "TelegramClient", _FakeTelethonClient)
+
+    seen_store = SeenStore(tmp_path / "seen.json")
+    candidate = _candidate(permalink=None)
+
+    sent = send_candidates([candidate], seen_store)
+
+    assert sent == 0
+    assert _FakeTelethonClient.sent_messages == []
+    # not marked seen — a future run (better DOM luck / fixed selectors)
+    # must get another shot at this same post
+    key = dedup_key(candidate.author, candidate.body)
+    assert seen_store.is_seen(key) is False

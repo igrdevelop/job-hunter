@@ -61,7 +61,15 @@ def build_payload(candidate: ScoutCandidate) -> str:
 
 
 def send_candidates(candidates: list[ScoutCandidate], seen_store: SeenStore) -> int:
-    """Send one `/scoutfound` command per not-yet-seen candidate.
+    """Send one `/scoutfound` command per not-yet-seen candidate that has a
+    captured permalink.
+
+    Owner decision (2026-07-08): only candidates with a real, clickable
+    LinkedIn post link (DOM marker or menu-click capture — see browser.py)
+    are relayed to the bot; a candidate that passed the M1 heuristic gate but
+    got no permalink is held back. It is deliberately NOT marked seen, so a
+    later run (better DOM luck, or a selector fix) gets another shot at the
+    same post instead of losing it silently.
 
     Dedup check happens BEFORE sending (same contract as the old queue-file
     design) so the same post is never relayed twice across scout runs.
@@ -91,6 +99,11 @@ def send_candidates(candidates: list[ScoutCandidate], seen_store: SeenStore) -> 
 
     to_send = []
     for candidate in candidates:
+        if not candidate.permalink:
+            logger.info(
+                "[linkedin_scout] skip (no permalink captured): %s", candidate.author
+            )
+            continue
         key = dedup_key(candidate.author, candidate.body)
         if seen_store.is_seen(key):
             logger.info("[linkedin_scout] skip (already seen): %s", candidate.author)
