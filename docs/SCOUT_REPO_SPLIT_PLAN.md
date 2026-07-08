@@ -1,6 +1,6 @@
 # Plan: Move `linkedin_scout/` to Its Own Private Repository
 
-**Status:** PROPOSED (owner decision 2026-07-08 pending execution)
+**Status:** Phase 0 DONE (2026-07-08, branch refactor/scout-decouple-phase0) — Phases 1-4 pending.
 **Owner action required:** create the private GitHub repo, desktop cutover (Phase 2).
 
 ---
@@ -135,13 +135,16 @@ drift silently. Mitigation, done in Phase 0 while still atomic:
 
 ## 6. Migration phases
 
-### Phase 0 — decouple in place (this repo, 1 PR)
-- [ ] `linkedin_scout/config.py` (env-based) — rewire `notify.py`, `browser.py`.
-- [ ] `linkedin_scout/location_gate.py` (vendored) — rewire `heuristics.py`,
+### Phase 0 — decouple in place (this repo, 1 PR) ✅ DONE (2026-07-08, PR TBD)
+- [x] `linkedin_scout/config.py` (env-based) — rewire `notify.py`, `browser.py`.
+- [x] `linkedin_scout/location_gate.py` (vendored) — rewire `heuristics.py`,
       drop `hunter.filters` / `hunter.models` imports; port the relevant
-      `test_linkedin_scout.py` location cases to the vendored gate.
-- [ ] Payload `v:1` + tolerant decoder + golden fixture + 2 contract tests (§5).
-- [ ] `grep -r "from hunter" linkedin_scout/` empty; `pytest`, `ruff`, `compileall`.
+      `test_linkedin_scout.py` location cases to the vendored gate. (In
+      practice no test edits were needed — the existing cases exercise
+      `check_location()`'s public API, which is unchanged.)
+- [x] Payload `v:1` + tolerant decoder + golden fixture + 2 contract tests (§5).
+- [x] `grep -r "from hunter" linkedin_scout/` empty (real imports); `pytest`,
+      `ruff`, `compileall` all green.
 
 ### Phase 1 — create the private repo
 - [ ] Owner creates **private** `igrdevelop/linkedin-scout`.

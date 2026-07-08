@@ -34,6 +34,13 @@ logger = logging.getLogger("linkedin_scout.telegram_relay")
 # pushes the encoded payload over the limit.
 _MAX_BODY_CHARS = 3000
 
+# Payload schema version (docs/SCOUT_REPO_SPLIT_PLAN.md §5). Bump on any field
+# change and update BOTH this repo's payload builder and the bot-side decoder
+# (hunter/commands/scoutfound.py) + tests/fixtures/scout_payload_v1.json in
+# lockstep — after the repo split this contract spans two git histories, so
+# nothing else catches drift.
+PAYLOAD_VERSION = 1
+
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
@@ -49,6 +56,7 @@ def build_payload(candidate: ScoutCandidate) -> str:
             _MAX_BODY_CHARS,
         )
     record = {
+        "v": PAYLOAD_VERSION,
         "keyword": candidate.keyword,
         "author": candidate.author,
         "body": body,

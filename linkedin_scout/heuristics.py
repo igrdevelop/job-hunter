@@ -6,8 +6,11 @@ docs/LINKEDIN_POSTS_SCOUT_TASK.md). Ported from docs/LINKEDIN_POSTS_SOURCE_PLAN.
 §4.2 (branch feat/linkedin-posts-source) plus the live-probe negatives from that
 plan's §4.6 round 2 (US-staffing noise, Angular-prominence gate, szukam/szukamy).
 
-The location gate reuses hunter.filters._is_unwanted_onsite_location (the
-anti-hybrid city list + regexes) instead of duplicating it, per the task spec.
+The location gate used to reuse hunter.filters._is_unwanted_onsite_location
+directly; Phase 0 of docs/SCOUT_REPO_SPLIT_PLAN.md vendored a simplified,
+plain-text copy into linkedin_scout/location_gate.py so this package no
+longer imports from hunter (see that module's docstring for the rationale
+and what was/wasn't ported).
 """
 
 from __future__ import annotations
@@ -15,8 +18,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-from hunter.filters import _is_unwanted_onsite_location
-from hunter.models import Job
+from linkedin_scout.location_gate import is_unwanted_onsite_location
 
 # --- Stack keyword -----------------------------------------------------------
 
@@ -206,8 +208,8 @@ def check_location(text: str) -> LocationVerdict:
     """Three-way location gate, applied to the raw post text.
 
     1. Explicit remote/Wrocław mention anywhere in the post -> KEEP.
-    2. Explicit on-site/hybrid signal tied to a non-Wrocław city (reusing
-       hunter.filters._is_unwanted_onsite_location, not reimplemented) -> REJECT.
+    2. Explicit on-site/hybrid signal tied to a non-Wrocław city (vendored
+       plain-text copy, linkedin_scout/location_gate.py) -> REJECT.
     3. No location info at all -> KEEP (the human decides at the Telegram card —
        this is the normal case for recruiter posts).
     """
@@ -215,15 +217,6 @@ def check_location(text: str) -> LocationVerdict:
         return LocationVerdict.KEEP
     if _WROCLAW_RE.search(text) or any(p.search(text) for p in _REMOTE_RES):
         return LocationVerdict.KEEP
-    job = Job(
-        title="",
-        company="",
-        location="",
-        salary=None,
-        url="",
-        source="linkedin_posts",
-        raw={"description": text},
-    )
-    if _is_unwanted_onsite_location(job):
+    if is_unwanted_onsite_location(text):
         return LocationVerdict.REJECT
     return LocationVerdict.KEEP

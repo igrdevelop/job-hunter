@@ -3,7 +3,7 @@
 Direct `requests.post` to the Telegram Bot API — no python-telegram-bot
 `Application`, no polling, so this script can send even if the bot process
 isn't running. Reuses `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` from
-`hunter.config` (same `.env`), same minimal pattern as
+`linkedin_scout.config` (same `.env`), same minimal pattern as
 `browser._send_circuit_breaker_alert` and `hunter/oauth_alert.py`.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from linkedin_scout.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from linkedin_scout.browser import ScoutCandidate
 from linkedin_scout.seen_store import SeenStore, dedup_key
 

@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 
 import linkedin_scout.telegram_relay as telegram_relay
 from linkedin_scout.browser import ScoutCandidate
 from linkedin_scout.seen_store import SeenStore, dedup_key
 from linkedin_scout.telegram_relay import build_payload, send_candidates
+
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "scout_payload_v1.json"
 
 
 def _candidate(**overrides) -> ScoutCandidate:
@@ -58,6 +61,36 @@ def test_build_payload_includes_permalink_when_present():
     payload = build_payload(candidate)
     decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
     assert decoded["permalink"] == "https://www.linkedin.com/feed/update/urn:li:share:1/"
+
+
+def test_build_payload_includes_version():
+    payload = build_payload(_candidate())
+    decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
+    assert decoded["v"] == telegram_relay.PAYLOAD_VERSION == 1
+
+
+# --- Payload contract v1 (docs/SCOUT_REPO_SPLIT_PLAN.md §5) ---------------
+#
+# tests/fixtures/scout_payload_v1.json is the golden fixture shared
+# (byte-identical) between this repo's test suite and the bot-side decoder
+# test in tests/test_scoutfound_command.py — after the scout's planned move
+# to its own private repo, this is the only thing that still proves the two
+# sides agree on the schema.
+
+
+def test_build_payload_matches_golden_fixture_v1():
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    candidate = ScoutCandidate(
+        keyword=fixture["keyword"],
+        author=fixture["author"],
+        body=fixture["body"],
+        scouted_at=fixture["scouted_at"],
+        author_profile_url=fixture["author_profile_url"],
+        permalink=fixture["permalink"],
+    )
+    payload = build_payload(candidate)
+    decoded = json.loads(base64.b64decode(payload).decode("utf-8"))
+    assert decoded == fixture
 
 
 def test_build_payload_permalink_none_when_absent():

@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from hunter.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from linkedin_scout.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from linkedin_scout.heuristics import LocationVerdict, check_location, is_hiring_post
 from linkedin_scout.parser import ParsedPost, parse_posts
 from linkedin_scout.seen_store import dedup_key
