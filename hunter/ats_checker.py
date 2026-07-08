@@ -67,8 +67,15 @@ _REQUIRED_SECTION_RE = re.compile(
 )
 
 
-def _extract_keywords(job_text: str) -> list[str]:
-    """Extract deduplicated tech + soft keywords from job posting."""
+def extract_job_keywords(job_text: str) -> list[str]:
+    """Extract deduplicated tech + soft keywords from job posting, highest
+    priority (found in a requirements/must-have section) first.
+
+    Public so callers besides `check()` (e.g. the deterministic keyword
+    checklist injected into the first generation prompt — see
+    docs/LLM_COST_REDUCTION_PLAN.md M3) can reuse the exact same extraction
+    the ATS scorer itself uses, without duplicating the regex.
+    """
     # Boost keywords found in required/must-have sections
     priority_text = ""
     for m in _REQUIRED_SECTION_RE.finditer(job_text):
@@ -326,7 +333,7 @@ def check(
     Weights (with LLM):   keyword 60% + LLM 30% + TF-IDF 10%
     Weights (no LLM):     keyword 75%            + TF-IDF 25%
     """
-    keywords = _extract_keywords(job_text)
+    keywords = extract_job_keywords(job_text)
     kw_raw, matched, missing = _keyword_match_score(keywords, resume_text)
     keyword_score = kw_raw * 100.0
 

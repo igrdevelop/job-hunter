@@ -478,6 +478,162 @@ def test_round2_not_run_when_round1_reaches_target(tmp_path, monkeypatch):
     assert out_verdict["score"] == 97
 
 
+# ── refine_loop: M1 escalate-after-rollback (docs/LLM_COST_REDUCTION_PLAN.md) ──
+
+def test_round1_rollback_escalates_round2_to_stretch(tmp_path, monkeypatch):
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    calls = []
+
+    def _fake_llm(system_prompt, user_message, **k):
+        calls.append(user_message)
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+    # Round 1 rolls back (75 < 80); round 2 (escalated stretch) accepted (90 > 80).
+    verdict_sequence = iter([_v(75), _v(90)])
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+    )
+
+    assert len(calls) == 2
+    assert "STRETCH ESCALATION" not in calls[0]
+    assert "STRETCH ESCALATION" in calls[1]
+    assert out_verdict["score"] == 90
+
+
+def test_round2_accepted_resets_escalation_round3_stays_honest(tmp_path, monkeypatch):
+    """A round that ends in acceptance resets the flag: round 3 is naturally
+    stretch anyway (STRETCH_FROM_ROUND=3), but a round accepted mid-way must
+    not force an unrelated later honest round to escalate."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    calls = []
+
+    def _fake_llm(system_prompt, user_message, **k):
+        calls.append(user_message)
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+    # Round 1 rolls back, round 2 (escalated stretch) accepted, round 3 never
+    # runs because target is reached.
+    verdict_sequence = iter([_v(75), _v(97)])
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=3,
+    )
+    assert len(calls) == 2  # round 3 never ran — already at target
+    assert out_verdict["score"] == 97
+
+
+def test_honest_rollback_then_stretch_rollback_stops_loop(tmp_path, monkeypatch):
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    calls = []
+
+    def _fake_llm(system_prompt, user_message, **k):
+        calls.append(user_message)
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+    # Both rounds roll back (score never improves): 75, then 78 (still < 80).
+    verdict_sequence = iter([_v(75), _v(78)])
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=4,
+    )
+
+    # Round 1 (honest, rollback) + round 2 (escalated stretch, rollback) —
+    # then the loop stops; rounds 3-4 never run.
+    assert len(calls) == 2
+    assert "STRETCH ESCALATION" not in calls[0]
+    assert "STRETCH ESCALATION" in calls[1]
+    assert out_content is content
+    assert out_verdict is verdict
+
+
+def test_max_rounds_one_unaffected_by_escalation_logic(tmp_path, monkeypatch):
+    """max_rounds=1 behaviour is byte-for-byte unchanged: a single honest
+    round runs regardless of the (nonexistent) prior-round outcome."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    calls = []
+
+    def _fake_llm(system_prompt, user_message, **k):
+        calls.append(user_message)
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(75))
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+    )
+    assert len(calls) == 1
+    assert "STRETCH ESCALATION" not in calls[0]
+    assert out_content is content
+    assert out_verdict is verdict
+
+
+def test_escalated_stretch_round_merges_to_learn(tmp_path, monkeypatch):
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    def _fake_llm(system_prompt, user_message, **k):
+        if "STRETCH ESCALATION" in user_message:
+            return {"resume_en": _resume(), "stretch_additions": ["Vitest"]}
+        return {"resume_en": _resume()}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
+    verdict_sequence = iter([_v(75), _v(90)])
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content(to_learn="")
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content, "job", "", tmp_path, verdict,
+        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+    )
+    assert out_content["to_learn"] == "Vitest"
+    assert out_verdict["score"] == 90
+
+
 # ── _merge_to_learn ────────────────────────────────────────────────────────────
 
 def test_merge_to_learn_dedupes_and_preserves_existing():
