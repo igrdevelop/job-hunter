@@ -27,14 +27,25 @@ findings — only genuine `/force` does, see hunter/apply_shared.py::
 run_doomed_gate's `is_force_override`), so a bad heuristic match still gets
 caught downstream, just not by a human looking at a card first.
 
-There is no real fetchable URL for a LinkedIn feed post (verified in the
-scout's own design docs — no permalinks are reachable without extra clicking,
-which was rejected as added bot surface). So `fetch_text()` always raises;
+There is no real fetchable URL for a LinkedIn feed post used for dedup/routing
+— `job.url` stays the synthetic `URL_PREFIX` key on purpose (a real
+linkedin.com URL here would collide with `LinkedInSource.matches_url`, which
+claims any URL containing "linkedin.com" regardless of path and is registered
+before this source in `_fetch_roster()`). So `fetch_text()` always raises;
 apply for these jobs routes through the paste flow instead — both the
 AUTO_APPLY path (`hunter.services.apply_service.run_apply_agent_subprocess`)
 and the manual Telegram-card path (`hunter/commands/url_message.py::
 _handle_apply`, kept for when AUTO_APPLY is off) detect `job.raw["post_text"]`
 and use it instead of fetching `job.url`.
+
+Some posts DO expose a real, clickable permalink in their DOM (owner discovery
+2026-07-08, live-verified — an earlier probe had found none reachable, which
+turned out to be wrong for at least LinkedIn "share"-type posts). When the
+scout's browser.py captures one, it's carried through as `job.raw["permalink"]`
+(best-effort, `None` when absent) purely for the owner's convenience — it is
+NOT used for dedup/fetch/routing, only surfaced in the pre-apply Telegram
+notification (see `hunter/main.py::_auto_apply_all`) so the owner can follow
+the actual post if they want to.
 """
 
 from __future__ import annotations
@@ -137,6 +148,7 @@ class LinkedInScoutRelaySource(BaseSource):
                 "keyword": rec.get("keyword", ""),
                 "author_profile_url": rec.get("author_profile_url"),
                 "scouted_at": rec.get("scouted_at", ""),
+                "permalink": rec.get("permalink"),
             },
         )
 

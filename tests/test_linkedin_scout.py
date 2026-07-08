@@ -202,6 +202,38 @@ def test_parse_posts_skips_marker_with_no_author():
     assert posts[0].author == "Real Author"
 
 
+def test_parse_posts_extracts_permalink_marker_and_strips_it_from_body():
+    text = (
+        "Feed post\n\nJane Doe\nFollow\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:123/\n"
+        "We're hiring an Angular developer."
+    )
+    posts = parse_posts(text)
+    assert len(posts) == 1
+    assert posts[0].permalink == "https://www.linkedin.com/feed/update/urn:li:share:123/"
+    assert "LI_PERMALINK::" not in posts[0].body
+    assert posts[0].body == "We're hiring an Angular developer."
+
+
+def test_parse_posts_no_permalink_marker_leaves_permalink_none():
+    text = "Feed post\n\nJane Doe\nFollow\nWe're hiring an Angular developer."
+    posts = parse_posts(text)
+    assert posts[0].permalink is None
+
+
+def test_parse_posts_keeps_first_permalink_marker_when_multiple():
+    text = (
+        "Feed post\n\nJane Doe\nFollow\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:111/\n"
+        "Body line one.\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:222/\n"
+        "Body line two."
+    )
+    posts = parse_posts(text)
+    assert posts[0].permalink == "https://www.linkedin.com/feed/update/urn:li:share:111/"
+    assert posts[0].body == "Body line one.\nBody line two."
+
+
 # --- seen_store --------------------------------------------------------------
 
 

@@ -9,6 +9,17 @@ per docs/LINKEDIN_POSTS_SOURCE_PLAN.md §4.6 round 2 live-probe finding:
     "• Connect" button text) sits between the author line and the post body;
     drop everything up to and including the Follow/Connect line.
   - The body runs until the next "Feed post" marker (or end of text).
+
+Real post permalinks (owner discovery 2026-07-08, re-verified live against a
+current session — an earlier probe had found none reachable, which is no
+longer accurate): SOME posts (not all — appears tied to how LinkedIn renders
+that particular post, e.g. shares) wrap their body text in a real, working
+`<a href="https://www.linkedin.com/feed/update/urn:li:share:...">` — no extra
+click needed, it's already in the DOM. `browser._EXTRACT_JS` emits a
+`LI_PERMALINK::<url>` marker line right where that anchor sits in the
+document-order text stream; this parser extracts it into `ParsedPost.
+permalink` (best-effort, `None` when the post has no such link) and strips
+the marker line out of the body text.
 """
 
 from __future__ import annotations
@@ -21,11 +32,14 @@ _HEADER_END_MARKERS = ("follow", "connect")
 # of silently eating the whole body if no Follow/Connect line ever appears.
 _MAX_HEADER_LINES = 10
 
+_PERMALINK_MARKER_PREFIX = "LI_PERMALINK::"
+
 
 @dataclass
 class ParsedPost:
     author: str
     body: str
+    permalink: str | None = None
 
 
 def _split_lines(inner_text: str) -> list[str]:
@@ -76,6 +90,20 @@ def parse_posts(inner_text: str) -> list[ParsedPost]:
                 break
 
         body_lines = [ln for ln in lines[body_start:block_end]]
+
+        # Pull out any LI_PERMALINK:: marker line(s) — first one wins, and the
+        # marker itself is never part of the actual post text.
+        permalink: str | None = None
+        filtered_body_lines: list[str] = []
+        for ln in body_lines:
+            stripped = ln.strip()
+            if stripped.startswith(_PERMALINK_MARKER_PREFIX):
+                if permalink is None:
+                    permalink = stripped[len(_PERMALINK_MARKER_PREFIX):].strip()
+                continue
+            filtered_body_lines.append(ln)
+        body_lines = filtered_body_lines
+
         # Trim leading/trailing blank lines but keep internal structure.
         while body_lines and not body_lines[0].strip():
             body_lines.pop(0)
@@ -84,5 +112,5 @@ def parse_posts(inner_text: str) -> list[ParsedPost]:
         body = "\n".join(body_lines).strip()
         if not body:
             continue
-        posts.append(ParsedPost(author=author, body=body))
+        posts.append(ParsedPost(author=author, body=body, permalink=permalink))
     return posts

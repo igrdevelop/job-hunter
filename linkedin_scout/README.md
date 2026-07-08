@@ -19,7 +19,19 @@ already a full check pipeline other job-board postings go through, I want these 
 through it too"). A HARD doomed-gate finding still aborts generation for $0.00, same as
 any other source; it just doesn't require a human to look at a card first. Apply
 (whichever code path runs) uses the saved post text automatically via the paste flow —
-no manual re-paste needed, and no real LinkedIn permalink exists to fetch instead.
+no manual re-paste needed; `job.url` stays a synthetic dedup key (never a real
+LinkedIn URL, to avoid colliding with `LinkedInSource`'s host-based URL dispatch).
+
+**Post permalinks** (owner discovery 2026-07-08, live-verified — an earlier probe found
+none reachable, which turned out to be wrong): some posts (LinkedIn "share"-type, at
+least) wrap their body text in a real `<a href="https://www.linkedin.com/feed/update/
+urn:li:share:...">` already present in the DOM, no extra click needed. `browser.py`'s
+extraction JS captures it when present and threads it through as `permalink` on
+`ScoutCandidate` → the Telegram relay payload → `job.raw["permalink"]` on the bot side
+(best-effort, `None` for posts without one). It's convenience-only — never used for
+dedup/fetch/routing — and shows up as an extra line in the pre-apply Telegram
+notification (`hunter/main.py::_auto_apply_all`) so you can click through to the actual
+post if you want to.
 
 **Why a Telegram command instead of a shared file:** an earlier version of this wrote
 matches directly to a local JSON file the bot's source would read. That broke the

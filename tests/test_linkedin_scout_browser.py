@@ -263,6 +263,47 @@ def test_run_once_filters_through_m1_heuristic_and_location_gate(tmp_path, monke
     assert "We're hiring" in candidate.body
 
 
+def test_run_once_threads_permalink_through_to_candidate(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "state.json")
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\n3rd+\nTalent Acquisition\n2h\nFollow\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:999/\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+        "Like\nComment\nShare\n"
+    )
+    monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: raw_text)
+
+    result = run_once(
+        ["angular hiring"],
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        state=state,
+    )
+
+    assert len(result) == 1
+    assert result[0].permalink == "https://www.linkedin.com/feed/update/urn:li:share:999/"
+
+
+def test_run_once_no_permalink_marker_leaves_candidate_permalink_none(tmp_path, monkeypatch):
+    state = ScoutState(tmp_path / "state.json")
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\n3rd+\nTalent Acquisition\n2h\nFollow\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+        "Like\nComment\nShare\n"
+    )
+    monkeypatch.setattr(browser, "scout_keyword", lambda *a, **k: raw_text)
+
+    result = run_once(
+        ["angular hiring"],
+        profile_dir=tmp_path / "profile",
+        storage_state_path=None,
+        state=state,
+    )
+
+    assert len(result) == 1
+    assert result[0].permalink is None
+
+
 def test_run_once_searches_every_keyword_in_one_call(tmp_path, monkeypatch):
     """Owner decision (2026-07-08): one run_once() call now searches the
     ENTIRE keyword list, not one rotation-keyword per call. Order is

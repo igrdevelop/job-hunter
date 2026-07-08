@@ -69,6 +69,31 @@ def test_search_converts_records_to_jobs(relay):
     assert job.raw["post_text"].startswith("We're hiring")
     assert job.raw["keyword"] == "angular hiring"
     assert job.raw["author_profile_url"] == "https://www.linkedin.com/in/someone"
+    assert job.raw["permalink"] is None
+
+
+def test_search_carries_permalink_through_when_present(relay):
+    source, queue_path = relay
+    queue_path.write_text(
+        json.dumps(
+            [
+                {
+                    "keyword": "angular hiring",
+                    "author": "Deloitte Poland",
+                    "body": "We're hiring an Angular Developer. Fully remote.",
+                    "scouted_at": "2026-07-08T12:00:00+00:00",
+                    "permalink": "https://www.linkedin.com/feed/update/urn:li:share:42/",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    jobs = source.search()
+
+    assert jobs[0].raw["permalink"] == "https://www.linkedin.com/feed/update/urn:li:share:42/"
+    # the synthetic dedup URL must stay untouched by the real permalink
+    assert jobs[0].url.startswith(URL_PREFIX)
 
 
 def test_search_drains_queue_after_reading(relay):

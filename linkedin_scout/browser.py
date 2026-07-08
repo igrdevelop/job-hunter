@@ -207,6 +207,17 @@ def seed_profile_cookies(context, storage_state_path: Path | None) -> bool:
 # `.textContent` does not, and was the previous bug here). `ownText()` grabs a
 # shadow-hosting element's own direct text-node children before recursing, so
 # a light-DOM text node sitting next to a shadow-hosting sibling isn't lost.
+#
+# Post permalinks (owner discovery 2026-07-08, live-verified): SOME posts (not
+# all — appears tied to how LinkedIn renders that particular post, e.g.
+# shares) wrap their body text in a real `<a href="https://www.linkedin.com/
+# feed/update/urn:li:share:...">`. Before emitting a shadow-free subtree's own
+# text, `collect()` checks for such an anchor anywhere inside it and — if
+# found — emits a `LI_PERMALINK::<href>` marker line first, so it lands right
+# next to (before) the post body text in the document-order output stream.
+# parser.py's parse_posts() detects and strips that marker line per post
+# block, keeping the first one found (the post's own permalink, not some
+# unrelated link deeper in the same render pass).
 _EXTRACT_JS = """
 () => {
   function hasShadowDescendant(el) {
@@ -220,6 +231,13 @@ _EXTRACT_JS = """
       .map((n) => n.textContent.trim())
       .filter(Boolean)
       .join(' ');
+  }
+  function findPermalink(el) {
+    if (el.tagName === 'A' && el.href && el.href.indexOf('/feed/update/') !== -1) {
+      return el.href;
+    }
+    const anchors = el.querySelectorAll ? el.querySelectorAll('a[href*="/feed/update/"]') : [];
+    return anchors.length ? anchors[0].href : null;
   }
   function collect(root, out) {
     const children = root.children ? Array.from(root.children) : [];
@@ -235,7 +253,11 @@ _EXTRACT_JS = """
         collect(el, out);
       } else {
         const t = el.innerText !== undefined ? el.innerText : (el.textContent || '');
-        if (t && t.trim()) out.push(t.trim());
+        if (t && t.trim()) {
+          const link = findPermalink(el);
+          if (link) out.push('LI_PERMALINK::' + link);
+          out.push(t.trim());
+        }
       }
     });
   }
@@ -290,6 +312,10 @@ class ScoutCandidate:
     # live DOM turns out to expose it cheaply. notify.py already renders it
     # when present so no further change is needed there once it's populated.
     author_profile_url: str | None = None
+    # Real LinkedIn post permalink (https://www.linkedin.com/feed/update/urn:li:
+    # share:...), when the post's DOM exposed one (see _EXTRACT_JS docstring).
+    # Best-effort — None for posts that don't wrap their body in such an anchor.
+    permalink: str | None = None
 
 
 def _open_scroll_extract(
@@ -463,6 +489,7 @@ def _filter_candidates(raw_text: str, label: str) -> list[ScoutCandidate]:
                 author=post.author,
                 body=post.body,
                 scouted_at=scouted_at,
+                permalink=post.permalink,
             )
         )
     logger.info(
