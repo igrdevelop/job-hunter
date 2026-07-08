@@ -91,6 +91,38 @@ def test_us_staffing_w2_onsite_rejected():
     assert is_hiring_post(text) is False
 
 
+# --- India-staffing/recruiter-spam negatives (real relayed examples,
+# 2026-07-08 owner report — see linkedin_scout/heuristics.py comment) --------
+
+
+def test_india_hyderabad_fullstack_java_rejected():
+    text = (
+        "We're Hiring | Full Stack Java Developer (Spring Boot + Angular)\n"
+        "Location: Hyderabad\n"
+        "Experience: 8-10 Years\n"
+        "Notice Period: Immediate to 30 Days Preferred\n"
+        "Mandatory Skills: Core Java, Spring Boot, Angular 8+/13+"
+    )
+    assert is_hiring_post(text) is False
+
+
+def test_india_chennai_ctc_lpa_rejected():
+    text = (
+        "We're Hiring: Full Stack Software Engineer Angular/Python "
+        "Location: Chennai. Employment Type: Permanent. "
+        "CTC: Up to INR 15 to INR 27 LPA. Experience: 6+ Years."
+    )
+    assert is_hiring_post(text) is False
+
+
+def test_india_remote_only_rejected_despite_remote_keyword():
+    text = (
+        "We're Hiring: Angular Developer (Remote | Full-Time | India). "
+        "Location: Remote (India Only). Client ID: 742MVKP. Job ID: 518RDXN."
+    )
+    assert is_hiring_post(text) is False
+
+
 def test_bare_stack_dump_mention_without_prominence_rejected():
     filler = "x" * 250
     text = (
