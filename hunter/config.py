@@ -54,6 +54,21 @@ JUDGE_API_KEY: str = (
     or LLM_API_KEY  # last resort: if only one key is configured
 )
 
+# ── PL/EN translation calls (docs/LLM_COST_REDUCTION_PLAN.md M5) ─────────────
+# _translate_resume / _translate_plain (hunter.apply_shared) do mechanical
+# PL<->EN translation — a Haiku-tier task, not a $15/M-output Sonnet one. The
+# result is already guarded by the caller (role-count guard + a repeat
+# language-gate scan), so a cheaper model is safe here. Defaults to the same
+# model as the judge (Haiku) via the same resolve chain; falls back to the
+# main LLM profile (never a translation failure) if no key resolves.
+TRANSLATE_PROVIDER: str = os.getenv("TRANSLATE_PROVIDER", "anthropic")
+TRANSLATE_MODEL: str = os.getenv("TRANSLATE_MODEL", JUDGE_MODEL)
+TRANSLATE_API_KEY: str = (
+    os.getenv("TRANSLATE_API_KEY", "")
+    or os.getenv("ANTHROPIC_API_KEY", "")
+    or LLM_API_KEY  # last resort: if only one key is configured
+)
+
 # Final independent ATS verdict: after generate_docs, ONE cheap-LLM call
 # (JUDGE_MODEL/JUDGE_PROVIDER/JUDGE_API_KEY) scores the text extracted from
 # the rendered EN CV PDF — i.e. what a real ATS actually parses — against the

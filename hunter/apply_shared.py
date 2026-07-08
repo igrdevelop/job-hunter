@@ -34,6 +34,20 @@ def _llm_p():
     return get_active()
 
 
+def _translate_p():
+    """Resolve the translate profile (Haiku-tier by default — mechanical
+    PL<->EN translation, not worth the main profile's $/output-token rate).
+    See docs/LLM_COST_REDUCTION_PLAN.md M5. Falls back to the main LLM
+    profile when no translate key resolves (TRANSLATE_API_KEY unset AND no
+    ANTHROPIC_API_KEY/LLM_API_KEY fallback) — a translation call must never
+    fail outright just because the cheaper profile has no key configured."""
+    from hunter.config import TRANSLATE_API_KEY, TRANSLATE_MODEL, TRANSLATE_PROVIDER
+    if not TRANSLATE_API_KEY:
+        return _llm_p()
+    from types import SimpleNamespace
+    return SimpleNamespace(provider=TRANSLATE_PROVIDER, model=TRANSLATE_MODEL, api_key=TRANSLATE_API_KEY)
+
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROMPTS_DIR = PROJECT_DIR / "prompts"
@@ -701,7 +715,8 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
     array structure identical; only natural-language values are translated. Guards
     against role drop — returns None if the translation loses experience entries.
     """
-    if not _llm_p().api_key or not isinstance(source_resume, dict):
+    _prof = _translate_p()
+    if not _prof.api_key or not isinstance(source_resume, dict):
         return None
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -725,9 +740,9 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
                 'Respond with JSON only: {"resume": <translated resume object>}\n\n'
                 f"Resume to translate:\n{json.dumps(source_resume, ensure_ascii=False)}"
             ),
-            provider=_llm_p().provider,
-            model=_llm_p().model,
-            api_key=_llm_p().api_key,
+            provider=_prof.provider,
+            model=_prof.model,
+            api_key=_prof.api_key,
             max_tokens=4000,
         )
         out = result.get("resume") if isinstance(result, dict) else None
@@ -751,7 +766,8 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
 
 def _translate_plain(text: str, target_lang: str, kind: str) -> str:
     """Translate a cover letter / about-me string into target_lang. '' on failure."""
-    if not _llm_p().api_key or not isinstance(text, str) or not text.strip():
+    _prof = _translate_p()
+    if not _prof.api_key or not isinstance(text, str) or not text.strip():
         return ""
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -770,9 +786,9 @@ def _translate_plain(text: str, target_lang: str, kind: str) -> str:
                 'Respond with JSON only: {"text": "<translated text>"}\n\n'
                 f"Text:\n{text}"
             ),
-            provider=_llm_p().provider,
-            model=_llm_p().model,
-            api_key=_llm_p().api_key,
+            provider=_prof.provider,
+            model=_prof.model,
+            api_key=_prof.api_key,
             max_tokens=2000,
         )
         out = result.get("text", "") if isinstance(result, dict) else ""
