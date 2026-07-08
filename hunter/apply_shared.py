@@ -34,6 +34,20 @@ def _llm_p():
     return get_active()
 
 
+def _translate_p():
+    """Resolve the translate profile (Haiku-tier by default — mechanical
+    PL<->EN translation, not worth the main profile's $/output-token rate).
+    See docs/LLM_COST_REDUCTION_PLAN.md M5. Falls back to the main LLM
+    profile when no translate key resolves (TRANSLATE_API_KEY unset AND no
+    ANTHROPIC_API_KEY/LLM_API_KEY fallback) — a translation call must never
+    fail outright just because the cheaper profile has no key configured."""
+    from hunter.config import TRANSLATE_API_KEY, TRANSLATE_MODEL, TRANSLATE_PROVIDER
+    if not TRANSLATE_API_KEY:
+        return _llm_p()
+    from types import SimpleNamespace
+    return SimpleNamespace(provider=TRANSLATE_PROVIDER, model=TRANSLATE_MODEL, api_key=TRANSLATE_API_KEY)
+
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROMPTS_DIR = PROJECT_DIR / "prompts"
@@ -701,7 +715,8 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
     array structure identical; only natural-language values are translated. Guards
     against role drop — returns None if the translation loses experience entries.
     """
-    if not _llm_p().api_key or not isinstance(source_resume, dict):
+    _prof = _translate_p()
+    if not _prof.api_key or not isinstance(source_resume, dict):
         return None
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -725,9 +740,9 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
                 'Respond with JSON only: {"resume": <translated resume object>}\n\n'
                 f"Resume to translate:\n{json.dumps(source_resume, ensure_ascii=False)}"
             ),
-            provider=_llm_p().provider,
-            model=_llm_p().model,
-            api_key=_llm_p().api_key,
+            provider=_prof.provider,
+            model=_prof.model,
+            api_key=_prof.api_key,
             max_tokens=4000,
         )
         out = result.get("resume") if isinstance(result, dict) else None
@@ -751,7 +766,8 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
 
 def _translate_plain(text: str, target_lang: str, kind: str) -> str:
     """Translate a cover letter / about-me string into target_lang. '' on failure."""
-    if not _llm_p().api_key or not isinstance(text, str) or not text.strip():
+    _prof = _translate_p()
+    if not _prof.api_key or not isinstance(text, str) or not text.strip():
         return ""
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
@@ -770,9 +786,9 @@ def _translate_plain(text: str, target_lang: str, kind: str) -> str:
                 'Respond with JSON only: {"text": "<translated text>"}\n\n'
                 f"Text:\n{text}"
             ),
-            provider=_llm_p().provider,
-            model=_llm_p().model,
-            api_key=_llm_p().api_key,
+            provider=_prof.provider,
+            model=_prof.model,
+            api_key=_prof.api_key,
             max_tokens=2000,
         )
         out = result.get("text", "") if isinstance(result, dict) else ""
@@ -925,6 +941,68 @@ def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
     """Drop employer-credential / regulatory terms that must not be claimed as
     the candidate's own skills (see _ATS_KEYWORD_BLOCKLIST)."""
     return [k for k in keywords if k.strip().lower() not in _ATS_KEYWORD_BLOCKLIST]
+
+
+# Cap on how many keywords go into the first-generation checklist (M3,
+# docs/LLM_COST_REDUCTION_PLAN.md) — keeps the prompt addition small even for
+# a keyword-dense posting.
+_ATS_CHECKLIST_CAP = 30
+
+
+def build_pl_skip_instruction(posting_lang: str, *, full_mode: bool) -> str:
+    """Prompt addition telling the generator to skip the _pl fields for an
+    EN-language posting in short mode (docs/LLM_COST_REDUCTION_PLAN.md M4).
+
+    Short mode never delivers the PL CV for an EN posting (see
+    generate_docs.py's primary_lang-driven routing), so generating a full
+    resume_pl/cover_letter_pl/about_me_pl is ~40-50% of the first call's
+    output tokens spent on fields nobody receives. Returns "" (no prompt
+    change) when the flag is off, the posting is PL, or full_mode is set —
+    those cases still get the complete bilingual set exactly as before.
+    """
+    from hunter.config import GEN_SKIP_PL_FOR_EN
+
+    if not GEN_SKIP_PL_FOR_EN or full_mode or posting_lang != "EN":
+        return ""
+    return (
+        "\n\n**Language optimization:** this posting is in English and the "
+        "Polish documents will not be delivered for it. Return empty values "
+        "for the Polish fields — "
+        '"resume_pl": {}, "cover_letter_pl": "", "about_me_pl": "" — '
+        "and put your full effort into resume_en, cover_letter_en, and "
+        "about_me_en instead."
+    )
+
+
+def build_ats_keyword_checklist(job_text: str) -> str:
+    """Deterministic (regex-only, $0.00) keyword checklist for the FIRST
+    generation prompt.
+
+    The ATS keyword loop (_ats_check_loop) already extracts these same
+    keywords and rewrites the resume until they're covered — but only AFTER
+    a first draft that didn't see them misses them, burning 1-2 avoidable
+    rewrite rounds. Handing the same deterministic list to the first call
+    lets it get there in one shot most of the time; the rewrite loop remains
+    the safety net, unchanged.
+
+    Returns "" when no actionable keyword survives (posting has none, or
+    every hit is an employer-credential term filtered by
+    _filter_self_description_keywords) — callers should skip the block
+    entirely rather than inject an empty checklist.
+    """
+    from hunter.ats_checker import extract_job_keywords
+
+    keywords = _filter_self_description_keywords(extract_job_keywords(job_text))
+    if not keywords:
+        return ""
+    keywords = keywords[:_ATS_CHECKLIST_CAP]
+    bullet_list = "\n".join(f"- {k}" for k in keywords)
+    return (
+        "\n\n## ATS keyword checklist (deterministic scan of this posting)\n"
+        "Make sure EACH of these terms appears naturally in resume_en (skills "
+        "and/or experience bullets). Do not fabricate experience — place "
+        f"honestly:\n{bullet_list}"
+    )
 
 
 # Word-boundary matcher for regulatory/compliance terms that an employer lists as
@@ -1653,10 +1731,33 @@ def _handle_jobleads_fetch_blocked(
 
 # ── Content validation ────────────────────────────────────────────────────────
 
-def validate_content(data: dict) -> list[str]:
-    """Return list of missing/invalid fields."""
+# The three _pl fields the M4 skip-instruction (build_pl_skip_instruction)
+# asks the generator to return empty for an EN posting. They're deliberately
+# grouped: a repair-round-trip is only worth avoiding when the LLM omitted
+# ALL three the same way an intentional skip would — one present and two
+# missing is a real inconsistency, not a skip, and must still error.
+_PL_SKIPPABLE_KEYS = ("resume_pl", "cover_letter_pl", "about_me_pl")
+
+
+def validate_content(data: dict, *, pl_optional: bool = False) -> list[str]:
+    """Return list of missing/invalid fields.
+
+    `pl_optional=True` (only ever passed by the caller that actually issued
+    the M4 skip-instruction — i.e. an EN posting, short mode, flag on) also
+    tolerates the LLM omitting the three _pl keys entirely instead of
+    returning them as explicit empty values ({}/"", which already pass the
+    `is None` check below regardless of this flag). Default False keeps
+    every other caller (CLI pipeline, verdict refine rounds, dual-apply,
+    tests) exactly as strict as before — a PL posting or a full-mode run
+    missing its _pl fields is still a real bug, not an intentional skip.
+    """
     errors = []
+    pl_all_missing = pl_optional and all(
+        key not in data or not data[key] for key in _PL_SKIPPABLE_KEYS
+    )
     for key in REQUIRED_JSON_KEYS:
+        if key in _PL_SKIPPABLE_KEYS and pl_all_missing:
+            continue
         if key not in data or data[key] is None:
             errors.append(f"Missing field: {key}")
 

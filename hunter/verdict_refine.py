@@ -297,6 +297,14 @@ def refine_loop(
     best_content = content
     best_verdict = verdict
 
+    # M1 (docs/LLM_COST_REDUCTION_PLAN.md): a round that fails (discarded
+    # before verdict, or rolled back after) leaves best_content/best_verdict
+    # unchanged — the next honest round would see the identical input and
+    # almost certainly repeat the same failure, wasting a call. Escalate it
+    # to stretch instead. If a stretch round ALSO fails on unchanged input,
+    # no further round can help (same input either way) — stop the loop.
+    last_round_failed = False
+
     for round_num in range(1, max_rounds + 1):
         try:
             score = float(best_verdict.get("score") or 0)
@@ -308,7 +316,15 @@ def refine_loop(
                 print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
                 break
 
-            kind = "stretch" if round_num >= STRETCH_FROM_ROUND else "honest"
+            natural_kind = "stretch" if round_num >= STRETCH_FROM_ROUND else "honest"
+            if last_round_failed and natural_kind == "honest":
+                kind = "stretch"
+                print(
+                    f"[verdict_refine] round {round_num}: escalating to stretch "
+                    "after rollback (same input would repeat)"
+                )
+            else:
+                kind = natural_kind
             print(
                 f"[verdict_refine] round {round_num} ({kind}): "
                 f"verdict {score} < target {target} — rewriting..."
@@ -324,6 +340,10 @@ def refine_loop(
 
             if _exp_len(candidate["resume_en"]) < _exp_len(best_content.get("resume_en")):
                 print(f"[verdict_refine] round {round_num}: rewrite dropped roles — discarding round")
+                if last_round_failed and kind == "stretch":
+                    print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
+                    break
+                last_round_failed = True
                 continue
 
             if kind == "stretch":
@@ -334,10 +354,18 @@ def refine_loop(
                 print(f"[verdict_refine] round {round_num}: {line}")
             if blocked:
                 print(f"[verdict_refine] round {round_num}: language gate blocked — discarding round")
+                if last_round_failed and kind == "stretch":
+                    print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
+                    break
+                last_round_failed = True
                 continue
 
             if len(validate_content(candidate)) > len(validate_content(best_content)):
                 print(f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round")
+                if last_round_failed and kind == "stretch":
+                    print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
+                    break
+                last_round_failed = True
                 continue
 
             content_path.write_text(
@@ -350,12 +378,17 @@ def refine_loop(
             if new_score is not None and new_score > score:
                 print(f"[verdict_refine] round {round_num}: verdict improved {score} -> {new_score} — accepted")
                 best_content, best_verdict = candidate, new_verdict
+                last_round_failed = False
             else:
                 print(
                     f"[verdict_refine] round {round_num}: verdict did not improve "
                     f"({score} -> {new_score}) — rolling back"
                 )
                 _rollback(content_path, best_content, folder, regenerate_docs)
+                if last_round_failed and kind == "stretch":
+                    print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
+                    break
+                last_round_failed = True
         except Exception as e:  # noqa: BLE001 — best-effort: stop, keep current best
             print(f"[verdict_refine] round {round_num} failed unexpectedly (keeping best): {e}")
             break

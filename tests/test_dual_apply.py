@@ -190,7 +190,7 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     )
     # Skip the real ATS loop / scrubs / lang gate — exercise orchestration only.
     import hunter.apply_shared as ash
-    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(
         ash, "_ats_check_loop",
         lambda content, jt: {**content, "ats_check": {"score": 88.0}},
@@ -251,7 +251,7 @@ def test_generate_shadow_uploads_to_drive_when_enabled(monkeypatch, tmp_path):
     generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
     import hunter.apply_shared as ash
-    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
     monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
@@ -304,7 +304,7 @@ def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_pa
     generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
     import hunter.apply_shared as ash
-    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
     monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
@@ -443,7 +443,7 @@ def _shadow_harness(monkeypatch, tmp_path):
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
 
     import hunter.apply_shared as ash
-    monkeypatch.setattr(ash, "validate_content", lambda c: [])
+    monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(
         ash, "_ats_check_loop",
         lambda content, jt: {**content, "ats_check": {"score": 88.0}},

@@ -183,9 +183,91 @@ def test_both_sides_dirty_pl_repaired_from_cleaned_en(monkeypatch, with_api_key)
 def test_no_api_key_no_repair(monkeypatch):
     """Without an API key the gate cannot translate; it reports but does not crash."""
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile(""))
+    # _translate_resume/_translate_plain resolve via _translate_p(), which falls
+    # back to ANTHROPIC_API_KEY/LLM_API_KEY when TRANSLATE_API_KEY is unset — pin
+    # all three empty so this test doesn't depend on the environment's .env.
+    monkeypatch.setattr(apply_shared, "_translate_p", lambda: _fake_profile(""))
     contaminated_en = json.loads(json.dumps(_CLEAN_EN_RESUME))
     contaminated_en["summary"] = "Senior Developer (7+ lat doświadczenia)."
     content = {"resume_en": contaminated_en, "resume_pl": _CLEAN_PL_RESUME}
     out, blocked, report = apply_shared.enforce_language_separation(content)
     # Strong contamination remains and could not be repaired → blocked.
     assert blocked is True
+
+
+# ── _translate_p / translate-model wiring (docs/LLM_COST_REDUCTION_PLAN.md M5) ─
+
+def test_translate_p_uses_translate_config_when_key_present(monkeypatch):
+    from hunter import config
+    monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
+    monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
+    monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
+    prof = apply_shared._translate_p()
+    assert prof.provider == "anthropic"
+    assert prof.model == "claude-haiku-4-5-20251001"
+    assert prof.api_key == "haiku-key"
+
+
+def test_translate_p_falls_back_to_main_profile_when_no_key(monkeypatch):
+    from hunter import config
+    monkeypatch.setattr(config, "TRANSLATE_API_KEY", "")
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile("main-key"))
+    prof = apply_shared._translate_p()
+    assert prof.api_key == "main-key"
+
+
+def test_translate_resume_calls_with_translate_profile(monkeypatch, with_api_key):
+    from hunter import config
+    monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
+    monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
+    monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
+
+    captured = {}
+
+    def _fake(system_prompt, user_message, **k):
+        captured.update(k)
+        return {"resume": json.loads(json.dumps(_CLEAN_EN_RESUME))}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake)
+    out = apply_shared._translate_resume(_CLEAN_PL_RESUME, "EN", expected_roles=7)
+    assert out is not None
+    assert captured["model"] == "claude-haiku-4-5-20251001"
+    assert captured["api_key"] == "haiku-key"
+
+
+def test_translate_plain_calls_with_translate_profile(monkeypatch, with_api_key):
+    from hunter import config
+    monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
+    monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
+    monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
+
+    captured = {}
+
+    def _fake(system_prompt, user_message, **k):
+        captured.update(k)
+        return {"text": "A" * 40}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake)
+    out = apply_shared._translate_plain("Some cover letter text.", "PL", "cover letter")
+    assert out
+    assert captured["model"] == "claude-haiku-4-5-20251001"
+    assert captured["api_key"] == "haiku-key"
+
+
+def test_translate_resume_falls_back_to_main_profile(monkeypatch):
+    """No translate key resolves — translation must not fail outright, it
+    uses the main profile instead."""
+    from hunter import config
+    monkeypatch.setattr(config, "TRANSLATE_API_KEY", "")
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile("main-key"))
+
+    captured = {}
+
+    def _fake(system_prompt, user_message, **k):
+        captured.update(k)
+        return {"resume": json.loads(json.dumps(_CLEAN_EN_RESUME))}
+
+    monkeypatch.setattr(llm_client, "call_llm", _fake)
+    out = apply_shared._translate_resume(_CLEAN_PL_RESUME, "EN", expected_roles=7)
+    assert out is not None
+    assert captured["api_key"] == "main-key"

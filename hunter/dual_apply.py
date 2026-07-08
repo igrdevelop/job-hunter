@@ -147,6 +147,8 @@ def _generate_shadow(
         _dedup_skill_glosses,
         _strip_compliance_claims,
         _strip_prestige_claims,
+        build_ats_keyword_checklist,
+        build_pl_skip_instruction,
         validate_content,
     )
     from hunter.llm_profiles import get_active
@@ -165,7 +167,14 @@ def _generate_shadow(
     stack_hint = _detect_stack_hint(job_text)
     base_cv = _load_base_cv(stack_hint)
 
+    from hunter.config import GEN_SKIP_PL_FOR_EN
+    from hunter.lang_guard import detect_posting_language
+    posting_lang = detect_posting_language(job_text)
+    pl_optional = GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"
+
     user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+    user_message += build_ats_keyword_checklist(job_text)
+    user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)
     if base_cv:
         user_message += (
             f"\n\n---\n\n## Base CV — {stack_hint} Track "
@@ -186,7 +195,7 @@ def _generate_shadow(
         return None
 
     # Validate + one best-effort repair pass (mirror of apply_api's logic).
-    errors = validate_content(content)
+    errors = validate_content(content, pl_optional=pl_optional)
     if errors:
         print(f"[dual] validation errors: {errors}")
         try:
@@ -202,7 +211,7 @@ def _generate_shadow(
                 model=prof.model,
                 api_key=prof.api_key,
             )
-            if len(validate_content(repaired)) < len(errors):
+            if len(validate_content(repaired, pl_optional=pl_optional)) < len(errors):
                 content = repaired
         except Exception as e:
             print(f"[dual] repair pass failed (using first pass): {e}")
@@ -224,15 +233,14 @@ def _generate_shadow(
         print(f"[dual] scrubs failed (continuing): {e}")
 
     # Language gate — clean contamination but never block (this is a comparison
-    # artifact, not an outgoing application).
+    # artifact, not an outgoing application). posting_lang was already computed
+    # above (before the LLM call, to drive the M4 skip-instruction) — reused
+    # here unchanged rather than detected a second time.
     try:
-        from hunter.lang_guard import detect_posting_language
         from hunter.apply_shared import enforce_language_separation
         content, _blocked, _report = enforce_language_separation(content)
-        posting_lang = detect_posting_language(job_text)
     except Exception as e:
         print(f"[dual] language gate failed (continuing): {e}")
-        posting_lang = "EN"
 
     # Carry the primary's apply_url so the shadow content.json is self-describing.
     apply_url = ""

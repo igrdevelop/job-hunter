@@ -283,3 +283,57 @@ def test_api_pipeline_sends_verdict_gap_report_line() -> None:
     src = _source_of("hunter.apply_api")
     assert "format_gap_report" in src
     assert "{gap_line}" in src
+
+
+# ── Deterministic ATS keyword checklist in the first generation prompt ──────
+# (docs/LLM_COST_REDUCTION_PLAN.md M3) — the checklist must be built from the
+# posting text and appended to user_message before the first call_llm().
+
+def test_api_pipeline_wires_ats_keyword_checklist_before_call_llm() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "build_ats_keyword_checklist" in src
+    checklist_pos = src.index("build_ats_keyword_checklist(job_text)")
+    call_pos = src.index("content = call_llm(")
+    assert checklist_pos < call_pos
+
+
+def test_dual_apply_shadow_wires_ats_keyword_checklist() -> None:
+    src = _source_of("hunter.dual_apply")
+    assert "build_ats_keyword_checklist" in src
+    checklist_pos = src.index("build_ats_keyword_checklist(job_text)")
+    call_pos = src.index("content = call_llm(")
+    assert checklist_pos < call_pos
+
+
+# ── PL-skip for EN postings in short mode (docs/LLM_COST_REDUCTION_PLAN.md M4) ─
+
+def test_api_pipeline_computes_posting_lang_before_first_call_llm() -> None:
+    """posting_lang must be computed before Step 3's call_llm so the skip
+    instruction can be injected into the very first prompt — not only at the
+    (former) Step 4.75 language-gate location."""
+    src = _source_of("hunter.apply_api")
+    lang_pos = src.index("posting_lang = detect_posting_language(job_text)")
+    call_pos = src.index("content = call_llm(")
+    assert lang_pos < call_pos
+    # detect_posting_language must be called exactly once — the Step 4.75
+    # language gate reuses the same variable instead of recomputing it.
+    assert src.count("detect_posting_language(job_text)") == 1
+
+
+def test_api_pipeline_wires_pl_skip_instruction_before_call_llm() -> None:
+    src = _source_of("hunter.apply_api")
+    skip_pos = src.index("build_pl_skip_instruction(posting_lang, full_mode=full_mode)")
+    call_pos = src.index("content = call_llm(")
+    assert skip_pos < call_pos
+
+
+def test_api_pipeline_validate_content_uses_pl_optional() -> None:
+    src = _source_of("hunter.apply_api")
+    assert "pl_optional=_pl_optional" in src
+    assert "GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == \"EN\"" in src
+
+
+def test_dual_apply_shadow_wires_pl_skip_instruction() -> None:
+    src = _source_of("hunter.dual_apply")
+    assert "build_pl_skip_instruction(posting_lang, full_mode=full_mode)" in src
+    assert "pl_optional=pl_optional" in src
