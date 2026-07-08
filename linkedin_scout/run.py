@@ -32,8 +32,8 @@ from pathlib import Path
 _BASE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _BASE_DIR.parent
 # `python linkedin_scout/run.py` puts THIS file's directory on sys.path[0], not
-# the repo root — without this, neither `import hunter` nor
-# `import linkedin_scout` (as a top-level package) would resolve.
+# the repo root — without this, `import linkedin_scout` (as a top-level
+# package, e.g. from telegram_relay.py) would not resolve.
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
