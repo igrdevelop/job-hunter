@@ -20,6 +20,7 @@ from hunter.apply_shared import (
     _last_paragraph_text,
     _sanitize_folder_company,
     build_ats_keyword_checklist,
+    build_pl_skip_instruction,
     compute_output_folder,
     validate_content,
 )
@@ -520,6 +521,95 @@ def test_build_ats_keyword_checklist_caps_at_30() -> None:
     finally:
         apply_shared._filter_self_description_keywords = orig_extract
     assert block.count("\n- ") == 30
+
+
+# ── build_pl_skip_instruction / validate_content pl_optional (M4) ───────────
+
+def test_pl_skip_instruction_present_for_en_short_mode(monkeypatch) -> None:
+    from hunter import config
+    monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
+    block = build_pl_skip_instruction("EN", full_mode=False)
+    assert "resume_pl" in block
+    assert '"resume_pl": {}' in block
+
+
+def test_pl_skip_instruction_absent_for_pl_posting(monkeypatch) -> None:
+    from hunter import config
+    monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
+    assert build_pl_skip_instruction("PL", full_mode=False) == ""
+
+
+def test_pl_skip_instruction_absent_in_full_mode(monkeypatch) -> None:
+    from hunter import config
+    monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
+    assert build_pl_skip_instruction("EN", full_mode=True) == ""
+
+
+def test_pl_skip_instruction_absent_when_flag_off(monkeypatch) -> None:
+    from hunter import config
+    monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", False)
+    assert build_pl_skip_instruction("EN", full_mode=False) == ""
+
+
+def _full_content(**overrides) -> dict:
+    content = {
+        "company_name": "Acme",
+        "stack": "Angular",
+        "lang": "EN",
+        "job_title": "Senior Frontend Developer",
+        "resume_en": {
+            "summary": "s", "skills": {}, "education": "BSc",
+            "experience": [{"company": f"C{i}"} for i in range(7)],
+        },
+        "cover_letter_en": "Dear Hiring Manager,",
+        "cover_letter_pl": "Szanowni Panstwo,",
+        "about_me_en": "About me EN",
+        "about_me_pl": "About me PL",
+        "resume_pl": {
+            "summary": "s", "skills": {}, "education": "BSc",
+            "experience": [{"company": f"C{i}"} for i in range(7)],
+        },
+    }
+    content.update(overrides)
+    return content
+
+
+def test_validate_content_pl_optional_accepts_all_pl_missing() -> None:
+    content = _full_content()
+    del content["resume_pl"]
+    del content["cover_letter_pl"]
+    del content["about_me_pl"]
+    errors = validate_content(content, pl_optional=True)
+    assert not any("resume_pl" in e or "cover_letter_pl" in e or "about_me_pl" in e for e in errors)
+
+
+def test_validate_content_pl_optional_accepts_explicit_empty_values() -> None:
+    content = _full_content(resume_pl={}, cover_letter_pl="", about_me_pl="")
+    errors = validate_content(content, pl_optional=True)
+    assert not any("resume_pl" in e or "cover_letter_pl" in e or "about_me_pl" in e for e in errors)
+
+
+def test_validate_content_pl_optional_still_flags_partial_omission() -> None:
+    """One _pl field missing while others present is a real inconsistency,
+    not an intentional skip — must still error."""
+    content = _full_content()
+    del content["cover_letter_pl"]
+    errors = validate_content(content, pl_optional=True)
+    assert any("cover_letter_pl" in e for e in errors)
+
+
+def test_validate_content_default_still_strict_on_missing_pl() -> None:
+    """pl_optional defaults False — every other caller (CLI, verdict refine,
+    dual-apply full mode) stays exactly as strict as before."""
+    content = _full_content()
+    del content["resume_pl"]
+    del content["cover_letter_pl"]
+    del content["about_me_pl"]
+    errors = validate_content(content)
+    # cover_letter_pl/about_me_pl are unconditionally in REQUIRED_JSON_KEYS
+    # (resume_pl's presence there depends on GENERATE_PL_RESUME).
+    assert any("cover_letter_pl" in e for e in errors)
+    assert any("about_me_pl" in e for e in errors)
 
 
 def test_build_ats_keyword_checklist_matches_extract_job_keywords() -> None:

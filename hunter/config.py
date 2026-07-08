@@ -91,6 +91,14 @@ DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").stri
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
+# Skip generating the _pl fields (resume_pl/cover_letter_pl/about_me_pl) on the
+# FIRST generation call for an English-language posting in short mode — they
+# are ~40-50% of that call's output tokens and short mode never delivers them
+# for an EN posting anyway (see hunter.apply_shared.compute_output_folder /
+# generate_docs short-mode routing). A PL posting (primary_lang == "PL") or a
+# full-mode run (--full) is unaffected and always gets the full bilingual set.
+# docs/LLM_COST_REDUCTION_PLAN.md M4.
+GEN_SKIP_PL_FOR_EN: bool = os.getenv("GEN_SKIP_PL_FOR_EN", "true").lower() in ("true", "1", "yes")
 # GDPR/RODO consent clause appended at the bottom of the CV body (not in a footer,
 # so ATS parsers still read it). "both" = PL + EN CVs, "pl" = PL CV only, "none" = off.
 CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()

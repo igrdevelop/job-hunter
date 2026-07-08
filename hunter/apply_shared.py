@@ -933,6 +933,31 @@ def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
 _ATS_CHECKLIST_CAP = 30
 
 
+def build_pl_skip_instruction(posting_lang: str, *, full_mode: bool) -> str:
+    """Prompt addition telling the generator to skip the _pl fields for an
+    EN-language posting in short mode (docs/LLM_COST_REDUCTION_PLAN.md M4).
+
+    Short mode never delivers the PL CV for an EN posting (see
+    generate_docs.py's primary_lang-driven routing), so generating a full
+    resume_pl/cover_letter_pl/about_me_pl is ~40-50% of the first call's
+    output tokens spent on fields nobody receives. Returns "" (no prompt
+    change) when the flag is off, the posting is PL, or full_mode is set —
+    those cases still get the complete bilingual set exactly as before.
+    """
+    from hunter.config import GEN_SKIP_PL_FOR_EN
+
+    if not GEN_SKIP_PL_FOR_EN or full_mode or posting_lang != "EN":
+        return ""
+    return (
+        "\n\n**Language optimization:** this posting is in English and the "
+        "Polish documents will not be delivered for it. Return empty values "
+        "for the Polish fields — "
+        '"resume_pl": {}, "cover_letter_pl": "", "about_me_pl": "" — '
+        "and put your full effort into resume_en, cover_letter_en, and "
+        "about_me_en instead."
+    )
+
+
 def build_ats_keyword_checklist(job_text: str) -> str:
     """Deterministic (regex-only, $0.00) keyword checklist for the FIRST
     generation prompt.
@@ -1690,10 +1715,33 @@ def _handle_jobleads_fetch_blocked(
 
 # ── Content validation ────────────────────────────────────────────────────────
 
-def validate_content(data: dict) -> list[str]:
-    """Return list of missing/invalid fields."""
+# The three _pl fields the M4 skip-instruction (build_pl_skip_instruction)
+# asks the generator to return empty for an EN posting. They're deliberately
+# grouped: a repair-round-trip is only worth avoiding when the LLM omitted
+# ALL three the same way an intentional skip would — one present and two
+# missing is a real inconsistency, not a skip, and must still error.
+_PL_SKIPPABLE_KEYS = ("resume_pl", "cover_letter_pl", "about_me_pl")
+
+
+def validate_content(data: dict, *, pl_optional: bool = False) -> list[str]:
+    """Return list of missing/invalid fields.
+
+    `pl_optional=True` (only ever passed by the caller that actually issued
+    the M4 skip-instruction — i.e. an EN posting, short mode, flag on) also
+    tolerates the LLM omitting the three _pl keys entirely instead of
+    returning them as explicit empty values ({}/"", which already pass the
+    `is None` check below regardless of this flag). Default False keeps
+    every other caller (CLI pipeline, verdict refine rounds, dual-apply,
+    tests) exactly as strict as before — a PL posting or a full-mode run
+    missing its _pl fields is still a real bug, not an intentional skip.
+    """
     errors = []
+    pl_all_missing = pl_optional and all(
+        key not in data or not data[key] for key in _PL_SKIPPABLE_KEYS
+    )
     for key in REQUIRED_JSON_KEYS:
+        if key in _PL_SKIPPABLE_KEYS and pl_all_missing:
+            continue
         if key not in data or data[key] is None:
             errors.append(f"Missing field: {key}")
 

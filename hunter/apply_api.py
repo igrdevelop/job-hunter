@@ -30,6 +30,7 @@ from hunter.apply_shared import (
     _ats_check_loop,
     _handle_jobleads_fetch_blocked,
     build_ats_keyword_checklist,
+    build_pl_skip_instruction,
     is_transient_fetch_error,
     compute_output_folder,
     is_backend_only_job_text,
@@ -314,6 +315,13 @@ def _run_main_api(
     else:
         print(f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch")
 
+    # Posting language — computed here (moved up from the former Step 4.75) so
+    # the first generation call can skip the _pl fields for an EN posting in
+    # short mode (M4, docs/LLM_COST_REDUCTION_PLAN.md). Reused unchanged at
+    # the language gate below and when persisted to content["primary_lang"].
+    from hunter.lang_guard import detect_posting_language
+    posting_lang = detect_posting_language(job_text)
+
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
     try:
@@ -325,6 +333,7 @@ def _run_main_api(
         )
         user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
         user_message += build_ats_keyword_checklist(job_text)
+        user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)
         if base_cv:
             user_message += f"\n\n---\n\n## Base CV — {stack_hint} Track (use as starting point for bullets)\n\n{base_cv}"
 
@@ -367,7 +376,9 @@ def _run_main_api(
 
     # Step 4 — Validate JSON
     print("[apply_agent] Step 3: Validating LLM output...")
-    errors = validate_content(content)
+    from hunter.config import GEN_SKIP_PL_FOR_EN
+    _pl_optional = GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"
+    errors = validate_content(content, pl_optional=_pl_optional)
     if errors:
         print(f"[apply_agent] Validation errors: {errors}")
         # Repair pass: structural errors (e.g. a dropped role) make the resume
@@ -394,7 +405,7 @@ def _run_main_api(
                 model=_llm_prof.model,
                 api_key=_llm_prof.api_key,
             )
-            _repaired_errors = validate_content(_repaired)
+            _repaired_errors = validate_content(_repaired, pl_optional=_pl_optional)
             if len(_repaired_errors) < len(errors):
                 print(
                     f"[apply_agent] Repair pass improved validation: "
@@ -543,8 +554,8 @@ def _run_main_api(
     # each _pl field clean Polish. Polish postings cause the ATS loop to inject
     # Polish keywords into resume_en; here we repair by translating from the clean
     # opposite-language counterpart, and BLOCK delivery if strong Polish survives.
-    from hunter.lang_guard import detect_posting_language
-    posting_lang = detect_posting_language(job_text)
+    # posting_lang was computed earlier (before Step 3) so the first generation
+    # call could skip the _pl fields for an EN posting — reused here unchanged.
     print(f"[apply_agent] Step 4.75: Language gate (posting language: {posting_lang})...")
     try:
         from hunter.apply_shared import enforce_language_separation
