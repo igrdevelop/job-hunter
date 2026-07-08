@@ -77,6 +77,22 @@ def test_extract_js_output_is_hiring_filterable():
     assert hiring == {"Deloitte Poland"}
 
 
+def test_extract_js_finds_permalink_via_vanity_posts_url():
+    """Regression pin: the post's own timestamp link ("2h" — what a real
+    right-click > Copy link address on that element would give you) renders
+    LinkedIn's newer vanity URL (linkedin.com/posts/<slug>-activity-<id>),
+    not the older /feed/update/urn:li:share:... form. isPostPermalink() must
+    recognize both, or non-share posts never get a permalink at all.
+    """
+    text = _extract("permalink_vanity_url.html")
+    posts = parse_posts(text)
+    assert len(posts) == 1
+    assert posts[0].permalink == (
+        "https://www.linkedin.com/posts/"
+        "deloitte-poland_angular-hiring-activity-7218459283746192384-abcd/"
+    )
+
+
 def test_extract_js_preserves_light_dom_text_next_to_shadow_sibling():
     text = _extract("mixed_light_and_shadow_siblings.html")
     assert "label text" in text

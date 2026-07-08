@@ -234,10 +234,16 @@ def seed_profile_cookies(context, storage_state_path: Path | None) -> bool:
 # shadow-hosting element's own direct text-node children before recursing, so
 # a light-DOM text node sitting next to a shadow-hosting sibling isn't lost.
 #
-# Post permalinks (owner discovery 2026-07-08, live-verified): SOME posts (not
-# all — appears tied to how LinkedIn renders that particular post, e.g.
-# shares) wrap their body text in a real `<a href="https://www.linkedin.com/
-# feed/update/urn:li:share:...">`. Before emitting a shadow-free subtree's own
+# Post permalinks (owner discovery 2026-07-08, live-verified): share-type
+# posts wrap their body text in a real `<a href="https://www.linkedin.com/
+# feed/update/urn:li:share:...">`. Every post ALSO has its own timestamp link
+# under the author name ("2h", "1d" — the exact element a real right-click >
+# Copy link address would target), which LinkedIn renders with its newer
+# vanity URL instead: linkedin.com/posts/<slug>-activity-<id>-<random>.
+# `isPostPermalink()` recognizes both forms (an earlier version only matched
+# /feed/update/, which is why permalink capture "only worked for share-type
+# posts" — the timestamp link was in the DOM the whole time, just under a URL
+# shape we weren't looking for). Before emitting a shadow-free subtree's own
 # text, `collect()` checks for such an anchor anywhere inside it and — if
 # found — emits a `LI_PERMALINK::<href>` marker line first, so it lands right
 # next to (before) the post body text in the document-order output stream.
@@ -258,12 +264,26 @@ _EXTRACT_JS = """
       .filter(Boolean)
       .join(' ');
   }
+  function isPostPermalink(href) {
+    if (!href) return false;
+    if (href.indexOf('/feed/update/') !== -1) return true;
+    // LinkedIn's newer "vanity" post URL (what the post's own timestamp link
+    // — e.g. "2h", "1d" under the author name — actually points to, and what
+    // a real right-click > Copy link address on that element would give you):
+    // linkedin.com/posts/<slug>-activity-<id>-<random>. The original marker
+    // only recognized the older /feed/update/urn:li:activity:... share form,
+    // which is why it "only caught share-type posts" — this format was
+    // present in the DOM the whole time, just under a link we weren't
+    // matching.
+    return href.indexOf('/posts/') !== -1 && href.indexOf('activity') !== -1;
+  }
   function findPermalink(el) {
-    if (el.tagName === 'A' && el.href && el.href.indexOf('/feed/update/') !== -1) {
+    if (el.tagName === 'A' && isPostPermalink(el.href)) {
       return el.href;
     }
-    const anchors = el.querySelectorAll ? el.querySelectorAll('a[href*="/feed/update/"]') : [];
-    return anchors.length ? anchors[0].href : null;
+    const anchors = el.querySelectorAll ? Array.from(el.querySelectorAll('a[href]')) : [];
+    const match = anchors.find((a) => isPostPermalink(a.href));
+    return match ? match.href : null;
   }
   function collect(root, out) {
     const children = root.children ? Array.from(root.children) : [];
@@ -298,19 +318,60 @@ def _sleep_human(range_sec: tuple[float, float]) -> None:
     time.sleep(random.uniform(*range_sec))
 
 
+def _click_menu_and_copy_link(page, button) -> str | None:
+    """Given an already-located control-menu button, click it, click 'Copy
+    link to post', and read the resulting clipboard content. Never raises —
+    any failure logs at debug and presses Escape to close a half-open menu
+    before the caller tries the next fallback.
+    """
+    try:
+        if button.count() == 0:
+            return None
+        button.click(timeout=_MENU_CLICK_TIMEOUT_MS)
+        _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
+        page.get_by_text(_COPY_LINK_ITEM_TEXT, exact=False).first.click(timeout=_MENU_CLICK_TIMEOUT_MS)
+        _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
+        link = page.evaluate("() => navigator.clipboard.readText()")
+        if link and "linkedin.com" in link:
+            return link.strip()
+    except Exception as e:  # noqa: BLE001 — best-effort, caller tries the next fallback
+        logger.debug("[linkedin_scout] menu-click permalink attempt failed: %s", e)
+        try:
+            page.keyboard.press("Escape")
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
 def _copy_link_via_menu(page, author: str, body: str) -> str | None:
     """Best-effort: open a post's '...' control menu, click 'Copy link to
     post', and read the resulting clipboard content.
 
+    Primary path (live-verified 2026-07-08 via a real-DOM aria-label dump):
+    LinkedIn's control-menu button carries the exact author name in its own
+    accessible name — "Open control menu for post by <Author>" — so it can be
+    found directly with `get_by_role`, no container/text-snippet guessing
+    needed. Falls back to the older container+button-selector probe (still
+    unverified) for the rare case a post's author name doesn't match cleanly
+    (e.g. it was truncated/reformatted between parsing and this call).
     Playwright locators pierce open shadow roots (unlike XPath), so this can
     stay at the locator level instead of the manual walker `_EXTRACT_JS`
-    needs. Tries each container/button selector combination in order and
-    gives up quietly — a failed lookup must never raise or block the run,
-    it's strictly a bonus on top of the always-working text extraction.
+    needs. Gives up quietly on any failure — this is strictly a bonus on top
+    of the always-working text extraction, never allowed to block the run.
     """
     snippet = body.strip()[:40]
     if not snippet:
         return None
+
+    if author:
+        try:
+            button = page.get_by_role("button", name=f"Open control menu for post by {author}").first
+            link = _click_menu_and_copy_link(page, button)
+            if link:
+                return link
+        except Exception as e:  # noqa: BLE001 — fall through to the container-based probe
+            logger.debug("[linkedin_scout] author-based menu button lookup failed: %s", e)
+
     for container_sel in _POST_CONTAINER_SELECTORS:
         try:
             container = page.locator(container_sel).filter(has_text=snippet).first
@@ -320,25 +381,10 @@ def _copy_link_via_menu(page, author: str, body: str) -> str | None:
             logger.debug("[linkedin_scout] permalink container probe failed: %s", e)
             continue
         for button_sel in _MENU_BUTTON_SELECTORS:
-            try:
-                button = container.locator(button_sel).first
-                if button.count() == 0:
-                    continue
-                button.click(timeout=_MENU_CLICK_TIMEOUT_MS)
-                _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
-                page.get_by_text(_COPY_LINK_ITEM_TEXT, exact=False).first.click(
-                    timeout=_MENU_CLICK_TIMEOUT_MS
-                )
-                _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
-                link = page.evaluate("() => navigator.clipboard.readText()")
-                if link and "linkedin.com" in link:
-                    return link.strip()
-            except Exception as e:  # noqa: BLE001 — best-effort, try next selector
-                logger.debug("[linkedin_scout] menu-click permalink attempt failed: %s", e)
-                try:
-                    page.keyboard.press("Escape")
-                except Exception:  # noqa: BLE001
-                    pass
+            button = container.locator(button_sel).first
+            link = _click_menu_and_copy_link(page, button)
+            if link:
+                return link
     return None
 
 
@@ -445,6 +491,7 @@ def _open_scroll_extract(
     a return-type change so every existing caller/test that treats this
     function's return value as a plain `str` keeps working unchanged.
     """
+    from playwright.sync_api import Error as PWError
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
@@ -463,6 +510,23 @@ def _open_scroll_extract(
             seed_profile_cookies(context, storage_state_path)
             context.add_init_script(_HIDE_WEBDRIVER_INIT_SCRIPT)
             page = context.new_page()
+            # Live-observed 2026-07-08: a long feed scroll crashed the tab
+            # with Chrome's own "Aw, Snap! Out of Memory" — LinkedIn's feed is
+            # heavy with profile photos, cover images, GIFs, and autoplaying
+            # video, none of which this module ever reads (only innerText).
+            # Blocking those resource types cuts memory/bandwidth without
+            # touching layout (LinkedIn reserves image space via CSS before
+            # load, so scroll-triggered lazy-load logic keyed on viewport
+            # geometry is unaffected). This is what actually surfaced as
+            # "Execution context was destroyed" in _open_scroll_extract's
+            # evaluate calls — Playwright reports a crashed renderer with the
+            # same generic message it uses for a real navigation.
+            page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_(),
+            )
             page.goto(url, wait_until="domcontentloaded")
             _sleep_human(_POST_LOAD_WAIT_RANGE_SEC)
 
@@ -479,7 +543,21 @@ def _open_scroll_extract(
             viewport = page.viewport_size or {"width": 1280, "height": 800}
             page.mouse.move(viewport["width"] // 2, viewport["height"] // 2)
 
-            text = page.evaluate(_EXTRACT_JS) or ""
+            try:
+                text = page.evaluate(_EXTRACT_JS) or ""
+            except PWError as e:
+                # Live-observed 2026-07-08: LinkedIn's SPA can destroy the JS
+                # execution context mid-evaluate ("Execution context was
+                # destroyed, most likely because of a navigation") even
+                # before any scrolling — an internal re-render, not a real
+                # anti-bot redirect (is_blocked_url/looks_like_anti_bot both
+                # check the URL/text, neither of which fires here). This must
+                # not crash the whole scheduled run; treat it as "nothing to
+                # report this time", same outcome as a quiet feed.
+                logger.warning(
+                    "[linkedin_scout] initial page.evaluate failed (%s) — treating as no content", e
+                )
+                return ""
             post_count = len(parse_posts(text))
             logger.info("[linkedin_scout] posts visible before scrolling: %d", post_count)
 
@@ -501,7 +579,19 @@ def _open_scroll_extract(
                 if is_blocked_url(page.url):
                     raise AntiBotDetected(f"redirected to {page.url} during scroll")
 
-                text = page.evaluate(_EXTRACT_JS) or ""
+                try:
+                    text = page.evaluate(_EXTRACT_JS) or ""
+                except PWError as e:
+                    # Same transient SPA-navigation hiccup as the initial
+                    # evaluate above, just mid-scroll instead of before it —
+                    # keep whatever was already captured on the last
+                    # successful iteration rather than crashing the run.
+                    logger.warning(
+                        "[linkedin_scout] evaluate failed mid-scroll (%s) — "
+                        "stopping early with %d scroll(s) done",
+                        e, iterations_done,
+                    )
+                    break
                 if looks_like_anti_bot(text) or looks_like_anti_bot(page.url):
                     raise AntiBotDetected("anti-bot interstitial marker detected in page")
 

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<body>
+<div id="host1"></div>
+<script>
+// A post whose ONLY permalink is its timestamp link ("2h" under the author
+// name — the element a real right-click > Copy link address would target),
+// rendered with LinkedIn's newer vanity URL (linkedin.com/posts/<slug>-
+// activity-<id>-<random>) rather than the older /feed/update/urn:li:share:...
+// form. Regression pin for isPostPermalink() recognizing BOTH shapes — an
+// earlier version only matched /feed/update/, so a non-share post like this
+// one never got a permalink at all even though the link was in the DOM.
+const h1 = document.getElementById('host1').attachShadow({mode: 'open'});
+h1.innerHTML =
+  '<div>Feed post</div>' +
+  '<div>Deloitte Poland</div>' +
+  '<div>3rd+</div>' +
+  '<div>Talent Acquisition</div>' +
+  '<a href="https://www.linkedin.com/posts/deloitte-poland_angular-hiring-activity-7218459283746192384-abcd/">2h</a>' +
+  '<div>Follow</div>' +
+  '<div>We are hiring an Angular Developer. Fully remote across Poland.</div>';
+</script>
+</body>
+</html>

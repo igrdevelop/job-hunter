@@ -614,16 +614,30 @@ class _FakeLocator:
 
 
 class _FakePage:
-    def __init__(self, container: _FakeLocator, copy_item: _FakeLocator, clipboard_text: str = ""):
+    def __init__(
+        self,
+        container: _FakeLocator,
+        copy_item: _FakeLocator,
+        clipboard_text: str = "",
+        role_button: _FakeLocator | None = None,
+        role_button_name: str | None = None,
+    ):
         self._container = container
         self._copy_item = copy_item
         self._clipboard_text = clipboard_text
+        self._role_button = role_button
+        self._role_button_name = role_button_name
         self.evaluate_calls: list[str] = []
         self.escape_presses = 0
         self.keyboard = self
 
     def locator(self, selector: str):
         return self._container if selector == browser._POST_CONTAINER_SELECTORS[0] else _FakeLocator(count=0)
+
+    def get_by_role(self, role: str, name: str = ""):
+        if self._role_button is not None and role == "button" and name == self._role_button_name:
+            return self._role_button
+        return _FakeLocator(count=0)
 
     def get_by_text(self, text: str, exact: bool = False):
         return self._copy_item
@@ -648,6 +662,28 @@ def test_copy_link_via_menu_happy_path():
     link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
 
     assert link == "https://www.linkedin.com/feed/update/urn:li:activity:1/"
+
+
+def test_copy_link_via_menu_author_based_lookup_wins_over_container(monkeypatch):
+    """Regression pin (2026-07-08 live DOM dump): LinkedIn's control-menu
+    button carries the exact author name in its aria-label ("Open control
+    menu for post by <Author>"). This must be tried FIRST — a caller that
+    would fail the old container+snippet probe (count=0) should still
+    succeed via the author-based lookup.
+    """
+    role_button = _FakeLocator(count=1)
+    copy_item = _FakeLocator(count=1)
+    page = _FakePage(
+        container=_FakeLocator(count=0),  # container probe would find nothing
+        copy_item=copy_item,
+        clipboard_text="https://www.linkedin.com/posts/deloitte-poland_hiring-activity-1-abcd/",
+        role_button=role_button,
+        role_button_name="Open control menu for post by Deloitte Poland",
+    )
+
+    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+
+    assert link == "https://www.linkedin.com/posts/deloitte-poland_hiring-activity-1-abcd/"
 
 
 def test_copy_link_via_menu_no_container_returns_none():
