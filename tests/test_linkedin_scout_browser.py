@@ -538,3 +538,183 @@ def test_scout_feed_does_not_launch_offscreen(tmp_path, monkeypatch):
 
     assert fake_chromium.launch_kwargs is not None
     assert "--window-position=-3000,0" not in fake_chromium.launch_kwargs["args"]
+
+
+# --- menu-click permalink capture (owner discovery 2026-07-08) --------------
+
+
+def test_filter_candidates_backfills_permalink_from_menu_dict():
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+    )
+    key = browser.dedup_key(
+        "Deloitte Poland", "We're hiring an Angular Developer. Fully remote across Poland."
+    )
+    menu_permalinks = {key: "https://www.linkedin.com/feed/update/urn:li:activity:1/"}
+
+    candidates = browser._filter_candidates(raw_text, "angular", menu_permalinks)
+
+    assert len(candidates) == 1
+    assert candidates[0].permalink == "https://www.linkedin.com/feed/update/urn:li:activity:1/"
+
+
+def test_filter_candidates_dom_marker_permalink_wins_over_menu_dict():
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:999/\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+    )
+    key = browser.dedup_key(
+        "Deloitte Poland", "We're hiring an Angular Developer. Fully remote across Poland."
+    )
+    menu_permalinks = {key: "https://www.linkedin.com/feed/update/urn:li:activity:should-not-win/"}
+
+    candidates = browser._filter_candidates(raw_text, "angular", menu_permalinks)
+
+    assert candidates[0].permalink == "https://www.linkedin.com/feed/update/urn:li:share:999/"
+
+
+def test_filter_candidates_no_menu_dict_entry_leaves_permalink_none():
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+    )
+    candidates = browser._filter_candidates(raw_text, "angular", {})
+    assert candidates[0].permalink is None
+
+
+class _FakeLocator:
+    """Minimal stand-in for a Playwright Locator: chains `.filter()`/`.locator()`,
+    exposes `.first` (self, for chaining) and a fixed `.count()`. Click
+    behavior is injected via a callback so tests can assert click order and
+    simulate failures without a real browser."""
+
+    def __init__(self, count: int = 0, on_click=None, children: dict[str, "_FakeLocator"] | None = None):
+        self._count = count
+        self._on_click = on_click
+        self._children = children or {}
+
+    @property
+    def first(self):
+        return self
+
+    def filter(self, has_text=None):
+        return self
+
+    def locator(self, selector: str):
+        return self._children.get(selector, _FakeLocator(count=0))
+
+    def count(self):
+        return self._count
+
+    def click(self, timeout=None):
+        if self._on_click:
+            self._on_click()
+
+
+class _FakePage:
+    def __init__(self, container: _FakeLocator, copy_item: _FakeLocator, clipboard_text: str = ""):
+        self._container = container
+        self._copy_item = copy_item
+        self._clipboard_text = clipboard_text
+        self.evaluate_calls: list[str] = []
+        self.escape_presses = 0
+        self.keyboard = self
+
+    def locator(self, selector: str):
+        return self._container if selector == browser._POST_CONTAINER_SELECTORS[0] else _FakeLocator(count=0)
+
+    def get_by_text(self, text: str, exact: bool = False):
+        return self._copy_item
+
+    def evaluate(self, js: str):
+        self.evaluate_calls.append(js)
+        return self._clipboard_text
+
+    def press(self, key: str):
+        if key == "Escape":
+            self.escape_presses += 1
+
+
+def test_copy_link_via_menu_happy_path():
+    button = _FakeLocator(count=1)
+    container = _FakeLocator(count=1, children={browser._MENU_BUTTON_SELECTORS[0]: button})
+    copy_item = _FakeLocator(count=1)
+    page = _FakePage(
+        container, copy_item, clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/"
+    )
+
+    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+
+    assert link == "https://www.linkedin.com/feed/update/urn:li:activity:1/"
+
+
+def test_copy_link_via_menu_no_container_returns_none():
+    page = _FakePage(_FakeLocator(count=0), _FakeLocator(count=0))
+    assert browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.") is None
+
+
+def test_copy_link_via_menu_clipboard_not_linkedin_returns_none():
+    button = _FakeLocator(count=1)
+    container = _FakeLocator(count=1, children={browser._MENU_BUTTON_SELECTORS[0]: button})
+    copy_item = _FakeLocator(count=1)
+    page = _FakePage(container, copy_item, clipboard_text="not a link")
+
+    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+
+    assert link is None
+
+
+def test_fetch_menu_permalinks_skips_posts_with_existing_marker():
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "LI_PERMALINK::https://www.linkedin.com/feed/update/urn:li:share:1/\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+    )
+    page = _FakePage(_FakeLocator(count=1), _FakeLocator(count=1), clipboard_text="")
+    result = browser._fetch_menu_permalinks(page, raw_text)
+    assert result == {}
+
+
+def test_fetch_menu_permalinks_skips_non_hiring_posts():
+    raw_text = "Feed post\n\nJohn Doe\nFollow\nJust a random update about my weekend.\n"
+    page = _FakePage(_FakeLocator(count=1), _FakeLocator(count=1), clipboard_text="")
+    result = browser._fetch_menu_permalinks(page, raw_text)
+    assert result == {}
+
+
+def test_fetch_menu_permalinks_captures_for_hiring_candidate():
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "We're hiring an Angular Developer. Fully remote across Poland.\n"
+    )
+    button = _FakeLocator(count=1)
+    container = _FakeLocator(count=1, children={browser._MENU_BUTTON_SELECTORS[0]: button})
+    copy_item = _FakeLocator(count=1)
+    page = _FakePage(
+        container, copy_item, clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/"
+    )
+
+    result = browser._fetch_menu_permalinks(page, raw_text)
+
+    key = browser.dedup_key(
+        "Deloitte Poland", "We're hiring an Angular Developer. Fully remote across Poland."
+    )
+    assert result == {key: "https://www.linkedin.com/feed/update/urn:li:activity:1/"}
+
+
+def test_fetch_menu_permalinks_caps_at_max_attempts(monkeypatch):
+    monkeypatch.setattr(browser, "_MAX_MENU_PERMALINK_ATTEMPTS", 1)
+    raw_text = (
+        "Feed post\n\nDeloitte Poland\nFollow\n"
+        "We're hiring an Angular Developer #1. Fully remote across Poland.\n"
+        "\nFeed post\n\nAcme Corp\nFollow\n"
+        "We're hiring an Angular Developer #2. Fully remote across Poland.\n"
+    )
+    calls = []
+    monkeypatch.setattr(browser, "_copy_link_via_menu", lambda page, author, body: calls.append(author) or None)
+    result = browser._fetch_menu_permalinks(_FakePage(_FakeLocator(), _FakeLocator()), raw_text)
+
+    assert len(calls) == 1
+    assert result == {}

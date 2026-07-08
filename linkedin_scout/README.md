@@ -26,12 +26,20 @@ LinkedIn URL, to avoid colliding with `LinkedInSource`'s host-based URL dispatch
 none reachable, which turned out to be wrong): some posts (LinkedIn "share"-type, at
 least) wrap their body text in a real `<a href="https://www.linkedin.com/feed/update/
 urn:li:share:...">` already present in the DOM, no extra click needed. `browser.py`'s
-extraction JS captures it when present and threads it through as `permalink` on
+extraction JS captures it when present. LinkedIn also exposes a `Copy link to post` item
+in every post's `...` menu — works on every post, not just share-type ones — so for any
+M1 candidate that didn't get a DOM-marker permalink, `browser._fetch_menu_permalinks()`
+clicks through `...` → `Copy link to post` and reads the clipboard (capped at
+`_MAX_MENU_PERMALINK_ATTEMPTS` per run — clicking is slower and adds anti-bot surface,
+so it's only spent on posts that already passed the hiring-post + location gate, not
+every post on the page). Either source threads through as `permalink` on
 `ScoutCandidate` → the Telegram relay payload → `job.raw["permalink"]` on the bot side
-(best-effort, `None` for posts without one). It's convenience-only — never used for
-dedup/fetch/routing — and shows up as an extra line in the pre-apply Telegram
+(best-effort, `None` when neither source found one). It's convenience-only — never used
+for dedup/fetch/routing — and shows up as an extra line in the pre-apply Telegram
 notification (`hunter/main.py::_auto_apply_all`) so you can click through to the actual
-post if you want to.
+post if you want to. The exact `...`-menu selectors are best-effort and unverified
+against a live session (same caveat as the rest of this module's DOM assumptions) — a
+failed lookup just skips that candidate's permalink, it never blocks the run.
 
 **Why a Telegram command instead of a shared file:** an earlier version of this wrote
 matches directly to a local JSON file the bot's source would read. That broke the
