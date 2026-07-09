@@ -5,9 +5,10 @@ shadow set with the shadow profile (default deepseek-v3) into a {model}
 subfolder of the application — comparison only, no tracker / Telegram / Sheets.
 Shadow doc filenames carry the ATS score (e.g. ..._EN_ats88.pdf).
 
-/dual            — show current state (on/off + shadow profile)
-/dual on         — enable
-/dual off        — disable
+/dual                 — show current state (on/off + shadow profile)
+/dual on              — enable
+/dual off             — disable
+/dual shadow <name>   — switch the shadow profile (e.g. deepseek-v4-pro)
 """
 
 from __future__ import annotations
@@ -45,8 +46,24 @@ def _status_text() -> str:
             "Each apply also writes a comparison set into "
             "<code>{Company}/{shadow}/</code> with the ATS score in the filename."
         )
-    lines.append("Use <code>/dual on</code> or <code>/dual off</code> to switch.")
+    lines.append(
+        "Use <code>/dual on</code> / <code>/dual off</code> to toggle, "
+        "<code>/dual shadow &lt;name&gt;</code> to switch the shadow profile."
+    )
     return "\n".join(lines)
+
+
+def _set_shadow(name: str) -> str:
+    from hunter.llm_profiles import PROFILES, set_shadow
+
+    if not name:
+        avail = ", ".join(p.name for p in PROFILES.values() if p.is_available())
+        return f"Usage: <code>/dual shadow &lt;name&gt;</code>\nAvailable: {avail}"
+    try:
+        set_shadow(name)
+    except ValueError as e:
+        return f"❌ {e}"
+    return _status_text()
 
 
 def _toggle(arg: str) -> str:
@@ -70,6 +87,9 @@ async def cmd_dual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args or []
     if not args:
         text = await asyncio.to_thread(_status_text)
+    elif args[0].strip().lower() == "shadow":
+        name = args[1].strip().lower() if len(args) > 1 else ""
+        text = await asyncio.to_thread(_set_shadow, name)
     else:
         text = await asyncio.to_thread(_toggle, args[0].strip().lower())
 
