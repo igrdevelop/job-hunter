@@ -3,8 +3,19 @@ and the shadow filename/ATS-suffix helpers."""
 
 import json
 
+import pytest
+
 import hunter.llm_profiles as lp
 from hunter import dual_apply
+
+
+@pytest.fixture(autouse=True)
+def _no_judge_no_refine(monkeypatch):
+    """Keep the judge + refine stages out of every test by default — they'd
+    otherwise hit the real Anthropic API through the dev .env's live keys.
+    Tests that exercise those stages re-enable them explicitly."""
+    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
 
 # ── Profile override (get_active) ───────────────────────────────────────────────
@@ -518,3 +529,204 @@ def test_generate_shadow_verdict_error_never_breaks_shadow(monkeypatch, tmp_path
     assert result == sub  # shadow completed despite the verdict failure
     names = {p.name for p in sub.iterdir()}
     assert "Ihar_CV_Angular_EN_ats88.pdf" in names
+
+
+# ── Shadow pipeline parity: claim judge ──────────────────────────────────────────
+
+def _fake_judge_outcome(content, violations=None, fixes=None):
+    from types import SimpleNamespace
+    violations = violations or []
+    return SimpleNamespace(
+        content=content,
+        report=SimpleNamespace(
+            actionable=violations,
+            violations=violations,
+            to_dict=lambda: {"violations": [v.__dict__ for v in violations]},
+        ),
+        fixes=fixes or [],
+        blocked=False,
+        survivors=[],
+    )
+
+
+def test_generate_shadow_runs_judge_and_writes_report(monkeypatch, tmp_path):
+    """The shadow runs the same claim-judge stage as the boevoy pipeline and
+    persists judge_report.json in the shadow subfolder when there are findings."""
+    from types import SimpleNamespace
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", True)
+    monkeypatch.setattr("hunter.config.JUDGE_MODE", "warn")
+
+    captured = {}
+
+    def fake_judge(content, job_text, base_cv, *, enabled, mode):
+        captured["mode"] = mode
+        content = {**content, "judged": True}
+        v = SimpleNamespace(severity="fabrication", field="resume_en.summary",
+                            reason="invented metric", quote="30%")
+        return _fake_judge_outcome(content, violations=[v], fixes=["dropped clause"])
+
+    monkeypatch.setattr("hunter.claim_judge.run_judge_stage", fake_judge)
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    sub = tmp_path / shadow.name
+    assert result == sub
+    assert captured["mode"] == "warn"
+    written = json.loads((sub / "content.json").read_text(encoding="utf-8"))
+    assert written["judged"] is True  # judge's repaired content was kept
+    report = json.loads((sub / "judge_report.json").read_text(encoding="utf-8"))
+    assert report["violations"][0]["field"] == "resume_en.summary"
+
+
+def test_generate_shadow_judge_block_mode_capped_to_warn(monkeypatch, tmp_path):
+    """JUDGE_MODE=block must never block a shadow (comparison artifact) — the
+    mode is capped to warn, same as verdict_refine._run_safety_stages."""
+    _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", True)
+    monkeypatch.setattr("hunter.config.JUDGE_MODE", "block")
+
+    captured = {}
+
+    def fake_judge(content, job_text, base_cv, *, enabled, mode):
+        captured["mode"] = mode
+        return _fake_judge_outcome(content)
+
+    monkeypatch.setattr("hunter.claim_judge.run_judge_stage", fake_judge)
+    dual_apply.run_shadow(tmp_path)
+    assert captured["mode"] == "warn"
+
+
+def test_generate_shadow_judge_failure_never_breaks_shadow(monkeypatch, tmp_path):
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", True)
+
+    def boom(*a, **k):
+        raise RuntimeError("judge model down")
+
+    monkeypatch.setattr("hunter.claim_judge.run_judge_stage", boom)
+
+    result = dual_apply.run_shadow(tmp_path)
+    assert result == tmp_path / shadow.name
+    assert not (tmp_path / shadow.name / "judge_report.json").exists()
+
+
+# ── Shadow pipeline parity: verdict refine loop ──────────────────────────────────
+
+def test_generate_shadow_runs_refine_loop_below_target(monkeypatch, tmp_path):
+    """A shadow verdict below ATS_VERDICT_TARGET triggers the same refine loop
+    as the boevoy pipeline; the refined verdict wins the filename suffix."""
+    shadow = _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 3)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_TARGET", 95)
+    monkeypatch.setattr(
+        "hunter.ats_pdf_roundtrip.run_llm_verdict",
+        lambda folder, job_text: {"score": 82.0, "model": "judge", "pdf_file": "x.pdf"},
+    )
+
+    captured = {}
+
+    def fake_refine(content, job_text, base_cv, folder, verdict, *,
+                    regenerate_docs, target, max_rounds):
+        captured["start_score"] = verdict["score"]
+        captured["target"] = target
+        captured["max_rounds"] = max_rounds
+        captured["folder"] = folder
+        regenerate_docs(folder)  # must be callable and tracker-free
+        return {**content, "refined": True}, {"score": 92.0, "model": "judge", "pdf_file": "x.pdf"}
+
+    monkeypatch.setattr("hunter.verdict_refine.refine_loop", fake_refine)
+
+    result = dual_apply.run_shadow(tmp_path)
+
+    sub = tmp_path / shadow.name
+    assert result == sub
+    assert captured["start_score"] == 82.0
+    assert captured["target"] == 95
+    assert captured["max_rounds"] == 3
+    assert captured["folder"] == sub
+    written = json.loads((sub / "content.json").read_text(encoding="utf-8"))
+    assert written["refined"] is True
+    assert written["ats_verdict"]["score"] == 92.0
+    names = {p.name for p in sub.iterdir()}
+    assert "Ihar_CV_Angular_EN_ats92.pdf" in names
+
+
+def test_generate_shadow_skips_refine_at_or_above_target(monkeypatch, tmp_path):
+    _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 3)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_TARGET", 95)
+    monkeypatch.setattr(
+        "hunter.ats_pdf_roundtrip.run_llm_verdict",
+        lambda folder, job_text: {"score": 95.0, "model": "judge", "pdf_file": "x.pdf"},
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("refine_loop must not run at target")
+
+    monkeypatch.setattr("hunter.verdict_refine.refine_loop", boom)
+    assert dual_apply.run_shadow(tmp_path) is not None
+
+
+def test_generate_shadow_skips_refine_when_disabled(monkeypatch, tmp_path):
+    _shadow_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
+    monkeypatch.setattr(
+        "hunter.ats_pdf_roundtrip.run_llm_verdict",
+        lambda folder, job_text: {"score": 60.0, "model": "judge", "pdf_file": "x.pdf"},
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("refine_loop must not run when disabled")
+
+    monkeypatch.setattr("hunter.verdict_refine.refine_loop", boom)
+    assert dual_apply.run_shadow(tmp_path) is not None
+
+
+# ── set_shadow + /dual shadow <name> ─────────────────────────────────────────────
+
+def test_set_shadow_persists_db(monkeypatch):
+    store = {}
+    monkeypatch.setattr(lp, "_db_get", lambda k: store.get(k))
+    monkeypatch.setattr(lp, "_db_set", lambda k, v: store.update({k: v}))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-o")
+    p = lp.set_shadow("deepseek-v4-pro")
+    assert p.model == "deepseek/deepseek-v4-pro"
+    assert store[lp._DUAL_SHADOW_KEY] == "deepseek-v4-pro"
+    # DB choice wins over env + default
+    monkeypatch.setenv("DUAL_SHADOW_PROFILE", "deepseek-v3")
+    assert lp.shadow_profile().name == "deepseek-v4-pro"
+
+
+def test_set_shadow_unknown_name_raises(monkeypatch):
+    with pytest.raises(ValueError, match="Unknown profile"):
+        lp.set_shadow("no-such-model")
+
+
+def test_set_shadow_unavailable_raises(monkeypatch):
+    import pytest
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="not available"):
+        lp.set_shadow("deepseek-v4-pro")
+
+
+def test_dual_command_set_shadow_helper(monkeypatch):
+    from hunter.commands.dual import _set_shadow
+    store = {}
+    monkeypatch.setattr(lp, "_db_get", lambda k: store.get(k))
+    monkeypatch.setattr(lp, "_db_set", lambda k, v: store.update({k: v}))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-o")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-a")
+
+    # Empty arg → usage text with available profiles
+    out = _set_shadow("")
+    assert "Usage" in out and "deepseek-v4-pro" in out
+    # Unknown name → error text, nothing persisted
+    out = _set_shadow("no-such-model")
+    assert out.startswith("❌")
+    assert lp._DUAL_SHADOW_KEY not in store
+    # Valid name → persisted + status text mentions it
+    out = _set_shadow("deepseek-v4-pro")
+    assert store[lp._DUAL_SHADOW_KEY] == "deepseek-v4-pro"
+    assert "deepseek-v4-pro" in out
