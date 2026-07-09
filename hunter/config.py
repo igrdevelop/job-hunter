@@ -124,8 +124,11 @@ MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "20"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 # Hard wall-clock cap for the detached dual-apply shadow run (its own budget,
 # independent of the primary's APPLY_AGENT_TIMEOUT_SEC). A watchdog force-exits
-# the detached shadow process after this many seconds.
-DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "900"))
+# the detached shadow process after this many seconds. Default 1800 (was 900):
+# the shadow now mirrors the full boevoy pipeline incl. the verdict refine loop
+# (up to ATS_VERDICT_MAX_REFINES rewrite+render+re-verdict rounds), which can
+# legitimately push a slow OpenRouter model past the old 15-minute budget.
+DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "1800"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 

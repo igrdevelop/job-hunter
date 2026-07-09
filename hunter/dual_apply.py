@@ -5,6 +5,12 @@ primary "boevoy" apply produces its documents, ``run_shadow`` generates a second
 side-by-side set with the shadow profile (default ``deepseek-v3``) into a
 ``{primary_folder}/{shadow_name}/`` subfolder.
 
+The shadow runs the SAME pipeline stages as the boevoy apply (generation →
+ATS loop → scrubs → claim judge → language gate → render → independent PDF
+verdict → verdict refine loop), with only the generator model swapped — so an
+A/B run compares models, not pipelines. The judge and the verdict always use
+the Anthropic JUDGE_* config on both sides (same yardstick).
+
 The shadow is comparison-only:
   • NO tracker row (generate_docs runs with --no-tracker)
   • NO Telegram message / no document upload
@@ -232,6 +238,27 @@ def _generate_shadow(
     except Exception as e:
         print(f"[dual] scrubs failed (continuing): {e}")
 
+    # Claim judge — same stage as the boevoy pipeline (Step 4.72), so the A/B
+    # compares like-for-like content: fabrications get the same auto-repair on
+    # both sides. Never blocks and never notifies Telegram (this is a
+    # comparison artifact, not an outgoing application) — JUDGE_MODE=block is
+    # capped to "warn" here, same as verdict_refine._run_safety_stages.
+    judge_report = None
+    try:
+        from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+        if JUDGE_ENABLED:
+            from hunter.claim_judge import run_judge_stage
+            _mode = "warn" if JUDGE_MODE == "block" else JUDGE_MODE
+            _outcome = run_judge_stage(content, job_text, base_cv, enabled=True, mode=_mode)
+            content = _outcome.content
+            judge_report = _outcome.report
+            for _v in judge_report.actionable:
+                print(f"[dual] judge: [{_v.severity}] {_v.field}: {_v.reason}")
+            for _fix in _outcome.fixes:
+                print(f"[dual] judge-repair: {_fix}")
+    except Exception as e:
+        print(f"[dual] claim judge failed (continuing): {e}")
+
     # Language gate — clean contamination but never block (this is a comparison
     # artifact, not an outgoing application). posting_lang was already computed
     # above (before the LLM call, to drive the M4 skip-instruction) — reused
@@ -262,6 +289,17 @@ def _generate_shadow(
         json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (sub / "job_posting.txt").write_text(job_text, encoding="utf-8")
+
+    # Audit trail — same artifact as the boevoy pipeline, so tools/judge_stats.py
+    # and manual A/B review see the shadow's violations too.
+    if judge_report is not None and judge_report.violations:
+        try:
+            (sub / "judge_report.json").write_text(
+                json.dumps(judge_report.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[dual] could not write judge_report.json: {e}")
 
     # Render docs — shadow run, so NO tracker row.
     gen_cmd = build_generate_docs_cmd(
@@ -298,6 +336,45 @@ def _generate_shadow(
         from hunter.ats_pdf_roundtrip import run_llm_verdict
         verdict = run_llm_verdict(folder=sub, job_text=job_text)
         if verdict is not None:
+            # Verdict refine loop — mirror of the boevoy Step 7.7b, so the A/B
+            # compares full-pipeline vs full-pipeline, not full vs one-shot.
+            # The rewrite rounds resolve their model via get_active(), which
+            # returns the SHADOW profile here (the override is active); the
+            # per-round judge + re-verdicts stay on the Anthropic JUDGE_*
+            # config regardless, so both sides are scored by the same
+            # yardstick. Comparison-only: NO tracker stamps (no to_learn /
+            # verdict / cost re-stamp — the shadow has no row). The regen
+            # callback reuses gen_cmd, which is already --no-tracker and
+            # never --force for a shadow.
+            from hunter.config import ATS_VERDICT_MAX_REFINES, ATS_VERDICT_TARGET
+            if (
+                float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
+                and ATS_VERDICT_MAX_REFINES > 0
+            ):
+                print(
+                    f"[dual] shadow verdict {verdict.get('score')}% < target "
+                    f"{ATS_VERDICT_TARGET}% — running refine loop "
+                    f"(max {ATS_VERDICT_MAX_REFINES} round(s))..."
+                )
+                from hunter.verdict_refine import refine_loop
+
+                def _regen_shadow(_folder: Path) -> None:
+                    subprocess.run(
+                        gen_cmd,
+                        cwd=str(PROJECT_DIR),
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=120,
+                    )
+
+                content, verdict = refine_loop(
+                    content, job_text, base_cv, sub, verdict,
+                    regenerate_docs=_regen_shadow,
+                    target=ATS_VERDICT_TARGET,
+                    max_rounds=ATS_VERDICT_MAX_REFINES,
+                )
             content["ats_verdict"] = verdict
             content_path.write_text(
                 json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
