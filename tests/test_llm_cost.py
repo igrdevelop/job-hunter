@@ -33,6 +33,15 @@ def test_resolve_pricing_deepseek_via_openrouter() -> None:
     assert _resolve_pricing("deepseek-r1") is PRICING["deepseek-r1"]
 
 
+def test_resolve_pricing_v4_pro_and_glm() -> None:
+    """2026-07 shadow candidates: v4-pro must not fall through to the shorter
+    'deepseek-chat'/'deepseek-r1' keys or the Sonnet fallback; glm-5.2 likewise."""
+    assert _resolve_pricing("deepseek/deepseek-v4-pro") is PRICING["deepseek-v4-pro"]
+    assert _resolve_pricing("z-ai/glm-5.2") is PRICING["glm-5.2"]
+    assert PRICING["deepseek-v4-pro"]["output"] == 0.87
+    assert PRICING["glm-5.2"]["output"] == 1.98
+
+
 def test_deepseek_r1_per_call_cost() -> None:
     """Pin the arithmetic on R1 so an accidental rate edit shows up in CI.
 

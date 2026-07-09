@@ -36,6 +36,18 @@ def test_deepseek_profiles_use_openrouter():
     assert lp.PROFILES["deepseek-r1"].env_key == "OPENROUTER_API_KEY"
 
 
+def test_openrouter_2026_profiles_present():
+    """deepseek-v4-pro + glm-5.2 (added 2026-07 for the dual-apply A/B)."""
+    for name, model in (
+        ("deepseek-v4-pro", "deepseek/deepseek-v4-pro"),
+        ("glm-5.2", "z-ai/glm-5.2"),
+    ):
+        p = lp.PROFILES[name]
+        assert p.provider == "openrouter"
+        assert p.model == model
+        assert p.env_key == "OPENROUTER_API_KEY"
+
+
 # ── API-key availability ────────────────────────────────────────────────────────
 
 def test_profile_is_available_when_env_key_set(monkeypatch):

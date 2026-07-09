@@ -73,6 +73,19 @@ PROFILES: dict[str, Profile] = {
         model="deepseek/deepseek-chat",
         env_key="OPENROUTER_API_KEY",
     ),
+    "deepseek-v4-pro": Profile(
+        name="deepseek-v4-pro",
+        provider="openrouter",
+        model="deepseek/deepseek-v4-pro",
+        env_key="OPENROUTER_API_KEY",
+    ),
+    # ── Zhipu GLM via OpenRouter ──────────────────────────────────────────────
+    "glm-5.2": Profile(
+        name="glm-5.2",
+        provider="openrouter",
+        model="z-ai/glm-5.2",
+        env_key="OPENROUTER_API_KEY",
+    ),
     # ── OpenAI GPT ────────────────────────────────────────────────────────────
     # Requires OPENAI_API_KEY in .env. Uses the openai SDK directly (no gateway).
     # Pricing as of 2026-06 (openai.com/pricing); update llm_cost.py if rates change.
@@ -248,6 +261,26 @@ def set_dual(enabled: bool) -> None:
     """Persist dual-apply mode on/off in tracker.db."""
     _db_set(_DUAL_KEY, "1" if enabled else "0")
     logger.info("[llm_profiles] dual-apply mode → %s", "on" if enabled else "off")
+
+
+def set_shadow(name: str) -> Profile:
+    """Persist `name` as the dual-apply shadow profile (DB key wins over the
+    DUAL_SHADOW_PROFILE env var). Returns the profile.
+
+    Raises ValueError if the name is unknown or the profile is unavailable
+    (missing API key) — same contract as set_active().
+    """
+    if name not in PROFILES:
+        known = ", ".join(PROFILES)
+        raise ValueError(f"Unknown profile '{name}'. Known: {known}")
+    profile = PROFILES[name]
+    if not profile.is_available():
+        raise ValueError(
+            f"Profile '{name}' is not available — set {profile.env_key} in .env"
+        )
+    _db_set(_DUAL_SHADOW_KEY, name)
+    logger.info("[llm_profiles] shadow profile → %s (%s)", name, profile.model)
+    return profile
 
 
 def shadow_profile() -> Profile | None:

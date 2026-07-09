@@ -47,6 +47,9 @@ PRICING: dict[str, dict[str, float]] = {
     # log would price the same payload as $0.00.
     "deepseek-r1":   {"input": 0.55, "output": 2.19, "cache_write": 0.55, "cache_read": 0.14},
     "deepseek-chat": {"input": 0.27, "output": 1.10, "cache_write": 0.27, "cache_read": 0.07},
+    "deepseek-v4-pro": {"input": 0.435, "output": 0.87, "cache_write": 0.435, "cache_read": 0.11},
+    # Zhipu GLM 5.2 (via OpenRouter, openrouter.ai/z-ai/glm-5.2 as of 2026-07).
+    "glm-5.2": {"input": 0.63, "output": 1.98, "cache_write": 0.63, "cache_read": 0.16},
     # OpenAI GPT (openai.com/pricing as of 2026-06). No cache stats exposed in the
     # standard response (cache_write / cache_read stay 0 in usage records).
     "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cache_write": 0.40, "cache_read": 0.10},
