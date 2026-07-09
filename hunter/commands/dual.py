@@ -54,10 +54,10 @@ def _status_text() -> str:
 
 
 def _set_shadow(name: str) -> str:
-    from hunter.llm_profiles import PROFILES, set_shadow
+    from hunter.llm_profiles import list_available, set_shadow
 
     if not name:
-        avail = ", ".join(p.name for p in PROFILES.values() if p.is_available())
+        avail = ", ".join(p.name for p in list_available())
         return f"Usage: <code>/dual shadow &lt;name&gt;</code>\nAvailable: {avail}"
     try:
         set_shadow(name)

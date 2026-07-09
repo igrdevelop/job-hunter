@@ -3,8 +3,19 @@ and the shadow filename/ATS-suffix helpers."""
 
 import json
 
+import pytest
+
 import hunter.llm_profiles as lp
 from hunter import dual_apply
+
+
+@pytest.fixture(autouse=True)
+def _no_judge_no_refine(monkeypatch):
+    """Keep the judge + refine stages out of every test by default — they'd
+    otherwise hit the real Anthropic API through the dev .env's live keys.
+    Tests that exercise those stages re-enable them explicitly."""
+    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
+    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
 
 # ── Profile override (get_active) ───────────────────────────────────────────────
@@ -200,12 +211,6 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
     monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
     monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
-    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
-    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
-    # Keep the judge + refine stages out of this orchestration test (covered by
-    # their own tests below) — and out of the real API (dev .env has live keys).
-    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
-    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
     captured_cmd = {}
 
@@ -264,8 +269,6 @@ def test_generate_shadow_uploads_to_drive_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
     monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
     monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
-    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
-    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
     def fake_run(cmd, **kw):
         sub = tmp_path / shadow.name
@@ -319,8 +322,6 @@ def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_pa
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
     monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
     monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
-    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
-    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
     def fake_run(cmd, **kw):
         sub = tmp_path / shadow.name
@@ -463,8 +464,6 @@ def _shadow_harness(monkeypatch, tmp_path):
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
     monkeypatch.setattr(ash, "enforce_language_separation", lambda c: (c, False, []))
     monkeypatch.setattr("hunter.resume_sanitizer.sanitize_content", lambda c: c)
-    monkeypatch.setattr("hunter.config.JUDGE_ENABLED", False)
-    monkeypatch.setattr("hunter.config.ATS_VERDICT_MAX_REFINES", 0)
 
     def fake_run(cmd, **kw):
         sub = tmp_path / shadow.name
@@ -700,7 +699,6 @@ def test_set_shadow_persists_db(monkeypatch):
 
 
 def test_set_shadow_unknown_name_raises(monkeypatch):
-    import pytest
     with pytest.raises(ValueError, match="Unknown profile"):
         lp.set_shadow("no-such-model")
 

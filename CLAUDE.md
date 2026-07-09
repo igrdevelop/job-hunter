@@ -207,7 +207,7 @@ hunter/
     funnel.py               /funnel [days] — application funnel report (hunter.funnel)
     health.py               /health — per-source scraper yield report (source_health)
     llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
-    dual.py                 /dual [on|off] — toggle dual-apply A/B comparison (hunter.dual_apply)
+    dual.py                 /dual [on|off|shadow <name>] — toggle dual-apply A/B comparison + switch shadow profile (hunter.dual_apply)
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   schedules/                One file per JobQueue callback
     hunt.py                 scheduled_hunt
@@ -313,7 +313,7 @@ Applications/               Generated documents (gitignored)
 | `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` wins over this env fallback — set it at runtime via `/dual shadow <name>` in Telegram (e.g. `/dual shadow deepseek-v4-pro`). Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (for `sonnet` profile + judge) |
-| `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`) |
+| `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`, `deepseek-v4-pro`, `glm-5.2`) |
 | `OPENAI_API_KEY` | — | OpenAI key (for `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`) |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
 | `JUDGE_ENABLED` | `true` | Run the LLM-as-judge CV verification pass |

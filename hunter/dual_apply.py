@@ -301,7 +301,9 @@ def _generate_shadow(
         except Exception as e:
             print(f"[dual] could not write judge_report.json: {e}")
 
-    # Render docs — shadow run, so NO tracker row.
+    # Render docs — shadow run, so NO tracker row. _run_gen is the single
+    # render invocation, shared with the refine loop's regen callback below
+    # so the two can't drift (same cwd/encoding/timeout).
     gen_cmd = build_generate_docs_cmd(
         generate_docs_script=GENERATE_DOCS_PATH,
         content_json_path=content_path,
@@ -310,8 +312,9 @@ def _generate_shadow(
         python_executable=sys.executable,
         no_tracker=True,
     )
-    try:
-        result = subprocess.run(
+
+    def _run_gen() -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(
             gen_cmd,
             cwd=str(PROJECT_DIR),
             capture_output=True,
@@ -320,6 +323,9 @@ def _generate_shadow(
             errors="replace",
             timeout=120,
         )
+
+    try:
+        result = _run_gen()
         if result.stdout:
             print(result.stdout)
         if result.stderr:
@@ -359,15 +365,7 @@ def _generate_shadow(
                 from hunter.verdict_refine import refine_loop
 
                 def _regen_shadow(_folder: Path) -> None:
-                    subprocess.run(
-                        gen_cmd,
-                        cwd=str(PROJECT_DIR),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=120,
-                    )
+                    _run_gen()
 
                 content, verdict = refine_loop(
                     content, job_text, base_cv, sub, verdict,
