@@ -29,9 +29,15 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://bulldogjob.com"
 
+# /order,published,desc: without it the listing uses Bulldogjob's default
+# (relevance/promoted) order, which pins sponsored offers above fresh ones and
+# can push a new posting out of the first page entirely. Live-verified
+# 2026-07-10: the segment is echoed into __NEXT_DATA__ as
+# order={"field":"PUBLISHED","direction":"DESC"} and reorders the main job
+# block strictly newest-first (a trailing "recommended" block stays put).
 LISTING_URLS = [
-    f"{BASE}/companies/jobs/s/skills,Angular/experience,mid,senior",
-    f"{BASE}/companies/jobs/s/skills,Angular/experience,mid,senior/remote,true",
+    f"{BASE}/companies/jobs/s/skills,Angular/experience,mid,senior/order,published,desc",
+    f"{BASE}/companies/jobs/s/skills,Angular/experience,mid,senior/remote,true/order,published,desc",
 ]
 
 HEADERS = {
