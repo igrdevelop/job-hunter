@@ -675,6 +675,11 @@ def main_cli(
         except Exception as e:
             print(f"[apply_agent] Warning: could not stamp verdict/cost on content.json: {e}")
 
+        # Outreach draft (issue #138): same hook as apply_api Step 7.8 —
+        # outreach.md next to the CV, best-effort, never fails the apply.
+        from hunter.outreach import run_outreach
+        run_outreach(folder_path, url)
+
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
         if created_files:
             file_names = "\n".join(f"  • {f.name}" for f in sorted(created_files))

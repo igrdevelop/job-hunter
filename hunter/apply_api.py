@@ -887,6 +887,13 @@ def _run_main_api(
         except Exception as e:
             print(f"[apply_agent] Warning: ATS verdict failed (continuing): {e}")
 
+    # Step 7.8 — Outreach draft (issue #138): outreach.md with the recruiter
+    # contact parsed from the posting + a ready-to-paste message, written next
+    # to the CV so it rides the Drive folder upload. Best-effort — run_outreach
+    # never raises and must never fail/delay the apply.
+    from hunter.outreach import run_outreach
+    run_outreach(output_folder, url)
+
     # Step 8 — Notify success (cost was already priced + persisted in Step 6.5).
     created_files = list(output_folder.glob("*.docx")) + list(output_folder.glob("*.pdf"))
     if created_files:

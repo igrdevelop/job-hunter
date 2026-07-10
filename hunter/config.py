@@ -54,6 +54,12 @@ JUDGE_API_KEY: str = (
     or LLM_API_KEY  # last resort: if only one key is configured
 )
 
+# ── Outreach draft after each successful apply (issue #138) ──────────────────
+# Writes outreach.md (recruiter contact parsed from the posting + a ≤300-char
+# ready-to-paste LinkedIn message) into the application folder next to the CV.
+# Best-effort, one JUDGE_MODEL call; the bot never sends anything itself.
+OUTREACH_ENABLED: bool = os.getenv("OUTREACH_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # ── PL/EN translation calls (docs/LLM_COST_REDUCTION_PLAN.md M5) ─────────────
 # _translate_resume / _translate_plain (hunter.apply_shared) do mechanical
 # PL<->EN translation — a Haiku-tier task, not a $15/M-output Sonnet one. The
