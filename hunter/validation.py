@@ -3,6 +3,27 @@ import re
 
 MIN_JOB_TEXT_LEN = 300  # P-2.2: raised from 200 — real postings are rarely <300 chars
 
+# LinkedIn Scout relay jobs carry a synthetic dedup-key URL (see
+# hunter/sources/linkedin_scout_relay.URL_PREFIX — a drift-guard test asserts
+# the two stay consistent). Defined here rather than imported: validation must
+# stay a leaf module, and tracker.py also needs this marker without pulling in
+# the whole hunter.sources package. No trailing slash: normalize_url() strips
+# it, and pre-#144 rows in prod are stored as the bare collapsed form.
+SCOUT_POSTS_URL_MARKER = "linkedin.com/scout-posts"
+
+# Scout feed posts are legitimately short ("We're hiring an Angular dev — DM
+# me") and already passed is_hiring_post() heuristics on the owner's desktop;
+# the 300-char floor calibrated for scraped board postings would silently
+# reject most of them.
+MIN_SCOUT_TEXT_LEN = 80
+
+
+def min_job_text_len_for(url: str) -> int:
+    """Return the too-short floor for this apply: scout posts get a lower one."""
+    if SCOUT_POSTS_URL_MARKER in (url or ""):
+        return MIN_SCOUT_TEXT_LEN
+    return MIN_JOB_TEXT_LEN
+
 _BOGUS_NAMES: frozenset[str] = frozenset({
     "unknown",
     "unknowncompany",

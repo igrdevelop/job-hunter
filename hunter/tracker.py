@@ -29,6 +29,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
 from hunter.models import Job
+from hunter.validation import SCOUT_POSTS_URL_MARKER
 
 # ── Module-level DB path — override in tests via monkeypatch ──────────────────
 DB_PATH: Path = TRACKER_DB_PATH
@@ -411,6 +412,10 @@ def get_failed_jobs() -> list[Job]:
 
     Excluded:
     - paste://no-url rows (no URL → apply_agent can't fetch the posting)
+    - LinkedIn Scout relay rows (synthetic dedup-key URL; the retry rebuilds a
+      bare Job without raw["post_text"], so fetching the URL raises by design —
+      every retry is guaranteed to fail. The scout relays the post again if it
+      is still live, so dropping the retry loses nothing.)
     - rows with fail_count >= MAX_FAIL_RETRIES (gave up after N attempts)
     """
     with get_db(DB_PATH) as conn:
@@ -430,6 +435,7 @@ def get_failed_jobs() -> list[Job]:
         for r in rows
         if r["url"]
         and r["url"] != _PASTE_NO_URL
+        and SCOUT_POSTS_URL_MARKER not in r["url"]
         and (r["fail_count"] or 0) < MAX_FAIL_RETRIES
     ]
 

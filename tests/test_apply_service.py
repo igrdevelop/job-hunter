@@ -291,7 +291,7 @@ def test_run_apply_agent_subprocess_uses_paste_file_when_post_text_present(monke
     )
 
     job = _job_with_paste_text(
-        "https://linkedin.com/scout-posts/#pabc", "We're hiring an Angular Developer."
+        "https://linkedin.com/scout-posts/pabc", "We're hiring an Angular Developer."
     )
     result = asyncio.run(
         run_apply_agent_subprocess(
@@ -325,7 +325,7 @@ def test_run_apply_agent_subprocess_paste_file_contains_post_text(monkeypatch) -
     )
 
     job = _job_with_paste_text(
-        "https://linkedin.com/scout-posts/#pxyz", "We're hiring an Angular Developer, remote."
+        "https://linkedin.com/scout-posts/pxyz", "We're hiring an Angular Developer, remote."
     )
     asyncio.run(
         run_apply_agent_subprocess(
