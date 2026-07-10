@@ -211,13 +211,16 @@ def _run_main_api(
             print(f"[apply_agent] FETCH ERROR: {e}")
             sys.exit(1)
 
-    # Step 1.5a — Abort if fetched text is too short
-    from hunter.validation import is_job_text_too_short
-    if is_job_text_too_short(job_text):
-        from hunter.validation import MIN_JOB_TEXT_LEN
+    # Step 1.5a — Abort if fetched text is too short. Scout relay posts get a
+    # lower floor: a real LinkedIn hiring post is often <300 chars and already
+    # passed is_hiring_post() heuristics (min_job_text_len_for dispatches on
+    # the synthetic scout URL).
+    from hunter.validation import is_job_text_too_short, min_job_text_len_for
+    _min_len = min_job_text_len_for(url)
+    if is_job_text_too_short(job_text, _min_len):
         notify(
             f"⚠️ <b>Job text too short — skipped</b>\n"
-            f"Got {len((job_text or '').strip())} chars (min {MIN_JOB_TEXT_LEN}).\n🔗 {url}"
+            f"Got {len((job_text or '').strip())} chars (min {_min_len}).\n🔗 {url}"
         )
         print(f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}")
         sys.exit(0)

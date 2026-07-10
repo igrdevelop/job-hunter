@@ -67,7 +67,11 @@ QUEUE_PATH = PROJECT_DIR / "linkedin_scout" / "pending_candidates.json"
 # Synthetic URL prefix — a dedup key for tracker.db, not a real navigable
 # LinkedIn URL. Distinctive enough to never collide with a real linkedin.com
 # URL, so it needs no special precedence handling in the fetch dispatcher.
-URL_PREFIX = "https://linkedin.com/scout-posts/#p"
+# The per-post hash MUST live in the path, not the fragment: normalize_url()
+# strips fragments, and a fragment-based key made every scout job normalize
+# to the same url_norm — dedup then dropped every candidate after the first
+# (issue #144).
+URL_PREFIX = "https://linkedin.com/scout-posts/p"
 
 # Guards QUEUE_PATH read/append/clear against the append (called from the
 # async /scoutfound command handler, via asyncio.to_thread) racing the drain

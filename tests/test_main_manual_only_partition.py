@@ -33,7 +33,7 @@ def _run(coro):
 
 
 def test_manual_only_job_gets_card_even_under_auto_apply(tracker_db) -> None:
-    manual_job = _make_job("Deloitte", "[LI post] hiring", "https://linkedin.com/scout-posts/#pabc", "linkedin_scout_relay")
+    manual_job = _make_job("Deloitte", "[LI post] hiring", "https://linkedin.com/scout-posts/pabc", "linkedin_scout_relay")
     auto_job = _make_job("Acme", "Angular Dev", "https://justjoin.it/job-offer/acme", "justjoin")
 
     captured_cards: list[list[Job]] = []
@@ -79,7 +79,7 @@ def test_manual_only_job_gets_card_even_under_auto_apply(tracker_db) -> None:
 
 
 def test_all_manual_only_jobs_skip_auto_apply_entirely(tracker_db) -> None:
-    manual_job = _make_job("Deloitte", "[LI post] hiring", "https://linkedin.com/scout-posts/#pxyz", "linkedin_scout_relay")
+    manual_job = _make_job("Deloitte", "[LI post] hiring", "https://linkedin.com/scout-posts/pxyz", "linkedin_scout_relay")
 
     captured_cards: list[list[Job]] = []
     auto_apply_called = []

@@ -19,7 +19,7 @@ def _job(**raw_overrides) -> Job:
         company="Acme",
         location="Remote",
         salary=None,
-        url="https://linkedin.com/scout-posts/#pabc123",
+        url="https://linkedin.com/scout-posts/pabc123",
         source="linkedin_scout_relay",
         raw={"post_text": "We're hiring", **raw_overrides},
     )

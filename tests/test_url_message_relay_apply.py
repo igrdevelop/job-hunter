@@ -40,7 +40,7 @@ def test_relay_job_apply_uses_paste_file(tmp_path):
         company="Deloitte",
         location="",
         salary=None,
-        url="https://linkedin.com/scout-posts/#pabc123",
+        url="https://linkedin.com/scout-posts/pabc123",
         source="linkedin_scout_relay",
         raw={"post_text": "We're hiring an Angular Developer, remote."},
     )
