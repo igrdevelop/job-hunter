@@ -333,7 +333,7 @@ Applications/               Generated documents (gitignored)
 | `DOOMED_GATE_HARD_ACTION` | `skip` | `skip` aborts generation on a HARD finding; `warn` is an emergency lever to downgrade every HARD finding to a warning without disabling the gate entirely (e.g. if live-data precision turns out worse than calibration). |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
-| `MAX_JOBS_PER_RUN` | `10` | Cap per hunt cycle |
+| `MAX_JOBS_PER_RUN` | `40` | Cap per hunt cycle (auto-apply only, applied after filter+dedup; raised 20→40 2026-07-10 — a lower value in the prod `.env` overrides this default) |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
 | `DUAL_SHADOW_TIMEOUT_SEC` | `1800` | Hard wall-clock cap for the detached dual-apply shadow run (its own watchdog; independent of the primary timeout). Raised from 900 when the shadow gained the judge + verdict-refine stages (2026-07-09). |
