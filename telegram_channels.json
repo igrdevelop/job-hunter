@@ -1,0 +1,27 @@
+[
+  {
+    "channel": "findmyremote_frontend",
+    "kind": "board",
+    "note": "frontend aggregator, daily posts, outbound links to findmyremote.ai"
+  },
+  {
+    "channel": "rabotafrontend",
+    "kind": "board",
+    "note": "frontend-specific, RU-language"
+  },
+  {
+    "channel": "IT_job_Poland",
+    "kind": "board",
+    "note": "PL-market mixed bag, occasional FE"
+  },
+  {
+    "channel": "Remoteit",
+    "kind": "board",
+    "note": "RU remote experiment — prune if 0 after 2-3 weeks"
+  },
+  {
+    "channel": "it_vakansii_jobs",
+    "kind": "board",
+    "note": "RU general experiment — prune if 0"
+  }
+]

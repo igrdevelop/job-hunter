@@ -517,6 +517,19 @@ LINKEDIN_SCOUT_RELAY_ENABLED: bool = os.getenv("LINKEDIN_SCOUT_RELAY_ENABLED", "
     "true", "1", "yes",
 )
 
+# ── Telegram channels source config ──────────────────────────────────────────
+# Reads public t.me/s/{channel} previews (no auth, no MTProto) for an
+# owner-curated channel list. See docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md +
+# hunter/sources/telegram_channels.py.
+TELEGRAM_CHANNELS_ENABLED: bool = os.getenv("TELEGRAM_CHANNELS_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+TELEGRAM_CHANNELS_FILE: Path = Path(
+    os.getenv("TELEGRAM_CHANNELS_FILE", str(PROJECT_DIR / "telegram_channels.json"))
+)
+# Polite pause between per-channel fetches (5 channels x 3 cycles/day is negligible).
+TELEGRAM_CHANNELS_DELAY_SEC: float = float(os.getenv("TELEGRAM_CHANNELS_DELAY_SEC", "1.5"))
+
 # ── Gmail source config ───────────────────────────────────────────────────────
 # Reads job alert emails from LinkedIn, NoFluffJobs, JustJoin, Bulldogjob, Pracuj.
 # Requires one-time setup: python tools/gmail_auth.py
