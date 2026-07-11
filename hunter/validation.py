@@ -17,10 +17,19 @@ SCOUT_POSTS_URL_MARKER = "linkedin.com/scout-posts"
 # reject most of them.
 MIN_SCOUT_TEXT_LEN = 80
 
+# Telegram channel posts fetched via our own t.me permalink (see
+# hunter/sources/telegram_channels.py) are legitimately short board-style
+# listings ("Senior Frontend @ Company | Remote | <link>") — same issue as
+# scout posts (#143). External-link jobs from this source use the linked
+# board's own URL (not t.me), so they keep the normal 300-char floor
+# automatically. No trailing slash, same reasoning as SCOUT_POSTS_URL_MARKER.
+TELEGRAM_POST_URL_MARKER = "//t.me/"
+
 
 def min_job_text_len_for(url: str) -> int:
-    """Return the too-short floor for this apply: scout posts get a lower one."""
-    if SCOUT_POSTS_URL_MARKER in (url or ""):
+    """Return the too-short floor for this apply: scout/telegram posts get a lower one."""
+    u = url or ""
+    if SCOUT_POSTS_URL_MARKER in u or TELEGRAM_POST_URL_MARKER in u:
         return MIN_SCOUT_TEXT_LEN
     return MIN_JOB_TEXT_LEN
 

@@ -24,6 +24,23 @@ Signal strength:
   - SOFT    (Polish inflectional suffix on a non-tech token): enough to TRIGGER a
             repair pass, but never to block on its own (avoids false positives on
             the rare English word with a Polish-looking ending).
+
+Cyrillic guard (docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md §2.7, M3): the Telegram
+channels source (hunter/sources/telegram_channels.py) can surface RU-language
+postings. The ATS keyword loop mirrors posting keywords verbatim into
+resume_en, and — before this guard — nothing here looked for Cyrillic, so a
+RU posting's keywords injected into `resume_en` would pass every gate. Any
+Cyrillic codepoint in an `_en`/`_pl` field is always contamination (no
+legitimate Cyrillic ever belongs in either) — no allowlist needed, unlike the
+Polish-diacritics detector which must exempt tech terms and place names.
+Cyrillic hits are folded into the existing `en_strong` / `pl_english` buckets
+so `enforce_language_separation` (hunter/apply_shared.py) repairs/blocks them
+through its existing scan/repair/block shape with zero changes there.
+
+Note: `detect_posting_language` only distinguishes PL/EN — a RU posting
+detects as EN and produces EN docs. That is correct (an EN CV is the right
+artifact; this project does not generate RU CVs) — this guard exists to keep
+Cyrillic OUT of that EN CV, not to add RU routing.
 """
 
 from __future__ import annotations
@@ -212,6 +229,28 @@ def english_prose_fragments(text: str) -> list[str]:
     return hits
 
 
+_CYRILLIC_WORD_RE = re.compile(r"[Ѐ-ӿ][\w\-]*", re.UNICODE)
+
+
+def cyrillic_fragments(text: str) -> list[str]:
+    """Return distinct Cyrillic tokens found in `text` (deduped, in order).
+
+    Cyrillic never legitimately belongs in an `_en`/`_pl` field — no allowlist
+    needed, unlike `polish_fragments`, which must exempt tech terms and place
+    names that carry Polish diacritics.
+    """
+    if not text or not isinstance(text, str):
+        return []
+    hits: list[str] = []
+    seen: set[str] = set()
+    for tok in _CYRILLIC_WORD_RE.findall(text):
+        key = tok.lower()
+        if key not in seen:
+            seen.add(key)
+            hits.append(tok)
+    return hits
+
+
 def detect_posting_language(job_text: str) -> str:
     """Return "PL" or "EN" for a job posting, by Polish-token density.
 
@@ -294,6 +333,12 @@ def scan_content(content: dict) -> dict:
 
     for path, text in _iter_en_strings(content):
         strong = polish_fragments(text, soft=False)
+        cyr = cyrillic_fragments(text)
+        if cyr:
+            # Cyrillic is always a strong (block-worthy) signal — fold into the
+            # same bucket the Polish-in-English detector uses so the enforce-
+            # gate's repair/block logic needs zero changes for this case.
+            strong = strong + [f for f in cyr if f not in strong]
         if strong:
             en_strong[path] = strong
         soft = polish_fragments(text, soft=True)
@@ -304,8 +349,13 @@ def scan_content(content: dict) -> dict:
 
     for path, text in _iter_pl_strings(content):
         eng = english_prose_fragments(text)
-        if len(eng) >= 3:  # a few stray anglicisms are fine; prose = contamination
-            pl_english[path] = eng
+        cyr = cyrillic_fragments(text)
+        frags = eng if len(eng) >= 3 else []  # a few stray anglicisms are fine
+        if cyr:
+            # Unlike stray anglicisms, even one Cyrillic token is contamination.
+            frags = frags + [f for f in cyr if f not in frags]
+        if frags:
+            pl_english[path] = frags
 
     return {"en_strong": en_strong, "en_soft": en_soft, "pl_english": pl_english}
 

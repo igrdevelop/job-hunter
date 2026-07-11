@@ -22,6 +22,7 @@ from hunter.config import (
     ATS_AGGREGATOR_ENABLED,
     GMAIL_ENABLED,
     LINKEDIN_SCOUT_RELAY_ENABLED,
+    TELEGRAM_CHANNELS_ENABLED,
 )
 
 # Registry — add new sources here as you build them
@@ -119,6 +120,10 @@ if LINKEDIN_SCOUT_RELAY_ENABLED:
     from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource
     ALL_SOURCES.append(LinkedInScoutRelaySource())
 
+if TELEGRAM_CHANNELS_ENABLED:
+    from hunter.sources.telegram_channels import TelegramChannelsSource
+    ALL_SOURCES.append(TelegramChannelsSource())
+
 
 # ── Detail-page dispatch ─────────────────────────────────────────────────────
 
@@ -162,6 +167,7 @@ def _fetch_roster() -> list:
     from hunter.sources.builtin import BuiltInSource
     from hunter.sources.justremote import JustRemoteSource
     from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource
+    from hunter.sources.telegram_channels import TelegramChannelsSource
 
     _FETCH_ROSTER = [
         JustJoinSource(),
@@ -186,6 +192,7 @@ def _fetch_roster() -> list:
         RemoteleafSource(),
         AtsAggregatorSource(),
         LinkedInScoutRelaySource(),
+        TelegramChannelsSource(),
     ]
     return _FETCH_ROSTER
 

@@ -89,7 +89,7 @@ With 21 sources, a full cycle spans ~12 hours from the base time.
 
 ---
 
-## Job Sources (22 active)
+## Job Sources (23 active)
 
 | Source | Module | Strategy | Notes |
 |--------|--------|----------|-------|
@@ -116,6 +116,7 @@ With 21 sources, a full cycle spans ~12 hours from the base time.
 | ATS Aggregator | ats_aggregator.py | Per-company ATS APIs | Workable/Greenhouse/Lever/Recruitee/Ashby |
 | Gmail | gmail.py | Gmail API email alerts | Parses LinkedIn/NoFluff/JustJoin/Pracuj alerts |
 | LinkedIn Scout relay | linkedin_scout_relay.py | Drains a JSON queue file | No scraping — reads what the standalone `linkedin_scout/` script found; behaves like any other source (not `manual_only`), see below |
+| Telegram channels | telegram_channels.py | `t.me/s/{channel}` public preview HTML | No auth/MTProto; owner-curated `telegram_channels.json`; see "Telegram Channels Source" below |
 
 ---
 
@@ -230,10 +231,14 @@ hunter/
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
-  sources/                  21 scrapers (see table above) + per-site detail-page fetchers
+  sources/                  23 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
     __init__.py             ALL_SOURCES registry + fetch_job_text() URL dispatcher
     html_fallback.py        Generic HTML -> text fallback + clean_url() helper
+    telegram_channels.py    Telegram channels source: t.me/s/{channel} public preview
+                            parser (TgPost, br->newline, outbound-link extraction),
+                            EN/PL/RU prefilter, title synthesis, job assembly. See
+                            "Telegram Channels Source" below.
     text_utils.py           Shared helpers: strip_html() (HTML fragment -> plain text),
                             REMOTE_ANY + ensure_remote_token() (guarantee a "remote" token
                             survives the central location whitelist). Used by the JSON/RSS
@@ -297,6 +302,8 @@ linkedin_scout/             STANDALONE — not imported by hunter/, not in Docke
                             via Windows Task Scheduler. See "LinkedIn Posts Scout" section below +
                             linkedin_scout/README.md.
 
+telegram_channels.json      Owner-curated channel list for hunter/sources/telegram_channels.py
+                            (tracked — see docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md)
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -373,7 +380,11 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `JUSTREMOTE_ENABLED`, `REMOTEOK_ENABLED`, `HIMALAYAS_ENABLED`, `FOURDAYWEEK_ENABLED`,
 `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`,
 `LINKEDIN_SCOUT_RELAY_ENABLED` (default `true` — no scraping, just drains a JSON queue
-file the standalone `linkedin_scout/` script writes; see "LinkedIn Posts Scout" below).
+file the standalone `linkedin_scout/` script writes; see "LinkedIn Posts Scout" below),
+`TELEGRAM_CHANNELS_ENABLED` (default `true` — public `t.me/s/{channel}` preview, no
+auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FILE`
+(default `telegram_channels.json` in the repo root — owner-curated channel list) and
+`TELEGRAM_CHANNELS_DELAY_SEC` (default `1.5` — polite pause between per-channel fetches).
 
 ---
 
@@ -877,6 +888,79 @@ store directly) — fixed by re-seeding every run instead of "once ever". What i
 NOT verified: the actual live LinkedIn DOM shape and its anti-bot behavior — that
 requires a real run on the owner's own machine, which this repo cannot do.
 
+## Telegram Channels Source (`hunter/sources/telegram_channels.py`)
+
+23rd source, INSIDE the bot process/Docker image, on the normal staggered hunt
+schedule — unlike LinkedIn Scout above, this needs no session, no desktop
+component, no relay: `t.me/s/{channel}` is a plain public HTTP preview, no
+auth/login/MTProto. Mechanism inspired by
+https://github.com/strelov1/freehire (`docs/telegram-channels.md`), but the
+channel list is NOT copied — a live probe (docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md
+§1.2) found freehire's RU-market channels yield ≈0 relevant roles, while
+frontend/EU channels absent from their list (`findmyremote_frontend`) are the
+real source of Angular/frontend candidates. Their LLM-extraction step is also
+not copied — the doomed gate + generation LLM already read the full text; a
+separate extraction model changes no real decision (owner's standing rule
+against speculative LLM layers).
+
+**Channel config:** owner-curated `telegram_channels.json` (repo root,
+tracked): `[{"channel": "findmyremote_frontend", "kind": "board", "note":
+"..."}]`. `kind: "board"` = one vacancy per post (the source-level hiring-
+signal prefilter is skipped — every post is assumed relevant); `kind:
+"authored"` = editorial digest (hiring-signal prefilter still required).
+Judge starter channels by `/funnel` + `/health` over 2-3 weeks and prune
+freely — see the plan's §6/§9 for the current list + first-run yield data.
+
+**`job.url`:** the post's first outbound external link when present (cleaned
+via `html_fallback.clean_url`, dispatches through the normal
+`fetch_job_text()` roster — an aggregator post's outbound link to e.g. a
+NoFluffJobs/ATS page fetches through THAT source's own detail-page code, not
+this one). Falls back to the post's own stable permalink
+`https://t.me/{channel}/{msg_id}` for self-contained text posts, served by
+this source's own `fetch_text()` via the single-post embed page
+(`?embed=1&mode=tme`). The permalink is always kept in
+`job.raw["permalink"]`/`job.raw["tg_permalink"]` for convenience
+(`hunter/main.py::_auto_apply_all` already surfaces `raw["permalink"]`
+generically in the pre-apply Telegram notification) — **never**
+`job.raw["post_text"]`, which would wrongly reroute the apply through the
+scout-relay paste flow (`hunter/services/apply_service.py`); every job here
+has a real fetchable URL, so retries/expiry-checks work through the normal
+machinery, unlike `linkedin_scout_relay`.
+
+**Title synthesis:** the central filter (`hunter.filters.classify_job`)
+checks `job.title` only, and these posts have no title field — `title` =
+first non-empty text line (90-char cap), with the matched prefilter keyword
+appended if absent from that line, so a garbage-looking synthesized title
+(digest posts like "Hey job seekers! Check out a handful of remote
+front-end roles...") still carries a real keyword the central whitelist can
+see, without bypassing it.
+
+**Cyrillic guard** (`hunter/lang_guard.py::cyrillic_fragments`, M3, blocker
+before this source went live): the channel list includes RU boards, and the
+ATS keyword loop mirrors posting keywords verbatim into `resume_en` — any
+Cyrillic codepoint in an `_en`/`_pl` field is now always treated as strong
+contamination (no allowlist needed, unlike Polish detection), folded into
+`scan_content()`'s existing `en_strong`/`pl_english` buckets so
+`apply_shared.enforce_language_separation`'s repair/block logic needed zero
+changes. `detect_posting_language` still only distinguishes PL/EN — a RU
+posting correctly produces an EN CV (this project does not generate RU CVs);
+the guard only keeps Cyrillic OUT of that EN/PL CV.
+
+**Validation floor:** `hunter.validation.TELEGRAM_POST_URL_MARKER` ("//t.me/")
+gives `t.me` permalink jobs the same lower `MIN_SCOUT_TEXT_LEN=80` floor as
+scout posts (a real board-style Telegram post is legitimately short);
+external-link jobs keep the normal 300-char floor automatically since their
+URL isn't `t.me`.
+
+**M4 live-calibration findings** (docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md §9):
+a "pinned Deleted message" service post DOES carry a
+`tgme_widget_message_text` div (unlike a plain media-only post) and would
+have synthesized a garbage job title — real posts carry Telegram's own
+`service_message` CSS class regardless of text-div presence, which the
+parser now checks. Some channels' raw HTML double-encodes query-string
+ampersands (`&amp;amp;`) — BeautifulSoup only unescapes once, so links get a
+second `html.unescape()` pass.
+
 ## Git Workflow
 
 - **Active branch:** `develop` — all changes go here
@@ -1003,6 +1087,7 @@ apply_agent.py: 1473 → 194 lines. 61 new tests (903 + 13 = 916 total).
 | JobLeads | 2026-06 | PARTIAL | Listing OK (`data-testid="search-job-card"`, relative hrefs — re-verified 2026-06-15); detail pages Cloudflare-blocked → MANUAL flow. Note: server ignores `q=` param (generic results), so few survive the frontend filter |
 | ATS Aggregator | 2026-04 | OK | Workable/Greenhouse/Lever/Recruitee/Ashby |
 | Gmail | 2026-05 | OK | Gmail API alerts |
+| Telegram channels | 2026-07-11 | OK | Public `t.me/s/` preview, no auth. Live yield (5 starter channels, 100 posts): `findmyremote_frontend` 15/20 prefilter pass (primary source); `rabotafrontend` 10/20; `IT_job_Poland`/`Remoteit` 0/20 (RU-market, expected — matches freehire-list flip in the plan); `it_vakansii_jobs` 1/20 (one live false positive, a clickbait digest post — channel already flagged prune-candidate in `telegram_channels.json`). See docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md §9 |
 
 ---
 
@@ -1026,6 +1111,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-07-11 | sonnet | Telegram channels job source, M1-M5 (branch feat/telegram-channels-source, docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md, 22→23 sources). New `hunter/sources/telegram_channels.py`: reads public `t.me/s/{channel}` previews (no auth/MTProto, plain HTTP) for an owner-curated `telegram_channels.json` channel list — mechanism inspired by strelov1/freehire, channel list flipped after a live probe (freehire's RU-market channels ≈0 yield; `findmyremote_frontend`, absent from their list, is the real EU/frontend source). **M1**: `TgPost` parser (`.tgme_widget_message`/`.tgme_widget_message_text` blocks, `<br>`→newline, outbound-link extraction dropping t.me/telegram.me/telegra.ph-photo-wrapper/relative-hashtag links), EN/PL/RU prefilter (vendored — NOT imported from `linkedin_scout`, which is leaving the repo per docs/SCOUT_REPO_SPLIT_PLAN.md — central title/exclude keywords + candidate-side/spam negatives + hiring-signal required only for `kind: "authored"` channels), title synthesis (first line + matched-keyword append, 90-char cap — the central filter checks `job.title` only), job assembly (external link wins → `clean_url`, permalink fallback, `raw["permalink"]`/`raw["tg_permalink"]` — never `raw["post_text"]`, which would wrongly reroute through the scout-relay paste flow). **M2**: `fetch_text()` via the single-post embed page (`?embed=1&mode=tme`, raises on empty/deleted), `matches_url()` claims `t.me`/`telegram.me` hosts, registered in `ALL_SOURCES` (behind `TELEGRAM_CHANNELS_ENABLED`, default true) + `_fetch_roster()`; new `hunter.validation.TELEGRAM_POST_URL_MARKER` gives `t.me` permalink jobs the scout's `MIN_SCOUT_TEXT_LEN=80` floor (external-link jobs keep the normal 300 floor automatically). **M3**: new `hunter.lang_guard.cyrillic_fragments()` — any Cyrillic codepoint in an `_en`/`_pl` field is now always strong contamination (no allowlist needed, unlike Polish detection), folded into `scan_content()`'s existing `en_strong`/`pl_english` buckets so `apply_shared.enforce_language_separation`'s repair/block logic needed zero changes; shipped BEFORE the source went live per the plan (RU channels in the starter list would otherwise let posting keywords leak Cyrillic into `resume_en` via the ATS loop, past every existing gate). **M4** (live, read-only, dev machine): ran `search()` against all 5 starter channels (100 posts, 26 prefilter survivors, 23 approximate central-filter survivors via `filters.classify_job`) — found and fixed 2 real bugs the M1 fixtures didn't cover: a "pinned Deleted message" service post DOES carry a text div (unlike plain media-only posts) and synthesized a garbage title, now excluded via Telegram's own `service_message` CSS class; some channels double-encode `&amp;amp;` in outbound links, now fixed with a second `html.unescape()` pass. One live false positive (a clickbait digest post) left undisturbed per the plan's own guidance not to over-fit on one run. The one-shot real-apply-run step (plan §M4) was NOT performed — this dev worktree has neither `.env` API keys nor the gitignored `prompts/candidate_profile.md`; documented as an owner follow-up in the plan's §9, not faked. **M5**: this entry + sources/config/repo-layout tables + a new "Telegram Channels Source" CLAUDE.md section. 60 new tests across `test_telegram_channels_source.py` (49, M1/M2/M4) + `test_lang_guard_cyrillic.py` (11, M3), plus 2 roster-count fixups in `test_sources_dispatcher.py`; full suite (2087) green throughout; ruff/compileall clean after every milestone. |
 | 2026-07-11 | fable | Paste-flow UX fixes from the plavno.io owner report (branch claude/plavno-frontend-role-ab1dec). A pasted Telegram forward (Russian chat intro line + English posting) produced TWO garbage warnings both quoting the chat line as the "title", then died with an unactionable "apply_agent failed (no stderr)". Four root causes, four fixes: **(1) Title guess** (`hunter/filters.py::_guess_title_from_text`): the old "first meaningful line" rule turned conversational prose into the gate's title. A guessed line must now LOOK like a title — new `_TITLE_GUESS_ROLE_RE` (EN+PL role nouns: developer/engineer/programista/inżynier/… + explicit stack keywords), a sentence-punctuation veto (body prose like "Senior Angular/TypeScript experience; …change detection." never qualifies despite naming the stack), and a 10-candidate-line scan cap (a role noun deep in the body isn't a title). Calibration wins keep matching (".NET Developer (Angular)", "Software Engineer - QuantumBlack"); a miss stays safe by design (no guess = title checks find nothing). **(2) Double warning**: Step 1.5e (`screen_job_text`) and Step 1.5f (doomed gate) both run `assess_job_text` and both notified — every flagged paste warned twice with the same evidence. Step 1.5e now fires only when `DOOMED_GATE_ENABLED` is false (the gate's message is a superset: rule + evidence per finding), in BOTH pipelines. **(3) "(no stderr)"**: every apply_agent error path prints diagnostics to STDOUT before `sys.exit(1)` — `run_apply_agent_for_url`/`run_apply_agent_subprocess` only surfaced stderr, so both Telegram AND the prod log had nothing. Now falls back to the stdout tail when stderr is empty ("(no output)" only when both are). **(4) Silently dropped error notifications** — the likely reason the real failure cause never reached Telegram: `apply_shared.notify()` ignored the HTTP status, and Telegram 400-rejects the WHOLE message when interpolated content (e.g. llm_client's "Could not parse JSON… {raw[:500]}" with a stray `<`) breaks HTML parsing; `bot/notifications._tg_notify` likewise swallowed BadRequest. Both now resend once as plain text (own formatting tags stripped, content kept), and `bot/apply_runner.py` html-escapes the raw output tail it embeds in `<pre>` in the failure message. NOT changed: no deterministic company extraction on paste (the LLM does that later; the "didn't recognize the company" complaint was really the garbage guessed-title warnings, fixed by (1)); URL extraction stays text-only (the plavno link was a Telegram link-entity pointing at the company homepage — not the posting URL, wrong dedup key anyway). 16 new tests (title guess ×5, screen-suppression wiring ×4, stdout fallback ×3, notify/_tg_notify fallback + escape ×5); full suite 2045 green; ruff/compileall clean. |
 | 2026-07-10 | fable | Outreach draft after each successful apply — issue #138 PR 1 (branch feat/outreach-contact-draft). Context: almost no cold ATS application gets a human reply; the owner's decision is to attack sent→answered with a short personal message to the recruiter after every apply, drafted by the bot but ALWAYS sent manually by the owner. Deliberately rejected along the way (owner pushback, twice): any fit-scoring/gating of which applies deserve outreach (#137 closed — at a handful of applies/day everything that passed the filters gets outreach), and any Telegram/Sheets delivery or tracking column (`outreach.md` goes in the application folder next to the CV and rides the existing Drive upload; success metric is answer-rate before/after over existing columns, evaluated ad hoc). **New `hunter/contact_extract.py`** (deterministic, $0): labeled-name patterns PL/EN (`Kontakt:`/`Recruiter:`/`Osoba kontaktowa:`/`Aplikuj do`…), signature blocks (name line over a recruiting-role line), emails (legal/noreply mailboxes skipped; an email whose local part echoes a found name attaches to that contact, diacritics folded), conservative phones (`+`-prefixed or tel-labeled only — bare digit groups collide with salary ranges), cap 3 contacts. Precision over recall throughout; two regex subtleties worth remembering: name-token separator must be horizontal-only (`[ \t]+`, else the match swallows the newline and the next line's first word becomes a "surname"), and the name capture group needs `(?-i:…)` inside the IGNORECASE label regexes (else "do"/"and" qualify as name tokens and "…IT Recruiter\nAntal Sp. z o.o." yields a false "Antal Sp" contact). **New `hunter/outreach.py`**: `run_outreach(folder, url)` — reads job_posting.txt + content.json from the folder itself (so both pipelines wire identically), one `JUDGE_*` (Haiku-tier) call drafts the ≤300-char message (LinkedIn connection-note limit, enforced post-hoc with word-boundary trim) in the posting's language (+EN version when PL), grounded ONLY in the already-judged content.json (summary+skills — no fresh fabrication surface); renders outreach.md with contact block (incl. evidence quote per contact) + message(s) + "bot never sends" footer. Degradation matrix: LLM fails → file still written with contacts + "Draft failed" note; no contacts → file with message + search-LinkedIn hint; both missing → no file; no content.json → no LLM call (nothing grounded to say), contacts only. Wired as Step 7.8 in `apply_api` (before the success notify) and the same spot in `apply_cli`; `run_outreach` never raises (best-effort contract, same as Drive/Sheets). Dual-apply shadows are naturally excluded (they don't run these pipelines' tail). New `OUTREACH_ENABLED` config (default true) + .env.example block. 36 new tests (contact_extract ×20, outreach ×16 incl. degradation paths + 2 source-inspection wiring tests). **Caveat:** the contact parser is calibrated on synthetic fixtures only — this dev worktree's `Applications/` is empty; a calibration pass over the real prod corpus (per the issue) is still pending and may tighten/loosen patterns. PR 2 (web-search fallback when the posting names nobody) not started. Full suite 2022 green; ruff/compileall clean. |
 | 2026-07-10 | fable | Scout relay bug fixes #142/#143/#144 (branch fix/scout-relay-retry-minlen). All three blocked the LinkedIn Scout relay from actually delivering candidates to generation. **#144 (found while writing tests for the other two, worst of the three):** `linkedin_scout_relay.URL_PREFIX` kept the per-post hash in the URL *fragment* (`.../scout-posts/#p<hash>`) — `tracker.normalize_url()` strips fragments, so EVERY scout job normalized to the same `https://linkedin.com/scout-posts`: after the first tracked scout candidate, every later one was a URL-duplicate (silently dropped by hunt-loop dedup, forever), and post-hoc URL stamps (`set_ats_verdict`/`set_cost`/`set_to_learn`) hit all scout rows at once. Fixed by moving the hash into the path (`.../scout-posts/p<hash>` — survives normalization; host unchanged so fetch-roster/matches_url behavior is identical); no migration — old collapsed rows just never match new keys. **#142:** `tracker.get_failed_jobs()` only excluded the `paste://no-url` sentinel, so a FAILed scout job was retried as a bare Job WITHOUT `raw["post_text"]` — `fetch_text()` raises by design, every retry was guaranteed to fail and re-increment fail_count. Now excluded via new `hunter.validation.SCOUT_POSTS_URL_MARKER` (defined in validation, NOT imported from the relay module, so tracker.py doesn't pull the whole `hunter.sources` package; a drift-guard test pins marker⊂URL_PREFIX; marker has no trailing slash so pre-#144 collapsed rows match too). The FAIL row itself is kept for dedup — only the retry loop skips it; the scout re-relays a still-live post on its own. **#143:** the `MIN_JOB_TEXT_LEN=300` too-short abort (calibrated for scraped board postings) silently rejected most real scout posts (a typical LinkedIn hiring post is well under 300 chars, and it already passed `is_hiring_post()`): new `MIN_SCOUT_TEXT_LEN=80` + `validation.min_job_text_len_for(url)` dispatching on the scout URL marker, wired into apply_api Step 1.5a; fetched postings keep the 300 floor. 13 new tests (test_scout_relay_apply_fixes.py) incl. normalize-distinctly + second-candidate-not-deduped regressions for #144 and a legacy-collapsed-row exclusion for #142; updated the old `#p` URL literals in 4 test files + this doc. Full suite 1986 green; ruff/compileall clean. |
