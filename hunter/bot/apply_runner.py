@@ -8,6 +8,7 @@ Functions:
 """
 
 import asyncio
+import html
 import logging
 import sys
 import tempfile
@@ -51,7 +52,9 @@ async def _run_apply_agent(
         )
         if outcome == "fail":
             logger.error("[apply_agent] failed for %s", label)
-            err_block = f"\n\n<pre>{error_detail[:800]}</pre>" if error_detail else ""
+            # error_detail is a raw stderr/stdout tail — escape it or a stray
+            # `<` makes Telegram reject the whole failure message (HTML parse).
+            err_block = f"\n\n<pre>{html.escape(error_detail[:800])}</pre>" if error_detail else ""
             await _tg_notify(f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}")
         else:
             logger.info("[apply_agent] done (%s) for %s", outcome, label)

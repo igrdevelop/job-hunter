@@ -356,3 +356,53 @@ def test_run_apply_agent_subprocess_no_paste_file_for_normal_job(monkeypatch) ->
     )
 
     assert "--paste-file" not in captured_cmds[0]
+
+
+# ── run_apply_agent_for_url failure detail (owner report 2026-07-11) ──────────
+# apply_agent prints its diagnostics to STDOUT ("[apply_agent] LLM ERROR: …")
+# before sys.exit(1); stderr is usually empty on those paths. The Telegram
+# failure message used to show an unactionable "(no stderr)".
+
+def _run_for_url(monkeypatch, proc: "_FakeProc"):
+    from hunter.services.apply_service import run_apply_agent_for_url
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return proc
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    return asyncio.run(
+        run_apply_agent_for_url(
+            url="https://example.com/jobs/7",
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+
+
+def test_run_apply_agent_for_url_falls_back_to_stdout_on_empty_stderr(monkeypatch) -> None:
+    outcome, detail = _run_for_url(
+        monkeypatch,
+        _FakeProc(returncode=1, stdout=b"[apply_agent] LLM ERROR: boom\n", stderr=b""),
+    )
+    assert outcome == "fail"
+    assert "LLM ERROR: boom" in detail
+    assert "(no stderr)" not in detail
+
+
+def test_run_apply_agent_for_url_prefers_stderr_when_present(monkeypatch) -> None:
+    outcome, detail = _run_for_url(
+        monkeypatch,
+        _FakeProc(returncode=1, stdout=b"stdout noise", stderr=b"Traceback: real error"),
+    )
+    assert outcome == "fail"
+    assert detail == "Traceback: real error"
+
+
+def test_run_apply_agent_for_url_reports_no_output_when_both_streams_empty(monkeypatch) -> None:
+    outcome, detail = _run_for_url(monkeypatch, _FakeProc(returncode=1))
+    assert outcome == "fail"
+    assert detail == "(no output)"

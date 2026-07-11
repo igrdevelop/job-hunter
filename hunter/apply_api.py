@@ -267,19 +267,25 @@ def _run_main_api(
     # hunt-time filter, so re-run the body-level gates against the fetched text and
     # warn (without aborting) if the posting would normally have been filtered out.
     # Hunt/AUTO jobs already passed these gates, so this only fires on manual input.
-    try:
-        from hunter.filters import screen_job_text
-        screen_reason = screen_job_text(job_text)
-        if screen_reason:
-            notify(
-                f"⚠️ <b>Heads-up — this posting would normally be filtered</b>\n"
-                f"Reason: {screen_reason}\n"
-                f"🔗 {url}\n\n"
-                f"Generating documents anyway (manual override)…"
-            )
-            print(f"[apply_agent] WARN (manual screen) — {screen_reason}: {url}")
-    except Exception as e:  # noqa: BLE001 — best-effort, never block apply
-        print(f"[apply_agent] Warning: manual screen failed: {e}")
+    # Skipped when the doomed gate (Step 1.5f below) is enabled: the gate re-runs
+    # the same assess_job_text and reports EVERY finding with its rule name, so
+    # this coarser reason-only message duplicated it — every flagged paste warned
+    # twice with the same evidence (owner report 2026-07-11).
+    from hunter.config import DOOMED_GATE_ENABLED as _doomed_gate_on
+    if not _doomed_gate_on:
+        try:
+            from hunter.filters import screen_job_text
+            screen_reason = screen_job_text(job_text)
+            if screen_reason:
+                notify(
+                    f"⚠️ <b>Heads-up — this posting would normally be filtered</b>\n"
+                    f"Reason: {screen_reason}\n"
+                    f"🔗 {url}\n\n"
+                    f"Generating documents anyway (manual override)…"
+                )
+                print(f"[apply_agent] WARN (manual screen) — {screen_reason}: {url}")
+        except Exception as e:  # noqa: BLE001 — best-effort, never block apply
+            print(f"[apply_agent] Warning: manual screen failed: {e}")
 
     # Step 1.5f — Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md +
     # docs/DOOMED_GATE_PASTE_PLAN.md). Deterministic full-text screen that can

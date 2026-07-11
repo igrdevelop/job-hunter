@@ -249,6 +249,44 @@ def test_api_pipeline_passes_force_override_false_for_normal_hunt_job(monkeypatc
     assert calls["is_force_override"] is False
 
 
+def test_api_pipeline_suppresses_manual_screen_warn_when_gate_enabled(monkeypatch) -> None:
+    """Owner report 2026-07-11: Step 1.5e and the doomed gate both run
+    assess_job_text, so every flagged paste warned TWICE with the same
+    evidence. With the gate enabled, the coarser Step 1.5e message must not
+    be sent — the gate's own warning (rule + evidence) covers it."""
+    _patch_api_pre_gate(monkeypatch)
+    monkeypatch.setattr("hunter.filters.screen_job_text", lambda text: "some reason")
+    monkeypatch.setattr("hunter.apply_api.run_doomed_gate", lambda *a, **kw: True)
+
+    from hunter.apply_api import main_api
+    with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
+         patch("hunter.apply_api.notify") as mock_notify:
+        main_api("https://example.com/api-screen-dup")
+
+    assert not any(
+        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
+    )
+
+
+def test_api_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) -> None:
+    """With the doomed gate off, Step 1.5e is the only manual-paste warning
+    left and must keep firing."""
+    _patch_api_pre_gate(monkeypatch)
+    monkeypatch.setattr("hunter.filters.screen_job_text", lambda text: "some reason")
+    # Gate disabled → returns False; abort at Step 2 via bogus PROMPTS_DIR.
+    monkeypatch.setattr("hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts"))
+
+    from hunter.apply_api import main_api
+    with patch("hunter.config.DOOMED_GATE_ENABLED", False), \
+         patch("hunter.apply_api.notify") as mock_notify:
+        with pytest.raises(SystemExit):
+            main_api("https://example.com/api-screen-solo")
+
+    assert any(
+        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
+    )
+
+
 def test_api_pipeline_gate_runs_after_manual_screen_source_order() -> None:
     """Source-position guard (repo precedent, see test_apply_api.py): Step 1.5f
     must sit after the Step 1.5e manual-screen block and before Step 2 (prompt
@@ -346,6 +384,43 @@ def test_cli_pipeline_passes_force_override_true_for_skip_dedup(monkeypatch) -> 
         main_cli("paste://no-url", paste_text="Pasted job text " * 20, skip_dedup=True)
 
     assert calls["is_force_override"] is True
+
+
+def test_cli_pipeline_suppresses_manual_screen_warn_when_gate_enabled(monkeypatch) -> None:
+    """Mirror of the apply_api test — the CLI pipeline had the same duplicate
+    warning (owner report 2026-07-11)."""
+    _patch_cli_pre_gate(monkeypatch)
+    monkeypatch.setattr("hunter.filters.screen_job_text", lambda text: "some reason")
+    monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", lambda *a, **kw: True)
+
+    from hunter.apply_cli import main_cli
+    with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
+         patch("hunter.apply_cli.notify") as mock_notify:
+        main_cli("paste://no-url", paste_text="Pasted job text " * 20)
+
+    assert not any(
+        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
+    )
+
+
+def test_cli_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) -> None:
+    _patch_cli_pre_gate(monkeypatch)
+    monkeypatch.setattr("hunter.filters.screen_job_text", lambda text: "some reason")
+
+    def _stop(*a, **kw):
+        raise RuntimeError("stop here — screen already ran")
+
+    monkeypatch.setattr("subprocess.run", _stop)
+
+    from hunter.apply_cli import main_cli
+    with patch("hunter.config.DOOMED_GATE_ENABLED", False), \
+         patch("hunter.apply_cli.notify") as mock_notify:
+        with pytest.raises(RuntimeError, match="stop here"):
+            main_cli("paste://no-url", paste_text="Pasted job text " * 20)
+
+    assert any(
+        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
+    )
 
 
 def test_cli_pipeline_gate_runs_after_manual_screen_source_order() -> None:
