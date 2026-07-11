@@ -344,3 +344,60 @@ def test_search_missing_channel_list_returns_empty(tmp_path, monkeypatch):
 
     source = TelegramChannelsSource()
     assert source.search() == []
+
+
+# ── M2: registration + dispatch + validation floor ───────────────────────────
+
+
+def test_registered_in_all_sources_by_default():
+    """TELEGRAM_CHANNELS_ENABLED defaults to true, so a normal import (no env
+    override) must already include it — same pattern as test_base_source_
+    fetch_text.py's direct ALL_SOURCES check."""
+    from hunter.sources import ALL_SOURCES
+    assert any(s.name == "telegram_channels" for s in ALL_SOURCES)
+
+
+def test_fetch_roster_includes_telegram_channels():
+    from hunter.sources import _fetch_roster
+    names = {s.name for s in _fetch_roster()}
+    assert "telegram_channels" in names
+
+
+def test_fetch_job_text_dispatches_t_me_url_to_this_source():
+    from hunter.sources import fetch_job_text
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.raw.read.return_value = _load("embed_post.html").encode("utf-8")
+    with patch("hunter.sources.telegram_channels.requests.get", return_value=resp):
+        text = fetch_job_text("https://t.me/rabotafrontend/449")
+    assert "uInflow" in text
+
+
+def test_fetch_job_text_does_not_claim_non_t_me_external_link():
+    """An external-link job's URL (e.g. an ATS/board link) must dispatch to
+    the matching board source (or html_fallback), never this one."""
+    from hunter.sources import _fetch_roster
+    for src in _fetch_roster():
+        if src.name == "telegram_channels":
+            assert src.matches_url("https://wroctech.example.com/careers/senior-frontend-angular") is False
+
+
+def test_min_job_text_len_for_t_me_permalink_uses_scout_floor():
+    from hunter.validation import MIN_SCOUT_TEXT_LEN, min_job_text_len_for
+    assert min_job_text_len_for("https://t.me/rabotafrontend/449") == MIN_SCOUT_TEXT_LEN
+
+
+def test_min_job_text_len_for_external_link_uses_normal_floor():
+    from hunter.validation import MIN_JOB_TEXT_LEN, min_job_text_len_for
+    assert min_job_text_len_for("https://wroctech.example.com/careers/x") == MIN_JOB_TEXT_LEN
+
+
+def test_telegram_post_url_marker_is_substring_of_produced_permalinks():
+    """Drift guard: the validation-floor marker must match every permalink
+    this source's build_job()/fetch_text() actually produces (same pattern
+    as the scout marker test in test_scout_relay_apply_fixes.py)."""
+    from hunter.validation import TELEGRAM_POST_URL_MARKER
+    posts = _parse_posts(_load("channel_board_rabotafrontend.html"), "rabotafrontend")
+    no_link_post = next(p for p in posts if p.msg_id == 447)
+    job = build_job(no_link_post, kind="board", source_name="telegram_channels")
+    assert TELEGRAM_POST_URL_MARKER in job.url
