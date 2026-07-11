@@ -359,6 +359,70 @@ freehire's list entirely).
 - MTProto/Telethon; LLM per-post extraction; RU CV generation; channel
   auto-discovery; shortener resolution at search time; any Telegram-side posting.
 
-## 9. Calibration log (fill in M4)
+## 9. Calibration log (M4, 2026-07-11)
 
-_(empty — M4 appends per-channel yield + apply run findings here)_
+Ran `TelegramChannelsSource.search()` live against all 5 starter channels
+(dev machine, real HTTP, read-only — `hunter.filters.classify_job` used to
+approximate the central-filter pass rate without running the full pipeline).
+
+| Channel | Posts | With text | Prefilter pass | External link | Central-filter pass |
+|---|---|---|---|---|---|
+| `findmyremote_frontend` | 20 | 20 | 15 | 15 | 14 |
+| `rabotafrontend` | 20 | 19 | 10 | 10 | 8 |
+| `IT_job_Poland` | 20 | 20 | 0 | 0 | 0 |
+| `Remoteit` | 20 | 15 | 0 | 0 | 0 |
+| `it_vakansii_jobs` | 20 | 20 | 1 | 1 | 1 |
+| **Total** | **100** | **94** | **26** | **26** | **23** |
+
+Confirms §1.2's flip: `findmyremote_frontend` (frontend/EU aggregator, NOT in
+freehire's list) is the real yield source; `IT_job_Poland`/`Remoteit` were 0
+on this run (RU-market, matches expectation — `source_health` will show them
+IDLE, not BROKEN, since they're never `ever_positive`).
+
+**Two real bugs found and fixed during this run** (not visible from the M1
+fixtures, which predate this live pass):
+
+1. **Pinned/deleted-message service posts leaked through as garbage jobs.**
+   `rabotafrontend/462` is a "pinned Deleted message" service post that DOES
+   carry a `tgme_widget_message_text` div (unlike the media-only case M1
+   already handled) — before the fix it synthesized the job title `"FrontEnd
+   Работа pinned Deleted message"`. Real posts carry the Telegram
+   `service_message` CSS class on the outer `.tgme_widget_message` container
+   regardless of whether a text div is present; `_parse_posts` now checks for
+   that class and treats either shape as `has_text=False`. Fixture
+   `channel_media_only.html` extended with this second real-shape case;
+   2 new regression tests.
+2. **Double-encoded ampersands in some channels' outbound links.**
+   `rabotafrontend/448`'s talanto.work link renders as `&amp;amp;` in the raw
+   page HTML; BeautifulSoup only unescapes HTML entities once, leaving a
+   literal `&amp;` in the extracted href (`...newest&amp;period=month...`
+   instead of `...newest&period=month...`) — a broken query string at fetch
+   time. Fixed with a second `html.unescape()` pass on every collected link
+   (a no-op on a normally-encoded href); 1 new regression test with an
+   inline double-encoded fixture.
+
+**One live false positive, not fixed (documented per plan §8/risk #5 —
+"note real examples in M4 findings instead", don't chase precision without
+more data):** `it_vakansii_jobs`'s single pass was a clickbait channel-index
+digest ("Вы моргнули, а мы создали свою вселенную ❗️ …") that happens to
+mention "frontend" describing a *different* sub-channel deep in a long
+multi-topic post — not a vacancy. `it_vakansii_jobs` is already flagged
+"prune if 0 after 2-3 weeks" in §6; this one false positive on the first run
+doesn't change that timeline, but is a data point for it.
+
+**Full apply end-to-end run (plan step 2) — NOT performed in this worktree.**
+This dev worktree has neither `.env` (no `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`)
+nor `prompts/candidate_profile.md` (gitignored personal data, per CLAUDE.md
+— "exists locally / on the deploy host only"). A real apply run needs to be
+done once by the owner on a machine that has both, e.g. via `/debug_url
+https://t.me/findmyremote_frontend/901` (the Accesa Angular post from this
+run) or any fresh `findmyremote_frontend` post at generation time — the
+`t.me/{channel}/{id}` permalink and `https://findmyremote.ai/companies/...`
+external links both fetch correctly per the dispatcher tests in M2; nothing
+about the fetch/generation path is blocked, this is purely a missing-
+credentials gap in this sandboxed dev worktree.
+
+No changes to `telegram_channels.json` — all 5 starter channels kept as-is;
+`IT_job_Poland`/`Remoteit`/`it_vakansii_jobs` remain owner-pruning candidates
+per §6's existing guidance, to be judged by `/funnel` + `/health` over
+2-3 weeks of real running, not a single dev-machine snapshot.

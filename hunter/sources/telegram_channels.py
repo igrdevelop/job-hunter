@@ -153,10 +153,17 @@ def _is_job_link_candidate(href: str) -> bool:
 
 
 def _extract_text_and_links(text_div) -> tuple[str, list[str]]:
+    import html as html_module
+
     for br in text_div.find_all("br"):
         br.replace_with("\n")
     links = [
-        href for a in text_div.find_all("a")
+        # M4 live finding: some channels' raw HTML double-encodes query-string
+        # ampersands ("&amp;amp;") — BeautifulSoup only unescapes once, leaving
+        # a literal "&amp;" in the href. A second unescape is a no-op on a
+        # normally-encoded href and fixes the double-encoded ones.
+        html_module.unescape(href)
+        for a in text_div.find_all("a")
         if _is_job_link_candidate(href := (a.get("href") or ""))
     ]
     text = text_div.get_text()
@@ -177,7 +184,14 @@ def _parse_posts(html: str, channel: str) -> list[TgPost]:
         if not ch or not msg_id_str.isdigit():
             continue
         permalink = f"https://t.me/{ch}/{msg_id_str}"
-        text_div = msg.find("div", class_="tgme_widget_message_text")
+        # M4 live finding: a "pinned"/deleted-message service post carries the
+        # `service_message` class AND a tgme_widget_message_text div (e.g.
+        # "<Author> pinned Deleted message") — real but useless content that
+        # would otherwise synthesize a garbage job title.
+        classes = msg.get("class") or []
+        text_div = None if "service_message" in classes else msg.find(
+            "div", class_="tgme_widget_message_text"
+        )
         if text_div is None:
             # Media-only / service message (e.g. "pinned", deleted) — no body text.
             posts.append(TgPost(int(msg_id_str), ch, permalink, "", [], has_text=False))

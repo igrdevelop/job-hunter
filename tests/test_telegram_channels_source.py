@@ -66,10 +66,36 @@ def test_parse_posts_extracts_first_external_link():
 
 def test_parse_posts_media_only_has_no_text():
     posts = _parse_posts(_load("channel_media_only.html"), "Remoteit")
-    assert len(posts) == 1
-    assert posts[0].has_text is False
-    assert posts[0].text == ""
-    assert posts[0].links == []
+    assert len(posts) == 2
+    assert all(p.has_text is False for p in posts)
+    assert all(p.text == "" for p in posts)
+    assert all(p.links == [] for p in posts)
+
+
+def test_parse_posts_service_message_with_text_div_still_skipped():
+    """M4 live finding (rabotafrontend/462): a 'pinned Deleted message' post
+    DOES have a tgme_widget_message_text div, but carries the
+    service_message class — must be treated as no-text, not turned into a
+    garbage 'FrontEnd Работа pinned Deleted message' job title."""
+    posts = _parse_posts(_load("channel_media_only.html"), "Remoteit")
+    pinned_post = next(p for p in posts if p.msg_id == 462)
+    assert pinned_post.has_text is False
+    assert pinned_post.text == ""
+
+
+def test_parse_posts_unescapes_double_encoded_ampersand_in_link():
+    """M4 live finding: some channels' raw HTML double-encodes query-string
+    ampersands ("&amp;amp;"), which BeautifulSoup only unescapes once."""
+    html = """
+    <div class="tgme_widget_message" data-post="chan/1">
+      <div class="tgme_widget_message_text">
+        <b>Frontend Developer</b><br/>
+        <a href="https://example.com/jobs?sort=newest&amp;amp;q=frontend">Apply</a>
+      </div>
+    </div>
+    """
+    posts = _parse_posts(html, "chan")
+    assert posts[0].links == ["https://example.com/jobs?sort=newest&q=frontend"]
 
 
 def test_parse_posts_drops_photo_wrapper_and_hashtag_links():

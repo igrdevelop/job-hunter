@@ -1,7 +1,10 @@
 <!--
-Trimmed real capture of a "pinned"/service-message post (Remoteit/13542,
-2026-07-11) — no tgme_widget_message_text div at all. Must be skipped
-(has_text=False), not crash the parser.
+Trimmed real captures of two "pinned"/service-message shapes seen live
+(2026-07-11): Remoteit/13542 has no tgme_widget_message_text div at all;
+rabotafrontend/462 (M4 live finding) DOES have one — "<Author> pinned
+Deleted message" — real but useless content that would otherwise
+synthesize a garbage job title. Both carry the `service_message` class,
+which the parser uses to skip either shape uniformly.
 -->
 <!DOCTYPE html>
 <html>
@@ -11,6 +14,12 @@ Trimmed real capture of a "pinned"/service-message post (Remoteit/13542,
 <div class="tgme_widget_message service_message text_not_supported_wrap js-widget_message" data-post="Remoteit/13542">
 <div class="tgme_widget_message_bubble">
 <a class="tgme_widget_message_author_name" href="https://t.me/Remoteit"><span dir="auto">Remote IT (Inflow)</span></a> pinned «<span class="tgme_widget_service_strong_text" dir="auto">Уважаемые подписчики...</span>»
+</div>
+</div>
+
+<div class="tgme_widget_message service_message text_not_supported_wrap js-widget_message" data-post="rabotafrontend/462">
+<div class="tgme_widget_message_bubble">
+<div class="tgme_widget_message_text js-message_text" dir="auto"><a class="tgme_widget_message_author_name" href="https://t.me/rabotafrontend"><span dir="auto">FrontEnd Работа</span></a> pinned Deleted message</div>
 </div>
 </div>
 
