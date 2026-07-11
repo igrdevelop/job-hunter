@@ -287,16 +287,39 @@ def run_doomed_gate(
 
 # ── Telegram helpers ──────────────────────────────────────────────────────────
 
+# Formatting tags this module itself puts into notify() messages — stripped
+# for the plain-text fallback resend below.
+_NOTIFY_TAG_RE = re.compile(r"</?(?:b|i|u|s|a|code|pre)(?:\s[^<>]*)?>")
+
+
 def notify(message: str) -> None:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        resp = requests.post(
+            api_url,
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": message,
                 "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return
+        # Telegram rejects the WHOLE message (400 "can't parse entities") when
+        # interpolated content — an LLM error snippet, a quoted posting line —
+        # breaks HTML parsing. That silently ate failure notifications: the
+        # owner saw a bare "apply_agent failed" with no reason (2026-07-11).
+        # Resend once as plain text with our own formatting tags stripped.
+        print(f"[apply_agent] Telegram rejected HTML message (HTTP {resp.status_code}) — resending plain")
+        requests.post(
+            api_url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": _NOTIFY_TAG_RE.sub("", message),
                 "disable_web_page_preview": True,
             },
             timeout=10,

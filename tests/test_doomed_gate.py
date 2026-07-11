@@ -483,6 +483,62 @@ def test_guess_title_from_text_skips_boilerplate_lines() -> None:
     assert _guess_title_from_text(text) == "Angular Developer"
 
 
+def test_guess_title_ignores_chat_intro_line() -> None:
+    """Owner report 2026-07-11 (plavno.io paste): a Telegram forward opened with
+    conversational Russian — the old first-meaningful-line rule turned it into
+    the gate's 'title' and produced a garbage off_domain_title warning quoting
+    the chat line as if it were the job title."""
+    from hunter.filters import _guess_title_from_text
+    text = (
+        "Да, тут можно ознакомиться с компанией - plavno.io\n"
+        "What you'll build\n"
+        "Your role\n"
+        "Who we're looking for\n"
+    )
+    assert _guess_title_from_text(text) == ""
+
+
+def test_chat_intro_paste_produces_no_off_domain_finding() -> None:
+    """End-to-end regression of the plavno.io case: the whole paste (chat intro
+    + English posting body with no title-looking line) must yield NO
+    off_domain_title finding — no guess means the title checks find nothing."""
+    text = (
+        "Да, тут можно ознакомиться с компанией - plavno.io\n"
+        "We're building an AI-enabled platform for trust managers in private "
+        "wealth and looking for a senior generalist to own its frontend.\n"
+        "What you'll build\n"
+        "Senior Angular/TypeScript experience; deep understanding of reactivity, "
+        "state management, and change detection.\n"
+    )
+    findings = assess_job_text(text)
+    assert "off_domain_title" not in _rules(findings)
+    assert "title_exclude_pattern" not in _rules(findings)
+
+
+def test_guess_title_skips_stack_line_that_reads_like_prose() -> None:
+    """A body line naming the stack but punctuated like a sentence is prose,
+    not a title — it must not become the guessed title."""
+    from hunter.filters import _guess_title_from_text
+    text = "Senior Angular/TypeScript experience; deep understanding of reactivity.\n"
+    assert _guess_title_from_text(text) == ""
+
+
+def test_guess_title_requires_role_or_stack_signal() -> None:
+    """Section headers and slogans without a role noun never qualify."""
+    from hunter.filters import _guess_title_from_text
+    text = "What you'll build\nYour role\nInterview\nGreat team culture"
+    assert _guess_title_from_text(text) == ""
+
+
+def test_guess_title_scan_is_capped_to_the_top_of_the_text() -> None:
+    """A role noun buried deep in the body (past the candidate-line cap) must
+    not be mistaken for the title."""
+    from hunter.filters import _guess_title_from_text
+    filler = "\n".join(f"Some plain line {i}" for i in range(12))
+    text = filler + "\nAngular Developer"
+    assert _guess_title_from_text(text) == ""
+
+
 def test_header_location_rule_was_removed_not_just_disabled() -> None:
     """Regression guard: a bare anti-hybrid city mention (no onsite/hybrid
     wording) must never produce a finding - the header-location rule was
