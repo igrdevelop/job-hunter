@@ -120,9 +120,12 @@ async def run_apply_agent_subprocess(
             return "rate_limited"
 
         if proc.returncode != 0:
-            logger.error(
-                f"[auto-apply] FAIL {job.company}: {stderr.decode(errors='replace')[-500:]}"
-            )
+            # Same stdout fallback as run_apply_agent_for_url: apply_agent's
+            # error paths print to stdout and exit 1 with an empty stderr.
+            detail = stderr.decode(errors="replace").strip() if stderr else ""
+            if not detail and stdout:
+                detail = stdout.decode(errors="replace").strip()
+            logger.error(f"[auto-apply] FAIL {job.company}: {detail[-500:]}")
             return "fail"
 
         if stdout:
@@ -189,7 +192,14 @@ async def run_apply_agent_for_url(
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if proc.returncode != 0:
-        snippet = stderr_text[-600:].strip() if stderr_text else "(no stderr)"
+        # apply_agent prints its diagnostics to STDOUT ("[apply_agent] LLM
+        # ERROR: …") before sys.exit(1) — stderr is usually empty on those
+        # paths, so fall back to the stdout tail instead of reporting an
+        # unactionable "(no stderr)" (owner report 2026-07-11).
+        detail = stderr_text.strip()
+        if not detail and stdout:
+            detail = stdout.decode(errors="replace").strip()
+        snippet = detail[-600:].strip() if detail else "(no output)"
         logger.error(f"[apply_agent] FAIL for {label}: {snippet}")
         return "fail", snippet
 

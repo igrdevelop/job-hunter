@@ -1090,23 +1090,60 @@ _TITLE_GUESS_JUNK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A guessed line must LOOK like a job title before the title-based gate rules
+# may act on it: it has to name a role (EN+PL role nouns) or an explicit
+# frontend stack keyword. A pasted Telegram/chat dump often opens with
+# conversational prose ("Да, тут можно ознакомиться с компанией — plavno.io",
+# owner report 2026-07-11) and the old "first meaningful line" rule turned
+# that into the gate's "title", producing garbage off_domain_title warnings.
+# The real calibration wins keep matching (".NET Developer (Angular)" →
+# developer; "Software Engineer - QuantumBlack, AI by McKinsey" → engineer),
+# and a miss is safe by design: no guess just means the title-based checks
+# find nothing, exactly like before the paste-path extension.
+_TITLE_GUESS_ROLE_RE = re.compile(
+    r"\b(?:developer|engineer|programmer|architect|consultant|specialist|"
+    r"designer|analyst|tester(?:ka)?|devops|lead|manager|"
+    r"front[- ]?end|full[- ]?stack|angular|react|javascript|typescript|"
+    r"programist(?:a|ka)|in[żz]ynier|deweloper|specjalist(?:a|ka)|"
+    r"projektant(?:ka)?|kierownik)\b",
+    re.IGNORECASE,
+)
+
+# A job title sits near the top of a posting — stop guessing after this many
+# plausible candidate lines so a role noun buried deep in the body can't be
+# mistaken for the title.
+_TITLE_GUESS_MAX_CANDIDATES = 10
+
 
 def _guess_title_from_text(job_text: str) -> str:
-    """Best-effort job-title guess from the first meaningful line of raw text.
+    """Best-effort job-title guess from the first title-looking line of raw text.
 
     Used ONLY on the manual-paste path, where no title is known at gate time
     (the LLM hasn't parsed the posting yet) — see docs/DOOMED_GATE_PASTE_PLAN.md.
-    A miss just means the title-based checks below find nothing (same as
-    today); it never overrides an explicitly known title, so a wrong guess
-    cannot turn into a false positive on a job whose real title is known.
+    A line only qualifies if it names a role or stack keyword
+    (_TITLE_GUESS_ROLE_RE) and doesn't end like a prose sentence; the scan is
+    capped to the first few candidate lines. A miss just means the title-based
+    checks below find nothing (same as before the paste-path extension); it
+    never overrides an explicitly known title, so a wrong guess cannot turn
+    into a false positive on a job whose real title is known.
     """
+    candidates = 0
     for line in (job_text or "").splitlines():
         line = line.strip()
         if not line or len(line) < 4 or len(line) > 120:
             continue
         if _TITLE_GUESS_JUNK_RE.match(line):
             continue
-        return line
+        candidates += 1
+        if candidates > _TITLE_GUESS_MAX_CANDIDATES:
+            break
+        # Titles don't end like sentences; chat intros and body prose do
+        # ("Senior Angular/TypeScript experience; deep understanding…" must
+        # not become the "title" just because it names the stack).
+        if line.endswith((".", "!", "?", "…", ":", ";", ",")):
+            continue
+        if _TITLE_GUESS_ROLE_RE.search(line):
+            return line
     return ""
 
 
