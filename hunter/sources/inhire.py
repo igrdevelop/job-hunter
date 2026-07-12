@@ -115,7 +115,8 @@ def _format_jp_ld(jp: dict) -> str:
 def _try_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     for raw in matches:
         try:
@@ -147,9 +148,7 @@ def _try_bs4_detail(html: str) -> str:
     og_desc = soup.find("meta", property="og:description")
     if og_desc and og_desc.get("content"):
         parts.append(f"Summary: {og_desc['content']}")
-    for tag in soup.find_all(
-        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
-    ):
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
     main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
     content = main or soup.body
@@ -255,6 +254,7 @@ class InhireSource(BaseSource):
     def fetch_text(self, url: str) -> str:
         """cloudscraper → JSON-LD → BS4 → Playwright → html_fallback cascade."""
         from hunter.sources.html_fallback import fetch_html
+
         try:
             import cloudscraper
         except ImportError:
@@ -284,7 +284,6 @@ class InhireSource(BaseSource):
 
         logger.warning("[inhire] All strategies returned too little text, using html_fallback")
         return fetch_html(url)
-
 
     def search(self) -> list[Job]:
         try:
@@ -483,9 +482,7 @@ class InhireSource(BaseSource):
 
     def _parse(self, raw: dict) -> Optional[Job]:
         # Vuex store format (Vue app internal state)
-        title = (
-            raw.get("name") or raw.get("title") or raw.get("jobTitle") or ""
-        ).strip()
+        title = (raw.get("name") or raw.get("title") or raw.get("jobTitle") or "").strip()
 
         # DOM fallback: title might be empty; try to extract from _text
         if not title and raw.get("_text"):
@@ -499,7 +496,9 @@ class InhireSource(BaseSource):
         if not url:
             return None
 
-        company_raw = raw.get("company") or raw.get("companyName") or raw.get("employer") or "Unknown"
+        company_raw = (
+            raw.get("company") or raw.get("companyName") or raw.get("employer") or "Unknown"
+        )
         company = (
             company_raw.get("name", "Unknown")
             if isinstance(company_raw, dict)

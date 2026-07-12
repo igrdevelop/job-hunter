@@ -33,6 +33,7 @@ _FOLDER_MIME = "application/vnd.google-apps.folder"
 # Auth
 # ---------------------------------------------------------------------------
 
+
 def build_service(credentials_file: Path, token_file: Path) -> Any:
     """Load credentials and return a Drive API v3 service object.
 
@@ -45,15 +46,19 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             from hunter.oauth_alert import refresh_or_alert
+
             refresh_or_alert(
-                creds, Request(), token_file,
-                service="Google Drive", reauth_cmd="python tools/gsheets_auth.py",
+                creds,
+                Request(),
+                token_file,
+                service="Google Drive",
+                reauth_cmd="python tools/gsheets_auth.py",
             )
         else:
             from hunter.oauth_alert import alert_oauth_expired
+
             err = RuntimeError(
-                "gsheets_token.json is missing or invalid. "
-                "Run: python tools/gsheets_auth.py"
+                "gsheets_token.json is missing or invalid. Run: python tools/gsheets_auth.py"
             )
             alert_oauth_expired("Google Drive", err, reauth_cmd="python tools/gsheets_auth.py")
             raise err
@@ -64,6 +69,7 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
 # ---------------------------------------------------------------------------
 # Folder management
 # ---------------------------------------------------------------------------
+
 
 def get_or_create_folder(
     service: Any,
@@ -115,11 +121,7 @@ def get_or_create_folder(
         metadata["parents"] = [parent_id]
 
     try:
-        folder = (
-            service.files()
-            .create(body=metadata, fields="id")
-            .execute()
-        )
+        folder = service.files().create(body=metadata, fields="id").execute()
     except HttpError as e:
         log.error("gdrive get_or_create_folder create failed for %r: %s", name, e)
         raise
@@ -132,6 +134,7 @@ def get_or_create_folder(
 # ---------------------------------------------------------------------------
 # File upload
 # ---------------------------------------------------------------------------
+
 
 def upload_file(service: Any, file_path: Path, parent_id: str) -> str:
     """Upload a file to parent_id. Updates existing file if found by name.
@@ -149,18 +152,12 @@ def upload_file(service: Any, file_path: Path, parent_id: str) -> str:
     try:
         if existing_id:
             file = (
-                service.files()
-                .update(fileId=existing_id, media_body=media, fields="id")
-                .execute()
+                service.files().update(fileId=existing_id, media_body=media, fields="id").execute()
             )
             log.debug("gdrive: updated file %r id=%s", name, file["id"])
         else:
             metadata = {"name": name, "parents": [parent_id]}
-            file = (
-                service.files()
-                .create(body=metadata, media_body=media, fields="id")
-                .execute()
-            )
+            file = service.files().create(body=metadata, media_body=media, fields="id").execute()
             log.debug("gdrive: uploaded file %r id=%s", name, file["id"])
     except HttpError as e:
         log.error("gdrive upload_file failed for %r: %s", name, e)
@@ -177,9 +174,7 @@ def _find_file(service: Any, name: str, parent_id: str) -> str | None:
     )
     try:
         result = (
-            service.files()
-            .list(q=query, spaces="drive", fields="files(id)", pageSize=1)
-            .execute()
+            service.files().list(q=query, spaces="drive", fields="files(id)", pageSize=1).execute()
         )
         files = result.get("files", [])
         return files[0]["id"] if files else None
@@ -191,6 +186,7 @@ def _find_file(service: Any, name: str, parent_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Folder upload (flat — no sub-directories)
 # ---------------------------------------------------------------------------
+
 
 def upload_folder(service: Any, folder_path: Path, parent_id: str) -> str:
     """Create a Drive folder for folder_path.name under parent_id and upload all files.
@@ -212,6 +208,7 @@ def upload_folder(service: Any, folder_path: Path, parent_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
+
 
 def delete_folder(service: Any, folder_id: str) -> bool:
     """Permanently delete a Drive folder (and all its contents) by id.
@@ -235,6 +232,7 @@ def delete_folder(service: Any, folder_id: str) -> bool:
 # URL helper
 # ---------------------------------------------------------------------------
 
+
 def folder_url(folder_id: str) -> str:
     return f"https://drive.google.com/drive/folders/{folder_id}"
 
@@ -245,6 +243,7 @@ def folder_id_from_url(url: str) -> str | None:
     Returns None if the URL doesn't match the expected pattern.
     """
     import re
+
     m = re.search(r"/folders/([A-Za-z0-9_-]+)", url or "")
     return m.group(1) if m else None
 
@@ -252,6 +251,7 @@ def folder_id_from_url(url: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _q(value: str) -> str:
     """Escape a string for a Drive API query (single-quote escaping)."""

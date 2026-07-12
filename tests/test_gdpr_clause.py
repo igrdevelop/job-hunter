@@ -1,6 +1,5 @@
 """Tests for the GDPR/RODO consent clause appended to generated CVs."""
 
-
 import pytest
 from docx import Document
 

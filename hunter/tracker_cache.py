@@ -37,9 +37,9 @@ class TrackerCache:
     """Thread-safe (asyncio) in-memory view of the tracker SQLite DB."""
 
     def __init__(self) -> None:
-        self.rows: dict[str, dict] = {}    # ID -> row dict
-        self.by_url: dict[str, str] = {}   # normalized_url -> ID (latest)
-        self.by_ctkey: dict[str, str] = {} # dedup_key -> ID (latest)
+        self.rows: dict[str, dict] = {}  # ID -> row dict
+        self.by_url: dict[str, str] = {}  # normalized_url -> ID (latest)
+        self.by_ctkey: dict[str, str] = {}  # dedup_key -> ID (latest)
         self._lock = asyncio.Lock()
         self._loaded = False
 
@@ -50,6 +50,7 @@ class TrackerCache:
     async def load_from_db(self) -> None:
         """Populate cache from the SQLite tracker DB.  Safe to call again to reload."""
         from hunter.tracker import read_all_tracker_rows
+
         rows = await asyncio.to_thread(read_all_tracker_rows)
         async with self._lock:
             self._load_rows_locked(rows)
@@ -201,10 +202,7 @@ class TrackerCache:
     async def unsent_count(self) -> int:
         """Count rows where Sent is blank."""
         async with self._lock:
-            return sum(
-                1 for r in self.rows.values()
-                if not r.get("Sent", "").strip()
-            )
+            return sum(1 for r in self.rows.values() if not r.get("Sent", "").strip())
 
     async def unsent_angular_count(self) -> int:
         """Count unsent rows where title or stack contains Angular."""
@@ -222,10 +220,7 @@ class TrackerCache:
     async def all_unsent(self) -> list[dict]:
         """Return copies of all rows where Sent is blank."""
         async with self._lock:
-            return [
-                dict(r) for r in self.rows.values()
-                if not r.get("Sent", "").strip()
-            ]
+            return [dict(r) for r in self.rows.values() if not r.get("Sent", "").strip()]
 
     # ------------------------------------------------------------------
     # Diagnostics

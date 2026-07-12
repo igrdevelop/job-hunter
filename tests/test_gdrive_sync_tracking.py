@@ -21,8 +21,9 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def _insert_row(tracker_db, *, url: str, folder_rel: str,
-                drive_url: str = "", row_id: str = "") -> None:
+def _insert_row(
+    tracker_db, *, url: str, folder_rel: str, drive_url: str = "", row_id: str = ""
+) -> None:
     """Insert a minimal application row directly into the test SQLite DB."""
     rid = row_id or uuid.uuid4().hex[:8]
     norm = normalize_url(url)
@@ -40,6 +41,7 @@ def _insert_row(tracker_db, *, url: str, folder_rel: str,
 # ---------------------------------------------------------------------------
 # upload_application_folder: writes Drive URL to tracker when job_url given
 # ---------------------------------------------------------------------------
+
 
 def test_upload_application_folder_writes_drive_url(tmp_path, tracker_db):
     folder = tmp_path / "2026-05-22" / "Acme"
@@ -59,6 +61,7 @@ def test_upload_application_folder_writes_drive_url(tmp_path, tracker_db):
         patch("hunter.gdrive_client.folder_url", return_value=drive_url),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(folder, job_url=job_url))
 
     assert result == drive_url
@@ -82,6 +85,7 @@ def test_upload_application_folder_no_tracker_write_when_no_job_url(tmp_path, tr
         patch("hunter.tracker.set_drive_url") as mock_set,
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(folder))  # no job_url
 
     assert result == drive_url
@@ -91,6 +95,7 @@ def test_upload_application_folder_no_tracker_write_when_no_job_url(tmp_path, tr
 # ---------------------------------------------------------------------------
 # upload_missing_folders: skip rows with existing Drive URL
 # ---------------------------------------------------------------------------
+
 
 def test_upload_missing_skips_already_uploaded_rows(tmp_path, tracker_db):
     job_url = "https://example.com/jobs/1"
@@ -107,6 +112,7 @@ def test_upload_missing_skips_already_uploaded_rows(tmp_path, tracker_db):
         patch("hunter.gdrive_client.upload_folder") as mock_upload,
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_missing_folders(tmp_path))
 
     mock_upload.assert_not_called()
@@ -134,6 +140,7 @@ def test_upload_missing_uploads_and_writes_drive_url(tmp_path, tracker_db):
         patch("hunter.gdrive_client.folder_url", return_value=new_drive_url),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_missing_folders(tmp_path))
 
     assert result["uploaded"] == 1
@@ -151,7 +158,7 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
     (folder_new / "cv.pdf").write_bytes(b"y")
 
     url_done = "https://example.com/jobs/done"
-    url_new  = "https://example.com/jobs/new"
+    url_new = "https://example.com/jobs/new"
 
     with get_db(tracker_db) as conn:
         conn.execute(
@@ -160,8 +167,12 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
             (id, date, company, title, ats_status, url, url_norm, folder, drive_url)
             VALUES ('id111111', '2026-05-22', 'DoneCorpX', 'Dev', '85%', ?, ?, ?, ?)
             """,
-            (url_done, normalize_url(url_done), str(folder_done),
-             "https://drive.google.com/drive/folders/done"),
+            (
+                url_done,
+                normalize_url(url_done),
+                str(folder_done),
+                "https://drive.google.com/drive/folders/done",
+            ),
         )
         conn.execute(
             """
@@ -182,6 +193,7 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
         patch("hunter.gdrive_client.folder_url", return_value=new_url),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_missing_folders(tmp_path))
 
     assert result["uploaded"] == 1
@@ -195,6 +207,7 @@ def test_upload_missing_counts_already_and_new_separately(tmp_path, tracker_db):
 # ---------------------------------------------------------------------------
 # upload_missing_folders: dual-apply shadow subfolders (no tracker row of their own)
 # ---------------------------------------------------------------------------
+
 
 def test_upload_missing_also_uploads_shadow_subfolder(tmp_path, tracker_db):
     """A {company}/{shadow_profile}/ subfolder has no Drive URL column of its own —
@@ -210,7 +223,9 @@ def test_upload_missing_also_uploads_shadow_subfolder(tmp_path, tracker_db):
 
     # Company already uploaded — primary upload_folder must NOT be called again.
     _insert_row(
-        tracker_db, url=job_url, folder_rel=str(folder),
+        tracker_db,
+        url=job_url,
+        folder_rel=str(folder),
         drive_url="https://drive.google.com/drive/folders/existing",
     )
 
@@ -224,6 +239,7 @@ def test_upload_missing_also_uploads_shadow_subfolder(tmp_path, tracker_db):
         ) as mock_upload_shadow,
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_missing_folders(tmp_path))
 
     mock_upload_folder.assert_not_called()  # company folder unchanged

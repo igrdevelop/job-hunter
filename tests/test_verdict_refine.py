@@ -81,6 +81,7 @@ def _v(score, missing=None, recs=None, gap="") -> dict:
 
 # ── build_refine_feedback ─────────────────────────────────────────────────────
 
+
 def test_build_refine_feedback_drops_unfixable_items():
     verdict = _v(
         80,
@@ -124,6 +125,7 @@ def test_build_refine_feedback_none_verdict_is_safe():
 
 # ── refine_loop: no-op paths (0 LLM calls) ────────────────────────────────────
 
+
 def test_refine_loop_noop_when_max_rounds_zero(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("call_llm must not be called when max_rounds=0")
@@ -132,8 +134,14 @@ def test_refine_loop_noop_when_max_rounds_zero(tmp_path, monkeypatch):
     content = _base_content()
     verdict = _v(50, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job text", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=0,
+        content,
+        "job text",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=0,
     )
     assert out_content is content
     assert out_verdict is verdict
@@ -148,14 +156,21 @@ def test_refine_loop_noop_when_already_at_target(tmp_path, monkeypatch):
     content = _base_content()
     verdict = _v(96, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job text", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        content,
+        "job text",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
     )
     assert out_content is content
     assert out_verdict is verdict
 
 
 # ── refine_loop: accept / rollback ────────────────────────────────────────────
+
 
 def test_refine_loop_accepts_when_verdict_improves(tmp_path, monkeypatch):
     _patch_safety_stages(monkeypatch)
@@ -166,16 +181,20 @@ def test_refine_loop_accepts_when_verdict_improves(tmp_path, monkeypatch):
     monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": revised})
 
     new_verdict = _v(90)
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: new_verdict
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: new_verdict)
 
     regen_calls = []
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job needs Docker", "", tmp_path, verdict,
-        regenerate_docs=lambda f: regen_calls.append(f), target=95, max_rounds=1,
+        content,
+        "job needs Docker",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: regen_calls.append(f),
+        target=95,
+        max_rounds=1,
     )
 
     assert out_verdict == new_verdict
@@ -205,8 +224,14 @@ def test_refine_loop_rolls_back_when_verdict_does_not_improve(tmp_path, monkeypa
     original_summary = content["resume_en"]["summary"]
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: regen_calls.append(f), target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: regen_calls.append(f),
+        target=95,
+        max_rounds=1,
     )
 
     assert out_verdict == verdict  # old verdict kept — no regression
@@ -231,8 +256,14 @@ def test_refine_loop_discards_round_on_language_block(tmp_path, monkeypatch):
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: regen_calls.append(f), target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: regen_calls.append(f),
+        target=95,
+        max_rounds=1,
     )
 
     assert out_content == content
@@ -251,8 +282,14 @@ def test_refine_loop_exception_in_rewrite_returns_original(tmp_path, monkeypatch
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
     )
     assert out_content is content
     assert out_verdict is verdict
@@ -261,6 +298,7 @@ def test_refine_loop_exception_in_rewrite_returns_original(tmp_path, monkeypatch
 
 # ── refine_loop: PL mirroring ─────────────────────────────────────────────────
 
+
 def test_refine_loop_mirrors_to_pl_once_after_accepted_round(tmp_path, monkeypatch):
     """PL mirroring happens ONCE, after the loop, and only for an accepted
     round — not per round (Fix 4: a translate call on a rolled-back round is
@@ -268,9 +306,7 @@ def test_refine_loop_mirrors_to_pl_once_after_accepted_round(tmp_path, monkeypat
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
     monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90)
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90))
 
     translate_calls = []
 
@@ -285,8 +321,14 @@ def test_refine_loop_mirrors_to_pl_once_after_accepted_round(tmp_path, monkeypat
     content["resume_pl"] = _resume()
     verdict = _v(80, missing=["Docker"])
     out_content, _ = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: regen_calls.append(f), target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: regen_calls.append(f),
+        target=95,
+        max_rounds=1,
     )
     assert translate_calls == ["PL"]
     assert "resume_pl" in out_content
@@ -300,9 +342,7 @@ def test_refine_loop_does_not_mirror_when_primary_lang_en(tmp_path, monkeypatch)
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
     monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90)
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90))
 
     def _boom(*a, **k):
         raise AssertionError("must not translate for an EN-primary posting")
@@ -312,8 +352,14 @@ def test_refine_loop_does_not_mirror_when_primary_lang_en(tmp_path, monkeypatch)
     content = _base_content(primary_lang="EN")
     verdict = _v(80, missing=["Docker"])
     refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
     )
 
 
@@ -323,9 +369,7 @@ def test_refine_loop_does_not_mirror_pl_on_full_rollback(tmp_path, monkeypatch):
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
     monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(75)
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(75))
 
     def _boom(*a, **k):
         raise AssertionError("must not translate when every round was rolled back")
@@ -336,14 +380,21 @@ def test_refine_loop_does_not_mirror_pl_on_full_rollback(tmp_path, monkeypatch):
     content["resume_pl"] = _resume()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
     )
     assert out_content is content
     assert out_verdict is verdict
 
 
 # ── refine_loop: escalation (rounds 1-2 honest, round 3 stretch) ─────────────
+
 
 def test_round1_prompt_has_no_stretch_permission(monkeypatch):
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
@@ -398,9 +449,7 @@ def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
 
-    verdict_sequence = iter(
-        [_v(80, missing=["Docker"]), _v(85, missing=["Docker"]), _v(90)]
-    )
+    verdict_sequence = iter([_v(80, missing=["Docker"]), _v(85, missing=["Docker"]), _v(90)])
     monkeypatch.setattr(
         ats_pdf_roundtrip,
         "run_llm_verdict",
@@ -410,8 +459,14 @@ def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
     content = _base_content(to_learn="")
     verdict = _v(70, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job needs Docker", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=3,
+        content,
+        "job needs Docker",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=3,
     )
 
     assert len(calls) == 3
@@ -446,8 +501,14 @@ def test_two_round_loop_never_stretches(tmp_path, monkeypatch):
     content = _base_content(to_learn="")
     verdict = _v(70, missing=["Docker"])
     refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
     )
     assert len(calls) == 2
     assert all("STRETCH ESCALATION" not in c for c in calls)
@@ -464,21 +525,26 @@ def test_round2_not_run_when_round1_reaches_target(tmp_path, monkeypatch):
         return {"resume_en": _resume()}
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(97)
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(97))
 
     content = _base_content()
     verdict = _v(70, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
     )
     assert len(calls) == 1  # round 2 never ran
     assert out_verdict["score"] == 97
 
 
 # ── refine_loop: M1 escalate-after-rollback (docs/LLM_COST_REDUCTION_PLAN.md) ──
+
 
 def test_round1_rollback_escalates_round2_to_stretch(tmp_path, monkeypatch):
     _patch_safety_stages(monkeypatch)
@@ -502,8 +568,14 @@ def test_round1_rollback_escalates_round2_to_stretch(tmp_path, monkeypatch):
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
     )
 
     assert len(calls) == 2
@@ -538,8 +610,14 @@ def test_round2_accepted_resets_escalation_round3_stays_honest(tmp_path, monkeyp
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=3,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=3,
     )
     assert len(calls) == 2  # round 3 never ran — already at target
     assert out_verdict["score"] == 97
@@ -567,8 +645,14 @@ def test_honest_rollback_then_stretch_rollback_stops_loop(tmp_path, monkeypatch)
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=4,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=4,
     )
 
     # Round 1 (honest, rollback) + round 2 (escalated stretch, rollback) —
@@ -598,8 +682,14 @@ def test_max_rounds_one_unaffected_by_escalation_logic(tmp_path, monkeypatch):
     content = _base_content()
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
     )
     assert len(calls) == 1
     assert "STRETCH ESCALATION" not in calls[0]
@@ -627,14 +717,21 @@ def test_escalated_stretch_round_merges_to_learn(tmp_path, monkeypatch):
     content = _base_content(to_learn="")
     verdict = _v(80, missing=["Docker"])
     out_content, out_verdict = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=2,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
     )
     assert out_content["to_learn"] == "Vitest"
     assert out_verdict["score"] == 90
 
 
 # ── _merge_to_learn ────────────────────────────────────────────────────────────
+
 
 def test_merge_to_learn_dedupes_and_preserves_existing():
     content = {"to_learn": "Existing skill"}
@@ -660,13 +757,17 @@ def test_round1_never_touches_to_learn(tmp_path, monkeypatch):
         "call_llm",
         lambda *a, **k: {"resume_en": _resume(), "stretch_additions": ["Should be ignored"]},
     )
-    monkeypatch.setattr(
-        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90)
-    )
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90))
     content = _base_content(to_learn="")
     verdict = _v(80, missing=["Docker"])
     out_content, _ = refine_loop(
-        content, "job", "", tmp_path, verdict,
-        regenerate_docs=lambda f: None, target=95, max_rounds=1,
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
     )
     assert out_content["to_learn"] == ""

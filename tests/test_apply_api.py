@@ -9,8 +9,10 @@ import pytest
 
 # ── Import sanity ─────────────────────────────────────────────────────────────
 
+
 def test_main_api_is_importable() -> None:
     from hunter.apply_api import main_api
+
     assert callable(main_api)
 
 
@@ -18,6 +20,7 @@ def test_main_api_accepts_keyword_args() -> None:
     """Signature must accept skip_dedup and full_mode as keyword-only args."""
     import inspect
     from hunter.apply_api import main_api
+
     sig = inspect.signature(main_api)
     params = sig.parameters
     assert "url" in params
@@ -27,10 +30,7 @@ def test_main_api_accepts_keyword_args() -> None:
     assert "jobleads_company" in params
     assert "jobleads_title" in params
     # keyword-only params after *
-    kw_only = [
-        name for name, p in params.items()
-        if p.kind == inspect.Parameter.KEYWORD_ONLY
-    ]
+    kw_only = [name for name, p in params.items() if p.kind == inspect.Parameter.KEYWORD_ONLY]
     assert "skip_dedup" in kw_only
     assert "full_mode" in kw_only
 
@@ -38,12 +38,14 @@ def test_main_api_accepts_keyword_args() -> None:
 def test_main_api_skip_dedup_defaults_false() -> None:
     import inspect
     from hunter.apply_api import main_api
+
     sig = inspect.signature(main_api)
     assert sig.parameters["skip_dedup"].default is False
     assert sig.parameters["full_mode"].default is False
 
 
 # ── Dedup short-circuit ───────────────────────────────────────────────────────
+
 
 def test_main_api_skips_when_already_processed(monkeypatch, capsys) -> None:
     """main_api should return early (no LLM call) when URL is in tracker."""
@@ -59,7 +61,10 @@ def test_main_api_skips_when_already_processed(monkeypatch, capsys) -> None:
 
     # Should have notified about already-processed
     mock_notify.assert_called_once()
-    assert "tracker" in mock_notify.call_args[0][0].lower() or "skipped" in mock_notify.call_args[0][0].lower()
+    assert (
+        "tracker" in mock_notify.call_args[0][0].lower()
+        or "skipped" in mock_notify.call_args[0][0].lower()
+    )
 
 
 def test_main_api_skip_dedup_true_bypasses_tracker(monkeypatch, capsys) -> None:
@@ -79,6 +84,7 @@ def test_main_api_skip_dedup_true_bypasses_tracker(monkeypatch, capsys) -> None:
     with patch("hunter.sources.fetch_job_text", _boom):
         with pytest.raises(SystemExit):
             from hunter.apply_api import main_api
+
             main_api("https://example.com/job/2", skip_dedup=True)
 
     # _already_processed was called with skip_dedup=True
@@ -86,6 +92,7 @@ def test_main_api_skip_dedup_true_bypasses_tracker(monkeypatch, capsys) -> None:
 
 
 # ── Paste flow ────────────────────────────────────────────────────────────────
+
 
 def test_main_api_uses_paste_text_without_fetch(monkeypatch) -> None:
     """When paste_text is provided, fetch should not be called."""
@@ -102,6 +109,7 @@ def test_main_api_uses_paste_text_without_fetch(monkeypatch) -> None:
         with patch("hunter.validation.is_job_text_too_short", return_value=True):
             with pytest.raises(SystemExit):
                 from hunter.apply_api import main_api
+
                 main_api(
                     "paste://no-url",
                     paste_text="This is pasted job text with enough content.",
@@ -111,6 +119,7 @@ def test_main_api_uses_paste_text_without_fetch(monkeypatch) -> None:
 
 
 # ── No globals: multiple calls independent ────────────────────────────────────
+
 
 def test_main_api_no_shared_global_state(monkeypatch) -> None:
     """Calling main_api twice with different flags should be independent."""
@@ -137,9 +146,11 @@ def test_main_api_no_shared_global_state(monkeypatch) -> None:
 # test_apply_dispatcher.test_apply_agent_is_thin). These guards assert the
 # stamp exists, lives inside the verdict block, and skips the paste flow.
 
+
 def _source_of(module_name: str) -> str:
     import importlib
     import inspect
+
     return inspect.getsource(importlib.import_module(module_name))
 
 
@@ -166,6 +177,7 @@ def test_cli_pipeline_stamps_verdict_on_tracker() -> None:
 # The owner asked for a single ATS number in Telegram: the independent verdict,
 # not "verdict | self: self-score". The generator's self-score stays in
 # content.json only.
+
 
 def test_api_pipeline_telegram_has_no_self_score_suffix() -> None:
     src = _source_of("hunter.apply_api")
@@ -199,6 +211,7 @@ def test_cli_pipeline_wires_refine_loop_before_verdict_stamp() -> None:
 # stretch additions land in content["to_learn"] — the row must be patched
 # post-hoc, same shape as the verdict stamp.
 
+
 def test_api_pipeline_stamps_to_learn_after_refine_loop() -> None:
     src = _source_of("hunter.apply_api")
     assert "from hunter.tracker import set_to_learn" in src
@@ -226,6 +239,7 @@ def test_cli_pipeline_stamps_to_learn_after_refine_loop() -> None:
 # command must pass --no-tracker (skip the row write) and never --force (a
 # force-mode apply would otherwise DELETE+INSERT the row on every round).
 
+
 def test_api_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
     src = _source_of("hunter.apply_api")
     verdict_block = src.split("run_llm_verdict(folder=output_folder")[1]
@@ -250,6 +264,7 @@ def test_cli_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
 
 # ── Default is 3 (honest ×2 + stretch), owner decision 2026-07-07 ───────────
 
+
 def test_ats_verdict_max_refines_default_is_three() -> None:
     """Owner decision 2026-07-07: max 3 rounds — two honest visibility passes,
     stretch (openly add posting skills) only on the third."""
@@ -262,6 +277,7 @@ def test_ats_verdict_max_refines_default_is_three() -> None:
 # figure; the refine loop can more than double the real spend. The pipeline
 # must re-price the usage log AFTER refine_loop and re-stamp the row via
 # tracker.set_cost so the DB / Sheet column M show the true per-vacancy total.
+
 
 def test_api_pipeline_restamps_cost_after_refine_loop() -> None:
     src = _source_of("hunter.apply_api")
@@ -279,6 +295,7 @@ def test_api_pipeline_restamps_cost_after_refine_loop() -> None:
 # The owner asked to see WHY the verdict isn't higher, not just the number —
 # the judge's gap_report rides the success notification as its own line.
 
+
 def test_api_pipeline_sends_verdict_gap_report_line() -> None:
     src = _source_of("hunter.apply_api")
     assert "format_gap_report" in src
@@ -288,6 +305,7 @@ def test_api_pipeline_sends_verdict_gap_report_line() -> None:
 # ── Deterministic ATS keyword checklist in the first generation prompt ──────
 # (docs/LLM_COST_REDUCTION_PLAN.md M3) — the checklist must be built from the
 # posting text and appended to user_message before the first call_llm().
+
 
 def test_api_pipeline_wires_ats_keyword_checklist_before_call_llm() -> None:
     src = _source_of("hunter.apply_api")
@@ -306,6 +324,7 @@ def test_dual_apply_shadow_wires_ats_keyword_checklist() -> None:
 
 
 # ── PL-skip for EN postings in short mode (docs/LLM_COST_REDUCTION_PLAN.md M4) ─
+
 
 def test_api_pipeline_computes_posting_lang_before_first_call_llm() -> None:
     """posting_lang must be computed before Step 3's call_llm so the skip
@@ -330,7 +349,7 @@ def test_api_pipeline_wires_pl_skip_instruction_before_call_llm() -> None:
 def test_api_pipeline_validate_content_uses_pl_optional() -> None:
     src = _source_of("hunter.apply_api")
     assert "pl_optional=_pl_optional" in src
-    assert "GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == \"EN\"" in src
+    assert 'GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"' in src
 
 
 def test_dual_apply_shadow_wires_pl_skip_instruction() -> None:

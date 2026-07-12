@@ -1,4 +1,5 @@
 """B5 wiring — hunt loop must skip jobs that are within the cooldown window."""
+
 import asyncio
 import datetime
 import uuid
@@ -15,13 +16,14 @@ from hunter.db import get_db
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_job(company: str, title: str, url: str) -> Job:
-    return Job(title=title, company=company, location="Remote",
-               salary=None, url=url, source="test")
+    return Job(title=title, company=company, location="Remote", salary=None, url=url, source="test")
 
 
-def _insert_cooldown_row(tracker_db, *, date_str, company: str, title: str,
-                         ats: str, url: str = "") -> None:
+def _insert_cooldown_row(
+    tracker_db, *, date_str, company: str, title: str, ats: str, url: str = ""
+) -> None:
     """Insert a row with the given date into the test DB."""
     if not url:
         url = f"https://example.com/{uuid.uuid4().hex[:8]}"
@@ -45,6 +47,7 @@ def _run(coro):
 # core test: cooldown job never reaches send_job_cards
 # ---------------------------------------------------------------------------
 
+
 def test_cooldown_job_excluded_from_new_jobs(tracker_db) -> None:
     today = datetime.date.today()
     _insert_cooldown_row(
@@ -56,7 +59,9 @@ def test_cooldown_job_excluded_from_new_jobs(tracker_db) -> None:
         ats="97%",
     )
 
-    fresh_job = _make_job("Acme", "Angular Dev", "https://justjoin.it/job-offer/acme-angular-dev-new")
+    fresh_job = _make_job(
+        "Acme", "Angular Dev", "https://justjoin.it/job-offer/acme-angular-dev-new"
+    )
     unrelated_job = _make_job("OtherCo", "React Dev", "https://justjoin.it/job-offer/other-react")
 
     captured_cards: list[list[Job]] = []
@@ -70,7 +75,9 @@ def test_cooldown_job_excluded_from_new_jobs(tracker_db) -> None:
     with (
         patch("hunter.main.AUTO_APPLY", False),
         patch("hunter.main.ALL_SOURCES", []),
-        patch("hunter.main.apply_filters_with_stats", return_value=([fresh_job, unrelated_job], {})),
+        patch(
+            "hunter.main.apply_filters_with_stats", return_value=([fresh_job, unrelated_job], {})
+        ),
         patch("hunter.main.get_known_urls", return_value=set()),
         patch("hunter.main.get_known_company_titles", return_value=set()),
         patch("hunter.main.send_job_cards", fake_send_cards),

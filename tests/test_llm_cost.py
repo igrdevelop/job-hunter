@@ -49,11 +49,14 @@ def test_deepseek_r1_per_call_cost() -> None:
       (1000 * 0.55 + 2000 * 2.19 + 5000 * 0.14) / 1_000_000
       = (550 + 4380 + 700) / 1M = 0.00563
     """
-    cost = usd_for_call("deepseek/deepseek-r1", {
-        "input_tokens": 1000,
-        "output_tokens": 2000,
-        "cache_read_input_tokens": 5000,
-    })
+    cost = usd_for_call(
+        "deepseek/deepseek-r1",
+        {
+            "input_tokens": 1000,
+            "output_tokens": 2000,
+            "cache_read_input_tokens": 5000,
+        },
+    )
     assert abs(cost - 0.00563) < 1e-6
 
 
@@ -73,10 +76,10 @@ def test_usd_for_call_sonnet_basic() -> None:
 def test_usd_for_call_includes_cache_tokens() -> None:
     # cache_write at 1.25× input rate, cache_read at 0.1× input rate.
     usage = {
-        "input_tokens": 1000,         # 1000 * 3 / 1M = 0.003
+        "input_tokens": 1000,  # 1000 * 3 / 1M = 0.003
         "output_tokens": 0,
         "cache_creation_input_tokens": 1000,  # 1000 * 3.75 / 1M = 0.00375
-        "cache_read_input_tokens": 1000,      # 1000 * 0.30 / 1M = 0.0003
+        "cache_read_input_tokens": 1000,  # 1000 * 0.30 / 1M = 0.0003
     }
     assert usd_for_call("claude-sonnet-4-6", usage) == pytest.approx(0.00705, abs=1e-9)
 
@@ -96,15 +99,27 @@ def test_usd_for_call_missing_keys_treated_as_zero() -> None:
 
 def test_price_usage_aggregates_by_model_and_total() -> None:
     log = [
-        {"model": "claude-sonnet-4-6",
-         "input_tokens": 30000, "output_tokens": 7000,
-         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
-        {"model": "claude-sonnet-4-6",
-         "input_tokens": 0, "output_tokens": 5000,
-         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 30000},
-        {"model": "claude-haiku-4-5-20251001",
-         "input_tokens": 2000, "output_tokens": 800,
-         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        {
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 30000,
+            "output_tokens": 7000,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        },
+        {
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 0,
+            "output_tokens": 5000,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 30000,
+        },
+        {
+            "model": "claude-haiku-4-5-20251001",
+            "input_tokens": 2000,
+            "output_tokens": 800,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        },
     ]
     out = price_usage(log)
 
@@ -116,9 +131,7 @@ def test_price_usage_aggregates_by_model_and_total() -> None:
     assert "claude-haiku-4-5-20251001" in out["by_model"]
     # Sonnet dominates the total — Haiku is single-digit-percent.
     assert out["by_model"]["claude-sonnet-4-6"] > out["by_model"]["claude-haiku-4-5-20251001"] * 5
-    assert out["total_usd"] == pytest.approx(
-        sum(out["by_model"].values()), abs=1e-4
-    )
+    assert out["total_usd"] == pytest.approx(sum(out["by_model"].values()), abs=1e-4)
 
 
 def test_price_usage_empty_log_returns_zero_totals() -> None:
@@ -135,8 +148,8 @@ def test_price_usage_tolerates_garbage_entries() -> None:
     # never crash the apply pipeline because the LLM SDK returned something
     # unexpected.
     log = [
-        None,                                      # type: ignore[list-item]
-        "broken",                                  # type: ignore[list-item]
+        None,  # type: ignore[list-item]
+        "broken",  # type: ignore[list-item]
         {"model": "sonnet-4-6", "input_tokens": 100, "output_tokens": 50},
     ]
     out = price_usage(log)

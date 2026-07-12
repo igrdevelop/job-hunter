@@ -189,8 +189,10 @@ def _parse_posts(html: str, channel: str) -> list[TgPost]:
         # "<Author> pinned Deleted message") — real but useless content that
         # would otherwise synthesize a garbage job title.
         classes = msg.get("class") or []
-        text_div = None if "service_message" in classes else msg.find(
-            "div", class_="tgme_widget_message_text"
+        text_div = (
+            None
+            if "service_message" in classes
+            else msg.find("div", class_="tgme_widget_message_text")
         )
         if text_div is None:
             # Media-only / service message (e.g. "pinned", deleted) — no body text.

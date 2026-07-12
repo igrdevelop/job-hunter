@@ -67,7 +67,8 @@ def _resolve_sheet_id() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Remove duplicate rows from the Sheets tracker.")
     parser.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Actually delete duplicates. Without it, only prints the plan (dry run).",
     )
     args = parser.parse_args()
@@ -103,11 +104,15 @@ def main() -> int:
         to_delete.extend(losers)
         keep_idx, keep_row = keeper
         print(f"\n{norm}  ({len(group)} rows)")
-        print(f"  KEEP   row {keep_idx}: Date={keep_row.get('Date','')!r} "
-              f"Sent={keep_row.get('Sent','')!r} Company={keep_row.get('Company','')!r}")
+        print(
+            f"  KEEP   row {keep_idx}: Date={keep_row.get('Date', '')!r} "
+            f"Sent={keep_row.get('Sent', '')!r} Company={keep_row.get('Company', '')!r}"
+        )
         for li, lr in losers:
-            print(f"  DELETE row {li}: Date={lr.get('Date','')!r} "
-                  f"Sent={lr.get('Sent','')!r} Company={lr.get('Company','')!r}")
+            print(
+                f"  DELETE row {li}: Date={lr.get('Date', '')!r} "
+                f"Sent={lr.get('Sent', '')!r} Company={lr.get('Company', '')!r}"
+            )
 
     print(
         f"\nSummary: {len(groups)} unique URLs, {len(dup_groups)} duplicated, "

@@ -29,6 +29,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # LLM generator + dual-apply comparison state
     try:
         from hunter.llm_profiles import dual_enabled, get_active, shadow_profile
+
         active = get_active()
         lines.append(f"🤖 LLM: <b>{active.name}</b>")
         if dual_enabled():
@@ -54,6 +55,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     try:
         from hunter.tracker import get_failed_jobs
+
         failed_count = len(await asyncio.to_thread(get_failed_jobs))
         if failed_count:
             lines.append(f"\n🔁 FAIL queue: <b>{failed_count}</b> jobs (will retry on next hunt)")

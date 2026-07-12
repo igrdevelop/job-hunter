@@ -11,41 +11,47 @@ import pytest
 from hunter.date_normalize import normalize_period
 
 
-@pytest.mark.parametrize("raw,expected", [
-    # English month names — short
-    ("Jan 2020 – Mar 2024", "01/2020 – 03/2024"),
-    ("Aug 2023 – Present", "08/2023 – Present"),
-    ("Feb 2019 – Jul 2022", "02/2019 – 07/2022"),
-    # English month names — full
-    ("January 2020 – March 2024", "01/2020 – 03/2024"),
-    ("August 2023 – Present", "08/2023 – Present"),
-    # Mixed dashes
-    ("Mar 2018 - Aug 2020", "03/2018 – 08/2020"),
-    ("Mar 2018 — Aug 2020", "03/2018 – 08/2020"),
-    # Already in canonical form
-    ("01/2020 – 03/2024", "01/2020 – 03/2024"),
-    # Single-digit MM normalises to two-digit MM
-    ("3/2024 – 12/2024", "03/2024 – 12/2024"),
-    # Present synonyms
-    ("Jan 2020 – Current", "01/2020 – Present"),
-    ("Jan 2020 – Now", "01/2020 – Present"),
-    # Polish month names (PL CV reuses the same render path)
-    ("Sty 2020 – Mar 2024", "01/2020 – 03/2024"),
-    ("Marca 2020 – Sierpnia 2024", "03/2020 – 08/2024"),
-    ("Lipiec 2019 – Obecnie", "07/2019 – Present"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # English month names — short
+        ("Jan 2020 – Mar 2024", "01/2020 – 03/2024"),
+        ("Aug 2023 – Present", "08/2023 – Present"),
+        ("Feb 2019 – Jul 2022", "02/2019 – 07/2022"),
+        # English month names — full
+        ("January 2020 – March 2024", "01/2020 – 03/2024"),
+        ("August 2023 – Present", "08/2023 – Present"),
+        # Mixed dashes
+        ("Mar 2018 - Aug 2020", "03/2018 – 08/2020"),
+        ("Mar 2018 — Aug 2020", "03/2018 – 08/2020"),
+        # Already in canonical form
+        ("01/2020 – 03/2024", "01/2020 – 03/2024"),
+        # Single-digit MM normalises to two-digit MM
+        ("3/2024 – 12/2024", "03/2024 – 12/2024"),
+        # Present synonyms
+        ("Jan 2020 – Current", "01/2020 – Present"),
+        ("Jan 2020 – Now", "01/2020 – Present"),
+        # Polish month names (PL CV reuses the same render path)
+        ("Sty 2020 – Mar 2024", "01/2020 – 03/2024"),
+        ("Marca 2020 – Sierpnia 2024", "03/2020 – 08/2024"),
+        ("Lipiec 2019 – Obecnie", "07/2019 – Present"),
+    ],
+)
 def test_normalize_period_strict_form(raw: str, expected: str) -> None:
     assert normalize_period(raw) == expected
 
 
-@pytest.mark.parametrize("raw", [
-    "2020 – 2024",          # year-only — don't fabricate months
-    "2020 – Present",
-    "",
-    "   ",
-    "freelance / consulting",  # no recognisable date — pass through
-    "Q3 2024 – Q1 2025",       # quarter — not parsed
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2020 – 2024",  # year-only — don't fabricate months
+        "2020 – Present",
+        "",
+        "   ",
+        "freelance / consulting",  # no recognisable date — pass through
+        "Q3 2024 – Q1 2025",  # quarter — not parsed
+    ],
+)
 def test_normalize_period_passes_through_unparseable(raw: str) -> None:
     # Either the original string back, or "Present" canonicalized — never a
     # garbage substitution that loses information.

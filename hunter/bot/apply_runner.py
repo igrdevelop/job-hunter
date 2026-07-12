@@ -65,28 +65,31 @@ async def _run_apply_agent(
             if url:
                 try:
                     from hunter.tracker_cache import cache
+
                     await cache.load_from_db()
                     row = await cache.get_row_by_url(url)
                     if row:
                         from hunter import gsheets_sync
+
                         await gsheets_sync.mirror_new_row(row)
                 except Exception as _e:
                     logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
             # Upload application folder to Google Drive (best-effort)
             try:
                 from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+
                 if GDRIVE_ENABLED:
                     from hunter.tracker import get_folder_by_url
+
                     folder_str = await asyncio.to_thread(get_folder_by_url, url)
                     if folder_str:
                         from hunter import gdrive_sync
+
                         drive_url = await gdrive_sync.upload_application_folder(
                             PROJECT_DIR / folder_str, job_url=url
                         )
                         if drive_url:
-                            await _tg_notify(
-                                f'📁 <a href="{drive_url}">Open folder on Drive</a>'
-                            )
+                            await _tg_notify(f'📁 <a href="{drive_url}">Open folder on Drive</a>')
             except Exception as _e:
                 logger.warning("[apply_agent] gdrive upload failed: %s", _e)
     except Exception as e:
@@ -100,7 +103,8 @@ async def _run_apply_agent(
             except Exception as cleanup_err:
                 logger.warning(
                     "[apply_agent] could not delete paste file %s: %s",
-                    paste_file, cleanup_err,
+                    paste_file,
+                    cleanup_err,
                 )
 
 
@@ -139,12 +143,16 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
             failed += 1
             logger.error(
                 "[linkedin_batch] FAIL job %s: %s",
-                jid, stderr.decode(errors="replace")[-300:],
+                jid,
+                stderr.decode(errors="replace")[-300:],
             )
             try:
                 stub = Job(
-                    title=f"LinkedIn {jid}", company="LinkedIn",
-                    url=url, source="linkedin", location="",
+                    title=f"LinkedIn {jid}",
+                    company="LinkedIn",
+                    url=url,
+                    source="linkedin",
+                    location="",
                 )
                 await asyncio.to_thread(add_failed, stub)
             except Exception as e:
@@ -154,6 +162,7 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
 
     try:
         from telegram.constants import ParseMode
+
         await update.message.reply_text(
             f"🏁 <b>LinkedIn batch done</b>\n✅ {ok} / ❌ {failed} / Total: {total}",
             parse_mode=ParseMode.HTML,
@@ -181,14 +190,11 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     manual_pending = False
     if url:
         entries = await asyncio.to_thread(lookup_url, url)
-        manual_pending = any(
-            str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries
-        )
+        manual_pending = any(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
         if entries and not manual_pending and not force:
             detail = "\n".join(
                 f"  Row {e['row']}: <b>{e['company']}</b> - {e['title']}\n"
-                f"    ATS: {e['ats']}"
-                + (f" | Sent: {e['sent']}" if e["sent"] else "")
+                f"    ATS: {e['ats']}" + (f" | Sent: {e['sent']}" if e["sent"] else "")
                 for e in entries
             )
             await update.message.reply_text(
@@ -233,7 +239,8 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
             )
             logger.info(
                 "[paste handler] Updated MANUAL job_posting.txt and rerun apply url=%s force=%s",
-                url, force,
+                url,
+                force,
             )
             asyncio.create_task(_run_apply_agent(url, force=force))
             return
@@ -241,8 +248,10 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     # Generic paste: write text to a temp file and pass it to apply_agent.
     try:
         tmp = tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8",
-            suffix=".txt", prefix="tg_paste_",
+            mode="w",
+            encoding="utf-8",
+            suffix=".txt",
+            prefix="tg_paste_",
             delete=False,
         )
         with tmp as fh:
@@ -270,6 +279,8 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     )
     logger.info(
         "[paste handler] Launching apply_agent paste mode (%d chars) url=%s force=%s",
-        chars, url or "—", force,
+        chars,
+        url or "—",
+        force,
     )
     asyncio.create_task(_run_apply_agent(url, force=force, paste_file=paste_path))

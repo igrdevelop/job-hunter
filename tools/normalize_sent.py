@@ -30,11 +30,13 @@ from hunter.sent_normalizer import APPLIED_COL, APPLIED_HEADER, build_column, wr
 def main() -> int:
     parser = argparse.ArgumentParser(description="Normalize Sent → clean date column (L).")
     parser.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Actually write column L. Without it, prints a preview (dry run).",
     )
     parser.add_argument(
-        "--tab", default="Tracker",
+        "--tab",
+        default="Tracker",
         help="Name of the data tab to read/write (default: Tracker).",
     )
     args = parser.parse_args()
@@ -51,8 +53,10 @@ def main() -> int:
 
     rows = read_all(service, sheet_id, tab=args.tab)
     grid, filled = build_column(rows)
-    print(f"Read {len(rows)} rows from tab {args.tab!r}. "
-          f"Found {filled} application dates ({len(rows) - filled} blank).")
+    print(
+        f"Read {len(rows)} rows from tab {args.tab!r}. "
+        f"Found {filled} application dates ({len(rows) - filled} blank)."
+    )
 
     # Show a small sample so the user can eyeball the parse.
     print("\nSample (Sent → Applied Date):")
@@ -67,8 +71,10 @@ def main() -> int:
         write_column(service, sheet_id, grid, tab=args.tab)
         print(f"\nDone. Column {APPLIED_COL} ({APPLIED_HEADER}) now holds clean dates.")
     else:
-        print(f"\nDry run — nothing written. Re-run with --apply to fill column "
-              f"{APPLIED_COL} ({APPLIED_HEADER}).")
+        print(
+            f"\nDry run — nothing written. Re-run with --apply to fill column "
+            f"{APPLIED_COL} ({APPLIED_HEADER})."
+        )
     return 0
 
 

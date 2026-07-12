@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 
 # ── Profile dataclass ──────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class Profile:
     name: str
     provider: str
     model: str
-    env_key: str          # env-var name that holds the API key for this provider
+    env_key: str  # env-var name that holds the API key for this provider
 
     @property
     def api_key(self) -> str:
@@ -41,6 +42,7 @@ class Profile:
     def cost_estimate(self) -> str:
         """Rough per-vacancy cost string for display (8 calls, typical token sizes)."""
         from hunter.llm_cost import _resolve_pricing
+
         rates = _resolve_pricing(self.model)
         # Rough estimate: 8 calls, avg 3k input + 4k output tokens per call
         est = (8 * (3000 * rates["input"] + 4000 * rates["output"])) / 1_000_000
@@ -134,27 +136,25 @@ def set_override(profile: "Profile | None") -> None:
 
 # ── DB persistence (config key-value table) ────────────────────────────────────
 
+
 def _get_db_path() -> Path:
     from hunter.config import TRACKER_DB_PATH
+
     return TRACKER_DB_PATH
 
 
 def _ensure_config_table(conn) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS config "
-        "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-    )
+    conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     conn.commit()
 
 
 def _db_get(key: str) -> str | None:
     import sqlite3
+
     try:
         with sqlite3.connect(_get_db_path()) as conn:
             _ensure_config_table(conn)
-            row = conn.execute(
-                "SELECT value FROM config WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT value FROM config WHERE key = ?", (key,)).fetchone()
             return row[0] if row else None
     except Exception as e:
         logger.warning("[llm_profiles] DB read failed: %s", e)
@@ -163,6 +163,7 @@ def _db_get(key: str) -> str | None:
 
 def _db_set(key: str, value: str) -> None:
     import sqlite3
+
     try:
         with sqlite3.connect(_get_db_path()) as conn:
             _ensure_config_table(conn)
@@ -177,6 +178,7 @@ def _db_set(key: str, value: str) -> None:
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
 
 def list_available() -> list[Profile]:
     """Profiles whose API key is present in the environment."""
@@ -237,9 +239,7 @@ def _validate_profile(name: str) -> Profile:
         raise ValueError(f"Unknown profile '{name}'. Known: {known}")
     profile = PROFILES[name]
     if not profile.is_available():
-        raise ValueError(
-            f"Profile '{name}' is not available — set {profile.env_key} in .env"
-        )
+        raise ValueError(f"Profile '{name}' is not available — set {profile.env_key} in .env")
     return profile
 
 
@@ -259,6 +259,7 @@ def set_active(name: str) -> Profile:
 # When enabled, after the primary (boevoy) apply produces its docs the bot runs a
 # second, side-by-side generation with the shadow profile into a {model} subfolder
 # (see hunter.dual_apply). Toggled at runtime via the /dual Telegram command.
+
 
 def dual_enabled() -> bool:
     """True if dual-apply (shadow comparison) mode is on."""
@@ -292,9 +293,7 @@ def shadow_profile() -> Profile | None:
     key is missing, so the shadow run quietly no-ops rather than crashing.
     """
     name = (
-        _db_get(_DUAL_SHADOW_KEY)
-        or os.getenv("DUAL_SHADOW_PROFILE", "").strip()
-        or _DEFAULT_SHADOW
+        _db_get(_DUAL_SHADOW_KEY) or os.getenv("DUAL_SHADOW_PROFILE", "").strip() or _DEFAULT_SHADOW
     )
     prof = PROFILES.get(name)
     return prof if (prof is not None and prof.is_available()) else None

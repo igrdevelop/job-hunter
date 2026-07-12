@@ -12,15 +12,29 @@ from hunter.content_qa import (
 
 
 def test_is_angular_version_entry_true_cases() -> None:
-    for item in ["Angular", "Angular (2-22)", "Angular 2-22", "Angular 2+",
-                 "Angular (latest versions)", "Angular (2-21)", " Angular  "]:
+    for item in [
+        "Angular",
+        "Angular (2-22)",
+        "Angular 2-22",
+        "Angular 2+",
+        "Angular (latest versions)",
+        "Angular (2-21)",
+        " Angular  ",
+    ]:
         assert is_angular_version_entry(item), item
 
 
 def test_is_angular_version_entry_false_cases() -> None:
-    for item in ["Angular Material", "Angular CLI", "Angular development",
-                 "Angular maintenance", "Angular Universal", "AngularJS",
-                 "TypeScript", "RxJS"]:
+    for item in [
+        "Angular Material",
+        "Angular CLI",
+        "Angular development",
+        "Angular maintenance",
+        "Angular Universal",
+        "AngularJS",
+        "TypeScript",
+        "RxJS",
+    ]:
         assert not is_angular_version_entry(item), item
 
 
@@ -51,6 +65,7 @@ def test_canonical_angular_constant() -> None:
 # into EN cover letter: 'ł'" because QA used a blunt diacritic regex with no
 # place-name allowlist, while the gate (correctly) shipped the docs.
 # ---------------------------------------------------------------------------
+
 
 def test_cover_letter_en_with_polish_city_passes() -> None:
     cl = {

@@ -128,9 +128,12 @@ def _is_node_only_title(title: str) -> bool:
     t = title.lower()
     # Front-end signals — don't block if any of these appear as whole words
     _FE_SIGNAL_RES = (
-        r"\bangular\b", r"\bfrontend\b", r"\bfront-end\b",
-        r"\breact\b", r"\bvue\b",
-        r"\bui\b",      # "UI / Node.js Developer" — UI is FE
+        r"\bangular\b",
+        r"\bfrontend\b",
+        r"\bfront-end\b",
+        r"\breact\b",
+        r"\bvue\b",
+        r"\bui\b",  # "UI / Node.js Developer" — UI is FE
         r"\bux\b",
         r"\bspa\b",
     )
@@ -342,7 +345,7 @@ _OPTIONAL_CONTEXT_RES: tuple[re.Pattern[str], ...] = tuple(
 
 def _is_optional_context(blob: str, pos: int, window: int = 150) -> bool:
     """True if an explicit nice-to-have/optional marker sits shortly before pos."""
-    return any(p.search(blob[max(0, pos - window):pos]) for p in _OPTIONAL_CONTEXT_RES)
+    return any(p.search(blob[max(0, pos - window) : pos]) for p in _OPTIONAL_CONTEXT_RES)
 
 
 def _is_german_language_required(job: Job) -> bool:
@@ -370,18 +373,33 @@ def _is_german_language_required(job: Job) -> bool:
 # at module load time so the set is computed once and stays O(1) per lookup.
 _ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
     {
-        "kraków", "krakow", "cracow",
-        "warszawa", "warsaw",
-        "gdańsk", "gdansk", "gdynia", "trójmiasto", "trojmiasto",
-        "poznań", "poznan",
-        "łódź", "lodz",
-        "katowice", "silesia", "śląsk", "slask",
-        "rzeszów", "rzeszow",
+        "kraków",
+        "krakow",
+        "cracow",
+        "warszawa",
+        "warsaw",
+        "gdańsk",
+        "gdansk",
+        "gdynia",
+        "trójmiasto",
+        "trojmiasto",
+        "poznań",
+        "poznan",
+        "łódź",
+        "lodz",
+        "katowice",
+        "silesia",
+        "śląsk",
+        "slask",
+        "rzeszów",
+        "rzeszow",
         "lublin",
         "szczecin",
         "bydgoszcz",
-        "toruń", "torun",
-        "białystok", "bialystok",
+        "toruń",
+        "torun",
+        "białystok",
+        "bialystok",
     }
     | {c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])}
 )
@@ -478,13 +496,13 @@ _ONSITE_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bon[-\s]?site\b",
         r"\bonsite\b",
         r"\bstationary\b",
-        r"\bstacjonarn\w*",          # PL: praca stacjonarna
+        r"\bstacjonarn\w*",  # PL: praca stacjonarna
         r"\bin[-\s]the[-\s]office\b",
         r"\bin[-\s]office\b",
-        r"\bdays?\s+(?:a|per)\s+week\b",   # "3 days a week" (in office)
+        r"\bdays?\s+(?:a|per)\s+week\b",  # "3 days a week" (in office)
         r"\bdays?\s+in\s+the\s+office\b",
-        r"\bz\s+biura\b",            # PL: from the office
-        r"\bw\s+biurze\b",          # PL: in the office
+        r"\bz\s+biura\b",  # PL: from the office
+        r"\bw\s+biurze\b",  # PL: in the office
     )
 )
 
@@ -512,7 +530,7 @@ def _onsite_signal_positions(blob: str) -> list[int]:
         m.start()
         for p in _ONSITE_SIGNAL_RES
         for m in p.finditer(blob)
-        if not _ONSITE_PERKS_CONTEXT_RE.search(blob[m.start(): m.start() + 100])
+        if not _ONSITE_PERKS_CONTEXT_RE.search(blob[m.start() : m.start() + 100])
     ]
 
 
@@ -534,8 +552,8 @@ _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\b100\s*%\s*remote\b",
         r"\bremote[-\s]first\b",
         r"\bwork\s+from\s+anywhere\b",
-        r"\bw\s+pełni\s+zdaln\w*",   # PL: fully remote
-        r"\b100\s*%\s*zdaln\w*",    # PL: 100% remote
+        r"\bw\s+pełni\s+zdaln\w*",  # PL: fully remote
+        r"\b100\s*%\s*zdaln\w*",  # PL: 100% remote
         r"tryb\s+pracy:?\s*\n?\s*\[?\s*(?:100\s*%\s*)?zdaln\w*",  # PL: theprotocol.it work-mode facet offering remote
     )
 )
@@ -640,7 +658,11 @@ def _is_ai_training_or_mill(job: Job) -> bool:
 # before any fetch — and catches sources whose location field itself
 # literally names the country (worldwide-remote boards sometimes do).
 _RUSSIA_MARKET_LOCATION_TOKENS = (
-    "russia", "russian federation", "рф", "россия", "российская федерация",
+    "russia",
+    "russian federation",
+    "рф",
+    "россия",
+    "российская федерация",
 )
 
 
@@ -838,7 +860,9 @@ _MANUAL_SCREEN_CHECKS_SOFT: tuple[tuple[str, str], ...] = (
     ("_is_unwanted_onsite_location", "on-site / hybrid outside Wrocław"),
 )
 # screen_job_text() (paste-path warn-but-allow) checks both tiers uniformly.
-_MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = _MANUAL_SCREEN_CHECKS_HARD + _MANUAL_SCREEN_CHECKS_SOFT
+_MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = (
+    _MANUAL_SCREEN_CHECKS_HARD + _MANUAL_SCREEN_CHECKS_SOFT
+)
 
 
 # ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ────────────────────────────
@@ -860,7 +884,7 @@ class GateFinding:
 
 def _context_snippet(blob: str, start: int, end: int, pad: int = 40) -> str:
     """Short evidence quote around a regex match, trimmed of surrounding noise."""
-    snippet = blob[max(0, start - pad):min(len(blob), end + pad)]
+    snippet = blob[max(0, start - pad) : min(len(blob), end + pad)]
     return re.sub(r"\s+", " ", snippet).strip()
 
 
@@ -999,7 +1023,9 @@ _UNSUPPORTED_LANG_REQUIRED_RES: dict[str, tuple[re.Pattern[str], ...]] = {
 # English-as-working-language vetoes any required-foreign-language finding
 # (shared with the German check's not-required set).
 _ENGLISH_ONLY_WORKPLACE_RES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\benglish\s+is\s+(?:the\s+)?(?:working|company|office)\s+language\b", re.IGNORECASE),
+    re.compile(
+        r"\benglish\s+is\s+(?:the\s+)?(?:working|company|office)\s+language\b", re.IGNORECASE
+    ),
     re.compile(r"\bworking\s+language\s*[:\s]+\s*english\b", re.IGNORECASE),
 )
 
@@ -1029,7 +1055,9 @@ def _assess_unsupported_language(job: Job) -> "GateFinding | None":
 # SOFT — primary-stack mismatch: a Vue/Svelte/Ember-first posting where neither
 # Angular nor React appears anywhere in the text. "Angular or Vue" / "React or
 # Vue" postings are NOT flagged (both frameworks present → not a mismatch).
-_OTHER_FRAMEWORK_RE = re.compile(r"\b(?:vue(?:\.?js)?|sveltekit|svelte|ember(?:\.?js)?)\b", re.IGNORECASE)
+_OTHER_FRAMEWORK_RE = re.compile(
+    r"\b(?:vue(?:\.?js)?|sveltekit|svelte|ember(?:\.?js)?)\b", re.IGNORECASE
+)
 _CANDIDATE_FRAMEWORK_RE = re.compile(r"\b(?:angular|react(?:\.?js)?)\b", re.IGNORECASE)
 
 
@@ -1293,12 +1321,17 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
     blob = f"{job.title}\n{_job_plain_text_blob(job)}".lower()
 
     findings: list[GateFinding] = []
-    for checks, severity in ((_MANUAL_SCREEN_CHECKS_HARD, "hard"), (_MANUAL_SCREEN_CHECKS_SOFT, "soft")):
+    for checks, severity in (
+        (_MANUAL_SCREEN_CHECKS_HARD, "hard"),
+        (_MANUAL_SCREEN_CHECKS_SOFT, "soft"),
+    ):
         for fn_name, label in checks:
             fn = globals().get(fn_name)
             try:
                 if fn and fn(job):
-                    findings.append(GateFinding(rule=fn_name.strip("_"), severity=severity, evidence=label))
+                    findings.append(
+                        GateFinding(rule=fn_name.strip("_"), severity=severity, evidence=label)
+                    )
             except Exception:  # noqa: BLE001 — one bad check must not sink the others
                 continue
 

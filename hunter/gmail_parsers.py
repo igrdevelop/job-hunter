@@ -27,6 +27,7 @@ def register(domain: str):
     def decorator(fn):
         PARSERS[domain] = fn
         return fn
+
     return decorator
 
 
@@ -74,10 +75,11 @@ def _jobs_from_urls(urls: list[str], source: str, subject: str) -> list[Job]:
 # almost always /comm/jobs/view/<id> (with refId/trk query params), not the bare
 # /jobs/view/<id> users see in their browser. We accept both, then canonicalize.
 
+
 @register("linkedin.com")
 def parse_linkedin(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
-    ids = re.findall(r'linkedin\.com/(?:comm/)?jobs/view/(\d{8,12})', html)
+    ids = re.findall(r"linkedin\.com/(?:comm/)?jobs/view/(\d{8,12})", html)
     urls = [f"https://www.linkedin.com/jobs/view/{jid}" for jid in ids]
     return _jobs_from_urls(urls, "linkedin", subject)
 
@@ -85,10 +87,11 @@ def parse_linkedin(subject: str, body_text: str, body_html: str) -> list[Job]:
 # ── NoFluffJobs ───────────────────────────────────────────────────────────────
 # URLs: https://nofluffjobs.com/pl/job/some-job-slug-city
 
+
 @register("nofluffjobs.com")
 def parse_nofluffjobs(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
-    urls = re.findall(r'https://nofluffjobs\.com/pl/job/[\w-]+', html)
+    urls = re.findall(r"https://nofluffjobs\.com/pl/job/[\w-]+", html)
     return _jobs_from_urls(urls, "nofluffjobs", subject)
 
 
@@ -96,20 +99,22 @@ def parse_nofluffjobs(subject: str, body_text: str, body_html: str) -> list[Job]
 # URLs: https://justjoin.it/offers/some-offer-slug
 #       https://justjoin.it/job-offer/some-offer-slug
 
+
 @register("justjoin.it")
 def parse_justjoin(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
-    urls = re.findall(r'https://justjoin\.it/(?:offers|job-offer)/[\w-]+', html)
+    urls = re.findall(r"https://justjoin\.it/(?:offers|job-offer)/[\w-]+", html)
     return _jobs_from_urls(urls, "justjoin", subject)
 
 
 # ── Bulldogjob ────────────────────────────────────────────────────────────────
 # URLs: https://bulldogjob.pl/companies/jobs/XXXXXXXX-some-title
 
+
 @register("bulldogjob.pl")
 def parse_bulldogjob(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
-    urls = re.findall(r'https://bulldogjob\.(?:pl|com)/companies/jobs/[\w-]+', html)
+    urls = re.findall(r"https://bulldogjob\.(?:pl|com)/companies/jobs/[\w-]+", html)
     return _jobs_from_urls(urls, "bulldogjob", subject)
 
 
@@ -121,19 +126,18 @@ def parse_bulldogjob(subject: str, body_text: str, body_html: str) -> list[Job]:
 # and canonicalize to the www. form so normalize_url's path-id treatment + dedup
 # stay stable across email and scraped links.
 
+
 @register("pracuj.pl")
 def parse_pracuj(subject: str, body_text: str, body_html: str) -> list[Job]:
     html = body_html or body_text or ""
     # Only use full URLs that contain the title slug — slug-less URLs (/praca/oferta,ID)
     # are invalid on pracuj.pl and will show "not found"
-    direct = re.findall(
-        r'https://(?:www\.)?pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html
-    )
+    direct = re.findall(r'https://(?:www\.)?pracuj\.pl/praca/[^">\s]+,oferta,\d+[^">\s]*', html)
     clean = []
     for url in direct:
-        if not re.search(r'/praca/[^/]+,oferta,\d+', url):
+        if not re.search(r"/praca/[^/]+,oferta,\d+", url):
             continue
-        url = re.sub(r'\?.*$', '', url)
-        url = re.sub(r'^https://pracuj\.pl/', 'https://www.pracuj.pl/', url)
+        url = re.sub(r"\?.*$", "", url)
+        url = re.sub(r"^https://pracuj\.pl/", "https://www.pracuj.pl/", url)
         clean.append(url)
     return _jobs_from_urls(clean, "pracuj", subject)

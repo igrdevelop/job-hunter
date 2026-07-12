@@ -16,9 +16,15 @@ from datetime import datetime
 from telegram.ext import ContextTypes
 
 from hunter.config import (
-    AUTO_APPLY, APPLY_AGENT_PATH, APPLY_USE_CLI,
-    LLM_API_KEY, LLM_PROVIDER, LLM_MODEL,
-    APPLY_DELAY_SEC, MAX_JOBS_PER_RUN, APPLY_AGENT_TIMEOUT_SEC,
+    AUTO_APPLY,
+    APPLY_AGENT_PATH,
+    APPLY_USE_CLI,
+    LLM_API_KEY,
+    LLM_PROVIDER,
+    LLM_MODEL,
+    APPLY_DELAY_SEC,
+    MAX_JOBS_PER_RUN,
+    APPLY_AGENT_TIMEOUT_SEC,
     GMAIL_MAX_RESULTS,
 )
 from hunter.filters import apply_filters_with_stats, classify_job
@@ -27,10 +33,16 @@ from hunter.models import Job
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
-    get_known_urls, get_known_company_titles,
-    dedup_key, normalize_url,
-    add_failed, get_failed_jobs, remove_failed, increment_fail_count,
-    is_in_cooldown, MAX_FAIL_RETRIES,
+    get_known_urls,
+    get_known_company_titles,
+    dedup_key,
+    normalize_url,
+    add_failed,
+    get_failed_jobs,
+    remove_failed,
+    increment_fail_count,
+    is_in_cooldown,
+    MAX_FAIL_RETRIES,
 )
 from hunter.telegram_bot import send_job_cards, send_text
 
@@ -73,8 +85,10 @@ def _check_apply_ready() -> str | None:
         try:
             r = subprocess.run(
                 ["claude", "--version"],
-                capture_output=True, text=True,
-                stdin=subprocess.DEVNULL, timeout=15,
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=15,
             )
             if r.returncode != 0 or "not logged in" in (r.stdout + r.stderr).lower():
                 return r.stderr or r.stdout or "unknown error"
@@ -108,9 +122,7 @@ async def _run_hunt_impl(
 
     # Select sources for this run
     active_sources = (
-        [s for s in ALL_SOURCES if s.name in source_names]
-        if source_names
-        else ALL_SOURCES
+        [s for s in ALL_SOURCES if s.name in source_names] if source_names else ALL_SOURCES
     )
 
     # ── Step 1: Fetch ────────────────────────────────────────────────────────
@@ -170,9 +182,7 @@ async def _run_hunt_impl(
     filtered_ids = {id(j) for j in filtered}
     for j in all_jobs:
         if j.source.startswith("gmail_") and id(j) not in filtered_ids:
-            gmail_outcomes.append(
-                JobOutcome.from_job(j, "filtered", classify_job(j))
-            )
+            gmail_outcomes.append(JobOutcome.from_job(j, "filtered", classify_job(j)))
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple
@@ -185,8 +195,7 @@ async def _run_hunt_impl(
         hint = str(e)[:400]
         await send_text(
             context,
-            "❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n"
-            f"<pre>{hint}</pre>",
+            f"❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n<pre>{hint}</pre>",
         )
         return
 
@@ -216,10 +225,9 @@ async def _run_hunt_impl(
         # Only called when URL and exact CT checks both miss (hot path unaffected).
         try:
             from hunter.tracker_cache import cache as _cache
+
             if await _cache.is_fuzzy_ct(j.company, j.title):
-                logger.info(
-                    f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}"
-                )
+                logger.info(f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}")
                 dup_ct += 1
                 if is_gmail:
                     gmail_outcomes.append(JobOutcome.from_job(j, "dup_ct"))
@@ -239,8 +247,7 @@ async def _run_hunt_impl(
             gmail_outcomes.append(JobOutcome.from_job(j, "taken"))
 
     logger.info(
-        f"[Hunt] New: {len(new_jobs)} "
-        f"(dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
+        f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
     )
 
     # ── Send detailed report ─────────────────────────────────────────────────
@@ -252,13 +259,7 @@ async def _run_hunt_impl(
         f"  Total: <b>{total_raw}</b> raw\n\n"
         f"<b>--- Filter ---</b>\n"
         f"  {total_raw} raw -> <b>{len(filtered)}</b> passed ({filtered_out} filtered out)\n"
-        + (
-            "".join(
-                f"  ✂️ {cnt} by {reason}\n"
-                for reason, cnt in filter_reasons.items()
-                if cnt > 0
-            )
-        )
+        + ("".join(f"  ✂️ {cnt} by {reason}\n" for reason, cnt in filter_reasons.items() if cnt > 0))
         + "\n"
         f"<b>--- Dedup ---</b>\n"
         f"  {len(filtered)} passed -> <b>{len(new_jobs)}</b> new\n"
@@ -329,6 +330,7 @@ async def _run_hunt_impl(
 
 # ── Scraper health ────────────────────────────────────────────────────────────
 
+
 def _record_source_health(
     source_name: str,
     yield_count: int,
@@ -341,9 +343,11 @@ def _record_source_health(
     breakage threshold. Best-effort — telemetry must never break a hunt."""
     try:
         from hunter.config import SOURCE_HEALTH_ENABLED
+
         if not SOURCE_HEALTH_ENABLED:
             return
         from hunter import source_health
+
         source_health.record_run(source_name, yield_count, ok=ok, error=error)
         if source_health.newly_broken(source_name):
             broken.append(source_name)
@@ -353,11 +357,13 @@ def _record_source_health(
 
 # ── Auto-apply pipeline ──────────────────────────────────────────────────────
 
+
 async def _sync_to_sheets(url: str) -> None:
     """Mirror a just-applied row to Google Sheets (best-effort)."""
     try:
         from hunter.tracker_cache import cache
         from hunter import gsheets_sync
+
         await cache.load_from_db()
         row = await cache.get_row_by_url(url)
         if row:
@@ -370,11 +376,13 @@ async def _upload_to_drive(url: str) -> None:
     """Upload application folder to Google Drive immediately after apply (best-effort)."""
     try:
         from hunter.config import GDRIVE_ENABLED
+
         if not GDRIVE_ENABLED:
             return
         from hunter.tracker import get_folder_by_url
         from hunter.config import PROJECT_DIR
         from hunter import gdrive_sync
+
         folder_str = await asyncio.to_thread(get_folder_by_url, url)
         if folder_str:
             await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
@@ -391,9 +399,11 @@ async def _upload_log_to_drive() -> None:
     """
     try:
         from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+
         if not GDRIVE_ENABLED:
             return
         from hunter import gdrive_sync
+
         await gdrive_sync.upload_log_file(PROJECT_DIR / "logs" / "hunter_errors.log")
         logger.debug("[gmail] log snapshot uploaded to Drive")
     except Exception as _e:
@@ -407,9 +417,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
 
     for i, job in enumerate(jobs, 1):
         text = (
-            f"⏳ [{i}/{total}] <b>{job.company}</b> — {job.title}\n"
-            f"📍 {job.location}\n"
-            f"🔗 {job.url}"
+            f"⏳ [{i}/{total}] <b>{job.company}</b> — {job.title}\n📍 {job.location}\n🔗 {job.url}"
         )
         permalink = job.raw.get("permalink")
         if permalink:
@@ -518,7 +526,8 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             consecutive_fails += 1
             logger.warning(
                 "[retry] Rate-limited (429), not escalating: %s - %s",
-                job.company, job.title,
+                job.company,
+                job.title,
             )
             await send_text(
                 context,
@@ -531,7 +540,9 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             if new_count >= MAX_FAIL_RETRIES:
                 logger.warning(
                     "[retry] Giving up on %s - %s after %d failures",
-                    job.company, job.title, new_count,
+                    job.company,
+                    job.title,
+                    new_count,
                 )
                 await send_text(
                     context,
@@ -541,7 +552,10 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 logger.info(
                     "[retry] Still failing (%d/%d): %s - %s",
-                    new_count, MAX_FAIL_RETRIES, job.company, job.title,
+                    new_count,
+                    MAX_FAIL_RETRIES,
+                    job.company,
+                    job.title,
                 )
 
         # Stop hammering a rate-limited/down host after N failures in a row.

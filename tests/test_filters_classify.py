@@ -10,8 +10,12 @@ from hunter.models import Job
 
 def _job(title: str, location: str = "Remote", source: str = "justjoin", **kw) -> Job:
     return Job(
-        title=title, company=kw.get("company", "Acme"), location=location,
-        salary=None, url=kw.get("url", f"https://x/{title}"), source=source,
+        title=title,
+        company=kw.get("company", "Acme"),
+        location=location,
+        salary=None,
+        url=kw.get("url", f"https://x/{title}"),
+        source=source,
         raw=kw.get("raw", {}),
     )
 
@@ -70,9 +74,9 @@ def test_reason_in_vocabulary():
 
 def test_aggregate_matches_classify():
     jobs = [
-        _job("Senior Angular Developer"),          # pass
-        _job("Plumber"),                           # title_kw
-        _job("Angular Intern"),                    # level
+        _job("Senior Angular Developer"),  # pass
+        _job("Plumber"),  # title_kw
+        _job("Angular Intern"),  # level
         _job("Angular Developer", location="Berlin"),  # location
     ]
     passed, reasons = apply_filters_with_stats(jobs)

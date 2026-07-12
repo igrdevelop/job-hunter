@@ -25,8 +25,7 @@ def _build_schedule_text() -> str:
 
     schedule_str = "\n".join(lines)
     return (
-        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset {SCHEDULE_SOURCE_OFFSET_MIN} min):\n"
-        f"{schedule_str}"
+        f"⏰ <b>Schedule</b> ({TIMEZONE}, offset {SCHEDULE_SOURCE_OFFSET_MIN} min):\n{schedule_str}"
     )
 
 
@@ -36,7 +35,7 @@ def _format_check_responses_report(results) -> str:
 
     confirmed = [r for r in results if r.match_type in ("exact", "fuzzy") and r.row_id]
     ambiguous = [r for r in results if r.match_type == "ambiguous"]
-    no_match  = [r for r in results if r.match_type == "no_match"]
+    no_match = [r for r in results if r.match_type == "no_match"]
 
     if not results:
         return "📭 <b>No confirmation emails found</b> in the last few days."
@@ -55,7 +54,7 @@ def _format_check_responses_report(results) -> str:
         lines.append(f"❓ <b>Ambiguous — needs review ({len(ambiguous)}):</b>")
         for r in ambiguous:
             company = r.email.company or "?"
-            title   = r.email.title   or "(no title extracted)"
+            title = r.email.title or "(no title extracted)"
             lines.append(f"  • {company} — {title}")
             cands = ", ".join(c["title"] for c in r.candidates[:3])
             lines.append(f"    <i>Candidates: {cands}</i>")
@@ -65,7 +64,7 @@ def _format_check_responses_report(results) -> str:
         lines.append(f"📭 <b>Not matched ({len(no_match)}):</b>")
         for r in no_match:
             company = r.email.company or "(no company)"
-            title   = r.email.title   or "(no title)"
+            title = r.email.title or "(no title)"
             lines.append(f"  • {company} — {title}")
 
     return "\n".join(lines).strip()

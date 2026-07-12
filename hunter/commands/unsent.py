@@ -13,6 +13,7 @@ async def cmd_unsent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Count unsent applications in tracker and how many have ANGULAR in stack."""
     try:
         from hunter.tracker_cache import cache
+
         if not cache.loaded:
             await cache.load_from_db()
         total = await cache.unsent_count()

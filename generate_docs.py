@@ -133,6 +133,7 @@ def keep_with_next(paragraph, keep_lines=True):
 
 def set_paragraph_spacing(paragraph, before=0, after=4, line_spacing=1.08):
     from docx.oxml.ns import qn
+
     pPr = paragraph._p.get_or_add_pPr()
     pSpacing = OxmlElement("w:spacing")
     pSpacing.set(qn("w:before"), str(int(before * 20)))
@@ -279,7 +280,11 @@ def build_resume(doc, data, stack, lang="EN"):
     p = doc.add_paragraph()
     edu = data.get("education", "")
     if not isinstance(edu, str):
-        edu = ", ".join(str(v) for v in edu.values() if v) if isinstance(edu, dict) else str(edu or "")
+        edu = (
+            ", ".join(str(v) for v in edu.values() if v)
+            if isinstance(edu, dict)
+            else str(edu or "")
+        )
     run = p.add_run(edu)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
@@ -289,7 +294,9 @@ def build_resume(doc, data, stack, lang="EN"):
     p = doc.add_paragraph()
     courses = data.get("courses", "")
     if not isinstance(courses, str):
-        courses = ", ".join(str(v) for v in courses) if isinstance(courses, list) else str(courses or "")
+        courses = (
+            ", ".join(str(v) for v in courses) if isinstance(courses, list) else str(courses or "")
+        )
     run = p.add_run(courses)
     set_font(run, size=11)
     set_paragraph_spacing(p, before=3, after=3)
@@ -334,6 +341,7 @@ def convert_all_to_pdf(output_folder):
     """Convert all DOCX files in the folder to PDF in a single LibreOffice call."""
     import subprocess
     from hunter.config import SOFFICE_PATH
+
     soffice = SOFFICE_PATH
     docx_files = list(Path(output_folder).glob("*.docx"))
     if not docx_files:
@@ -341,7 +349,9 @@ def convert_all_to_pdf(output_folder):
     result = subprocess.run(
         [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(output_folder)]
         + [str(f) for f in docx_files],
-        capture_output=True, text=True, timeout=120
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if result.returncode == 0:
         for f in docx_files:
@@ -379,6 +389,7 @@ def main():
     # apply_agent already ran sanitizer (handles manual / re-run scenarios).
     try:
         from hunter.resume_sanitizer import sanitize_content
+
         content = sanitize_content(content)
         # Persist corrected content back to disk
         Path(json_path).write_text(
@@ -433,6 +444,7 @@ def main():
     _about_me_pl = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
     if full_mode or _about_me_pl:
         from hunter.about_me_agent import generate_about_me
+
         if full_mode:
             generate_about_me(Path(output_folder), lang="en")
         generate_about_me(Path(output_folder), lang="pl")

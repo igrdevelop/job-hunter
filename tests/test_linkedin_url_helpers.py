@@ -23,9 +23,7 @@ def test_is_linkedin_view() -> None:
 
 
 def test_is_linkedin_search() -> None:
-    assert is_linkedin_search(
-        "https://www.linkedin.com/jobs/search/?currentJobId=123"
-    )
+    assert is_linkedin_search("https://www.linkedin.com/jobs/search/?currentJobId=123")
     assert not is_linkedin_search("https://www.linkedin.com/jobs/view/123")
     assert not is_linkedin_search("https://example.com/jobs/search/")
 

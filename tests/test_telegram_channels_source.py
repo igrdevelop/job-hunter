@@ -53,7 +53,9 @@ def test_parse_posts_br_converted_to_newlines():
     text = posts[0].text
     assert "\n" in text
     first_line = text.split("\n")[0].strip()
-    assert first_line == "Hey job seekers! Check out a handful of remote front-end roles (13 found)!"
+    assert (
+        first_line == "Hey job seekers! Check out a handful of remote front-end roles (13 found)!"
+    )
 
 
 def test_parse_posts_extracts_first_external_link():
@@ -140,7 +142,10 @@ def test_prefilter_negative_interview_practice_event_ru():
 
 
 def test_prefilter_negative_no_title_keyword():
-    assert passes_prefilter("Just a generic update with no relevant tech at all.", kind="board") is False
+    assert (
+        passes_prefilter("Just a generic update with no relevant tech at all.", kind="board")
+        is False
+    )
 
 
 def test_prefilter_negative_exclude_pattern_dotnet():
@@ -330,6 +335,7 @@ def test_search_end_to_end_over_channel_list(tmp_path, monkeypatch):
         '[{"channel": "findmyremote_frontend", "kind": "board"}]', encoding="utf-8"
     )
     import hunter.config as config
+
     monkeypatch.setattr(config, "TELEGRAM_CHANNELS_FILE", channels_file)
     monkeypatch.setattr(config, "TELEGRAM_CHANNELS_DELAY_SEC", 0)
 
@@ -351,10 +357,9 @@ def test_search_end_to_end_over_channel_list(tmp_path, monkeypatch):
 
 def test_search_returns_empty_and_does_not_crash_on_fetch_error(tmp_path, monkeypatch):
     channels_file = tmp_path / "telegram_channels.json"
-    channels_file.write_text(
-        '[{"channel": "brokenchannel", "kind": "board"}]', encoding="utf-8"
-    )
+    channels_file.write_text('[{"channel": "brokenchannel", "kind": "board"}]', encoding="utf-8")
     import hunter.config as config
+
     monkeypatch.setattr(config, "TELEGRAM_CHANNELS_FILE", channels_file)
     monkeypatch.setattr(config, "TELEGRAM_CHANNELS_DELAY_SEC", 0)
 
@@ -366,6 +371,7 @@ def test_search_returns_empty_and_does_not_crash_on_fetch_error(tmp_path, monkey
 
 def test_search_missing_channel_list_returns_empty(tmp_path, monkeypatch):
     import hunter.config as config
+
     monkeypatch.setattr(config, "TELEGRAM_CHANNELS_FILE", tmp_path / "does_not_exist.json")
 
     source = TelegramChannelsSource()
@@ -380,17 +386,20 @@ def test_registered_in_all_sources_by_default():
     override) must already include it — same pattern as test_base_source_
     fetch_text.py's direct ALL_SOURCES check."""
     from hunter.sources import ALL_SOURCES
+
     assert any(s.name == "telegram_channels" for s in ALL_SOURCES)
 
 
 def test_fetch_roster_includes_telegram_channels():
     from hunter.sources import _fetch_roster
+
     names = {s.name for s in _fetch_roster()}
     assert "telegram_channels" in names
 
 
 def test_fetch_job_text_dispatches_t_me_url_to_this_source():
     from hunter.sources import fetch_job_text
+
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
     resp.raw.read.return_value = _load("embed_post.html").encode("utf-8")
@@ -403,18 +412,24 @@ def test_fetch_job_text_does_not_claim_non_t_me_external_link():
     """An external-link job's URL (e.g. an ATS/board link) must dispatch to
     the matching board source (or html_fallback), never this one."""
     from hunter.sources import _fetch_roster
+
     for src in _fetch_roster():
         if src.name == "telegram_channels":
-            assert src.matches_url("https://wroctech.example.com/careers/senior-frontend-angular") is False
+            assert (
+                src.matches_url("https://wroctech.example.com/careers/senior-frontend-angular")
+                is False
+            )
 
 
 def test_min_job_text_len_for_t_me_permalink_uses_scout_floor():
     from hunter.validation import MIN_SCOUT_TEXT_LEN, min_job_text_len_for
+
     assert min_job_text_len_for("https://t.me/rabotafrontend/449") == MIN_SCOUT_TEXT_LEN
 
 
 def test_min_job_text_len_for_external_link_uses_normal_floor():
     from hunter.validation import MIN_JOB_TEXT_LEN, min_job_text_len_for
+
     assert min_job_text_len_for("https://wroctech.example.com/careers/x") == MIN_JOB_TEXT_LEN
 
 
@@ -423,6 +438,7 @@ def test_telegram_post_url_marker_is_substring_of_produced_permalinks():
     this source's build_job()/fetch_text() actually produces (same pattern
     as the scout marker test in test_scout_relay_apply_fixes.py)."""
     from hunter.validation import TELEGRAM_POST_URL_MARKER
+
     posts = _parse_posts(_load("channel_board_rabotafrontend.html"), "rabotafrontend")
     no_link_post = next(p for p in posts if p.msg_id == 447)
     job = build_job(no_link_post, kind="board", source_name="telegram_channels")

@@ -1,4 +1,5 @@
 """Tests for B1 (bogus company names) and B2 (short job text) validation."""
+
 import pytest
 
 from hunter.validation import is_bogus_company, is_job_text_too_short, MIN_JOB_TEXT_LEN
@@ -8,31 +9,38 @@ from hunter.validation import is_bogus_company, is_job_text_too_short, MIN_JOB_T
 # B1 — bogus company name detection
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", [
-    "Unknown",
-    "UNKNOWN",
-    "UnknownCompany",
-    "PracujPortal",
-    "pracujportal",
-    "GeneralJobBoard",
-    "GeneralJobPosting",
-    "GeneralJobSearch",
-    "generaljobboard",
-])
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Unknown",
+        "UNKNOWN",
+        "UnknownCompany",
+        "PracujPortal",
+        "pracujportal",
+        "GeneralJobBoard",
+        "GeneralJobPosting",
+        "GeneralJobSearch",
+        "generaljobboard",
+    ],
+)
 def test_is_bogus_company_rejects_placeholders(name: str) -> None:
     assert is_bogus_company(name), f"Expected bogus but got False for: {name!r}"
 
 
-@pytest.mark.parametrize("name", [
-    "EdgeOneSolutions",
-    "Capgemini",
-    "LinkGroup",
-    "Upvanta",
-    "NASK",
-    "DCVTechnologies",
-    "Arcanys",
-    "GetItTogether",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "EdgeOneSolutions",
+        "Capgemini",
+        "LinkGroup",
+        "Upvanta",
+        "NASK",
+        "DCVTechnologies",
+        "Arcanys",
+        "GetItTogether",
+    ],
+)
 def test_is_bogus_company_accepts_real_names(name: str) -> None:
     assert not is_bogus_company(name), f"Expected real company but got True for: {name!r}"
 
@@ -49,6 +57,7 @@ def test_is_bogus_company_none_coerced_is_bogus() -> None:
 # ---------------------------------------------------------------------------
 # B2 — minimum job text length
 # ---------------------------------------------------------------------------
+
 
 def test_is_job_text_too_short_empty() -> None:
     assert is_job_text_too_short("")

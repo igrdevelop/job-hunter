@@ -16,4 +16,3 @@ def should_skip_url(url: str) -> bool:
 def record_successful_apply(content: dict, force: bool = False) -> bool:
     """Record successful generated docs in tracker."""
     return add_applied(content, force=force)
-

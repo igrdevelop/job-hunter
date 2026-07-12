@@ -39,9 +39,7 @@ def test_format_message_omits_profile_link_when_absent():
 
 
 def test_format_message_includes_profile_link_when_present():
-    text = format_message(
-        _candidate(author_profile_url="https://www.linkedin.com/in/janedoe")
-    )
+    text = format_message(_candidate(author_profile_url="https://www.linkedin.com/in/janedoe"))
     assert "https://www.linkedin.com/in/janedoe" in text
 
 

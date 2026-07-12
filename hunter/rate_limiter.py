@@ -85,9 +85,7 @@ class DomainLimiter:
         async with global_sem:
             async with dom_sem:
                 coro = asyncio.to_thread(fetch_fn, url)
-                result = await (
-                    asyncio.wait_for(coro, timeout=timeout) if timeout else coro
-                )
+                result = await (asyncio.wait_for(coro, timeout=timeout) if timeout else coro)
         # Rate-limit delay runs outside semaphores so slots are freed immediately.
         if delay > 0:
             async with dom_lock:

@@ -57,8 +57,9 @@ def _load_cost(folder: Path) -> dict | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("path", type=Path, help="Applications/ or a single apply folder")
-    ap.add_argument("--since", type=str, default="",
-                    help="only consider date folders >= YYYY-MM-DD")
+    ap.add_argument(
+        "--since", type=str, default="", help="only consider date folders >= YYYY-MM-DD"
+    )
     ap.add_argument("--by-day", action="store_true", help="aggregate by day")
     ap.add_argument("--json", action="store_true", help="emit raw JSON")
     args = ap.parse_args()
@@ -92,8 +93,10 @@ def main() -> int:
     if not rows:
         print("no priced rows found", file=sys.stderr)
         if no_cost or cli_runs:
-            print(f"({no_cost} folders without cost record, {cli_runs} CLI-mode runs)",
-                  file=sys.stderr)
+            print(
+                f"({no_cost} folders without cost record, {cli_runs} CLI-mode runs)",
+                file=sys.stderr,
+            )
         return 1
 
     if args.by_day:
@@ -106,8 +109,10 @@ def main() -> int:
         for day in sorted(by_day):
             day_total = sum(by_day[day])
             grand += day_total
-            print(f"{day:12s}  {len(by_day[day]):5d}  ${day_total:7.2f}  "
-                  f"${day_total/len(by_day[day]):7.4f}  ${max(by_day[day]):7.4f}")
+            print(
+                f"{day:12s}  {len(by_day[day]):5d}  ${day_total:7.2f}  "
+                f"${day_total / len(by_day[day]):7.4f}  ${max(by_day[day]):7.4f}"
+            )
         print("-" * 56)
         print(f"{'GRAND':12s}  {len(rows):5d}  ${grand:7.2f}")
     else:
@@ -115,7 +120,7 @@ def main() -> int:
         print("-" * 110)
         for r in sorted(rows, key=lambda r: -float(r["total_usd"]))[:30]:
             print(
-                f"{(r.get('_date') + '/' + r.get('_folder',''))[:45]:45s}  "
+                f"{(r.get('_date') + '/' + r.get('_folder', ''))[:45]:45s}  "
                 f"${float(r['total_usd']):7.4f}  "
                 f"{r.get('calls', 0):4d}    "
                 f"{r.get('input_tokens', 0):>6} / {r.get('output_tokens', 0):>6} / "
@@ -124,11 +129,15 @@ def main() -> int:
 
     totals = [float(r["total_usd"]) for r in rows]
     print("\n--- summary ---")
-    print(f"folders with cost: {len(totals)}  (CLI runs skipped: {cli_runs}, "
-          f"no cost record: {no_cost})")
+    print(
+        f"folders with cost: {len(totals)}  (CLI runs skipped: {cli_runs}, "
+        f"no cost record: {no_cost})"
+    )
     print(f"total spend: ${sum(totals):.2f}")
-    print(f"per vacancy: min=${min(totals):.4f}  median=${statistics.median(totals):.4f}  "
-          f"max=${max(totals):.4f}  avg=${sum(totals)/len(totals):.4f}")
+    print(
+        f"per vacancy: min=${min(totals):.4f}  median=${statistics.median(totals):.4f}  "
+        f"max=${max(totals):.4f}  avg=${sum(totals) / len(totals):.4f}"
+    )
     return 0
 
 

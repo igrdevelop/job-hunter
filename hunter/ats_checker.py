@@ -275,6 +275,7 @@ def llm_verdict(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ATSResult:
     score: float

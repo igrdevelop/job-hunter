@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 
 def _flatten(content: dict) -> dict[str, str]:
     from hunter.claim_judge import iter_judged_fields
+
     return iter_judged_fields(content)
 
 
@@ -51,11 +52,14 @@ def main() -> None:
         job_path = content_path.parent / "job_posting.txt"
     job_text = job_path.read_text(encoding="utf-8") if job_path.exists() else ""
     print(f"[preview-judge] content: {content_path}")
-    print(f"[preview-judge] job text: {job_path if job_path.exists() else '(none)'} "
-          f"({len(job_text)} chars)\n")
+    print(
+        f"[preview-judge] job text: {job_path if job_path.exists() else '(none)'} "
+        f"({len(job_text)} chars)\n"
+    )
 
     # Parity scrubs (same order as the pipeline) — so the judge sees post-scrub text.
     from hunter.apply_shared import _dedup_skill_glosses, _strip_prestige_claims
+
     content, pf = _strip_prestige_claims(content, job_text)
     content, gf = _dedup_skill_glosses(content)
     for line in pf + gf:
@@ -66,13 +70,16 @@ def main() -> None:
     import os
 
     from hunter.claim_judge import run_judge_stage
+
     mode = os.getenv("JUDGE_MODE", "warn").strip().lower()
     before = _flatten(content)
     outcome = run_judge_stage(content, job_text, enabled=True, mode=mode)
     report = outcome.report
 
-    print(f"\n[preview-judge] mode={mode} | {len(report.violations)} finding(s) "
-          f"({len(report.actionable)} actionable):")
+    print(
+        f"\n[preview-judge] mode={mode} | {len(report.violations)} finding(s) "
+        f"({len(report.actionable)} actionable):"
+    )
     for v in report.violations:
         print(f"  • [{v.severity}] {v.field}")
         print(f"      quote : {v.quote!r}")
@@ -82,8 +89,10 @@ def main() -> None:
         print("\n[preview-judge] No actionable findings — CV is clean. ✅")
         return
 
-    print(f"\n[preview-judge] repair applied {len(outcome.fixes)} fix(es) "
-          f"(fabrication-only in warn/block):")
+    print(
+        f"\n[preview-judge] repair applied {len(outcome.fixes)} fix(es) "
+        f"(fabrication-only in warn/block):"
+    )
     for f in outcome.fixes:
         print(f"  - {f}")
 
@@ -100,13 +109,17 @@ def main() -> None:
         print("  (none — report mode or no fabrication repaired)")
 
     if outcome.blocked:
-        print(f"\n[preview-judge] ⛔ BLOCKED — {len(outcome.survivors)} fabrication(s) "
-              f"survived repair:")
+        print(
+            f"\n[preview-judge] ⛔ BLOCKED — {len(outcome.survivors)} fabrication(s) "
+            f"survived repair:"
+        )
         for v in outcome.survivors:
             print(f"  • {v.field}: {v.quote!r}")
     elif outcome.survivors:
-        print(f"\n[preview-judge] ⚠️ {len(outcome.survivors)} fabrication(s) survived "
-              f"(would block in JUDGE_MODE=block).")
+        print(
+            f"\n[preview-judge] ⚠️ {len(outcome.survivors)} fabrication(s) survived "
+            f"(would block in JUDGE_MODE=block)."
+        )
     else:
         print("\n[preview-judge] All fabrications repaired. ✅")
 

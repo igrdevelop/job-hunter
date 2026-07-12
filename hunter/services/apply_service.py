@@ -70,7 +70,11 @@ async def run_apply_agent_subprocess(
     if paste_text:
         try:
             tmp = tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", suffix=".txt", prefix="auto_apply_paste_", delete=False,
+                mode="w",
+                encoding="utf-8",
+                suffix=".txt",
+                prefix="auto_apply_paste_",
+                delete=False,
             )
             with tmp as fh:
                 fh.write(paste_text)
@@ -137,7 +141,9 @@ async def run_apply_agent_subprocess(
             return "fail"
 
         if stdout:
-            logger.debug(f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}")
+            logger.debug(
+                f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}"
+            )
         logger.info(f"[auto-apply] OK {job.company} — {job.title}")
         return "ok"
     finally:

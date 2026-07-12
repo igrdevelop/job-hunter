@@ -8,20 +8,28 @@ P-7.1: Salesforce/DevOps/SRE/mobile exclude_patterns
 P-8.1: Tech Lead / Project Lead / part-time exclusions
 P-9.1: German-speaking title patterns
 """
+
 import pytest
 from hunter.filters import (
-    apply_filters, apply_filters_with_stats,
-    _is_node_only_title, _matches_location,
+    apply_filters,
+    apply_filters_with_stats,
+    _is_node_only_title,
+    _matches_location,
 )
 from hunter.models import Job
 
 
-def _job(*, title: str, location: str = "Wroclaw", source: str = "test",
-         raw: dict | None = None) -> Job:
+def _job(
+    *, title: str, location: str = "Wroclaw", source: str = "test", raw: dict | None = None
+) -> Job:
     return Job(
-        title=title, company="Acme", location=location, salary=None,
+        title=title,
+        company="Acme",
+        location=location,
+        salary=None,
         url=f"https://example.com/{title.lower().replace(' ', '-')}",
-        source=source, raw=raw or {},
+        source=source,
+        raw=raw or {},
     )
 
 
@@ -33,22 +41,26 @@ def _gmail(*, title: str, location: str = "remote") -> Job:
 # P-4.1 — eCommerce/CMS blocked via exclude_pattern (gmail, so title_kw bypassed)
 # ---------------------------------------------------------------------------
 
+
 # Each title is prefixed/suffixed with a whitelist keyword (frontend/typescript)
 # so it passes the title_kw gate and reaches the exclude_pattern check —
 # that's the filter under test here.
-@pytest.mark.parametrize("title", [
-    "Frontend Hyva Developer",
-    "Adobe Commerce Frontend",
-    "Frontend PWA Studio Engineer",
-    "Frontend Shopware Developer",
-    "Shopify Frontend",
-    "Frontend BigCommerce Developer",
-    "Frontend WooCommerce Dev",
-    "Frontend Drupal Developer",
-    "WordPress Frontend",
-    "Frontend SharePoint Developer",
-    "SAP Frontend Developer",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Frontend Hyva Developer",
+        "Adobe Commerce Frontend",
+        "Frontend PWA Studio Engineer",
+        "Frontend Shopware Developer",
+        "Shopify Frontend",
+        "Frontend BigCommerce Developer",
+        "Frontend WooCommerce Dev",
+        "Frontend Drupal Developer",
+        "WordPress Frontend",
+        "Frontend SharePoint Developer",
+        "SAP Frontend Developer",
+    ],
+)
 def test_ecommerce_cms_blocked(title: str) -> None:
     job = _gmail(title=title)
     result, reasons = apply_filters_with_stats([job])
@@ -60,22 +72,29 @@ def test_ecommerce_cms_blocked(title: str) -> None:
 # P-5.1 — Node.js backend title check
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("title", [
-    "Node.js Developer",
-    "Node.js Engineer",
-    "TypeScript/Node.js Developer",
-    "Senior Node Developer",
-])
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Node.js Developer",
+        "Node.js Engineer",
+        "TypeScript/Node.js Developer",
+        "Senior Node Developer",
+    ],
+)
 def test_node_only_title_positive(title: str) -> None:
     assert _is_node_only_title(title), f"Expected True for: {title!r}"
 
 
-@pytest.mark.parametrize("title", [
-    "Frontend Node.js Developer",         # has 'frontend'
-    "Angular + Node.js Full Stack",        # has 'angular'
-    "React/Node.js Developer",             # has 'react'
-    "UI / Node.js Developer",              # has 'ui'
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Frontend Node.js Developer",  # has 'frontend'
+        "Angular + Node.js Full Stack",  # has 'angular'
+        "React/Node.js Developer",  # has 'react'
+        "UI / Node.js Developer",  # has 'ui'
+    ],
+)
 def test_node_only_title_negative(title: str) -> None:
     assert not _is_node_only_title(title), f"Expected False for: {title!r}"
 
@@ -97,6 +116,7 @@ def test_frontend_node_passes_filter() -> None:
 # ---------------------------------------------------------------------------
 # P-6.1 — Anti-hybrid cities
 # ---------------------------------------------------------------------------
+
 
 def test_location_wroclaw_passes() -> None:
     job = _job(title="Angular Developer", location="Wrocław (Hybrid)")
@@ -140,17 +160,21 @@ def test_location_wroclaw_in_title_and_poland_passes() -> None:
 # P-7.1 — Salesforce/DevOps/SRE/mobile blocked (via gmail to bypass title_kw)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("title", [
-    "Salesforce Developer",
-    "DevOps Engineer",
-    "SRE Engineer",
-    "Platform Engineer",
-    "Cloud Engineer",
-    "Android Developer",
-    "Flutter Developer",
-    "Automation Engineer",
-    "Testing Engineer",
-])
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Salesforce Developer",
+        "DevOps Engineer",
+        "SRE Engineer",
+        "Platform Engineer",
+        "Cloud Engineer",
+        "Android Developer",
+        "Flutter Developer",
+        "Automation Engineer",
+        "Testing Engineer",
+    ],
+)
 def test_devops_mobile_blocked(title: str) -> None:
     job = _gmail(title=title)
     result = apply_filters([job])
@@ -161,14 +185,18 @@ def test_devops_mobile_blocked(title: str) -> None:
 # P-8.1 — Tech Lead / Project Lead / part-time excluded
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("title", [
-    "Tech Lead Angular",
-    "Angular Tech Lead",
-    "Project Lead Frontend",
-    "Engineering Manager Frontend",  # needs whitelist kw to clear title_kw
-    "Frontend Developer Part-Time",
-    "Angular Developer part time",
-])
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Tech Lead Angular",
+        "Angular Tech Lead",
+        "Project Lead Frontend",
+        "Engineering Manager Frontend",  # needs whitelist kw to clear title_kw
+        "Frontend Developer Part-Time",
+        "Angular Developer part time",
+    ],
+)
 def test_lead_management_parttime_blocked(title: str) -> None:
     job = _gmail(title=title)
     result, reasons = apply_filters_with_stats([job])
@@ -188,15 +216,20 @@ def test_senior_frontend_not_affected_by_lead_patterns() -> None:
 # P-9.1 — German-speaking title patterns
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("raw_text", [
-    "Frontend Developer with German",
-    "Angular Engineer (German)",
-    "Frontend Developer - German Speaking",
-    "Angular Dev German speaking",
-])
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "Frontend Developer with German",
+        "Angular Engineer (German)",
+        "Frontend Developer - German Speaking",
+        "Angular Dev German speaking",
+    ],
+)
 def test_german_title_patterns(raw_text: str) -> None:
     """P-9.1 title patterns should trigger German filter via _GERMAN_REQUIRED_RES."""
     from hunter.filters import _GERMAN_REQUIRED_RES
+
     assert any(p.search(raw_text) for p in _GERMAN_REQUIRED_RES), (
         f"No German pattern matched: {raw_text!r}"
     )

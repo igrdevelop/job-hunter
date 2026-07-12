@@ -108,9 +108,7 @@ def send_candidates(candidates: list[ScoutCandidate], seen_store: SeenStore) -> 
     to_send = []
     for candidate in candidates:
         if not candidate.permalink:
-            logger.info(
-                "[linkedin_scout] skip (no permalink captured): %s", candidate.author
-            )
+            logger.info("[linkedin_scout] skip (no permalink captured): %s", candidate.author)
             continue
         key = dedup_key(candidate.author, candidate.body)
         if seen_store.is_seen(key):

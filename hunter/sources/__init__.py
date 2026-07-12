@@ -30,98 +30,122 @@ ALL_SOURCES = []
 
 if JUSTJOIN_ENABLED:
     from hunter.sources.justjoin import JustJoinSource
+
     ALL_SOURCES.append(JustJoinSource())
 
 if NOFLUFFJOBS_ENABLED:
     from hunter.sources.nofluffjobs import NoFluffJobsSource
+
     ALL_SOURCES.append(NoFluffJobsSource())
 
 if LINKEDIN_ENABLED:
     from hunter.sources.linkedin import LinkedInSource
+
     ALL_SOURCES.append(LinkedInSource())
 
 if BULLDOGJOB_ENABLED:
     from hunter.sources.bulldogjob import BulldogJobSource
+
     ALL_SOURCES.append(BulldogJobSource())
 
 if PRACUJ_ENABLED:
     from hunter.sources.pracuj import PracujSource
+
     ALL_SOURCES.append(PracujSource())
 
 if THEPROTOCOL_ENABLED:
     from hunter.sources.theprotocol import TheProtocolSource
+
     ALL_SOURCES.append(TheProtocolSource())
 
 if SOLIDJOBS_ENABLED:
     from hunter.sources.solidjobs import SolidJobsSource
+
     ALL_SOURCES.append(SolidJobsSource())
 
 if INHIRE_ENABLED:
     from hunter.sources.inhire import InhireSource
+
     ALL_SOURCES.append(InhireSource())
 
 if JOBLEADS_ENABLED:
     from hunter.sources.jobleads import JobLeadsSource
+
     ALL_SOURCES.append(JobLeadsSource())
 
 if ARBEITNOW_ENABLED:
     from hunter.sources.arbeitnow import ArbeitnowSource
+
     ALL_SOURCES.append(ArbeitnowSource())
 
 if REMOTIVE_ENABLED:
     from hunter.sources.remotive import RemotiveSource
+
     ALL_SOURCES.append(RemotiveSource())
 
 if WORKINGNOMADS_ENABLED:
     from hunter.sources.workingnomads import WorkingNomadsSource
+
     ALL_SOURCES.append(WorkingNomadsSource())
 
 if JOBSPRESSO_ENABLED:
     from hunter.sources.jobspresso import JobspressoSource
+
     ALL_SOURCES.append(JobspressoSource())
 
 if BUILTIN_ENABLED:
     from hunter.sources.builtin import BuiltInSource
+
     ALL_SOURCES.append(BuiltInSource())
 
 if JUSTREMOTE_ENABLED:
     from hunter.sources.justremote import JustRemoteSource
+
     ALL_SOURCES.append(JustRemoteSource())
 
 if REMOTEOK_ENABLED:
     from hunter.sources.remoteok import RemoteOkSource
+
     ALL_SOURCES.append(RemoteOkSource())
 
 if HIMALAYAS_ENABLED:
     from hunter.sources.himalayas import HimalayasSource
+
     ALL_SOURCES.append(HimalayasSource())
 
 if FOURDAYWEEK_ENABLED:
     from hunter.sources.fourdayweek import FourdayweekSource
+
     ALL_SOURCES.append(FourdayweekSource())
 
 if WEWORKREMOTELY_ENABLED:
     from hunter.sources.weworkremotely import WeworkremotelySource
+
     ALL_SOURCES.append(WeworkremotelySource())
 
 if REMOTELEAF_ENABLED:
     from hunter.sources.remoteleaf import RemoteleafSource
+
     ALL_SOURCES.append(RemoteleafSource())
 
 if ATS_AGGREGATOR_ENABLED:
     from hunter.sources.ats_aggregator import AtsAggregatorSource
+
     ALL_SOURCES.append(AtsAggregatorSource())
 
 if GMAIL_ENABLED:
     from hunter.sources.gmail import GmailSource
+
     ALL_SOURCES.append(GmailSource())
 
 if LINKEDIN_SCOUT_RELAY_ENABLED:
     from hunter.sources.linkedin_scout_relay import LinkedInScoutRelaySource
+
     ALL_SOURCES.append(LinkedInScoutRelaySource())
 
 if TELEGRAM_CHANNELS_ENABLED:
     from hunter.sources.telegram_channels import TelegramChannelsSource
+
     ALL_SOURCES.append(TelegramChannelsSource())
 
 

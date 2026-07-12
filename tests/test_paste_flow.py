@@ -49,7 +49,12 @@ def test_parse_apply_cli_argv_notify_start() -> None:
 
 def test_parse_apply_cli_argv_permalink() -> None:
     url, _, _, _, _, _, _, _, permalink = parse_apply_cli_argv(
-        ["apply_agent.py", "https://example.com/job/1", "--permalink", "https://linkedin.com/posts/abc"]
+        [
+            "apply_agent.py",
+            "https://example.com/job/1",
+            "--permalink",
+            "https://linkedin.com/posts/abc",
+        ]
     )
     assert url == "https://example.com/job/1"
     assert permalink == "https://linkedin.com/posts/abc"

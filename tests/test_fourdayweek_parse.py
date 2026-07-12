@@ -82,10 +82,7 @@ def test_format_salary_empty() -> None:
 
 
 def test_format_salary_min_only() -> None:
-    assert (
-        _format_salary(_sample_job(salary_min=9_000_000, salary_max=None))
-        == "90 000+ USD/yr"
-    )
+    assert _format_salary(_sample_job(salary_min=9_000_000, salary_max=None)) == "90 000+ USD/yr"
 
 
 def test_prefilter_context_skills() -> None:
@@ -99,8 +96,5 @@ def test_slug_from_job_url() -> None:
         _slug_from_job_url("https://4dayweek.io/jobs/senior-frontend-acme")
         == "senior-frontend-acme"
     )
-    assert (
-        _slug_from_job_url("https://www.4dayweek.io/jobs/some-job_slug-1/")
-        == "some-job_slug-1"
-    )
+    assert _slug_from_job_url("https://www.4dayweek.io/jobs/some-job_slug-1/") == "some-job_slug-1"
     assert _slug_from_job_url("https://example.com/jobs/x") is None

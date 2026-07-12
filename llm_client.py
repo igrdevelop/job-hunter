@@ -78,18 +78,21 @@ def _record_usage(model: str, usage) -> None:
     if not _USAGE_STACK:
         return
     try:
+
         def _get(name: str) -> int:
             if isinstance(usage, dict):
                 return int(usage.get(name) or 0)
             return int(getattr(usage, name, 0) or 0)
 
-        _USAGE_STACK[-1].append({
-            "model": model,
-            "input_tokens": _get("input_tokens"),
-            "output_tokens": _get("output_tokens"),
-            "cache_creation_input_tokens": _get("cache_creation_input_tokens"),
-            "cache_read_input_tokens": _get("cache_read_input_tokens"),
-        })
+        _USAGE_STACK[-1].append(
+            {
+                "model": model,
+                "input_tokens": _get("input_tokens"),
+                "output_tokens": _get("output_tokens"),
+                "cache_creation_input_tokens": _get("cache_creation_input_tokens"),
+                "cache_read_input_tokens": _get("cache_read_input_tokens"),
+            }
+        )
     except Exception as e:
         logger.warning("[LLM] usage record failed for %s: %s", model, e)
 
@@ -154,12 +157,16 @@ def call_llm(
             elif provider == "openai":
                 raw = _call_openai(system_prompt, user_message, active_model, api_key, max_tokens)
             elif provider == "openrouter":
-                raw = _call_openrouter(system_prompt, user_message, active_model, api_key, max_tokens)
+                raw = _call_openrouter(
+                    system_prompt, user_message, active_model, api_key, max_tokens
+                )
             else:
                 raise LLMError(f"Unknown LLM provider: {provider}")
 
             if active_model != model:
-                logger.warning(f"[LLM] Succeeded on fallback model {active_model} (attempt {attempt})")
+                logger.warning(
+                    f"[LLM] Succeeded on fallback model {active_model} (attempt {attempt})"
+                )
             return _parse_json(raw)
 
         except LLMRateLimitError as e:
@@ -202,7 +209,12 @@ def call_llm(
 # Models that accept the GA effort param (output_config.effort). Substring match
 # on the model id so dated snapshots (…-6, …-4-8) and aliases both resolve.
 _EFFORT_MODEL_TAGS = (
-    "sonnet-4-6", "opus-4-5", "opus-4-6", "opus-4-7", "opus-4-8", "fable-5",
+    "sonnet-4-6",
+    "opus-4-5",
+    "opus-4-6",
+    "opus-4-7",
+    "opus-4-8",
+    "fable-5",
 )
 
 
@@ -219,7 +231,12 @@ def _supports_disabled_thinking(model: str) -> bool:
 
 
 def _call_anthropic(
-    system: str, user: str, model: str, key: str, max_tokens: int, effort: str = "low",
+    system: str,
+    user: str,
+    model: str,
+    key: str,
+    max_tokens: int,
+    effort: str = "low",
 ) -> str:
     try:
         import anthropic
@@ -236,9 +253,7 @@ def _call_anthropic(
             # rewrite loop, cover-letter review, repair passes) and across CVs in a
             # hunt, so after the first write subsequent reads cost ~0.1x — a large
             # saving on the multi-pass apply pipeline.
-            "system": [
-                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
-            ],
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}],
         }
         # Keep the structured generation fast/cheap on models that support it;
@@ -280,10 +295,13 @@ def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) 
         # in the standard response).
         u = getattr(response, "usage", None)
         if u is not None:
-            _record_usage(model, {
-                "input_tokens": getattr(u, "prompt_tokens", 0),
-                "output_tokens": getattr(u, "completion_tokens", 0),
-            })
+            _record_usage(
+                model,
+                {
+                    "input_tokens": getattr(u, "prompt_tokens", 0),
+                    "output_tokens": getattr(u, "completion_tokens", 0),
+                },
+            )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
@@ -325,6 +343,7 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
         # rather than silent blocks. APPLY_AGENT_TIMEOUT_SEC (900s) is the outer
         # per-vacancy wall-clock limit; stay well under it at the per-call level.
         import httpx
+
         client = openai.OpenAI(
             api_key=key,
             base_url=_OPENROUTER_BASE_URL,
@@ -344,11 +363,14 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
         if u is not None:
             prompt_tokens = int(getattr(u, "prompt_tokens", 0) or 0)
             cache_hit = int(getattr(u, "prompt_cache_hit_tokens", 0) or 0)
-            _record_usage(model, {
-                "input_tokens": max(0, prompt_tokens - cache_hit),
-                "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
-                "cache_read_input_tokens": cache_hit,
-            })
+            _record_usage(
+                model,
+                {
+                    "input_tokens": max(0, prompt_tokens - cache_hit),
+                    "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
+                    "cache_read_input_tokens": cache_hit,
+                },
+            )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
         raise LLMRateLimitError(str(e)) from e
@@ -361,6 +383,7 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
 
 
 # ── JSON parsing ──────────────────────────────────────────────────────────────
+
 
 def _parse_json(raw: str) -> dict:
     """Extract and parse JSON from LLM output.

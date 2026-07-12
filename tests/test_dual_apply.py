@@ -20,6 +20,7 @@ def _no_judge_no_refine(monkeypatch):
 
 # ── Profile override (get_active) ───────────────────────────────────────────────
 
+
 def test_set_override_wins_over_db_and_env(monkeypatch):
     monkeypatch.setattr(lp, "_db_get", lambda _k: "sonnet")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-a")
@@ -46,6 +47,7 @@ def test_override_none_is_noop(monkeypatch):
 
 
 # ── Dual config (enabled / shadow profile) ──────────────────────────────────────
+
 
 def test_dual_enabled_reads_db(monkeypatch):
     store = {}
@@ -84,6 +86,7 @@ def test_shadow_profile_respects_env_override(monkeypatch):
 
 
 # ── ATS suffix + filename rename helpers ────────────────────────────────────────
+
 
 def test_ats_suffix_from_content():
     assert dual_apply._ats_suffix({"ats_check": {"score": 87.5}}) == "_ats88"
@@ -130,6 +133,7 @@ def test_suffix_docs_idempotent(tmp_path):
 
 # ── _read_job_text strips the URL header ────────────────────────────────────────
 
+
 def test_read_job_text_strips_url_header(tmp_path):
     (tmp_path / "job_posting.txt").write_text(
         "URL: https://example.com/job\n\nWe need a Senior Angular dev.",
@@ -144,6 +148,7 @@ def test_read_job_text_no_header(tmp_path):
 
 
 # ── run_shadow guard clauses (no LLM calls) ─────────────────────────────────────
+
 
 def test_run_shadow_skips_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(lp, "dual_enabled", lambda: False)
@@ -177,6 +182,7 @@ def test_run_shadow_skips_when_job_text_short(monkeypatch, tmp_path):
 
 # ── Full orchestration (LLM + generate_docs mocked) ─────────────────────────────
 
+
 def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     """End-to-end orchestration: content.json in {shadow}/, generate_docs called
     with --no-tracker, docs suffixed with the ATS score."""
@@ -201,9 +207,11 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
     )
     # Skip the real ATS loop / scrubs / lang gate — exercise orchestration only.
     import hunter.apply_shared as ash
+
     monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(
-        ash, "_ats_check_loop",
+        ash,
+        "_ats_check_loop",
         lambda content, jt: {**content, "ats_check": {"score": 88.0}},
     )
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
@@ -225,6 +233,7 @@ def test_generate_shadow_writes_subfolder_no_tracker(monkeypatch, tmp_path):
             returncode = 0
             stdout = ""
             stderr = ""
+
         return R()
 
     monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
@@ -257,13 +266,18 @@ def test_generate_shadow_uploads_to_drive_when_enabled(monkeypatch, tmp_path):
 
     job_text = "We are hiring a Senior Angular developer. " * 10
     (tmp_path / "job_posting.txt").write_text(f"URL: https://x/y\n\n{job_text}", encoding="utf-8")
-    (tmp_path / "content.json").write_text(json.dumps({"apply_url": "https://x/y"}), encoding="utf-8")
+    (tmp_path / "content.json").write_text(
+        json.dumps({"apply_url": "https://x/y"}), encoding="utf-8"
+    )
 
     generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
     import hunter.apply_shared as ash
+
     monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
-    monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
+    monkeypatch.setattr(
+        ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}}
+    )
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
     monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
@@ -278,6 +292,7 @@ def test_generate_shadow_uploads_to_drive_when_enabled(monkeypatch, tmp_path):
             returncode = 0
             stdout = ""
             stderr = ""
+
         return R()
 
     monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
@@ -310,13 +325,18 @@ def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_pa
 
     job_text = "We are hiring a Senior Angular developer. " * 10
     (tmp_path / "job_posting.txt").write_text(f"URL: https://x/y\n\n{job_text}", encoding="utf-8")
-    (tmp_path / "content.json").write_text(json.dumps({"apply_url": "https://x/y"}), encoding="utf-8")
+    (tmp_path / "content.json").write_text(
+        json.dumps({"apply_url": "https://x/y"}), encoding="utf-8"
+    )
 
     generated = {"company_name": "Acme", "stack": "Angular", "resume_en": {"experience": []}}
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
     import hunter.apply_shared as ash
+
     monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
-    monkeypatch.setattr(ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}})
+    monkeypatch.setattr(
+        ash, "_ats_check_loop", lambda content, jt: {**content, "ats_check": {"score": 88.0}}
+    )
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
     monkeypatch.setattr(ash, "_strip_prestige_claims", lambda c, jt: (c, []))
     monkeypatch.setattr(ash, "_dedup_skill_glosses", lambda c: (c, []))
@@ -331,6 +351,7 @@ def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_pa
             returncode = 0
             stdout = ""
             stderr = ""
+
         return R()
 
     monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
@@ -346,6 +367,7 @@ def test_generate_shadow_drive_upload_failure_does_not_raise(monkeypatch, tmp_pa
 
 
 # ── Detached CLI shim (_main) ───────────────────────────────────────────────────
+
 
 def test_main_usage_without_folder_returns_2():
     assert dual_apply._main(["prog"]) == 2
@@ -376,11 +398,13 @@ def test_main_swallows_shadow_errors(monkeypatch):
 
 # ── launch_detached (fire-and-forget) ───────────────────────────────────────────
 
+
 def test_launch_detached_noop_when_dual_disabled(monkeypatch):
     monkeypatch.setattr(lp, "dual_enabled", lambda: False)
     called = {"popen": False}
-    monkeypatch.setattr(dual_apply.subprocess, "Popen",
-                        lambda *a, **k: called.__setitem__("popen", True))
+    monkeypatch.setattr(
+        dual_apply.subprocess, "Popen", lambda *a, **k: called.__setitem__("popen", True)
+    )
     assert dual_apply.launch_detached("/app/Applications/2026-06-28/Acme") is False
     assert called["popen"] is False
 
@@ -405,24 +429,31 @@ def test_launch_detached_spawns_when_enabled(monkeypatch):
 
 def test_maybe_run_shadow_noop_when_folder_none(monkeypatch):
     import apply_agent
+
     called = {"launch": False}
-    monkeypatch.setattr(dual_apply, "launch_detached",
-                        lambda *a, **k: called.__setitem__("launch", True))
+    monkeypatch.setattr(
+        dual_apply, "launch_detached", lambda *a, **k: called.__setitem__("launch", True)
+    )
     apply_agent._maybe_run_shadow(None, full=False)
     assert called["launch"] is False
 
 
 def test_maybe_run_shadow_delegates_to_launch_detached(monkeypatch):
     import apply_agent
+
     captured = {}
-    monkeypatch.setattr(dual_apply, "launch_detached",
-                        lambda folder, *, full_mode: captured.update(folder=folder, full=full_mode))
+    monkeypatch.setattr(
+        dual_apply,
+        "launch_detached",
+        lambda folder, *, full_mode: captured.update(folder=folder, full=full_mode),
+    )
     apply_agent._maybe_run_shadow("/app/Applications/2026-06-28/Acme", full=True)
     assert captured["folder"] == "/app/Applications/2026-06-28/Acme"
     assert captured["full"] is True
 
 
 # ── Shadow PDF verdict (Phase 2 M4) ─────────────────────────────────────────────
+
 
 def test_ats_suffix_prefers_verdict_over_ats_check():
     content = {"ats_verdict": {"score": 91.0}, "ats_check": {"score": 87.5}}
@@ -454,9 +485,11 @@ def _shadow_harness(monkeypatch, tmp_path):
     monkeypatch.setattr("llm_client.call_llm", lambda **kw: dict(generated))
 
     import hunter.apply_shared as ash
+
     monkeypatch.setattr(ash, "validate_content", lambda c, **k: [])
     monkeypatch.setattr(
-        ash, "_ats_check_loop",
+        ash,
+        "_ats_check_loop",
         lambda content, jt: {**content, "ats_check": {"score": 88.0}},
     )
     monkeypatch.setattr(ash, "_strip_compliance_claims", lambda c: (c, []))
@@ -473,6 +506,7 @@ def _shadow_harness(monkeypatch, tmp_path):
             returncode = 0
             stdout = ""
             stderr = ""
+
         return R()
 
     monkeypatch.setattr(dual_apply.subprocess, "run", fake_run)
@@ -501,9 +535,7 @@ def test_generate_shadow_stores_verdict_and_suffixes_with_it(monkeypatch, tmp_pa
 
 def test_generate_shadow_verdict_none_falls_back_to_ats_check(monkeypatch, tmp_path):
     shadow = _shadow_harness(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "hunter.ats_pdf_roundtrip.run_llm_verdict", lambda folder, job_text: None
-    )
+    monkeypatch.setattr("hunter.ats_pdf_roundtrip.run_llm_verdict", lambda folder, job_text: None)
 
     result = dual_apply.run_shadow(tmp_path)
 
@@ -533,8 +565,10 @@ def test_generate_shadow_verdict_error_never_breaks_shadow(monkeypatch, tmp_path
 
 # ── Shadow pipeline parity: claim judge ──────────────────────────────────────────
 
+
 def _fake_judge_outcome(content, violations=None, fixes=None):
     from types import SimpleNamespace
+
     violations = violations or []
     return SimpleNamespace(
         content=content,
@@ -553,6 +587,7 @@ def test_generate_shadow_runs_judge_and_writes_report(monkeypatch, tmp_path):
     """The shadow runs the same claim-judge stage as the boevoy pipeline and
     persists judge_report.json in the shadow subfolder when there are findings."""
     from types import SimpleNamespace
+
     shadow = _shadow_harness(monkeypatch, tmp_path)
     monkeypatch.setattr("hunter.config.JUDGE_ENABLED", True)
     monkeypatch.setattr("hunter.config.JUDGE_MODE", "warn")
@@ -562,8 +597,9 @@ def test_generate_shadow_runs_judge_and_writes_report(monkeypatch, tmp_path):
     def fake_judge(content, job_text, base_cv, *, enabled, mode):
         captured["mode"] = mode
         content = {**content, "judged": True}
-        v = SimpleNamespace(severity="fabrication", field="resume_en.summary",
-                            reason="invented metric", quote="30%")
+        v = SimpleNamespace(
+            severity="fabrication", field="resume_en.summary", reason="invented metric", quote="30%"
+        )
         return _fake_judge_outcome(content, violations=[v], fixes=["dropped clause"])
 
     monkeypatch.setattr("hunter.claim_judge.run_judge_stage", fake_judge)
@@ -613,6 +649,7 @@ def test_generate_shadow_judge_failure_never_breaks_shadow(monkeypatch, tmp_path
 
 # ── Shadow pipeline parity: verdict refine loop ──────────────────────────────────
 
+
 def test_generate_shadow_runs_refine_loop_below_target(monkeypatch, tmp_path):
     """A shadow verdict below ATS_VERDICT_TARGET triggers the same refine loop
     as the boevoy pipeline; the refined verdict wins the filename suffix."""
@@ -626,8 +663,9 @@ def test_generate_shadow_runs_refine_loop_below_target(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_refine(content, job_text, base_cv, folder, verdict, *,
-                    regenerate_docs, target, max_rounds):
+    def fake_refine(
+        content, job_text, base_cv, folder, verdict, *, regenerate_docs, target, max_rounds
+    ):
         captured["start_score"] = verdict["score"]
         captured["target"] = target
         captured["max_rounds"] = max_rounds
@@ -685,6 +723,7 @@ def test_generate_shadow_skips_refine_when_disabled(monkeypatch, tmp_path):
 
 # ── set_shadow + /dual shadow <name> ─────────────────────────────────────────────
 
+
 def test_set_shadow_persists_db(monkeypatch):
     store = {}
     monkeypatch.setattr(lp, "_db_get", lambda k: store.get(k))
@@ -705,6 +744,7 @@ def test_set_shadow_unknown_name_raises(monkeypatch):
 
 def test_set_shadow_unavailable_raises(monkeypatch):
     import pytest
+
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     with pytest.raises(ValueError, match="not available"):
@@ -713,6 +753,7 @@ def test_set_shadow_unavailable_raises(monkeypatch):
 
 def test_dual_command_set_shadow_helper(monkeypatch):
     from hunter.commands.dual import _set_shadow
+
     store = {}
     monkeypatch.setattr(lp, "_db_get", lambda k: store.get(k))
     monkeypatch.setattr(lp, "_db_set", lambda k, v: store.update({k: v}))

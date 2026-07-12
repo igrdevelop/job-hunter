@@ -13,6 +13,7 @@ docs/DOOMED_GATE_PASTE_PLAN.md for the force-vs-paste split):
 3. `hunter.apply_cli.main_cli` — symmetric wiring, mirrored inside the
    `if job_text:` block, before the `claude -p` subprocess is spawned.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -24,17 +25,23 @@ from hunter.filters import GateFinding
 
 # ── run_doomed_gate (shared helper) ──────────────────────────────────────────
 
-def _hard_finding(rule: str = "foreign_onsite_hybrid", evidence: str = "hybrid in McLean, Virginia") -> GateFinding:
+
+def _hard_finding(
+    rule: str = "foreign_onsite_hybrid", evidence: str = "hybrid in McLean, Virginia"
+) -> GateFinding:
     return GateFinding(rule=rule, severity="hard", evidence=evidence)
 
 
-def _soft_finding(rule: str = "stack_mismatch_non_candidate_framework", evidence: str = "Vue 3 / Nuxt") -> GateFinding:
+def _soft_finding(
+    rule: str = "stack_mismatch_non_candidate_framework", evidence: str = "Vue 3 / Nuxt"
+) -> GateFinding:
     return GateFinding(rule=rule, severity="soft", evidence=evidence)
 
 
 class TestRunDoomedGateDisabled:
     def test_disabled_returns_false_without_calling_assess(self) -> None:
         from hunter.apply_shared import run_doomed_gate
+
         with patch("hunter.config.DOOMED_GATE_ENABLED", False):
             with patch("hunter.filters.assess_job_text") as mock_assess:
                 result = run_doomed_gate("some job text", "https://example.com/1")
@@ -45,14 +52,19 @@ class TestRunDoomedGateDisabled:
 class TestRunDoomedGateHardSkip:
     def test_hard_finding_returns_true_and_writes_skip_row(self) -> None:
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"), \
-             patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]), \
-             patch("hunter.apply_shared.notify") as mock_notify, \
-             patch("hunter.tracker.add_skipped") as mock_add_skipped:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"),
+            patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]),
+            patch("hunter.apply_shared.notify") as mock_notify,
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
             result = run_doomed_gate(
-                "job text", "https://example.com/2",
-                title="Senior Angular Dev", company="Acme",
+                "job text",
+                "https://example.com/2",
+                title="Senior Angular Dev",
+                company="Acme",
             )
         assert result is True
         mock_add_skipped.assert_called_once()
@@ -68,11 +80,14 @@ class TestRunDoomedGateHardSkip:
         """A tracker/DB error while writing the SKIP row must not un-abort —
         the gate already decided to skip; the write is best-effort."""
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"), \
-             patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]), \
-             patch("hunter.apply_shared.notify"), \
-             patch("hunter.tracker.add_skipped", side_effect=RuntimeError("db locked")):
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"),
+            patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]),
+            patch("hunter.apply_shared.notify"),
+            patch("hunter.tracker.add_skipped", side_effect=RuntimeError("db locked")),
+        ):
             result = run_doomed_gate("job text", "https://example.com/3")
         assert result is True
 
@@ -80,13 +95,18 @@ class TestRunDoomedGateHardSkip:
 class TestRunDoomedGateForceOverride:
     def test_hard_finding_with_force_override_degrades_to_warn(self) -> None:
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"), \
-             patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]), \
-             patch("hunter.apply_shared.notify") as mock_notify, \
-             patch("hunter.tracker.add_skipped") as mock_add_skipped:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"),
+            patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]),
+            patch("hunter.apply_shared.notify") as mock_notify,
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
             result = run_doomed_gate(
-                "job text", "https://example.com/4", is_force_override=True,
+                "job text",
+                "https://example.com/4",
+                is_force_override=True,
             )
         assert result is False
         mock_add_skipped.assert_not_called()
@@ -100,11 +120,14 @@ class TestRunDoomedGateForceOverride:
         """DOOMED_GATE_HARD_ACTION=warn is the emergency lever — degrades
         every HARD finding to a warning even without /force."""
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.config.DOOMED_GATE_HARD_ACTION", "warn"), \
-             patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]), \
-             patch("hunter.apply_shared.notify") as mock_notify, \
-             patch("hunter.tracker.add_skipped") as mock_add_skipped:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.config.DOOMED_GATE_HARD_ACTION", "warn"),
+            patch("hunter.filters.assess_job_text", return_value=[_hard_finding()]),
+            patch("hunter.apply_shared.notify") as mock_notify,
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
             result = run_doomed_gate("job text", "https://example.com/5")
         assert result is False
         mock_add_skipped.assert_not_called()
@@ -114,11 +137,14 @@ class TestRunDoomedGateForceOverride:
 class TestRunDoomedGateSoft:
     def test_soft_finding_warns_and_continues(self) -> None:
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"), \
-             patch("hunter.filters.assess_job_text", return_value=[_soft_finding()]), \
-             patch("hunter.apply_shared.notify") as mock_notify, \
-             patch("hunter.tracker.add_skipped") as mock_add_skipped:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.config.DOOMED_GATE_HARD_ACTION", "skip"),
+            patch("hunter.filters.assess_job_text", return_value=[_soft_finding()]),
+            patch("hunter.apply_shared.notify") as mock_notify,
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
             result = run_doomed_gate("job text", "https://example.com/6")
         assert result is False
         mock_add_skipped.assert_not_called()
@@ -132,10 +158,13 @@ class TestRunDoomedGateSoft:
 class TestRunDoomedGateNoFindings:
     def test_no_findings_no_notify_no_skip(self) -> None:
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.filters.assess_job_text", return_value=[]), \
-             patch("hunter.apply_shared.notify") as mock_notify, \
-             patch("hunter.tracker.add_skipped") as mock_add_skipped:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.filters.assess_job_text", return_value=[]),
+            patch("hunter.apply_shared.notify") as mock_notify,
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
             result = run_doomed_gate("clean job text", "https://example.com/7")
         assert result is False
         mock_notify.assert_not_called()
@@ -145,15 +174,19 @@ class TestRunDoomedGateNoFindings:
 class TestRunDoomedGateBestEffort:
     def test_assess_job_text_exception_is_swallowed(self) -> None:
         from hunter.apply_shared import run_doomed_gate
-        with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-             patch("hunter.filters.assess_job_text", side_effect=RuntimeError("boom")), \
-             patch("hunter.apply_shared.notify") as mock_notify:
+
+        with (
+            patch("hunter.config.DOOMED_GATE_ENABLED", True),
+            patch("hunter.filters.assess_job_text", side_effect=RuntimeError("boom")),
+            patch("hunter.apply_shared.notify") as mock_notify,
+        ):
             result = run_doomed_gate("job text", "https://example.com/8")
         assert result is False
         mock_notify.assert_not_called()
 
 
 # ── apply_api.py wiring ───────────────────────────────────────────────────────
+
 
 def _patch_api_pre_gate(monkeypatch, job_text: str = "Full job posting text " * 20) -> None:
     """Neutralize every pipeline stage BEFORE Step 1.5f so the gate call is
@@ -173,9 +206,12 @@ def test_api_pipeline_aborts_before_step2_when_gate_returns_true(monkeypatch) ->
     # If the pipeline continued past the gate it would look for real prompt
     # files under a bogus PROMPTS_DIR and sys.exit(1) — never patched, so a
     # SystemExit here would mean the gate did NOT stop the pipeline.
-    monkeypatch.setattr("hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts"))
+    monkeypatch.setattr(
+        "hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts")
+    )
 
     from hunter.apply_api import main_api
+
     with patch("hunter.apply_api.notify"):
         result = main_api("https://example.com/api-hard")
 
@@ -186,9 +222,12 @@ def test_api_pipeline_continues_past_gate_when_it_returns_false(monkeypatch) -> 
     _patch_api_pre_gate(monkeypatch)
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", lambda *a, **kw: False)
     # A bogus PROMPTS_DIR makes Step 2 sys.exit(1) — proves we reached Step 2.
-    monkeypatch.setattr("hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts"))
+    monkeypatch.setattr(
+        "hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts")
+    )
 
     from hunter.apply_api import main_api
+
     with patch("hunter.apply_api.notify"):
         with pytest.raises(SystemExit):
             main_api("https://example.com/api-continue")
@@ -209,6 +248,7 @@ def test_api_pipeline_passes_force_override_false_for_paste(monkeypatch) -> None
 
     from hunter.apply_api import main_api
     from hunter.apply_shared import PASTE_NO_URL_PLACEHOLDER
+
     with patch("hunter.apply_api.notify"):
         main_api(PASTE_NO_URL_PLACEHOLDER, paste_text="Pasted job text " * 20)
 
@@ -226,6 +266,7 @@ def test_api_pipeline_passes_force_override_true_for_skip_dedup(monkeypatch) -> 
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", _capture)
 
     from hunter.apply_api import main_api
+
     with patch("hunter.apply_api.notify"):
         main_api("https://example.com/api-force", skip_dedup=True)
 
@@ -243,6 +284,7 @@ def test_api_pipeline_passes_force_override_false_for_normal_hunt_job(monkeypatc
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", _capture)
 
     from hunter.apply_api import main_api
+
     with patch("hunter.apply_api.notify"):
         main_api("https://example.com/api-normal")
 
@@ -259,13 +301,14 @@ def test_api_pipeline_suppresses_manual_screen_warn_when_gate_enabled(monkeypatc
     monkeypatch.setattr("hunter.apply_api.run_doomed_gate", lambda *a, **kw: True)
 
     from hunter.apply_api import main_api
-    with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-         patch("hunter.apply_api.notify") as mock_notify:
+
+    with (
+        patch("hunter.config.DOOMED_GATE_ENABLED", True),
+        patch("hunter.apply_api.notify") as mock_notify,
+    ):
         main_api("https://example.com/api-screen-dup")
 
-    assert not any(
-        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
-    )
+    assert not any("would normally be filtered" in c.args[0] for c in mock_notify.call_args_list)
 
 
 def test_api_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) -> None:
@@ -274,17 +317,20 @@ def test_api_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) 
     _patch_api_pre_gate(monkeypatch)
     monkeypatch.setattr("hunter.filters.screen_job_text", lambda text: "some reason")
     # Gate disabled → returns False; abort at Step 2 via bogus PROMPTS_DIR.
-    monkeypatch.setattr("hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts"))
+    monkeypatch.setattr(
+        "hunter.apply_api.PROMPTS_DIR", __import__("pathlib").Path("/nonexistent/prompts")
+    )
 
     from hunter.apply_api import main_api
-    with patch("hunter.config.DOOMED_GATE_ENABLED", False), \
-         patch("hunter.apply_api.notify") as mock_notify:
+
+    with (
+        patch("hunter.config.DOOMED_GATE_ENABLED", False),
+        patch("hunter.apply_api.notify") as mock_notify,
+    ):
         with pytest.raises(SystemExit):
             main_api("https://example.com/api-screen-solo")
 
-    assert any(
-        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
-    )
+    assert any("would normally be filtered" in c.args[0] for c in mock_notify.call_args_list)
 
 
 def test_api_pipeline_gate_runs_after_manual_screen_source_order() -> None:
@@ -293,6 +339,7 @@ def test_api_pipeline_gate_runs_after_manual_screen_source_order() -> None:
     read / first LLM call)."""
     import importlib
     import inspect
+
     src = inspect.getsource(importlib.import_module("hunter.apply_api"))
     screen_pos = src.index("Step 1.5e")
     gate_pos = src.index("Step 1.5f")
@@ -302,6 +349,7 @@ def test_api_pipeline_gate_runs_after_manual_screen_source_order() -> None:
 
 
 # ── apply_cli.py wiring ───────────────────────────────────────────────────────
+
 
 def _patch_cli_pre_gate(monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_cli._already_processed", lambda *a, **kw: False)
@@ -319,6 +367,7 @@ def test_cli_pipeline_aborts_before_subprocess_when_gate_returns_true(monkeypatc
     monkeypatch.setattr("subprocess.run", _boom)
 
     from hunter.apply_cli import main_cli
+
     with patch("hunter.apply_cli.notify"):
         result = main_cli(
             "paste://no-url",
@@ -341,6 +390,7 @@ def test_cli_pipeline_reaches_subprocess_when_gate_returns_false(monkeypatch) ->
     monkeypatch.setattr("subprocess.run", _boom)
 
     from hunter.apply_cli import main_cli
+
     with patch("hunter.apply_cli.notify"):
         with pytest.raises(RuntimeError, match="stop here"):
             main_cli(
@@ -363,6 +413,7 @@ def test_cli_pipeline_passes_force_override_false_for_paste(monkeypatch) -> None
     monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", _capture)
 
     from hunter.apply_cli import main_cli
+
     with patch("hunter.apply_cli.notify"):
         main_cli("paste://no-url", paste_text="Pasted job text " * 20)
 
@@ -380,6 +431,7 @@ def test_cli_pipeline_passes_force_override_true_for_skip_dedup(monkeypatch) -> 
     monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", _capture)
 
     from hunter.apply_cli import main_cli
+
     with patch("hunter.apply_cli.notify"):
         main_cli("paste://no-url", paste_text="Pasted job text " * 20, skip_dedup=True)
 
@@ -394,13 +446,14 @@ def test_cli_pipeline_suppresses_manual_screen_warn_when_gate_enabled(monkeypatc
     monkeypatch.setattr("hunter.apply_shared.run_doomed_gate", lambda *a, **kw: True)
 
     from hunter.apply_cli import main_cli
-    with patch("hunter.config.DOOMED_GATE_ENABLED", True), \
-         patch("hunter.apply_cli.notify") as mock_notify:
+
+    with (
+        patch("hunter.config.DOOMED_GATE_ENABLED", True),
+        patch("hunter.apply_cli.notify") as mock_notify,
+    ):
         main_cli("paste://no-url", paste_text="Pasted job text " * 20)
 
-    assert not any(
-        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
-    )
+    assert not any("would normally be filtered" in c.args[0] for c in mock_notify.call_args_list)
 
 
 def test_cli_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) -> None:
@@ -413,19 +466,21 @@ def test_cli_pipeline_manual_screen_still_warns_when_gate_disabled(monkeypatch) 
     monkeypatch.setattr("subprocess.run", _stop)
 
     from hunter.apply_cli import main_cli
-    with patch("hunter.config.DOOMED_GATE_ENABLED", False), \
-         patch("hunter.apply_cli.notify") as mock_notify:
+
+    with (
+        patch("hunter.config.DOOMED_GATE_ENABLED", False),
+        patch("hunter.apply_cli.notify") as mock_notify,
+    ):
         with pytest.raises(RuntimeError, match="stop here"):
             main_cli("paste://no-url", paste_text="Pasted job text " * 20)
 
-    assert any(
-        "would normally be filtered" in c.args[0] for c in mock_notify.call_args_list
-    )
+    assert any("would normally be filtered" in c.args[0] for c in mock_notify.call_args_list)
 
 
 def test_cli_pipeline_gate_runs_after_manual_screen_source_order() -> None:
     import importlib
     import inspect
+
     src = inspect.getsource(importlib.import_module("hunter.apply_cli"))
     screen_pos = src.index("Step 1.5e")
     gate_pos = src.index("Step 1.5f")
@@ -436,7 +491,9 @@ def test_cli_pipeline_gate_runs_after_manual_screen_source_order() -> None:
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+
 def test_doomed_gate_config_defaults() -> None:
     from hunter.config import DOOMED_GATE_ENABLED, DOOMED_GATE_HARD_ACTION
+
     assert DOOMED_GATE_ENABLED is True
     assert DOOMED_GATE_HARD_ACTION == "skip"

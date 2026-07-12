@@ -27,6 +27,7 @@ src = JobLeadsSource()
 # _parse_cards — HTML → list[dict]
 # ---------------------------------------------------------------------------
 
+
 class TestParseCards:
     def setup_method(self):
         html = (FIXTURES / "jobleads_listing.html").read_text(encoding="utf-8")
@@ -66,6 +67,7 @@ class TestParseCards:
 # ---------------------------------------------------------------------------
 # _parse — raw dict → Job
 # ---------------------------------------------------------------------------
+
 
 class TestParse:
     def test_wroclaw_card(self):
@@ -112,16 +114,20 @@ class TestParse:
 # _build_location
 # ---------------------------------------------------------------------------
 
+
 class TestBuildLocation:
-    @pytest.mark.parametrize("work_type,city,expected", [
-        ("Remote",  "Poland",  "Poland (Remote)"),
-        ("remote",  "",        "Remote"),
-        ("Hybrid",  "Wrocław", "Wrocław (Hybrid)"),
-        ("hybrid",  "",        "Hybrid"),
-        ("On-site", "Kraków",  "Kraków"),
-        ("",        "Warszawa","Warszawa"),
-        ("",        "",        "Unknown"),
-    ])
+    @pytest.mark.parametrize(
+        "work_type,city,expected",
+        [
+            ("Remote", "Poland", "Poland (Remote)"),
+            ("remote", "", "Remote"),
+            ("Hybrid", "Wrocław", "Wrocław (Hybrid)"),
+            ("hybrid", "", "Hybrid"),
+            ("On-site", "Kraków", "Kraków"),
+            ("", "Warszawa", "Warszawa"),
+            ("", "", "Unknown"),
+        ],
+    )
     def test_combinations(self, work_type, city, expected):
         raw = {"location": city, "work_type": work_type}
         assert JobLeadsSource._build_location(raw) == expected
@@ -131,11 +137,15 @@ class TestBuildLocation:
 # _is_relevant — pre-filter
 # ---------------------------------------------------------------------------
 
+
 class TestIsRelevant:
     def _make_job(self, title: str):
         from hunter.models import Job
+
         return Job(
-            title=title, company="X", location="Remote",
+            title=title,
+            company="X",
+            location="Remote",
             salary=None,
             url="https://www.jobleads.com/pl/job/x--y--z",
             source="jobleads",
@@ -169,6 +179,7 @@ class TestIsRelevant:
 # ---------------------------------------------------------------------------
 # search() — mock HTTP
 # ---------------------------------------------------------------------------
+
 
 class TestSearch:
     def test_search_returns_filtered_jobs(self):

@@ -119,6 +119,7 @@ def test_enrich_via_text_exception_propagates():
 
 # ── _enrich_one dispatcher ────────────────────────────────────────────────────
 
+
 def test_enrich_one_unknown_domain_returns_stub():
     job = _stub("https://somerandomblog.com/jobs/angular-dev")
     result = _enrich_one(job)
@@ -143,6 +144,7 @@ def test_enrich_one_exception_returns_stub():
 
 
 # ── enrich_jobs ───────────────────────────────────────────────────────────────
+
 
 def test_enrich_jobs_empty_list():
     assert enrich_jobs([]) == []
@@ -219,8 +221,10 @@ def test_enrich_jobs_disabled_via_gmail_source(monkeypatch):
 
 # ── Fix B: skip-host enrichment (avoid 429 storm) ───────────────────────────────
 
+
 def test_is_skipped_host():
     from hunter.gmail_enricher import _is_skipped_host
+
     assert _is_skipped_host("www.linkedin.com") is True
     assert _is_skipped_host("www.pracuj.pl") is True
     assert _is_skipped_host("justjoin.it") is False
@@ -248,5 +252,6 @@ def test_enrich_one_skip_list_is_configurable(monkeypatch):
     """Removing a host from the skip list re-enables its enrichment."""
     monkeypatch.setattr("hunter.gmail_enricher.GMAIL_ENRICH_SKIP_HOSTS", ["pracuj.pl"])
     from hunter.gmail_enricher import _is_skipped_host
+
     assert _is_skipped_host("www.linkedin.com") is False
     assert _is_skipped_host("www.pracuj.pl") is True

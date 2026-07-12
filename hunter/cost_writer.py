@@ -142,9 +142,7 @@ def backfill_all_costs_sync(
     and rows with NULL cost_usd (CLI runs / pre-tracking).
     """
     with get_db(DB_PATH) as conn:
-        rows = conn.execute(
-            "SELECT id, sheets_row, cost_usd FROM applications"
-        ).fetchall()
+        rows = conn.execute("SELECT id, sheets_row, cost_usd FROM applications").fetchall()
 
     data = []
     no_row = 0
@@ -156,17 +154,22 @@ def backfill_all_costs_sync(
         if r["cost_usd"] is None:
             no_cost += 1
             continue
-        data.append({
-            "range": f"'{tab}'!{COST_COL_LETTER}{r['sheets_row']}",
-            "values": [[_format_cost(r["cost_usd"])]],
-        })
+        data.append(
+            {
+                "range": f"'{tab}'!{COST_COL_LETTER}{r['sheets_row']}",
+                "values": [[_format_cost(r["cost_usd"])]],
+            }
+        )
 
     # Header always — pin it before any data write so a fresh sheet gets
     # the column labelled even when there are no priced rows yet.
-    data.insert(0, {
-        "range": f"'{tab}'!{COST_COL_LETTER}1",
-        "values": [[COST_HEADER]],
-    })
+    data.insert(
+        0,
+        {
+            "range": f"'{tab}'!{COST_COL_LETTER}1",
+            "values": [[COST_HEADER]],
+        },
+    )
 
     if len(data) == 1:
         # Only the header — still worth writing (one API call), but skip the

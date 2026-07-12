@@ -54,7 +54,7 @@ log = logging.getLogger(__name__)
 # Runtime state (survives process lifetime; persisted to gsheets_state.json)
 # ---------------------------------------------------------------------------
 
-_state: dict = {}   # {"sheet_id": "..."}
+_state: dict = {}  # {"sheet_id": "..."}
 
 
 def _read_state() -> dict:
@@ -63,7 +63,9 @@ def _read_state() -> dict:
         log.error(
             "gsheets_sync: %s is a directory, not a file — Docker Volume misconfiguration. "
             "Fix on server: stop container, run `rm -rf %s && echo '{}' > %s`, restart.",
-            GSHEETS_STATE_FILE, GSHEETS_STATE_FILE, GSHEETS_STATE_FILE,
+            GSHEETS_STATE_FILE,
+            GSHEETS_STATE_FILE,
+            GSHEETS_STATE_FILE,
         )
         return {}
     try:
@@ -101,6 +103,7 @@ def _get_service() -> Any | None:
     if _service is None:
         try:
             from hunter.gsheets_client import build_service
+
             _service = build_service(GSHEETS_CREDENTIALS_FILE, GSHEETS_TOKEN_FILE)
         except Exception as e:
             log.error("gsheets_sync: failed to build service: %s", e)
@@ -119,6 +122,7 @@ def _ready() -> bool:
 # ---------------------------------------------------------------------------
 # Mirror — append new row
 # ---------------------------------------------------------------------------
+
 
 async def mirror_new_row(row: dict) -> None:
     """Append a new row to Sheets.  On success, stores sheets_row in DB.
@@ -148,9 +152,7 @@ async def mirror_new_row(row: dict) -> None:
     from hunter.verdict_writer import mirror_verdict_cell_sync
 
     try:
-        indices = await asyncio.to_thread(
-            append_rows, _get_service(), _sheet_id(), [row]
-        )
+        indices = await asyncio.to_thread(append_rows, _get_service(), _sheet_id(), [row])
         if indices:
             set_sheets_row(row_id, indices[0])
         mark_sheets_clean(row_id)
@@ -165,18 +167,14 @@ async def mirror_new_row(row: dict) -> None:
     # workflow gate). We swallow failures because cost_writer logs them
     # internally and the next /sync_costs backfill will catch up.
     try:
-        await asyncio.to_thread(
-            mirror_cost_cell_sync, _get_service(), _sheet_id(), row_id
-        )
+        await asyncio.to_thread(mirror_cost_cell_sync, _get_service(), _sheet_id(), row_id)
     except Exception as e:
         log.warning("gsheets cost mirror failed for %s (non-fatal): %s", row_id, e)
 
     # Mirror the independent PDF-verdict score into column N. Same best-effort
     # contract as cost above; tools/sync_verdicts.py backfills any misses.
     try:
-        await asyncio.to_thread(
-            mirror_verdict_cell_sync, _get_service(), _sheet_id(), row_id
-        )
+        await asyncio.to_thread(mirror_verdict_cell_sync, _get_service(), _sheet_id(), row_id)
     except Exception as e:
         log.warning("gsheets verdict mirror failed for %s (non-fatal): %s", row_id, e)
 
@@ -184,6 +182,7 @@ async def mirror_new_row(row: dict) -> None:
 # ---------------------------------------------------------------------------
 # Mirror — single cell update (status, EXPIRED, etc.)
 # ---------------------------------------------------------------------------
+
 
 async def mirror_cell_update(row_id: str, col: str, value: str) -> None:
     """Update a single cell in Sheets using the sheets_row stored in DB.
@@ -203,9 +202,7 @@ async def mirror_cell_update(row_id: str, col: str, value: str) -> None:
         return
 
     try:
-        await asyncio.to_thread(
-            update_cell, _get_service(), _sheet_id(), sheet_row, col, value
-        )
+        await asyncio.to_thread(update_cell, _get_service(), _sheet_id(), sheet_row, col, value)
         mark_sheets_clean(row_id)
     except Exception as e:
         log.error("gsheets mirror_cell_update(%s, %s) failed: %s", row_id, col, e)
@@ -215,6 +212,7 @@ async def mirror_cell_update(row_id: str, col: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 # Mirror — batch EXPIRED write
 # ---------------------------------------------------------------------------
+
 
 async def mirror_expired_batch(row_ids: set[str]) -> None:
     """Write EXPIRED to Sheets Sent column for all given row IDs.
@@ -230,6 +228,7 @@ async def mirror_expired_batch(row_ids: set[str]) -> None:
 # ---------------------------------------------------------------------------
 # Resync dirty rows
 # ---------------------------------------------------------------------------
+
 
 async def resync_dirty() -> int:
     """Retry all dirty rows. Returns number successfully pushed to Sheets."""
@@ -250,16 +249,12 @@ async def resync_dirty() -> int:
         try:
             if sheet_row is None:
                 # Row was never pushed — append it
-                indices = await asyncio.to_thread(
-                    append_rows, svc, sheet_id, [row]
-                )
+                indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
                 if indices:
                     set_sheets_row(row_id, indices[0])
             else:
                 # Row exists in Sheets — overwrite it
-                await asyncio.to_thread(
-                    update_row, svc, sheet_id, sheet_row, row
-                )
+                await asyncio.to_thread(update_row, svc, sheet_id, sheet_row, row)
             mark_sheets_clean(row_id)
             synced += 1
             log.debug("gsheets resync_dirty: synced %s", row_id)
@@ -273,6 +268,7 @@ async def resync_dirty() -> int:
 # ---------------------------------------------------------------------------
 # Push Sent column — DB → Sheets
 # ---------------------------------------------------------------------------
+
 
 async def push_sent_column() -> dict:
     """Push the Sent column from DB to Sheets for rows that differ.
@@ -319,11 +315,11 @@ async def push_sent_column() -> dict:
         if tracker_sent == sheets_sent:
             continue  # already in sync
         try:
-            await asyncio.to_thread(
-                update_cell, svc, sid, sheet_row_idx, "Sent", tracker_sent
-            )
+            await asyncio.to_thread(update_cell, svc, sid, sheet_row_idx, "Sent", tracker_sent)
             updated += 1
-            log.info("push_sent_column: %s → Sent=%s (was %r)", row_id[:8], tracker_sent, sheets_sent)
+            log.info(
+                "push_sent_column: %s → Sent=%s (was %r)", row_id[:8], tracker_sent, sheets_sent
+            )
         except Exception as e:
             errors += 1
             log.warning("push_sent_column: failed for %s: %s", row_id[:8], e)
@@ -335,6 +331,7 @@ async def push_sent_column() -> dict:
 # ---------------------------------------------------------------------------
 # Pull delta helper (Sheets → DB conflict matrix)
 # ---------------------------------------------------------------------------
+
 
 def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
     """Synchronous: apply Sheets conflict matrix against DB; persist sheets_row.
@@ -391,6 +388,7 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
 # Pull — Sheets → DB
 # ---------------------------------------------------------------------------
 
+
 def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
     """Synchronous: mark DB rows whose ID is gone from Sheets as EXPIRED.
 
@@ -407,11 +405,7 @@ def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
     of the DB's ID-bearing rows), skip entirely rather than mass-EXPIRE live rows.
     Intended to be called via asyncio.to_thread. Returns count marked.
     """
-    sheet_ids = {
-        (r.get("ID") or "").strip()
-        for _, r in sheets_rows
-        if (r.get("ID") or "").strip()
-    }
+    sheet_ids = {(r.get("ID") or "").strip() for _, r in sheets_rows if (r.get("ID") or "").strip()}
     if not sheet_ids:
         return 0
 
@@ -423,7 +417,9 @@ def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
         log.warning(
             "gsheets reconcile: Sheets returned %d IDs vs %d DB rows (<%.0f%%) — "
             "skipping orphan reconcile (looks partial)",
-            len(sheet_ids), len(db_rows), _RECONCILE_MIN_RATIO * 100,
+            len(sheet_ids),
+            len(db_rows),
+            _RECONCILE_MIN_RATIO * 100,
         )
         return 0
 
@@ -462,9 +458,7 @@ async def pull_full_snapshot() -> dict:
     errors: list[str] = []
 
     try:
-        sheets_rows = await asyncio.to_thread(
-            read_all, _get_service(), _sheet_id()
-        )
+        sheets_rows = await asyncio.to_thread(read_all, _get_service(), _sheet_id())
     except Exception as e:
         log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
         return {"pulled": 0, "inserted": 0, "updated": 0, "errors": [str(e)]}
@@ -507,7 +501,10 @@ async def pull_full_snapshot() -> dict:
 
     log.info(
         "gsheets pull_full_snapshot: pulled %d rows, %d inserted, %d DB updates, %d reconciled",
-        len(sheets_rows), inserted, len(to_write), reconciled,
+        len(sheets_rows),
+        inserted,
+        len(to_write),
+        reconciled,
     )
     return {
         "pulled": len(sheets_rows),
@@ -521,6 +518,7 @@ async def pull_full_snapshot() -> dict:
 # ---------------------------------------------------------------------------
 # Bootstrap — create or load spreadsheet
 # ---------------------------------------------------------------------------
+
 
 async def init_or_load_spreadsheet(
     notify_cb=None,
@@ -571,6 +569,7 @@ async def init_or_load_spreadsheet(
     log.info("gsheets_sync: no sheet_id found — creating new spreadsheet")
     try:
         from hunter.gsheets_client import create_spreadsheet
+
         sheet_id = await asyncio.to_thread(create_spreadsheet, svc, "Job Tracker")
     except Exception as e:
         log.error("gsheets_sync: create_spreadsheet failed: %s", e)
@@ -603,6 +602,7 @@ async def init_or_load_spreadsheet(
 # Startup validation
 # ---------------------------------------------------------------------------
 
+
 def validate_startup() -> dict:
     """
     Check credentials, token, and sheet reachability.
@@ -621,16 +621,17 @@ def validate_startup() -> dict:
     if not GSHEETS_TOKEN_FILE.exists():
         return {
             "ok": False,
-            "error": (
-                "gsheets_token.json not found. "
-                "Run: python tools/gsheets_auth.py"
-            ),
+            "error": ("gsheets_token.json not found. Run: python tools/gsheets_auth.py"),
             "sheet_url": None,
         }
 
     svc = _get_service()
     if svc is None:
-        return {"ok": False, "error": "Failed to build Sheets service (check token)", "sheet_url": None}
+        return {
+            "ok": False,
+            "error": "Failed to build Sheets service (check token)",
+            "sheet_url": None,
+        }
 
     sid = _sheet_id()
     if not sid:
@@ -644,6 +645,7 @@ def validate_startup() -> dict:
     # Try a lightweight read to verify the sheet is accessible
     try:
         from hunter.gsheets_client import read_all
+
         read_all(svc, sid)
         sheet_url = f"https://docs.google.com/spreadsheets/d/{sid}"
         return {"ok": True, "error": None, "sheet_url": sheet_url}
@@ -654,6 +656,7 @@ def validate_startup() -> dict:
 # ---------------------------------------------------------------------------
 # Delete row by URL (used by /force cleanup)
 # ---------------------------------------------------------------------------
+
 
 async def delete_row_by_url(url: str) -> bool:
     """Delete the Sheets row that corresponds to this URL (best-effort).
@@ -676,7 +679,10 @@ async def delete_row_by_url(url: str) -> bool:
     row_id = candidates[0]["id"]
     sheet_row = get_sheets_row(row_id)
     if sheet_row is None:
-        log.debug("gsheets delete_row_by_url: no sheets_row for %s — row may never have been pushed", row_id[:8])
+        log.debug(
+            "gsheets delete_row_by_url: no sheets_row for %s — row may never have been pushed",
+            row_id[:8],
+        )
         return False
 
     try:
@@ -691,6 +697,7 @@ async def delete_row_by_url(url: str) -> bool:
 # ---------------------------------------------------------------------------
 # Push missing rows (DB → Sheets, skipping rows already there)
 # ---------------------------------------------------------------------------
+
 
 async def push_missing_rows() -> dict:
     """Append DB rows that are absent from Google Sheets (by ID).
@@ -713,9 +720,7 @@ async def push_missing_rows() -> dict:
         return {"pushed": 0, "already_present": 0, "errors": [str(e)]}
 
     sheets_ids: set[str] = {
-        r.get("ID", "").strip()
-        for _, r in sheets_rows
-        if r.get("ID", "").strip()
+        r.get("ID", "").strip() for _, r in sheets_rows if r.get("ID", "").strip()
     }
     # Persist sheets_row for rows we already know about
     for sheet_row_num, row in sheets_rows:
@@ -739,9 +744,7 @@ async def push_missing_rows() -> dict:
 
     # 3. Append missing rows in one batch
     try:
-        indices = await asyncio.to_thread(
-            append_rows, _get_service(), _sheet_id(), missing
-        )
+        indices = await asyncio.to_thread(append_rows, _get_service(), _sheet_id(), missing)
         for row_dict, sheet_row in zip(missing, indices):
             row_id = row_dict.get("ID", "").strip()
             if row_id and sheet_row > 0:
@@ -759,6 +762,7 @@ async def push_missing_rows() -> dict:
 # ---------------------------------------------------------------------------
 # Status report (for /gsheets_status command)
 # ---------------------------------------------------------------------------
+
 
 async def status_report() -> dict:
     """Return a dict summarising gsheets integration state for the status command."""

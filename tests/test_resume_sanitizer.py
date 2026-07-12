@@ -65,7 +65,9 @@ REAL_ROLES = [
     },
 ]
 
-REAL_EDUCATION = "Belarusian State Technological University - Bachelor, PE and Systems of Information Processing"
+REAL_EDUCATION = (
+    "Belarusian State Technological University - Bachelor, PE and Systems of Information Processing"
+)
 REAL_COURSES = (
     "Angular Updates Course, Angular Advanced Course, Angular Core Course, "
     "JS Architecture Workshop, RxJS Course, Java basic Course, Node.js Course, "
@@ -91,8 +93,10 @@ def _patch_profile(roles=None, edu=None, courses=None):
 # _parse_period_date
 # ---------------------------------------------------------------------------
 
+
 def test_parse_period_date_month_year():
     from hunter.resume_sanitizer import _parse_period_date
+
     assert _parse_period_date("Apr 2026") == 202604
     assert _parse_period_date("November 2022") == 202211
     assert _parse_period_date("June 2025") == 202506
@@ -100,11 +104,13 @@ def test_parse_period_date_month_year():
 
 def test_parse_period_date_bare_year():
     from hunter.resume_sanitizer import _parse_period_date
+
     assert _parse_period_date("2018") == 201801
 
 
 def test_parse_period_date_unparseable():
     from hunter.resume_sanitizer import _parse_period_date
+
     assert _parse_period_date("present") is None
     assert _parse_period_date("") is None
 
@@ -113,14 +119,17 @@ def test_parse_period_date_unparseable():
 # _parse_period
 # ---------------------------------------------------------------------------
 
+
 def test_parse_period_normal():
     from hunter.resume_sanitizer import _parse_period
+
     assert _parse_period("Apr 2026 - May 2026") == (202604, 202605)
     assert _parse_period("November 2022 - July 2023") == (202211, 202307)
 
 
 def test_parse_period_present():
     from hunter.resume_sanitizer import _parse_period
+
     start, end = _parse_period("Jun 2025 - present")
     assert start == 202506
     assert end == 209912
@@ -128,6 +137,7 @@ def test_parse_period_present():
 
 def test_parse_period_bare_years():
     from hunter.resume_sanitizer import _parse_period
+
     assert _parse_period("2014 - 2017") == (201401, 201712)
 
 
@@ -135,10 +145,12 @@ def test_parse_period_bare_years():
 # _is_real_company
 # ---------------------------------------------------------------------------
 
+
 def test_is_real_company_exact():
     with _patch_profile()[0]:
         # reload whitelist with patched data
         import hunter.resume_sanitizer as s
+
         s._load_profile_roles.cache_clear()
         with _patch_profile()[0]:
             assert s._is_real_company("Fairmarkit (via contractor)")
@@ -148,6 +160,7 @@ def test_is_real_company_exact():
 
 def test_is_real_company_fake():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -162,8 +175,10 @@ def test_is_real_company_fake():
 # sanitize_resume — education / courses
 # ---------------------------------------------------------------------------
 
+
 def test_sanitize_fills_missing_education():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -176,6 +191,7 @@ def test_sanitize_fills_missing_education():
 
 def test_sanitize_fills_missing_courses():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -188,6 +204,7 @@ def test_sanitize_fills_missing_courses():
 
 def test_sanitize_leaves_real_education_untouched():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -200,6 +217,7 @@ def test_sanitize_leaves_real_education_untouched():
 # ---------------------------------------------------------------------------
 # sanitize_resume — company replacement
 # ---------------------------------------------------------------------------
+
 
 def _make_fake_entry(company, period, bullets=None, stack_line="Stack: Angular."):
     return {
@@ -215,6 +233,7 @@ def _make_fake_entry(company, period, bullets=None, stack_line="Stack: Angular."
 def test_sanitize_replaces_experis_with_sii():
     """Experis Poland Feb 2022 - Jun 2023 overlaps with SII Nov 2022 - Jul 2023."""
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -223,8 +242,13 @@ def test_sanitize_replaces_experis_with_sii():
         resume = {
             "education": REAL_EDUCATION,
             "courses": REAL_COURSES,
-            "experience": [_make_fake_entry("Experis Poland (ManpowerGroup)", "Feb 2022 - June 2023",
-                                            bullets=original_bullets)],
+            "experience": [
+                _make_fake_entry(
+                    "Experis Poland (ManpowerGroup)",
+                    "Feb 2022 - June 2023",
+                    bullets=original_bullets,
+                )
+            ],
         }
         result, fixes = s.sanitize_resume(resume, lang="EN")
         entry = result["experience"][0]
@@ -238,6 +262,7 @@ def test_sanitize_replaces_experis_with_sii():
 def test_sanitize_replaces_avenga_with_altoros():
     """Avenga Sep 2019 - Jan 2022 overlaps with Altoros Apr 2018 - Nov 2022."""
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -255,6 +280,7 @@ def test_sanitize_replaces_livechat_with_solbegsoft():
     """LiveChat Dec 2017 - Aug 2019 overlaps with SolbegSoft Apr 2016 - Apr 2018 (and Altoros).
     With Altoros already consumed in a previous entry, SolbegSoft should be next best."""
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -276,6 +302,7 @@ def test_sanitize_replaces_livechat_with_solbegsoft():
 def test_sanitize_leaves_real_companies_untouched():
     """Real companies must not be replaced; titles are corrected to match profile."""
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -303,13 +330,14 @@ def test_sanitize_leaves_real_companies_untouched():
 def test_sanitize_real_case_emagine():
     """Simulate the EmaginePolska hallucination: 4 fake companies in EN resume."""
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
     with p1, p2:
         resume_en = {
-            "education": "",   # missing in real case
-            "courses": None,   # missing in real case
+            "education": "",  # missing in real case
+            "courses": None,  # missing in real case
             "experience": [
                 _make_fake_entry("Alten Poland", "Apr 2026 - May 2026"),
                 _make_fake_entry("Fairmarkit (via contractor)", "Jun 2025 - March 2026"),
@@ -342,6 +370,7 @@ def test_sanitize_real_case_emagine():
 
 def test_sanitize_collapses_duplicate_angular_versions():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()
@@ -350,7 +379,9 @@ def test_sanitize_collapses_duplicate_angular_versions():
             "experience": [],
             "education": REAL_EDUCATION,
             "courses": REAL_COURSES,
-            "skills": {"frontend": "Angular (latest versions), Angular 2-22, Angular Material, TypeScript, RxJS"},
+            "skills": {
+                "frontend": "Angular (latest versions), Angular 2-22, Angular Material, TypeScript, RxJS"
+            },
         }
         result, fixes = s.sanitize_resume(resume, lang="EN")
         fe = result["skills"]["frontend"]
@@ -364,6 +395,7 @@ def test_sanitize_collapses_duplicate_angular_versions():
 
 def test_sanitize_keeps_single_angular_and_material():
     import hunter.resume_sanitizer as s
+
     s._load_profile_roles.cache_clear()
     s._load_profile_education_courses.cache_clear()
     p1, p2 = _patch_profile()

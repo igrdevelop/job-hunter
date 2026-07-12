@@ -243,8 +243,10 @@ def _format_salary(raw: dict) -> Optional[str]:
         hi_i = 0
     if lo_i <= 0 and hi_i <= 0:
         return None
+
     def fmt(n: int) -> str:
         return f"{n:,}".replace(",", " ")
+
     if lo_i and hi_i:
         return f"{fmt(lo_i)}–{fmt(hi_i)} {cur}/yr"
     if lo_i:

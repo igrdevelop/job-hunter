@@ -14,8 +14,8 @@ from hunter.config import LLM_PROVIDER, LLM_MODEL, LLM_API_KEY, PROJECT_DIR
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are writing a professional \"About Me\" / self-introduction for a senior developer's "
-    "job application. Return ONLY valid JSON: {\"about_me\": \"<text>\"}. "
+    'You are writing a professional "About Me" / self-introduction for a senior developer\'s '
+    'job application. Return ONLY valid JSON: {"about_me": "<text>"}. '
     "No markdown fences, no extra keys. "
     "IMPORTANT: Never use em dashes or en dashes. Use only regular hyphens."
 )
@@ -24,9 +24,7 @@ _BANNED_EN = (
     "proven track record, passionate about, excited to, thrilled to, leverage, "
     "aligns with my background, seamlessly, comfortable with, perfect fit, ideal match"
 )
-_BANNED_PL = (
-    "udowodniony track record, pasjonat, idealnym kandydatem, doskonale wpisuje się"
-)
+_BANNED_PL = "udowodniony track record, pasjonat, idealnym kandydatem, doskonale wpisuje się"
 
 
 def generate_about_me(folder: Path, lang: str) -> str:
@@ -88,7 +86,11 @@ def generate_about_me(folder: Path, lang: str) -> str:
 
     lang_label = "ENGLISH" if lang == "en" else "POLISH"
     banned = _BANNED_EN if lang == "en" else _BANNED_PL
-    pl_note = "\n{PL only}: Write natively in Polish - NOT a translation. Use Polish idioms." if lang == "pl" else ""
+    pl_note = (
+        "\n{PL only}: Write natively in Polish - NOT a translation. Use Polish idioms."
+        if lang == "pl"
+        else ""
+    )
 
     job_meta = ""
     if company_name or job_title or stack:
@@ -129,6 +131,7 @@ BANNED phrases: {banned}
 
     try:
         from llm_client import call_llm
+
         result = call_llm(
             system_prompt=_SYSTEM_PROMPT,
             user_message=user_message,

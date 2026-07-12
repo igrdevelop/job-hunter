@@ -21,10 +21,15 @@ from hunter.sources.gmail import GmailSource, LOOKBACK_HOURS
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hours", type=int, default=LOOKBACK_HOURS,
-                        help=f"How many hours back to look (default: {LOOKBACK_HOURS})")
-    parser.add_argument("--debug", action="store_true",
-                        help="Print From/Subject of every matched email")
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=LOOKBACK_HOURS,
+        help=f"How many hours back to look (default: {LOOKBACK_HOURS})",
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Print From/Subject of every matched email"
+    )
     args = parser.parse_args()
 
     print("Connecting to Gmail...")
@@ -73,7 +78,7 @@ def main():
         if args.debug:
             print()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TOTAL: {len(source_jobs)} job URLs found in {len(messages)} emails")
 
     if not source_jobs:

@@ -6,6 +6,7 @@ from hunter.tracker import dedup_key, normalize_company, normalize_url
 # normalize_url
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_url_removes_tracking_query_params() -> None:
     url = (
         "https://www.pracuj.pl/praca/senior-frontend,wroclaw,oferta,1004225555"
@@ -31,39 +32,49 @@ def test_normalize_url_linkedin_view_strips_extra_parts() -> None:
 # normalize_company — legal suffix stripping
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("variant", [
-    "Mindbox Sp. z o.o.",   # properly formatted
-    "Mindbox Sp z o o",     # no dots
-    "Mindbox sp.z.o.o.",    # no spaces
-    "MindboxSpZOo",         # squished CamelCase (LLM folder form)
-    "MindboxSpZoo",         # lowercase 'oo'
-    "Mindbox spzoo",        # all-lower squished
-    "MINDBOX",              # uppercase only
-    "mindbox",              # plain
-])
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Mindbox Sp. z o.o.",  # properly formatted
+        "Mindbox Sp z o o",  # no dots
+        "Mindbox sp.z.o.o.",  # no spaces
+        "MindboxSpZOo",  # squished CamelCase (LLM folder form)
+        "MindboxSpZoo",  # lowercase 'oo'
+        "Mindbox spzoo",  # all-lower squished
+        "MINDBOX",  # uppercase only
+        "mindbox",  # plain
+    ],
+)
 def test_normalize_company_mindbox_variants(variant: str) -> None:
     assert normalize_company(variant) == "mindbox", f"Failed for: {variant!r}"
 
 
-@pytest.mark.parametrize("variant", [
-    "Upvanta Sp. z o.o.",
-    "Upvanta Spółka z o.o.",
-    "UpvantaSpółkaZOgraniczonąOdpowiedzialnoś",   # real tracker example
-    "Upvanta Spolka z o.o.",
-    "Upvanta",
-])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Upvanta Sp. z o.o.",
+        "Upvanta Spółka z o.o.",
+        "UpvantaSpółkaZOgraniczonąOdpowiedzialnoś",  # real tracker example
+        "Upvanta Spolka z o.o.",
+        "Upvanta",
+    ],
+)
 def test_normalize_company_upvanta_variants(variant: str) -> None:
     assert normalize_company(variant) == "upvanta", f"Failed for: {variant!r}"
 
 
-@pytest.mark.parametrize("variant", [
-    "Acme Sp. z o.o.",
-    "ACME",
-    "Acme S.A.",
-    "Acme Ltd.",
-    "Acme GmbH",
-    "Acme Inc.",
-])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Acme Sp. z o.o.",
+        "ACME",
+        "Acme S.A.",
+        "Acme Ltd.",
+        "Acme GmbH",
+        "Acme Inc.",
+    ],
+)
 def test_normalize_company_acme_variants(variant: str) -> None:
     assert normalize_company(variant) == "acme", f"Failed for: {variant!r}"
 
@@ -71,6 +82,7 @@ def test_normalize_company_acme_variants(variant: str) -> None:
 # ---------------------------------------------------------------------------
 # dedup_key — company+title dedup stable across name variants
 # ---------------------------------------------------------------------------
+
 
 def test_dedup_key_is_stable_for_company_variations() -> None:
     k1 = dedup_key("Acme Sp. z o.o.", "Senior Frontend Developer")
@@ -96,23 +108,30 @@ def test_dedup_key_polish_form_vs_short() -> None:
 # compute_output_folder() appends _2/_3 when a same-day folder already exists.
 # That suffix must not create a new dedup_key.
 
-@pytest.mark.parametrize("variant", [
-    "EdgeOneSolutions_2",
-    "EdgeOneSolutions_3",
-    "EdgeOneSolutions_10",
-    "EdgeOneSolutions",
-])
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "EdgeOneSolutions_2",
+        "EdgeOneSolutions_3",
+        "EdgeOneSolutions_10",
+        "EdgeOneSolutions",
+    ],
+)
 def test_normalize_company_strips_numeric_folder_suffix(variant: str) -> None:
     assert normalize_company(variant) == normalize_company("EdgeOneSolutions"), (
         f"normalize_company({variant!r}) diverged from base"
     )
 
 
-@pytest.mark.parametrize("pair", [
-    ("Upvanta_2", "Upvanta"),
-    ("LinkGroup_3", "LinkGroup"),
-    ("NASK_2", "NASK"),
-])
+@pytest.mark.parametrize(
+    "pair",
+    [
+        ("Upvanta_2", "Upvanta"),
+        ("LinkGroup_3", "LinkGroup"),
+        ("NASK_2", "NASK"),
+    ],
+)
 def test_dedup_key_numeric_suffix_equals_base(pair: tuple[str, str]) -> None:
     suffixed, base = pair
     assert dedup_key(suffixed, "Developer") == dedup_key(base, "Developer")

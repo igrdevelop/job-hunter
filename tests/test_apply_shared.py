@@ -28,6 +28,7 @@ from hunter.apply_shared import (
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
+
 def test_apply_manual_exit_code_is_44() -> None:
     assert APPLY_MANUAL_EXIT_CODE == 44
 
@@ -45,6 +46,7 @@ def test_apply_error_is_runtime_error() -> None:
 
 
 # ── _already_processed ────────────────────────────────────────────────────────
+
 
 def test_already_processed_skip_dedup_returns_false() -> None:
     """skip_dedup=True should always return False (never blocked)."""
@@ -77,12 +79,14 @@ def test_already_processed_returns_false_on_tracker_exception(monkeypatch) -> No
 
 def test_already_processed_does_not_mutate_sys_path() -> None:
     import sys
+
     before = list(sys.path)
     _already_processed("https://example.com/jobs/42")
     assert list(sys.path) == before
 
 
 # ── _sanitize_folder_company ──────────────────────────────────────────────────
+
 
 def test_sanitize_strips_illegal_chars() -> None:
     assert "/" not in _sanitize_folder_company("Acme/Corp")
@@ -106,6 +110,7 @@ def test_sanitize_normal_name_unchanged() -> None:
 
 # ── compute_output_folder ─────────────────────────────────────────────────────
 
+
 def test_compute_output_folder_returns_path(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_shared.APPLICATIONS_DIR", tmp_path)
     result = compute_output_folder("Acme")
@@ -126,9 +131,11 @@ def test_compute_output_folder_suffix_on_collision(tmp_path, monkeypatch) -> Non
 
 # ── validate_content ──────────────────────────────────────────────────────────
 
+
 def _make_valid_content() -> dict:
     """Build a content dict that passes validate_content() regardless of GENERATE_PL_RESUME."""
     from hunter.apply_shared import REQUIRED_JSON_KEYS
+
     content: dict = {
         "company_name": "Acme",
         "stack": "Angular, TypeScript",
@@ -138,8 +145,12 @@ def _make_valid_content() -> dict:
             "summary": "Senior FE dev",
             "skills": ["Angular"],
             "experience": [
-                {"company": "A"}, {"company": "B"}, {"company": "C"},
-                {"company": "D"}, {"company": "E"}, {"company": "F"},
+                {"company": "A"},
+                {"company": "B"},
+                {"company": "C"},
+                {"company": "D"},
+                {"company": "E"},
+                {"company": "F"},
                 {"company": "G"},
             ],
             "education": [{"degree": "BSc"}],
@@ -193,6 +204,7 @@ def test_validate_content_experience_too_short() -> None:
 
 # ── ATS loop role-preservation guard ──────────────────────────────────────────
 
+
 def test_ats_loop_restores_dropped_roles() -> None:
     """The ATS rewrite must never shrink the experience array (Altkom bug).
 
@@ -225,8 +237,10 @@ def test_ats_loop_restores_dropped_roles() -> None:
         "ats_score": 50,
     }
 
-    with patch("hunter.ats_checker.check", return_value=fake_result), \
-         patch("llm_client.call_llm", return_value=boosted):
+    with (
+        patch("hunter.ats_checker.check", return_value=fake_result),
+        patch("llm_client.call_llm", return_value=boosted),
+    ):
         out = _ats_check_loop(content, "job text")
 
     assert len(out["resume_en"]["experience"]) == 7
@@ -236,6 +250,7 @@ def test_ats_loop_restores_dropped_roles() -> None:
 
 
 # ── ATS loop deterministic exit ───────────────────────────────────────────────
+
 
 def _fake_ats_result(
     *,
@@ -264,8 +279,10 @@ def test_ats_loop_exits_early_when_no_missing_keywords() -> None:
     content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
     fake = _fake_ats_result(score=86.0, keyword_score=100.0, missing=[])
 
-    with patch("hunter.ats_checker.check", return_value=fake) as check_mock, \
-         patch("llm_client.call_llm") as llm_mock:
+    with (
+        patch("hunter.ats_checker.check", return_value=fake) as check_mock,
+        patch("llm_client.call_llm") as llm_mock,
+    ):
         _ats_check_loop(content, "job text")
 
     assert check_mock.call_count == 1
@@ -280,8 +297,10 @@ def test_ats_loop_exits_when_only_blocklisted_keywords_missing() -> None:
     content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
     fake = _fake_ats_result(score=88.0, keyword_score=97.0, missing=["DORA", "ISO 27001"])
 
-    with patch("hunter.ats_checker.check", return_value=fake), \
-         patch("llm_client.call_llm") as llm_mock:
+    with (
+        patch("hunter.ats_checker.check", return_value=fake),
+        patch("llm_client.call_llm") as llm_mock,
+    ):
         _ats_check_loop(content, "job text")
 
     llm_mock.assert_not_called()
@@ -295,10 +314,14 @@ def test_ats_loop_rewrites_until_keywords_covered() -> None:
     content = {"resume_en": {"summary": "s", "skills": {}, "experience": []}}
     first = _fake_ats_result(score=80.0, keyword_score=82.0, missing=["Docker", "GraphQL"])
     second = _fake_ats_result(score=87.0, keyword_score=100.0, missing=[])
-    boosted = {"resume_en": {"summary": "s2", "skills": {"tools": "Docker, GraphQL"}, "experience": []}}
+    boosted = {
+        "resume_en": {"summary": "s2", "skills": {"tools": "Docker, GraphQL"}, "experience": []}
+    }
 
-    with patch("hunter.ats_checker.check", side_effect=[first, second]) as check_mock, \
-         patch("llm_client.call_llm", return_value=boosted) as llm_mock:
+    with (
+        patch("hunter.ats_checker.check", side_effect=[first, second]) as check_mock,
+        patch("llm_client.call_llm", return_value=boosted) as llm_mock,
+    ):
         out = _ats_check_loop(content, "job text")
 
     assert llm_mock.call_count == 1
@@ -322,18 +345,21 @@ def test_ats_loop_never_runs_inline_llm_review() -> None:
 
 # ── Compliance-claim scrubbing ────────────────────────────────────────────────
 
+
 def test_filter_self_description_keywords_drops_regulatory() -> None:
     from hunter.apply_shared import _filter_self_description_keywords
+
     out = _filter_self_description_keywords(["Angular", "DORA", "RxJS", "RODO", "GDPR", "ISO"])
     assert out == ["Angular", "RxJS"]
 
 
 def test_strip_compliance_claims_summary_and_skills() -> None:
     from hunter.apply_shared import _strip_compliance_claims
+
     content = {
         "resume_en": {
             "summary": "Senior Angular dev with 10+ years. Proven DORA compliance and ISO "
-                       "standards adherence for financial institutions. Expert in RxJS.",
+            "standards adherence for financial institutions. Expert in RxJS.",
             "skills": {
                 "frontend": "Angular, TypeScript, RxJS",
                 "methodologies": "Agile, Code Reviews, DORA compliance, RODO compliance, GDPR compliance",
@@ -342,11 +368,13 @@ def test_strip_compliance_claims_summary_and_skills() -> None:
         "about_me_en": "Frontend developer. Deep GDPR and DORA expertise. Builds Angular apps.",
     }
     out, fixes = _strip_compliance_claims(content)
-    blob = " ".join([
-        out["resume_en"]["summary"],
-        out["resume_en"]["skills"]["methodologies"],
-        out["about_me_en"],
-    ]).lower()
+    blob = " ".join(
+        [
+            out["resume_en"]["summary"],
+            out["resume_en"]["skills"]["methodologies"],
+            out["about_me_en"],
+        ]
+    ).lower()
     for term in ("dora", "rodo", "gdpr", "iso"):
         assert term not in blob, f"{term} should be scrubbed"
     # Legit content survives
@@ -357,7 +385,10 @@ def test_strip_compliance_claims_summary_and_skills() -> None:
 
 def test_strip_compliance_claims_keeps_clean_content() -> None:
     from hunter.apply_shared import _strip_compliance_claims
-    content = {"resume_en": {"summary": "Senior Angular developer.", "skills": {"frontend": "Angular"}}}
+
+    content = {
+        "resume_en": {"summary": "Senior Angular developer.", "skills": {"frontend": "Angular"}}
+    }
     out, fixes = _strip_compliance_claims(content)
     assert out["resume_en"]["summary"] == "Senior Angular developer."
     assert fixes == []
@@ -367,23 +398,30 @@ def test_strip_compliance_clause_from_bullets() -> None:
     """ATS aggressive rewrite appends compliance clauses to bullets — strip them,
     keep the real achievement."""
     from hunter.apply_shared import _strip_compliance_claims
+
     content = {
         "resume_en": {
             "summary": "Senior Angular developer.",
             "skills": {},
             "experience": [
-                {"company": "Fairmarkit", "bullets": [
-                    "Built AI decision-support feature with DORA compliance",
-                    "Optimized healthcare app following ISO standards and DORA compliance",
-                    "Led Angular migration projects",
-                ], "stack_line": "Stack: Angular 21, TypeScript following ISO standards"},
+                {
+                    "company": "Fairmarkit",
+                    "bullets": [
+                        "Built AI decision-support feature with DORA compliance",
+                        "Optimized healthcare app following ISO standards and DORA compliance",
+                        "Led Angular migration projects",
+                    ],
+                    "stack_line": "Stack: Angular 21, TypeScript following ISO standards",
+                },
             ],
             "courses": "RxJS Course, ISO Standards Certification, Node.js Course",
         },
     }
     out, fixes = _strip_compliance_claims(content)
     b = out["resume_en"]["experience"][0]["bullets"]
-    blob = " ".join(b + [out["resume_en"]["experience"][0]["stack_line"], out["resume_en"]["courses"]]).lower()
+    blob = " ".join(
+        b + [out["resume_en"]["experience"][0]["stack_line"], out["resume_en"]["courses"]]
+    ).lower()
     for term in ("dora", "iso", "gdpr"):
         assert term not in blob, f"{term} survived: {blob}"
     assert "Built AI decision-support feature" in b[0]
@@ -397,13 +435,20 @@ def test_strip_compliance_clause_from_bullets() -> None:
 def test_strip_compliance_does_not_match_isolated() -> None:
     """Word-boundary: 'ISO' must not match inside 'isolated' / 'isolation'."""
     from hunter.apply_shared import _strip_compliance_claims
-    content = {"resume_en": {"summary": "Built isolated micro-frontends with strong isolation.", "skills": {}}}
+
+    content = {
+        "resume_en": {
+            "summary": "Built isolated micro-frontends with strong isolation.",
+            "skills": {},
+        }
+    }
     out, fixes = _strip_compliance_claims(content)
     assert "isolated" in out["resume_en"]["summary"]
     assert fixes == []
 
 
 # ── Cover letter review helpers ───────────────────────────────────────────────
+
 
 def test_count_words_empty() -> None:
     assert _count_words("") == 0
@@ -457,35 +502,42 @@ def test_cta_banlist_allowed_cta() -> None:
 
 # ── notify (smoke — no real Telegram call) ───────────────────────────────────
 
+
 def test_notify_no_credentials_is_silent(monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_shared.TELEGRAM_BOT_TOKEN", "")
     monkeypatch.setattr("hunter.apply_shared.TELEGRAM_CHAT_ID", "")
     # Should not raise
     from hunter.apply_shared import notify
+
     notify("test message")
 
 
 # ── Backward compat re-exports from apply_agent ───────────────────────────────
 
+
 def test_apply_agent_reexports_already_processed() -> None:
     import apply_agent
+
     assert hasattr(apply_agent, "_already_processed")
     assert callable(apply_agent._already_processed)
 
 
 def test_apply_agent_reexports_banlist_functions() -> None:
     import apply_agent
+
     assert hasattr(apply_agent, "_body_banlist_hits")
     assert hasattr(apply_agent, "_opener_banlist_hits")
 
 
 def test_apply_agent_reexports_constants() -> None:
     import apply_agent
+
     assert apply_agent.APPLY_MANUAL_EXIT_CODE == 44
     assert apply_agent.PASTE_NO_URL_PLACEHOLDER == PASTE_NO_URL_PLACEHOLDER
 
 
 # ── build_ats_keyword_checklist (docs/LLM_COST_REDUCTION_PLAN.md M3) ──────────
+
 
 def test_build_ats_keyword_checklist_contains_keywords() -> None:
     job_text = "We need a Senior Angular developer with strong TypeScript, RxJS and Docker skills."
@@ -525,8 +577,10 @@ def test_build_ats_keyword_checklist_caps_at_30() -> None:
 
 # ── build_pl_skip_instruction / validate_content pl_optional (M4) ───────────
 
+
 def test_pl_skip_instruction_present_for_en_short_mode(monkeypatch) -> None:
     from hunter import config
+
     monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
     block = build_pl_skip_instruction("EN", full_mode=False)
     assert "resume_pl" in block
@@ -535,18 +589,21 @@ def test_pl_skip_instruction_present_for_en_short_mode(monkeypatch) -> None:
 
 def test_pl_skip_instruction_absent_for_pl_posting(monkeypatch) -> None:
     from hunter import config
+
     monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
     assert build_pl_skip_instruction("PL", full_mode=False) == ""
 
 
 def test_pl_skip_instruction_absent_in_full_mode(monkeypatch) -> None:
     from hunter import config
+
     monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", True)
     assert build_pl_skip_instruction("EN", full_mode=True) == ""
 
 
 def test_pl_skip_instruction_absent_when_flag_off(monkeypatch) -> None:
     from hunter import config
+
     monkeypatch.setattr(config, "GEN_SKIP_PL_FOR_EN", False)
     assert build_pl_skip_instruction("EN", full_mode=False) == ""
 
@@ -558,7 +615,9 @@ def _full_content(**overrides) -> dict:
         "lang": "EN",
         "job_title": "Senior Frontend Developer",
         "resume_en": {
-            "summary": "s", "skills": {}, "education": "BSc",
+            "summary": "s",
+            "skills": {},
+            "education": "BSc",
             "experience": [{"company": f"C{i}"} for i in range(7)],
         },
         "cover_letter_en": "Dear Hiring Manager,",
@@ -566,7 +625,9 @@ def _full_content(**overrides) -> dict:
         "about_me_en": "About me EN",
         "about_me_pl": "About me PL",
         "resume_pl": {
-            "summary": "s", "skills": {}, "education": "BSc",
+            "summary": "s",
+            "skills": {},
+            "education": "BSc",
             "experience": [{"company": f"C{i}"} for i in range(7)],
         },
     }

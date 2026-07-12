@@ -5,6 +5,7 @@ from hunter.sources.text_utils import REMOTE_ANY, ensure_remote_token, strip_htm
 
 # --- strip_html ----------------------------------------------------------
 
+
 def test_strip_html_removes_tags_and_unescapes() -> None:
     html = "<p>Senior <b>Angular</b> &amp; React</p>"
     assert strip_html(html, 100) == "Senior Angular & React"
@@ -32,6 +33,7 @@ def test_strip_html_tag_spanning_newline() -> None:
 
 # --- ensure_remote_token -------------------------------------------------
 
+
 def test_ensure_remote_token_empty_becomes_remote() -> None:
     assert ensure_remote_token("") == "Remote"
     assert ensure_remote_token(None) == "Remote"
@@ -50,7 +52,9 @@ def test_ensure_remote_token_keeps_existing_token() -> None:
 
 def test_ensure_remote_token_appends_geo_hint() -> None:
     assert ensure_remote_token("Fully Remote", "United States") == "Fully Remote — United States"
-    assert ensure_remote_token("Flexible", "Poland, Germany") == "Flexible (Remote) — Poland, Germany"
+    assert (
+        ensure_remote_token("Flexible", "Poland, Germany") == "Flexible (Remote) — Poland, Germany"
+    )
     assert ensure_remote_token("", "Poland") == "Remote — Poland"
 
 

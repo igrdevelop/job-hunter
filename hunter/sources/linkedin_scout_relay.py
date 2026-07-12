@@ -111,7 +111,9 @@ def append_to_queue(record: dict) -> None:
         tmp_path = QUEUE_PATH.with_suffix(QUEUE_PATH.suffix + ".tmp")
         tmp_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp_path, QUEUE_PATH)
-    logger.info("[linkedin_scout_relay] appended 1 candidate via /scoutfound (queue now %d)", len(existing))
+    logger.info(
+        "[linkedin_scout_relay] appended 1 candidate via /scoutfound (queue now %d)", len(existing)
+    )
 
 
 class LinkedInScoutRelaySource(BaseSource):

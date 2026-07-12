@@ -55,6 +55,7 @@ def test_apply_filters_rejects_disallowed_location() -> None:
 
 # ── Hybrid city logic ─────────────────────────────────────────────────────────
 
+
 def test_apply_filters_accepts_wroclaw_hybrid() -> None:
     jobs = [_job(title="Senior Frontend Developer (Angular)", location="Wrocław (Hybrid)")]
     filtered = apply_filters(jobs)
@@ -141,8 +142,7 @@ def test_apply_filters_keeps_english_working_language_exemption() -> None:
             location="Berlin (Remote)",
             raw={
                 "description": (
-                    "English is the company language. "
-                    "Knowledge of German is not required. "
+                    "English is the company language. Knowledge of German is not required. "
                 ),
             },
         )

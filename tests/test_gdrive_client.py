@@ -20,6 +20,7 @@ from hunter.gdrive_client import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def mock_service() -> MagicMock:
     """Return a MagicMock that chains .files().list/create/update().execute()."""
     return MagicMock()
@@ -36,6 +37,7 @@ def _files_list_result(files: list[dict]) -> MagicMock:
 # _q (query escaping)
 # ---------------------------------------------------------------------------
 
+
 class TestQ:
     def test_simple(self):
         assert _q("hello") == "'hello'"
@@ -51,6 +53,7 @@ class TestQ:
 # folder_url
 # ---------------------------------------------------------------------------
 
+
 class TestFolderUrl:
     def test_format(self):
         assert folder_url("abc123") == "https://drive.google.com/drive/folders/abc123"
@@ -60,10 +63,13 @@ class TestFolderUrl:
 # get_or_create_folder
 # ---------------------------------------------------------------------------
 
+
 class TestGetOrCreateFolder:
     def test_reuses_existing_folder(self):
         svc = mock_service()
-        svc.files().list.return_value = _files_list_result([{"id": "folder123", "name": "MyFolder"}])
+        svc.files().list.return_value = _files_list_result(
+            [{"id": "folder123", "name": "MyFolder"}]
+        )
 
         result = get_or_create_folder(svc, "MyFolder", parent_id="parent1")
 
@@ -109,6 +115,7 @@ class TestGetOrCreateFolder:
 # _find_file
 # ---------------------------------------------------------------------------
 
+
 class TestFindFile:
     def test_returns_id_when_found(self):
         svc = mock_service()
@@ -130,6 +137,7 @@ class TestFindFile:
 # ---------------------------------------------------------------------------
 # upload_file
 # ---------------------------------------------------------------------------
+
 
 class TestUploadFile:
     def test_creates_new_file_when_not_existing(self, tmp_path):
@@ -168,6 +176,7 @@ class TestUploadFile:
 # upload_folder
 # ---------------------------------------------------------------------------
 
+
 class TestUploadFolder:
     def test_uploads_all_files(self, tmp_path):
         # Create a flat folder with 3 files
@@ -182,9 +191,13 @@ class TestUploadFolder:
         svc.files().list.return_value = _files_list_result([])
         svc.files().create.return_value.execute.return_value = {"id": "company_folder_id"}
 
-        with patch("hunter.gdrive_client.MediaFileUpload"), \
-             patch("hunter.gdrive_client.get_or_create_folder", return_value="company_folder_id") as mock_goc, \
-             patch("hunter.gdrive_client.upload_file", return_value="fid") as mock_uf:
+        with (
+            patch("hunter.gdrive_client.MediaFileUpload"),
+            patch(
+                "hunter.gdrive_client.get_or_create_folder", return_value="company_folder_id"
+            ) as mock_goc,
+            patch("hunter.gdrive_client.upload_file", return_value="fid") as mock_uf,
+        ):
             result = upload_folder(svc, folder, "date_folder_id")
 
         assert result == "company_folder_id"
@@ -195,8 +208,10 @@ class TestUploadFolder:
         folder = tmp_path / "EmptyCompany"
         folder.mkdir()
 
-        with patch("hunter.gdrive_client.get_or_create_folder", return_value="fid123"), \
-             patch("hunter.gdrive_client.upload_file"):
+        with (
+            patch("hunter.gdrive_client.get_or_create_folder", return_value="fid123"),
+            patch("hunter.gdrive_client.upload_file"),
+        ):
             result = upload_folder(mock_service(), folder, "parent")
 
         assert result == "fid123"

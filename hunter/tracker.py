@@ -36,9 +36,21 @@ DB_PATH: Path = TRACKER_DB_PATH
 
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─
 TRACKER_HEADERS = [
-    "Date", "Company", "Job Title", "Stack",
-    "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
-    "Drive URL", "Confirmation", "Answer", "Cost $",
+    "Date",
+    "Company",
+    "Job Title",
+    "Stack",
+    "ATS %",
+    "URL",
+    "Folder",
+    "Sent",
+    "Re-application",
+    "To Learn",
+    "ID",
+    "Drive URL",
+    "Confirmation",
+    "Answer",
+    "Cost $",
 ]
 # 1-based column indices (mirror xlsx schema; kept for tracker_cache / db imports)
 URL_COL_INDEX = 6
@@ -58,12 +70,22 @@ _COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
 
 # ── gsheets column map (used by read_all_tracker_rows + gsheets_sync) ─────────
 _GSHEETS_COLS = [
-    "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-    "Folder", "Sent", "Re-application", "To Learn", "ID",
+    "Date",
+    "Company",
+    "Job Title",
+    "Stack",
+    "ATS %",
+    "URL",
+    "Folder",
+    "Sent",
+    "Re-application",
+    "To Learn",
+    "ID",
 ]
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
+
 
 def normalize_url(url: str) -> str:
     """Canonical form: lowercase host, strip trailing slash, drop tracking params."""
@@ -74,11 +96,25 @@ def normalize_url(url: str) -> str:
     host = (p.hostname or "").lower()
     path = p.path.rstrip("/") or "/"
     drop_params = {
-        "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
-        "utm_id", "ref", "refId", "trackingId", "trk", "fbclid", "gclid",
-        "campaignid", "adgroupid",
-        "originToLandingJobPostings", "origin",
-        "sendid", "send_date", "sug",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+        "utm_id",
+        "ref",
+        "refId",
+        "trackingId",
+        "trk",
+        "fbclid",
+        "gclid",
+        "campaignid",
+        "adgroupid",
+        "originToLandingJobPostings",
+        "origin",
+        "sendid",
+        "send_date",
+        "sug",
     }
     _path_id_domains = {"www.pracuj.pl", "justjoin.it", "nofluffjobs.com"}
     if host in _path_id_domains:
@@ -101,37 +137,38 @@ def normalize_url(url: str) -> str:
 
 def _strip_diacritics(s: str) -> str:
     import unicodedata
-    s = s.replace('ł', 'l').replace('Ł', 'L')
-    return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+
+    s = s.replace("ł", "l").replace("Ł", "L")
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
 
 def _strip_legal_suffixes(s: str) -> str:
-    s = re.sub(r'sp\.?\s*z\.?\s*o\.?\s*o\.?', '', s)
-    s = re.sub(r's\.a\.(?![a-z])', '', s)
-    s = re.sub(r'\b(ltd|gmbh|inc|llc)\b\.?', '', s)
-    s = re.sub(r'spol?ka.*', '', s)
-    s = re.sub(r'spzo+', '', s)
+    s = re.sub(r"sp\.?\s*z\.?\s*o\.?\s*o\.?", "", s)
+    s = re.sub(r"s\.a\.(?![a-z])", "", s)
+    s = re.sub(r"\b(ltd|gmbh|inc|llc)\b\.?", "", s)
+    s = re.sub(r"spol?ka.*", "", s)
+    s = re.sub(r"spzo+", "", s)
     return s
 
 
 def normalize_company(company: str) -> str:
     s = company.lower()
-    s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
-    s = re.sub(r'_\d+$', '', s)
+    s = re.sub(r"_?\d{4}-\d{2}-\d{2}(_\d+)?$", "", s)
+    s = re.sub(r"_\d+$", "", s)
     s = _strip_diacritics(s)
     s = _strip_legal_suffixes(s)
-    s = re.sub(r'[^a-z0-9]', '', s)
+    s = re.sub(r"[^a-z0-9]", "", s)
     return s
 
 
 _MARKETING_VERBS = (
-    r'build|join|help|shape|create|drive|be\s+part|make|lead|scale|'
-    r'transform|craft|deliver|grow|work|define|change|redefine'
+    r"build|join|help|shape|create|drive|be\s+part|make|lead|scale|"
+    r"transform|craft|deliver|grow|work|define|change|redefine"
 )
 _MARKETING_TAIL_RE = re.compile(
-    r'\s+[—–]\s+(?=' + _MARKETING_VERBS + r')'
-    r'|\s+\|\s+'
-    r'|\s+-\s+(?=' + _MARKETING_VERBS + r')',
+    r"\s+[—–]\s+(?=" + _MARKETING_VERBS + r")"
+    r"|\s+\|\s+"
+    r"|\s+-\s+(?=" + _MARKETING_VERBS + r")",
     re.IGNORECASE,
 )
 
@@ -139,19 +176,20 @@ _MARKETING_TAIL_RE = re.compile(
 def _strip_marketing_tail(title: str) -> str:
     m = _MARKETING_TAIL_RE.search(title)
     if m:
-        return title[:m.start()].strip()
+        return title[: m.start()].strip()
     return title
 
 
 def dedup_key(company: str, title: str) -> str:
     def _norm(s: str) -> str:
         s = s.lower()
-        s = re.sub(r'_?\d{4}-\d{2}-\d{2}(_\d+)?$', '', s)
-        s = re.sub(r'_\d+$', '', s)
+        s = re.sub(r"_?\d{4}-\d{2}-\d{2}(_\d+)?$", "", s)
+        s = re.sub(r"_\d+$", "", s)
         s = _strip_diacritics(s)
         s = _strip_legal_suffixes(s)
-        s = re.sub(r'[^a-z0-9]', '', s)
+        s = re.sub(r"[^a-z0-9]", "", s)
         return s
+
     return _norm(company) + "|" + _norm(_strip_marketing_tail(title))
 
 
@@ -191,24 +229,25 @@ def _is_unsent(sent: str) -> bool:
 
 # ── Row → dict helpers ────────────────────────────────────────────────────────
 
+
 def _db_row_to_tracker_dict(row) -> dict:
     """Map sqlite3.Row / dict with DB column names to TRACKER_HEADERS keyed dict."""
     return {
-        "Date":           str(row["date"] or ""),
-        "Company":        str(row["company"] or ""),
-        "Job Title":      str(row["title"] or ""),
-        "Stack":          str(row["stack"] or ""),
-        "ATS %":          str(row["ats_status"] or ""),
-        "URL":            str(row["url"] or ""),
-        "Folder":         str(row["folder"] or ""),
-        "Sent":           str(row["sent"] or ""),
+        "Date": str(row["date"] or ""),
+        "Company": str(row["company"] or ""),
+        "Job Title": str(row["title"] or ""),
+        "Stack": str(row["stack"] or ""),
+        "ATS %": str(row["ats_status"] or ""),
+        "URL": str(row["url"] or ""),
+        "Folder": str(row["folder"] or ""),
+        "Sent": str(row["sent"] or ""),
         "Re-application": str(row["reapplication"] or ""),
-        "To Learn":       str(row["to_learn"] or ""),
-        "ID":             str(row["id"] or ""),
-        "Drive URL":      str(row["drive_url"] or ""),
-        "Confirmation":   str(row["confirmation"] or ""),
-        "Answer":         str(row["answer"] or ""),
-        "Cost $":         _format_cost(row["cost_usd"] if "cost_usd" in row.keys() else None),
+        "To Learn": str(row["to_learn"] or ""),
+        "ID": str(row["id"] or ""),
+        "Drive URL": str(row["drive_url"] or ""),
+        "Confirmation": str(row["confirmation"] or ""),
+        "Answer": str(row["answer"] or ""),
+        "Cost $": _format_cost(row["cost_usd"] if "cost_usd" in row.keys() else None),
     }
 
 
@@ -248,12 +287,11 @@ def _parse_cost_cell(value) -> float | None:
 
 # ── Dedup reads ───────────────────────────────────────────────────────────────
 
+
 def get_known_urls() -> set[str]:
     """Return all normalised URLs stored in tracker — used for deduplication."""
     with get_db(DB_PATH) as conn:
-        rows = conn.execute(
-            "SELECT url_norm FROM applications WHERE url_norm != ''"
-        ).fetchall()
+        rows = conn.execute("SELECT url_norm FROM applications WHERE url_norm != ''").fetchall()
         return {r["url_norm"] for r in rows}
 
 
@@ -261,8 +299,7 @@ def get_known_company_titles() -> set[str]:
     """Return dedup_key(company, title) for all rows in tracker."""
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT company, title FROM applications "
-            "WHERE company != '' AND title != ''"
+            "SELECT company, title FROM applications WHERE company != '' AND title != ''"
         ).fetchall()
         return {dedup_key(r["company"], r["title"]) for r in rows}
 
@@ -294,9 +331,12 @@ def is_known(url: str, company: str = "", title: str = "") -> bool:
     """Check if a job is already in tracker (by URL or company+title)."""
     norm = normalize_url(url)
     with get_db(DB_PATH) as conn:
-        if norm and conn.execute(
-            "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm,)
-        ).fetchone():
+        if (
+            norm
+            and conn.execute(
+                "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+            ).fetchone()
+        ):
             return True
         if company and title:
             key = dedup_key(company, title)
@@ -310,6 +350,7 @@ def is_known(url: str, company: str = "", title: str = "") -> bool:
 
 
 # ── Status queries ────────────────────────────────────────────────────────────
+
 
 def has_successful_entry(url: str) -> bool:
     """True if tracker has a non-FAIL, non-SKIP entry for this URL."""
@@ -348,6 +389,7 @@ def is_react_skipped(url: str) -> bool:
 
 # ── Lookup ────────────────────────────────────────────────────────────────────
 
+
 def lookup_url(url: str) -> list[dict]:
     """Find all tracker entries matching this URL (normalised).
 
@@ -365,12 +407,12 @@ def lookup_url(url: str) -> list[dict]:
         ).fetchall()
     return [
         {
-            "id":      r["id"],
+            "id": r["id"],
             "company": r["company"],
-            "title":   r["title"],
-            "ats":     r["ats_status"],
-            "folder":  r["folder"],
-            "sent":    r["sent"],
+            "title": r["title"],
+            "ats": r["ats_status"],
+            "folder": r["folder"],
+            "sent": r["sent"],
         }
         for r in rows
     ]
@@ -387,12 +429,12 @@ def lookup_company(company: str) -> list[dict]:
         ).fetchall()
     return [
         {
-            "id":      r["id"],
+            "id": r["id"],
             "company": r["company"],
-            "title":   r["title"],
-            "ats":     r["ats_status"],
-            "folder":  r["folder"],
-            "sent":    r["sent"],
+            "title": r["title"],
+            "ats": r["ats_status"],
+            "folder": r["folder"],
+            "sent": r["sent"],
         }
         for r in rows
         if r["company"] and normalize_company(r["company"]) == norm
@@ -420,8 +462,7 @@ def get_failed_jobs() -> list[Job]:
     """
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT title, company, url, fail_count FROM applications "
-            "WHERE ats_status='FAIL'"
+            "SELECT title, company, url, fail_count FROM applications WHERE ats_status='FAIL'"
         ).fetchall()
     return [
         Job(
@@ -463,9 +504,7 @@ def remove_failed(url: str) -> None:
     if not norm:
         return
     with get_db(DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM applications WHERE ats_status='FAIL' AND url_norm=?", (norm,)
-        )
+        conn.execute("DELETE FROM applications WHERE ats_status='FAIL' AND url_norm=?", (norm,))
 
 
 def delete_all_by_url(url: str) -> dict:
@@ -486,14 +525,13 @@ def delete_all_by_url(url: str) -> dict:
         if first:
             result["folder"] = first["folder"] or None
             result["drive_url"] = first["drive_url"] or None
-        cur = conn.execute(
-            "DELETE FROM applications WHERE url_norm=?", (norm,)
-        )
+        cur = conn.execute("DELETE FROM applications WHERE url_norm=?", (norm,))
         result["deleted"] = cur.rowcount
     return result
 
 
 # ── MANUAL row management ─────────────────────────────────────────────────────
+
 
 def has_manual_pending(url: str) -> bool:
     """True if tracker already has a MANUAL row for this URL."""
@@ -501,10 +539,12 @@ def has_manual_pending(url: str) -> bool:
     if not norm:
         return False
     with get_db(DB_PATH) as conn:
-        return bool(conn.execute(
-            "SELECT 1 FROM applications WHERE url_norm=? AND ats_status=? LIMIT 1",
-            (norm, MANUAL_PENDING_ATS),
-        ).fetchone())
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM applications WHERE url_norm=? AND ats_status=? LIMIT 1",
+                (norm, MANUAL_PENDING_ATS),
+            ).fetchone()
+        )
 
 
 def remove_manual_pending_rows(url: str) -> int:
@@ -527,8 +567,7 @@ def manual_jobleads_job_posting_path(url: str) -> Path | None:
         return None
     with get_db(DB_PATH) as conn:
         row = conn.execute(
-            "SELECT folder FROM applications "
-            "WHERE url_norm=? AND ats_status=? LIMIT 1",
+            "SELECT folder FROM applications WHERE url_norm=? AND ats_status=? LIMIT 1",
             (norm, MANUAL_PENDING_ATS),
         ).fetchone()
     if not row or not row["folder"]:
@@ -549,11 +588,11 @@ def get_all_manual_pending() -> list[dict]:
         ).fetchall()
     return [
         {
-            "id":      r["id"],
-            "url":     r["url"],
-            "folder":  r["folder"],
+            "id": r["id"],
+            "url": r["url"],
+            "folder": r["folder"],
             "company": r["company"],
-            "title":   r["title"],
+            "title": r["title"],
         }
         for r in rows
     ]
@@ -573,6 +612,7 @@ def latest_manual_pending() -> dict[str, str] | None:
 
 
 # ── Write operations ──────────────────────────────────────────────────────────
+
 
 def add_manual_jobleads_pending(
     *,
@@ -601,14 +641,15 @@ def add_manual_jobleads_pending(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                row_id, today,
+                row_id,
+                today,
                 company.strip() or "Unknown",
                 title.strip() or "Unknown",
                 MANUAL_PENDING_ATS,
-                url, norm,
+                url,
+                norm,
                 folder_str,
-                "Paste job text into job_posting.txt in Folder, "
-                "then re-run apply (same URL).",
+                "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
             ),
         )
 
@@ -652,7 +693,8 @@ def add_applied(content: dict, force: bool = False) -> bool:
         # Is this a re-application (same URL exists with any status)?
         # Check BEFORE the force-mode delete below so the flag is accurate.
         is_reapply = bool(
-            norm_url and conn.execute(
+            norm_url
+            and conn.execute(
                 "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm_url,)
             ).fetchone()
         )
@@ -672,8 +714,14 @@ def add_applied(content: dict, force: bool = False) -> bool:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
             """,
             (
-                _new_row_id(), today, company, job_title, stack, ats_display,
-                norm_url or apply_url, norm_url,
+                _new_row_id(),
+                today,
+                company,
+                job_title,
+                stack,
+                ats_display,
+                norm_url or apply_url,
+                norm_url,
                 folder,
                 "+" if is_reapply else "",
                 to_learn,
@@ -703,18 +751,27 @@ def add_skipped(job: Job) -> dict | None:
         )
 
     return {
-        "Date": today, "Company": job.company, "Job Title": job.title,
-        "Stack": "", "ATS %": "SKIP", "URL": norm,
-        "Folder": "", "Sent": "", "Re-application": "", "To Learn": "",
+        "Date": today,
+        "Company": job.company,
+        "Job Title": job.title,
+        "Stack": "",
+        "ATS %": "SKIP",
+        "URL": norm,
+        "Folder": "",
+        "Sent": "",
+        "Re-application": "",
+        "To Learn": "",
         "ID": row_id,
-        "Drive URL": "", "Confirmation": "", "Answer": "",
+        "Drive URL": "",
+        "Confirmation": "",
+        "Answer": "",
     }
 
 
 def add_react_skipped(content: dict, url: str) -> None:
     """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered."""
     company = (content.get("company_name") or "").strip()
-    title   = (content.get("job_title")    or "").strip()
+    title = (content.get("job_title") or "").strip()
     if is_known(url, company, title):
         return
 
@@ -729,10 +786,13 @@ def add_react_skipped(content: dict, url: str) -> None:
             VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
             """,
             (
-                _new_row_id(), today,
-                company, title,
+                _new_row_id(),
+                today,
+                company,
+                title,
                 content.get("stack", ""),
-                norm, norm,
+                norm,
+                norm,
             ),
         )
 
@@ -783,6 +843,7 @@ def add_failed(job: Job) -> None:
 
 # ── Unsent rows ───────────────────────────────────────────────────────────────
 
+
 def iter_unsent_rows() -> list[dict]:
     """Return unsent tracker rows (no Sent value, excluding SKIP).
 
@@ -803,16 +864,16 @@ def iter_unsent_rows() -> list[dict]:
 
     return [
         {
-            "id":       r["id"],
-            "date":     r["date"],
-            "company":  r["company"],
-            "title":    r["title"],
-            "stack":    r["stack"],
-            "ats":      r["ats_status"],
-            "url":      r["url"],
-            "folder":   r["folder"],
-            "sent":     r["sent"],
-            "reapp":    r["reapplication"],
+            "id": r["id"],
+            "date": r["date"],
+            "company": r["company"],
+            "title": r["title"],
+            "stack": r["stack"],
+            "ats": r["ats_status"],
+            "url": r["url"],
+            "folder": r["folder"],
+            "sent": r["sent"],
+            "reapp": r["reapplication"],
             "to_learn": r["to_learn"],
         }
         for r in rows
@@ -820,6 +881,7 @@ def iter_unsent_rows() -> list[dict]:
 
 
 # ── Pull-sync updates ─────────────────────────────────────────────────────────
+
 
 def apply_sent_updates(updates: dict[str, str]) -> int:
     """Write Sent values (e.g. EXPIRED) back into tracker.
@@ -833,9 +895,7 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
     with get_db(DB_PATH) as conn:
         for row_id, sent_val in updates.items():
             if sent_val:
-                cur = conn.execute(
-                    "UPDATE applications SET sent=? WHERE id=?", (sent_val, row_id)
-                )
+                cur = conn.execute("UPDATE applications SET sent=? WHERE id=?", (sent_val, row_id))
                 updated += cur.rowcount
     return updated
 
@@ -950,24 +1010,24 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
                  :confirmation, :answer, :sheets_row, :sheets_dirty, :cost_usd)
                 """,
                 {
-                    "id":            row_id,
-                    "date":          row.get("Date", ""),
-                    "company":       row.get("Company", ""),
-                    "title":         row.get("Job Title", ""),
-                    "stack":         row.get("Stack", ""),
-                    "ats_status":    row.get("ATS %", ""),
-                    "url":           raw_url,
-                    "url_norm":      url_norm,
-                    "folder":        row.get("Folder", ""),
-                    "sent":          row.get("Sent", ""),
+                    "id": row_id,
+                    "date": row.get("Date", ""),
+                    "company": row.get("Company", ""),
+                    "title": row.get("Job Title", ""),
+                    "stack": row.get("Stack", ""),
+                    "ats_status": row.get("ATS %", ""),
+                    "url": raw_url,
+                    "url_norm": url_norm,
+                    "folder": row.get("Folder", ""),
+                    "sent": row.get("Sent", ""),
                     "reapplication": row.get("Re-application", ""),
-                    "to_learn":      row.get("To Learn", ""),
-                    "drive_url":     row.get("Drive URL", ""),
-                    "confirmation":  row.get("Confirmation", ""),
-                    "answer":        row.get("Answer", ""),
-                    "sheets_row":    sheet_idx,
-                    "sheets_dirty":  0,
-                    "cost_usd":      _parse_cost_cell(row.get("Cost $", "")),
+                    "to_learn": row.get("To Learn", ""),
+                    "drive_url": row.get("Drive URL", ""),
+                    "confirmation": row.get("Confirmation", ""),
+                    "answer": row.get("Answer", ""),
+                    "sheets_row": sheet_idx,
+                    "sheets_dirty": 0,
+                    "cost_usd": _parse_cost_cell(row.get("Cost $", "")),
                 },
             )
             if conn.execute("SELECT changes()").fetchone()[0]:
@@ -980,6 +1040,7 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
 
 
 # ── Folder / Drive URL ────────────────────────────────────────────────────────
+
 
 def get_folder_by_url(url: str) -> str | None:
     """Return the Folder value for a given job URL, or None if not found."""
@@ -1017,9 +1078,7 @@ def set_drive_url(url: str, drive_url: str) -> None:
     if not norm:
         return
     with get_db(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE applications SET drive_url=? WHERE url_norm=?", (drive_url, norm)
-        )
+        conn.execute("UPDATE applications SET drive_url=? WHERE url_norm=?", (drive_url, norm))
 
 
 def set_ats_verdict(url: str, score: float) -> bool:
@@ -1113,6 +1172,7 @@ def set_to_learn(url: str, to_learn: str) -> bool:
 
 # ── Google Sheets sync helpers ────────────────────────────────────────────────
 
+
 def read_all_tracker_rows() -> list[dict]:
     """Read every data row as a dict keyed by column names.
 
@@ -1132,26 +1192,27 @@ def read_all_tracker_rows() -> list[dict]:
     result = []
     for r in rows:
         d = {
-            "Date":           r["date"],
-            "Company":        r["company"],
-            "Job Title":      r["title"],
-            "Stack":          r["stack"],
-            "ATS %":          r["ats_status"],
-            "URL":            r["url"],
-            "Folder":         r["folder"],
-            "Sent":           r["sent"],
+            "Date": r["date"],
+            "Company": r["company"],
+            "Job Title": r["title"],
+            "Stack": r["stack"],
+            "ATS %": r["ats_status"],
+            "URL": r["url"],
+            "Folder": r["folder"],
+            "Sent": r["sent"],
             "Re-application": r["reapplication"],
-            "To Learn":       r["to_learn"],
-            "ID":             r["id"],
-            "Drive URL":      r["drive_url"],
-            "Confirmation":   r["confirmation"],
-            "Answer":         r["answer"],
+            "To Learn": r["to_learn"],
+            "ID": r["id"],
+            "Drive URL": r["drive_url"],
+            "Confirmation": r["confirmation"],
+            "Answer": r["answer"],
         }
         result.append(d)
     return result
 
 
 # ── Cooldown ──────────────────────────────────────────────────────────────────
+
 
 def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
     """Return True if company+title was applied to within the last cooldown_days."""
@@ -1222,10 +1283,26 @@ def company_cooldown_active(company: str, days: int = 180) -> bool:
 
 # ── Email response / confirmation ─────────────────────────────────────────────
 
-_TITLE_STOP = frozenset({
-    "senior", "junior", "mid", "lead", "principal", "staff", "head",
-    "the", "and", "for", "with", "of", "a", "an", "in", "at",
-})
+_TITLE_STOP = frozenset(
+    {
+        "senior",
+        "junior",
+        "mid",
+        "lead",
+        "principal",
+        "staff",
+        "head",
+        "the",
+        "and",
+        "for",
+        "with",
+        "of",
+        "a",
+        "an",
+        "in",
+        "at",
+    }
+)
 
 
 def _title_tokens(title: str) -> set[str]:
@@ -1268,16 +1345,18 @@ def lookup_by_company_and_title(
         score = _title_similarity(title, row["title"])
         if score < title_min_score:
             continue
-        results.append({
-            "id":           row["id"],
-            "company":      row["company"],
-            "title":        row["title"],
-            "ats":          row["ats_status"],
-            "sent":         row["sent"],
-            "url":          row["url"],
-            "confirmation": row["confirmation"],
-            "title_score":  score,
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "company": row["company"],
+                "title": row["title"],
+                "ats": row["ats_status"],
+                "sent": row["sent"],
+                "url": row["url"],
+                "confirmation": row["confirmation"],
+                "title_score": score,
+            }
+        )
 
     results.sort(key=lambda r: r["title_score"], reverse=True)
     return results
@@ -1308,17 +1387,18 @@ def get_applications_on_date(date_str: str) -> list[dict]:
         ).fetchall()
     return [
         {
-            "date":    r["date"],
+            "date": r["date"],
             "company": r["company"],
-            "title":   r["title"],
-            "ats":     r["ats_status"],
-            "url":     r["url"],
+            "title": r["title"],
+            "ats": r["ats_status"],
+            "url": r["url"],
         }
         for r in rows
     ]
 
 
 # ── Google Sheets metadata ────────────────────────────────────────────────────
+
 
 def set_sheets_row(row_id: str, sheets_row: int) -> None:
     """Store the Google Sheets 1-based row index for a tracker row."""
@@ -1332,26 +1412,20 @@ def set_sheets_row(row_id: str, sheets_row: int) -> None:
 def get_sheets_row(row_id: str) -> int | None:
     """Return the Google Sheets row index for a row, or None if not yet pushed."""
     with get_db(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT sheets_row FROM applications WHERE id=?", (row_id,)
-        ).fetchone()
+        row = conn.execute("SELECT sheets_row FROM applications WHERE id=?", (row_id,)).fetchone()
     return int(row["sheets_row"]) if row and row["sheets_row"] is not None else None
 
 
 def mark_sheets_dirty(row_id: str) -> None:
     """Flag a tracker row as needing a Sheets resync."""
     with get_db(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE applications SET sheets_dirty=1 WHERE id=?", (row_id,)
-        )
+        conn.execute("UPDATE applications SET sheets_dirty=1 WHERE id=?", (row_id,))
 
 
 def mark_sheets_clean(row_id: str) -> None:
     """Clear the sheets_dirty flag after a successful Sheets write."""
     with get_db(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE applications SET sheets_dirty=0 WHERE id=?", (row_id,)
-        )
+        conn.execute("UPDATE applications SET sheets_dirty=0 WHERE id=?", (row_id,))
 
 
 def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
@@ -1369,20 +1443,20 @@ def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
     result = []
     for r in rows:
         row_dict = {
-            "Date":           r["date"],
-            "Company":        r["company"],
-            "Job Title":      r["title"],
-            "Stack":          r["stack"],
-            "ATS %":          r["ats_status"],
-            "URL":            r["url"],
-            "Folder":         r["folder"],
-            "Sent":           r["sent"],
+            "Date": r["date"],
+            "Company": r["company"],
+            "Job Title": r["title"],
+            "Stack": r["stack"],
+            "ATS %": r["ats_status"],
+            "URL": r["url"],
+            "Folder": r["folder"],
+            "Sent": r["sent"],
             "Re-application": r["reapplication"],
-            "To Learn":       r["to_learn"],
-            "ID":             r["id"],
-            "Drive URL":      r["drive_url"],
-            "Confirmation":   r["confirmation"],
-            "Answer":         r["answer"],
+            "To Learn": r["to_learn"],
+            "ID": r["id"],
+            "Drive URL": r["drive_url"],
+            "Confirmation": r["confirmation"],
+            "Answer": r["answer"],
         }
         result.append((r["id"], row_dict, r["sheets_row"]))
     return result
@@ -1391,7 +1465,5 @@ def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
 def get_dirty_sheets_count() -> int:
     """Return the number of rows flagged for Sheets resync."""
     with get_db(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1").fetchone()
     return row["n"] if row else 0

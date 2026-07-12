@@ -27,19 +27,20 @@ from hunter.verdict_writer import backfill_all_verdicts_sync  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dry-run", action="store_true",
-                    help="show what would be written without touching Sheets")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="show what would be written without touching Sheets"
+    )
     args = ap.parse_args()
 
     sheet_id = _sheet_id()
     if not sheet_id:
-        print("error: GSHEETS_TRACKER_ID is not set / no sheet bootstrapped",
-              file=sys.stderr)
+        print("error: GSHEETS_TRACKER_ID is not set / no sheet bootstrapped", file=sys.stderr)
         return 2
 
     if args.dry_run:
         import sqlite3
         from hunter.config import TRACKER_DB_PATH
+
         con = sqlite3.connect(str(TRACKER_DB_PATH))
         con.row_factory = sqlite3.Row
         rows = con.execute(
@@ -52,13 +53,14 @@ def main() -> int:
             "SELECT count(*) FROM applications WHERE sheets_row IS NULL"
         ).fetchone()[0]
         no_verdict = con.execute(
-            "SELECT count(*) FROM applications "
-            "WHERE sheets_row IS NOT NULL AND ats_verdict IS NULL"
+            "SELECT count(*) FROM applications WHERE sheets_row IS NOT NULL AND ats_verdict IS NULL"
         ).fetchone()[0]
         print(f"would write {len(rows)} rows to N column:")
         for r in rows:
-            print(f"  N{r['sheets_row']:>4}  {r['ats_verdict']:>6}  "
-                  f"{r['company'][:30]:30s}  {r['title'][:40]}")
+            print(
+                f"  N{r['sheets_row']:>4}  {r['ats_verdict']:>6}  "
+                f"{r['company'][:30]:30s}  {r['title'][:40]}"
+            )
         print(f"\nskipped: no_sheets_row={no_row}  no_verdict={no_verdict}")
         return 0
 

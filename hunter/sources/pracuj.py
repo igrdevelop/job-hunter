@@ -67,12 +67,13 @@ def _retry_after_delay(exc: Exception, attempt: int) -> float:
                 return min(float(ra), _RATE_LIMIT_MAX_DELAY)
             except (TypeError, ValueError):
                 pass
-    return min(_RATE_LIMIT_BASE_DELAY * (2 ** attempt), _RATE_LIMIT_MAX_DELAY)
+    return min(_RATE_LIMIT_BASE_DELAY * (2**attempt), _RATE_LIMIT_MAX_DELAY)
 
 
 def _playwright_available() -> bool:
     try:
         import playwright  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -82,7 +83,7 @@ def _playwright_available() -> bool:
 
 _ARCHIVED_PATTERNS = (
     'data-test="section-archived"',
-    "data-apply-type=\"ArchivedApplyPanel\"",
+    'data-apply-type="ArchivedApplyPanel"',
     "Pracodawca zakończył zbieranie zgłoszeń",
     "oferta wygasła",
     "offer expired",
@@ -134,7 +135,7 @@ def _format_job_posting_ld(jp: dict) -> str:
     elif isinstance(loc, list):
         cities: list[str] = []
         for l in loc:
-            addr = (l.get("address") or {})
+            addr = l.get("address") or {}
             c = addr.get("addressLocality", "")
             if c:
                 cities.append(c)
@@ -177,7 +178,8 @@ def _format_job_posting_ld(jp: dict) -> str:
 def _try_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     for raw in matches:
         try:
@@ -254,7 +256,8 @@ def _format_next_data_offer(offer: dict) -> str:
 def _try_next_data(html: str) -> str:
     m = re.search(
         r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     if not m:
         return ""
@@ -295,9 +298,7 @@ def _try_bs4_detail(html: str) -> str:
     if og_desc and og_desc.get("content"):
         parts.append(f"Summary: {og_desc['content']}")
 
-    for tag in soup.find_all(
-        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
-    ):
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
 
     main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
@@ -336,7 +337,9 @@ def _fetch_detail_html(url: str) -> str:
                     delay = _retry_after_delay(cs_err, attempt)
                     logger.warning(
                         "[pracuj] 429 (attempt %d/%d) — backing off %.1fs",
-                        attempt + 1, _RATE_LIMIT_MAX_RETRIES + 1, delay,
+                        attempt + 1,
+                        _RATE_LIMIT_MAX_RETRIES + 1,
+                        delay,
                     )
                     time.sleep(delay)
                     continue
@@ -347,6 +350,7 @@ def _fetch_detail_html(url: str) -> str:
 
     import requests as _req
     from hunter.sources.html_fallback import HEADERS as _FB_HEADERS
+
     resp = _req.get(url, headers=_FB_HEADERS, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.text
@@ -365,6 +369,7 @@ class PracujSource(BaseSource):
         Appends an archived-notice line when the page HTML signals an expired offer.
         """
         from hunter.sources.html_fallback import fetch_html
+
         try:
             html = _fetch_detail_html(url)
         except Exception as e:
@@ -413,9 +418,7 @@ class PracujSource(BaseSource):
 
         for url in LISTING_URLS:
             raw_jobs = (
-                self._fetch_listing_playwright(url)
-                if use_playwright
-                else self._fetch_listing(url)
+                self._fetch_listing_playwright(url) if use_playwright else self._fetch_listing(url)
             )
             logger.info(f"[Pracuj] {url} -> {len(raw_jobs)} raw jobs")
             for raw in raw_jobs:
@@ -443,6 +446,7 @@ class PracujSource(BaseSource):
 
     def _fetch_listing_playwright(self, url: str) -> list[dict]:
         from hunter.playwright_helper import chromium_page
+
         try:
             with chromium_page(url) as page:
                 html = page.content()
@@ -482,7 +486,8 @@ class PracujSource(BaseSource):
     def _extract_next_data(self, html: str) -> list[dict]:
         m = re.search(
             r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
-            html, re.S,
+            html,
+            re.S,
         )
         if not m:
             return []
@@ -549,7 +554,8 @@ class PracujSource(BaseSource):
     def _extract_json_ld(self, html: str) -> list[dict]:
         matches = re.findall(
             r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-            html, re.S,
+            html,
+            re.S,
         )
         results = []
         for raw in matches:
@@ -592,11 +598,13 @@ class PracujSource(BaseSource):
             if not title or len(title) < 3:
                 continue
 
-            jobs.append({
-                "jobTitle": title,
-                "offerUrl": href,
-                "_source": "bs4",
-            })
+            jobs.append(
+                {
+                    "jobTitle": title,
+                    "offerUrl": href,
+                    "_source": "bs4",
+                }
+            )
 
         return jobs
 
@@ -606,9 +614,7 @@ class PracujSource(BaseSource):
         title = job.title.lower()
 
         exclude_levels = [lv.lower() for lv in FILTER.get("exclude_levels", [])]
-        level = (
-            raw.get("experienceLevel") or raw.get("positionLevels") or ""
-        )
+        level = raw.get("experienceLevel") or raw.get("positionLevels") or ""
         if isinstance(level, list):
             level = " ".join(str(l).lower() for l in level)
         else:
@@ -628,19 +634,9 @@ class PracujSource(BaseSource):
 
     def _parse(self, raw: dict) -> Optional[Job]:
         # Handle both __NEXT_DATA__ format and JSON-LD format
-        title = (
-            raw.get("jobTitle")
-            or raw.get("title")
-            or raw.get("name")
-            or ""
-        ).strip()
+        title = (raw.get("jobTitle") or raw.get("title") or raw.get("name") or "").strip()
 
-        company = (
-            raw.get("companyName")
-            or raw.get("employer")
-            or raw.get("company")
-            or ""
-        )
+        company = raw.get("companyName") or raw.get("employer") or raw.get("company") or ""
         if isinstance(company, dict):
             company = company.get("name", "")
         company = str(company).strip()
@@ -667,7 +663,9 @@ class PracujSource(BaseSource):
 
     @staticmethod
     def _build_url(raw: dict) -> str:
-        title_slug = re.sub(r"[^\w-]", "-", (raw.get("jobTitle") or raw.get("title") or "").strip().lower())
+        title_slug = re.sub(
+            r"[^\w-]", "-", (raw.get("jobTitle") or raw.get("title") or "").strip().lower()
+        )
         title_slug = re.sub(r"-{2,}", "-", title_slug).strip("-")
 
         def _fix(url: str) -> str:

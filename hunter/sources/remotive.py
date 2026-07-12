@@ -80,7 +80,9 @@ class RemotiveSource(BaseSource):
         jobs = data.get("jobs")
         if not isinstance(jobs, list):
             return []
-        logger.info(f"[Remotive] params={params} -> {len(jobs)} raw (job-count={data.get('job-count')})")
+        logger.info(
+            f"[Remotive] params={params} -> {len(jobs)} raw (job-count={data.get('job-count')})"
+        )
         return jobs
 
     def _parse(self, raw: dict) -> Optional[Job]:

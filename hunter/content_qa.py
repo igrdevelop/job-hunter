@@ -39,16 +39,21 @@ _EXPECTED_ROLE_COUNT = 7
 # Known canonical profile titles (lowercase normalised)
 _PROFILE_TITLES_NORM = {
     "frontend developer (angular, part-time contract)",  # Alten Poland
-    "senior frontend developer (angular)",               # Fairmarkit, Venture Labs, SII
-    "senior frontend developer",                         # Altoros
-    "frontend developer (angular)",                      # SolbegSoft
-    "frontend developer",                                # Staronka
+    "senior frontend developer (angular)",  # Fairmarkit, Venture Labs, SII
+    "senior frontend developer",  # Altoros
+    "frontend developer (angular)",  # SolbegSoft
+    "frontend developer",  # Staronka
 }
 
 # Known real company names (lowercase)
 _REAL_COMPANIES = {
-    "alten poland", "fairmarkit", "venture labs", "sii", "altoros",
-    "solbegsoft", "staronka",
+    "alten poland",
+    "fairmarkit",
+    "venture labs",
+    "sii",
+    "altoros",
+    "solbegsoft",
+    "staronka",
 }
 
 
@@ -60,6 +65,7 @@ def _norm_title(t: str) -> str:
 # ---------------------------------------------------------------------------
 # QAReport
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class QACheck:
@@ -94,19 +100,14 @@ class QAReport:
         if self.passed:
             return f"✅ <b>QA: all checks passed</b>\n🔗 {url}"
         fails = self.failed_checks
-        fail_lines = "\n".join(
-            f"• <b>{c.name}</b>: {c.detail[:120]}" for c in fails
-        )
-        return (
-            f"⚠️ <b>QA: {len(fails)} check(s) failed</b>\n"
-            f"🔗 {url}\n\n"
-            f"{fail_lines}"
-        )
+        fail_lines = "\n".join(f"• <b>{c.name}</b>: {c.detail[:120]}" for c in fails)
+        return f"⚠️ <b>QA: {len(fails)} check(s) failed</b>\n🔗 {url}\n\n{fail_lines}"
 
 
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
+
 
 def _check_role_count(resume_en: dict[str, Any]) -> QACheck:
     exp = resume_en.get("experience") or []
@@ -160,9 +161,9 @@ def _check_no_polish_in_en_resume(resume_en: dict[str, Any]) -> QACheck:
             hits.append(f"skills.{skill_key}: '{m[:40]}'")
 
     # Experience bullets
-    for entry in (resume_en.get("experience") or []):
+    for entry in resume_en.get("experience") or []:
         company = entry.get("company", "?")
-        for bullet in (entry.get("bullets") or []):
+        for bullet in entry.get("bullets") or []:
             m = _has_polish(bullet)
             if m:
                 hits.append(f"{company} bullet: '{m[:30]}'")
@@ -230,18 +231,16 @@ def is_angular_version_entry(item: str) -> bool:
     s = (item or "").strip()
     if not re.match(r"(?i)^angular\b", s):
         return False
-    rest = s[len("angular"):]
-    rest = re.sub(r"\([^)]*\)", "", rest)          # drop "(2-22)", "(latest versions)"
-    rest = re.sub(r"(?i)[\d.+\-–x\s]", "", rest)   # drop version chars
+    rest = s[len("angular") :]
+    rest = re.sub(r"\([^)]*\)", "", rest)  # drop "(2-22)", "(latest versions)"
+    rest = re.sub(r"(?i)[\d.+\-–x\s]", "", rest)  # drop version chars
     return rest == ""
 
 
 def _check_no_duplicate_angular(resume_en: dict[str, Any]) -> QACheck:
     frontend = (resume_en.get("skills") or {}).get("frontend") or ""
     # Only flag duplicate *version* entries; "Angular Material" etc. are fine.
-    version_entries = [
-        e.strip() for e in frontend.split(",") if is_angular_version_entry(e)
-    ]
+    version_entries = [e.strip() for e in frontend.split(",") if is_angular_version_entry(e)]
     ok = len(version_entries) <= 1
     return QACheck(
         name="No duplicate Angular in skills",
@@ -252,7 +251,7 @@ def _check_no_duplicate_angular(resume_en: dict[str, Any]) -> QACheck:
 
 def _check_titles(resume_en: dict[str, Any]) -> QACheck:
     bad: list[str] = []
-    for entry in (resume_en.get("experience") or []):
+    for entry in resume_en.get("experience") or []:
         title = (entry.get("title") or "").strip()
         norm = _norm_title(title)
         # Check against known canonical titles
@@ -269,13 +268,10 @@ def _check_titles(resume_en: dict[str, Any]) -> QACheck:
 def _check_companies(resume_en: dict[str, Any]) -> QACheck:
     """All companies must be from the known whitelist."""
     bad: list[str] = []
-    for entry in (resume_en.get("experience") or []):
+    for entry in resume_en.get("experience") or []:
         company = (entry.get("company") or "").strip().lower()
         company_base = re.sub(r"\s*\(.*?\)", "", company).strip()
-        matched = any(
-            real in company_base or company_base in real
-            for real in _REAL_COMPANIES
-        )
+        matched = any(real in company_base or company_base in real for real in _REAL_COMPANIES)
         if not matched:
             bad.append(entry.get("company", "?"))
     ok = len(bad) == 0
@@ -289,6 +285,7 @@ def _check_companies(resume_en: dict[str, Any]) -> QACheck:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run_qa(content: dict[str, Any]) -> QAReport:
     """Run all QA checks on a content dict. Returns a QAReport."""

@@ -29,7 +29,7 @@ async def scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     expired = result["expired"]
     skipped = result.get("skipped", [])
-    errors  = result["errors"]
+    errors = result["errors"]
 
     if not expired:
         logger.info("[scheduled_check_expired] Nothing expired.")

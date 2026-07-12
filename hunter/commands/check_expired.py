@@ -37,10 +37,10 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    total   = result["total"]
-    alive   = result["alive"]
+    total = result["total"]
+    alive = result["alive"]
     expired = result["expired"]
-    errors  = result["errors"]
+    errors = result["errors"]
     skipped = result.get("skipped", [])
 
     lines = [f"✅ <b>Check complete</b> — {total} vacancies\n"]
@@ -69,6 +69,7 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if GSHEETS_ENABLED and expired:
         try:
             from hunter import gsheets_sync
+
             pushed = await gsheets_sync.push_sent_column()
             if pushed["updated"]:
                 lines.append(f"\n🔄 Sheets: {pushed['updated']} row(s) updated.")

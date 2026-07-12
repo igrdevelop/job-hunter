@@ -28,21 +28,18 @@ def _insert_row(tracker_db, *, url: str, row_id: str = "abc12345") -> None:
 
 def _verdict_of(tracker_db, row_id: str):
     with get_db(tracker_db) as conn:
-        row = conn.execute(
-            "SELECT ats_verdict FROM applications WHERE id=?", (row_id,)
-        ).fetchone()
+        row = conn.execute("SELECT ats_verdict FROM applications WHERE id=?", (row_id,)).fetchone()
     return row["ats_verdict"] if row else None
 
 
 def _status_of(tracker_db, row_id: str):
     with get_db(tracker_db) as conn:
-        row = conn.execute(
-            "SELECT ats_status FROM applications WHERE id=?", (row_id,)
-        ).fetchone()
+        row = conn.execute("SELECT ats_status FROM applications WHERE id=?", (row_id,)).fetchone()
     return row["ats_status"] if row else None
 
 
 # ── Schema migration ──────────────────────────────────────────────────────────
+
 
 def test_ats_verdict_column_exists(tracker_db):
     """The lazy migration in db._ensure_columns adds ats_verdict to fresh DBs."""
@@ -53,6 +50,7 @@ def test_ats_verdict_column_exists(tracker_db):
 
 # ── set_ats_verdict ───────────────────────────────────────────────────────────
 
+
 def test_set_ats_verdict_writes_value(tracker_db):
     _insert_row(tracker_db, url="https://example.com/jobs/1")
     assert tracker.set_ats_verdict("https://example.com/jobs/1", 91.0) is True
@@ -61,9 +59,7 @@ def test_set_ats_verdict_writes_value(tracker_db):
 
 def test_set_ats_verdict_normalizes_url(tracker_db):
     _insert_row(tracker_db, url="https://example.com/jobs/1")
-    assert tracker.set_ats_verdict(
-        "https://example.com/jobs/1/?utm_source=x", 88.5
-    ) is True
+    assert tracker.set_ats_verdict("https://example.com/jobs/1/?utm_source=x", 88.5) is True
     assert _verdict_of(tracker_db, "abc12345") == 88.5
 
 
@@ -90,6 +86,7 @@ def test_set_ats_verdict_overwrites_previous(tracker_db):
 # tracker/Sheet "ATS %" column should show the independent verdict, not the
 # generator's own self-assessment, once the verdict has been stamped.
 
+
 def test_set_ats_verdict_overwrites_ats_status(tracker_db):
     _insert_row(tracker_db, url="https://example.com/jobs/1")
     assert _status_of(tracker_db, "abc12345") == "97%"  # generator self-score
@@ -105,8 +102,10 @@ def test_set_ats_verdict_ats_status_rounds_to_int_percent(tracker_db):
 
 def test_set_ats_verdict_never_raises(tracker_db, monkeypatch):
     """Best-effort contract: DB failure logs and returns False."""
+
     def _boom(*a, **k):
         raise RuntimeError("db locked")
+
     monkeypatch.setattr(tracker, "get_db", _boom)
     assert tracker.set_ats_verdict("https://example.com/jobs/1", 90.0) is False
 
@@ -116,11 +115,10 @@ def test_set_ats_verdict_never_raises(tracker_db, monkeypatch):
 # verdict refine loop's round-2 stretch additions land in content["to_learn"]
 # — so this is the same post-hoc-UPDATE-by-URL contract as set_ats_verdict.
 
+
 def _to_learn_of(tracker_db, row_id: str):
     with get_db(tracker_db) as conn:
-        row = conn.execute(
-            "SELECT to_learn FROM applications WHERE id=?", (row_id,)
-        ).fetchone()
+        row = conn.execute("SELECT to_learn FROM applications WHERE id=?", (row_id,)).fetchone()
     return row["to_learn"] if row else None
 
 
@@ -132,9 +130,7 @@ def test_set_to_learn_writes_value(tracker_db):
 
 def test_set_to_learn_normalizes_url(tracker_db):
     _insert_row(tracker_db, url="https://example.com/jobs/1")
-    assert tracker.set_to_learn(
-        "https://example.com/jobs/1/?utm_source=x", "Vitest"
-    ) is True
+    assert tracker.set_to_learn("https://example.com/jobs/1/?utm_source=x", "Vitest") is True
     assert _to_learn_of(tracker_db, "abc12345") == "Vitest"
 
 
@@ -156,8 +152,10 @@ def test_set_to_learn_false_on_empty_url(tracker_db):
 
 def test_set_to_learn_never_raises(tracker_db, monkeypatch):
     """Best-effort contract: DB failure logs and returns False."""
+
     def _boom(*a, **k):
         raise RuntimeError("db locked")
+
     monkeypatch.setattr(tracker, "get_db", _boom)
     assert tracker.set_to_learn("https://example.com/jobs/1", "Vitest") is False
 
@@ -167,11 +165,10 @@ def test_set_to_learn_never_raises(tracker_db, monkeypatch):
 # the verdict + refine loop spend more AFTER that, so the pipeline re-prices
 # and re-stamps — same post-hoc-UPDATE-by-URL contract as set_ats_verdict.
 
+
 def _cost_of(tracker_db, row_id: str):
     with get_db(tracker_db) as conn:
-        row = conn.execute(
-            "SELECT cost_usd FROM applications WHERE id=?", (row_id,)
-        ).fetchone()
+        row = conn.execute("SELECT cost_usd FROM applications WHERE id=?", (row_id,)).fetchone()
     return row["cost_usd"] if row else None
 
 
@@ -183,9 +180,7 @@ def test_set_cost_writes_value(tracker_db):
 
 def test_set_cost_normalizes_url(tracker_db):
     _insert_row(tracker_db, url="https://example.com/jobs/1")
-    assert tracker.set_cost(
-        "https://example.com/jobs/1/?utm_source=x", 0.31
-    ) is True
+    assert tracker.set_cost("https://example.com/jobs/1/?utm_source=x", 0.31) is True
     assert _cost_of(tracker_db, "abc12345") == 0.31
 
 
@@ -208,7 +203,9 @@ def test_set_cost_false_on_empty_url(tracker_db):
 
 def test_set_cost_never_raises(tracker_db, monkeypatch):
     """Best-effort contract: DB failure logs and returns False."""
+
     def _boom(*a, **k):
         raise RuntimeError("db locked")
+
     monkeypatch.setattr(tracker, "get_db", _boom)
     assert tracker.set_cost("https://example.com/jobs/1", 0.5) is False

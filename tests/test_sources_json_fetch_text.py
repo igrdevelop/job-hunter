@@ -20,6 +20,7 @@ from hunter.sources.nofluffjobs import NoFluffJobsSource
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
+
 def _mk_json_response(payload, status: int = 200) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status
@@ -31,6 +32,7 @@ def _mk_json_response(payload, status: int = 200) -> MagicMock:
 
 
 # ── JustJoin ────────────────────────────────────────────────────────────────
+
 
 def test_justjoin_matches_url() -> None:
     s = JustJoinSource()
@@ -71,17 +73,18 @@ def test_justjoin_fetch_text_formats_api_payload() -> None:
 
 def test_justjoin_fetch_text_marks_inactive_offers() -> None:
     payload = {
-        "title": "x", "companyName": "y", "city": "Wroclaw",
-        "workplaceType": "office", "body": "<p>" + ("desc " * 50) + "</p>",
+        "title": "x",
+        "companyName": "y",
+        "city": "Wroclaw",
+        "workplaceType": "office",
+        "body": "<p>" + ("desc " * 50) + "</p>",
         "isActive": False,
     }
     with patch(
         "hunter.sources.justjoin.requests.get",
         return_value=_mk_json_response(payload),
     ):
-        out = JustJoinSource().fetch_text(
-            "https://justjoin.it/job-offer/x-y-wroclaw"
-        )
+        out = JustJoinSource().fetch_text("https://justjoin.it/job-offer/x-y-wroclaw")
     assert "Offer expired" in out
 
 
@@ -91,6 +94,7 @@ def test_justjoin_fetch_text_raises_on_bad_url() -> None:
 
 
 # ── NoFluffJobs ─────────────────────────────────────────────────────────────
+
 
 def test_nofluffjobs_matches_url() -> None:
     s = NoFluffJobsSource()
@@ -120,9 +124,7 @@ def test_nofluffjobs_fetch_text_formats_api_payload() -> None:
         "hunter.sources.nofluffjobs.requests.get",
         return_value=_mk_json_response(payload),
     ):
-        out = NoFluffJobsSource().fetch_text(
-            "https://nofluffjobs.com/pl/job/example-slug"
-        )
+        out = NoFluffJobsSource().fetch_text("https://nofluffjobs.com/pl/job/example-slug")
     assert "Senior Angular Developer" in out
     assert "ExampleCo" in out
     assert "Warsaw" in out
@@ -177,21 +179,23 @@ def test_nofluffjobs_fetch_text_new_schema_payload() -> None:
 
 
 def test_nofluffjobs_fetch_text_falls_back_on_api_failure() -> None:
-    with patch(
-        "hunter.sources.nofluffjobs.requests.get",
-        side_effect=Exception("network down"),
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html",
-        return_value="fallback content",
-    ) as m:
-        out = NoFluffJobsSource().fetch_text(
-            "https://nofluffjobs.com/pl/job/example-slug"
-        )
+    with (
+        patch(
+            "hunter.sources.nofluffjobs.requests.get",
+            side_effect=Exception("network down"),
+        ),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="fallback content",
+        ) as m,
+    ):
+        out = NoFluffJobsSource().fetch_text("https://nofluffjobs.com/pl/job/example-slug")
     assert out == "fallback content"
     m.assert_called_once()
 
 
 # ── Himalayas ───────────────────────────────────────────────────────────────
+
 
 def test_himalayas_matches_url() -> None:
     s = HimalayasSource()
@@ -209,6 +213,7 @@ def test_himalayas_fetch_text_uses_html_fallback() -> None:
 
 # ── 4dayweek ────────────────────────────────────────────────────────────────
 
+
 def test_fourdayweek_matches_url() -> None:
     s = FourdayweekSource()
     assert s.matches_url("https://4dayweek.io/remote-jobs/angular-developer-abc")
@@ -217,7 +222,10 @@ def test_fourdayweek_matches_url() -> None:
 
 
 def test_fourdayweek_slug_extraction() -> None:
-    assert _slug_from_job_url("https://4dayweek.io/jobs/senior-fe-eng-abc123") == "senior-fe-eng-abc123"
+    assert (
+        _slug_from_job_url("https://4dayweek.io/jobs/senior-fe-eng-abc123")
+        == "senior-fe-eng-abc123"
+    )
     assert _slug_from_job_url("https://www.4dayweek.io/remote-jobs/abc") == "abc"
     assert _slug_from_job_url("https://4dayweek.io/") is None
     assert _slug_from_job_url("https://example.com/jobs/abc") is None
@@ -253,12 +261,16 @@ def test_fourdayweek_fetch_text_formats_api_payload() -> None:
 
 
 def test_fourdayweek_fetch_text_falls_back_on_404() -> None:
-    with patch(
-        "hunter.sources.fourdayweek.requests.get",
-        return_value=_mk_json_response({"error": "not found"}, status=404),
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="html-fallback",
-    ) as m:
+    with (
+        patch(
+            "hunter.sources.fourdayweek.requests.get",
+            return_value=_mk_json_response({"error": "not found"}, status=404),
+        ),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="html-fallback",
+        ) as m,
+    ):
         out = FourdayweekSource().fetch_text("https://4dayweek.io/jobs/abc")
     assert out == "html-fallback"
     m.assert_called_once()
@@ -266,7 +278,8 @@ def test_fourdayweek_fetch_text_falls_back_on_404() -> None:
 
 def test_fourdayweek_fetch_text_falls_back_on_bad_url() -> None:
     with patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="html-fallback",
+        "hunter.sources.html_fallback.fetch_html",
+        return_value="html-fallback",
     ) as m:
         out = FourdayweekSource().fetch_text("https://4dayweek.io/")
     assert out == "html-fallback"

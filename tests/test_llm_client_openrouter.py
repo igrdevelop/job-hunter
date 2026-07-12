@@ -27,6 +27,7 @@ def _fake_openai(monkeypatch, captured: dict, *, usage=None, content='{"ok": 1}'
     captured["init"] gets the OpenAI() kwargs (api_key, base_url, default_headers).
     captured["create"] gets the chat.completions.create() kwargs.
     """
+
     class FakeCompletions:
         def create(self, **kwargs):
             captured["create"] = kwargs
@@ -187,6 +188,7 @@ def _fake_response(code: int):
 
 def test_rate_limit_translated(monkeypatch):
     """openai.RateLimitError → LLMRateLimitError so call_llm's retry kicks in."""
+
     def raise_rate(**kw):
         raise openai.RateLimitError(message="rate", response=_fake_response(429), body=None)
 
@@ -201,10 +203,13 @@ def test_rate_limit_translated(monkeypatch):
 
 def test_retryable_status_translated(monkeypatch):
     """503/529 → LLMRateLimitError (retried by call_llm); other 4xx → LLMError."""
+
     def make_client(code):
         def raise_status(**kw):
             raise openai.APIStatusError(
-                message=f"http {code}", response=_fake_response(code), body=None,
+                message=f"http {code}",
+                response=_fake_response(code),
+                body=None,
             )
 
         class BoomClient:
@@ -233,7 +238,8 @@ def test_call_llm_dispatches_to_openrouter(monkeypatch):
     captured: dict = {}
     _fake_openai(monkeypatch, captured, content='{"routed": true}')
     out = llm_client.call_llm(
-        "SYS", "USER",
+        "SYS",
+        "USER",
         provider="openrouter",
         model="deepseek/deepseek-r1",
         api_key="sk-or-v1-x",

@@ -93,6 +93,4 @@ async def cmd_dual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         text = await asyncio.to_thread(_toggle, args[0].strip().lower())
 
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)

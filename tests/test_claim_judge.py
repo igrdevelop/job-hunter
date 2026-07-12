@@ -19,13 +19,26 @@ from hunter.claim_judge import (
 def _content_7_roles():
     """A minimal valid content dict with 7 experience roles (validate_content passes)."""
     exp = [
-        {"company": c, "period": "x", "title": "Senior Frontend Developer (Angular)",
-         "bullets": [f"Did work at {c}."]}
-        for c in ["Alten Poland", "Fairmarkit", "Venture Labs", "SII",
-                  "Altoros", "SolbegSoft", "Staronka"]
+        {
+            "company": c,
+            "period": "x",
+            "title": "Senior Frontend Developer (Angular)",
+            "bullets": [f"Did work at {c}."],
+        }
+        for c in [
+            "Alten Poland",
+            "Fairmarkit",
+            "Venture Labs",
+            "SII",
+            "Altoros",
+            "SolbegSoft",
+            "Staronka",
+        ]
     ]
     return {
-        "company_name": "Acme", "stack": "Angular", "lang": "en",
+        "company_name": "Acme",
+        "stack": "Angular",
+        "lang": "en",
         "job_title": "Senior Frontend Developer",
         "resume_en": {
             "summary": "Senior Angular developer with 10+ years.",
@@ -43,6 +56,7 @@ def _content_7_roles():
 # ---------------------------------------------------------------------------
 # iter_judged_fields
 # ---------------------------------------------------------------------------
+
 
 def test_iter_judged_fields_covers_expected_paths():
     c = _content_7_roles()
@@ -75,6 +89,7 @@ def test_iter_judged_fields_skills_list_joined():
 # _resolve_path
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_path_nested_and_list():
     c = _content_7_roles()
     holder, key = _resolve_path(c, "resume_en.summary")
@@ -103,12 +118,19 @@ def test_resolve_path_assignment_roundtrip():
 # _parse_violations (hallucination guard)
 # ---------------------------------------------------------------------------
 
+
 def test_parse_violations_keeps_verbatim_quote():
     fields = {"resume_en.summary": "Senior dev serving Fortune 500 clients."}
-    raw = {"violations": [
-        {"field": "resume_en.summary", "quote": "serving Fortune 500 clients",
-         "reason": "no such client", "severity": "fabrication"},
-    ]}
+    raw = {
+        "violations": [
+            {
+                "field": "resume_en.summary",
+                "quote": "serving Fortune 500 clients",
+                "reason": "no such client",
+                "severity": "fabrication",
+            },
+        ]
+    }
     vs = _parse_violations(raw, fields)
     assert len(vs) == 1
     assert vs[0].severity == "fabrication"
@@ -116,28 +138,46 @@ def test_parse_violations_keeps_verbatim_quote():
 
 def test_parse_violations_drops_nonverbatim_quote():
     fields = {"resume_en.summary": "Senior dev."}
-    raw = {"violations": [
-        {"field": "resume_en.summary", "quote": "Fortune 500",  # not in field
-         "reason": "x", "severity": "fabrication"},
-    ]}
+    raw = {
+        "violations": [
+            {
+                "field": "resume_en.summary",
+                "quote": "Fortune 500",  # not in field
+                "reason": "x",
+                "severity": "fabrication",
+            },
+        ]
+    }
     assert _parse_violations(raw, fields) == []
 
 
 def test_parse_violations_drops_unknown_field():
     fields = {"resume_en.summary": "Fortune 500 clients"}
-    raw = {"violations": [
-        {"field": "resume_pl.summary", "quote": "Fortune 500 clients",
-         "reason": "x", "severity": "fabrication"},
-    ]}
+    raw = {
+        "violations": [
+            {
+                "field": "resume_pl.summary",
+                "quote": "Fortune 500 clients",
+                "reason": "x",
+                "severity": "fabrication",
+            },
+        ]
+    }
     assert _parse_violations(raw, fields) == []
 
 
 def test_parse_violations_drops_bad_severity():
     fields = {"resume_en.summary": "Fortune 500 clients"}
-    raw = {"violations": [
-        {"field": "resume_en.summary", "quote": "Fortune 500 clients",
-         "reason": "x", "severity": "made-up"},
-    ]}
+    raw = {
+        "violations": [
+            {
+                "field": "resume_en.summary",
+                "quote": "Fortune 500 clients",
+                "reason": "x",
+                "severity": "made-up",
+            },
+        ]
+    }
     assert _parse_violations(raw, fields) == []
 
 
@@ -150,6 +190,7 @@ def test_parse_violations_handles_garbage():
 # ---------------------------------------------------------------------------
 # _drop_quote
 # ---------------------------------------------------------------------------
+
 
 def test_drop_quote_preserves_honest_clause():
     out = _drop_quote(
@@ -183,16 +224,24 @@ def test_drop_quote_missing_returns_unchanged():
 # judge_content
 # ---------------------------------------------------------------------------
 
+
 def test_judge_content_parses_findings(monkeypatch):
     monkeypatch.setattr(claim_judge, "LLM_API_KEY", "test-key")
     c = _content_7_roles()
     c["resume_en"]["summary"] = "Senior dev serving Fortune 500 clients worldwide."
 
     def _fake(**kwargs):
-        return {"violations": [
-            {"field": "resume_en.summary", "quote": "serving Fortune 500 clients",
-             "reason": "no Fortune 500 in profile", "severity": "fabrication"},
-        ]}
+        return {
+            "violations": [
+                {
+                    "field": "resume_en.summary",
+                    "quote": "serving Fortune 500 clients",
+                    "reason": "no Fortune 500 in profile",
+                    "severity": "fabrication",
+                },
+            ]
+        }
+
     monkeypatch.setattr(llm_client, "call_llm", _fake)
 
     report = judge_content(c, "some job posting")
@@ -211,6 +260,7 @@ def test_judge_content_exception_returns_passing(monkeypatch):
 
     def _boom(**kwargs):
         raise RuntimeError("LLM down")
+
     monkeypatch.setattr(llm_client, "call_llm", _boom)
 
     report = judge_content(_content_7_roles(), "job")
@@ -223,11 +273,17 @@ def test_judge_content_style_only_passes(monkeypatch):
     c["resume_en"]["skills"]["frontend"] = "Angular / Angular framework, React"
 
     def _fake(**kwargs):
-        return {"violations": [
-            {"field": "resume_en.skills.frontend",
-             "quote": "Angular / Angular framework",
-             "reason": "gloss pair", "severity": "style"},
-        ]}
+        return {
+            "violations": [
+                {
+                    "field": "resume_en.skills.frontend",
+                    "quote": "Angular / Angular framework",
+                    "reason": "gloss pair",
+                    "severity": "style",
+                },
+            ]
+        }
+
     monkeypatch.setattr(llm_client, "call_llm", _fake)
 
     report = judge_content(c, "job")
@@ -239,15 +295,22 @@ def test_judge_content_style_only_passes(monkeypatch):
 # repair_content
 # ---------------------------------------------------------------------------
 
+
 def test_repair_deterministic_drop(monkeypatch):
     c = _content_7_roles()
     c["resume_en"]["experience"][2]["bullets"][0] = (
         "Built apps for 300+ German banks and Fortune 500 firms."
     )
-    report = JudgeReport(violations=[
-        Violation("resume_en.experience[2].bullets[0]", "and Fortune 500 firms",
-                  "no Fortune 500", "fabrication"),
-    ])
+    report = JudgeReport(
+        violations=[
+            Violation(
+                "resume_en.experience[2].bullets[0]",
+                "and Fortune 500 firms",
+                "no Fortune 500",
+                "fabrication",
+            ),
+        ]
+    )
     fixed, fixes = repair_content(c, report, "job")
     bullet = fixed["resume_en"]["experience"][2]["bullets"][0]
     assert "Fortune 500" not in bullet
@@ -257,9 +320,11 @@ def test_repair_deterministic_drop(monkeypatch):
 
 def test_repair_style_violation_not_repaired():
     c = _content_7_roles()
-    report = JudgeReport(violations=[
-        Violation("resume_en.skills.frontend", "Angular", "gloss", "style"),
-    ])
+    report = JudgeReport(
+        violations=[
+            Violation("resume_en.skills.frontend", "Angular", "gloss", "style"),
+        ]
+    )
     fixed, fixes = repair_content(c, report, "job")
     assert fixes == []
     assert fixed["resume_en"]["skills"]["frontend"] == "Angular, React"
@@ -272,18 +337,26 @@ def test_repair_rejected_when_structure_worsens(monkeypatch):
     c["resume_en"]["experience"][2]["bullets"][0] = (
         "Built apps for 300+ banks and Fortune 500 firms."
     )
-    report = JudgeReport(violations=[
-        Violation("resume_en.experience[2].bullets[0]", "and Fortune 500 firms",
-                  "fabricated", "fabrication"),
-    ])
+    report = JudgeReport(
+        violations=[
+            Violation(
+                "resume_en.experience[2].bullets[0]",
+                "and Fortune 500 firms",
+                "fabricated",
+                "fabrication",
+            ),
+        ]
+    )
 
     # Make validate_content report MORE errors after the repair than before.
     import hunter.apply_shared as apply_shared
+
     calls = {"n": 0}
 
     def _validate(_d):
         calls["n"] += 1
         return [] if calls["n"] == 1 else ["resume_en.experience has only 6 jobs"]
+
     monkeypatch.setattr(apply_shared, "validate_content", _validate)
 
     fixed, fixes = repair_content(c, report, "job")
@@ -306,12 +379,15 @@ def test_repair_no_actionable_is_noop():
 # JudgeReport
 # ---------------------------------------------------------------------------
 
+
 def test_report_actionable_split():
-    r = JudgeReport(violations=[
-        Violation("f", "q1", "r", "fabrication"),
-        Violation("f", "q2", "r", "exaggeration"),
-        Violation("f", "q3", "r", "style"),
-    ])
+    r = JudgeReport(
+        violations=[
+            Violation("f", "q1", "r", "fabrication"),
+            Violation("f", "q2", "r", "exaggeration"),
+            Violation("f", "q3", "r", "style"),
+        ]
+    )
     assert len(r.actionable) == 2
     assert len(r.fabrications) == 1
     assert not r.passed
@@ -325,8 +401,10 @@ def test_report_telegram_summary_clean():
 # quote_survives + end-to-end judge→repair
 # ---------------------------------------------------------------------------
 
+
 def test_quote_survives():
     from hunter.claim_judge import quote_survives
+
     c = _content_7_roles()
     c["resume_en"]["summary"] = "Senior dev serving Fortune 500 clients."
     assert quote_survives(c, "resume_en.summary", "Fortune 500")
@@ -344,12 +422,17 @@ def test_judge_then_repair_end_to_end(monkeypatch):
     )
 
     def _fake(**kwargs):
-        return {"violations": [
-            {"field": "resume_en.experience[2].bullets[0]",
-             "quote": "and Fortune 500 firms",
-             "reason": "no Fortune 500 client in profile",
-             "severity": "fabrication"},
-        ]}
+        return {
+            "violations": [
+                {
+                    "field": "resume_en.experience[2].bullets[0]",
+                    "quote": "and Fortune 500 firms",
+                    "reason": "no Fortune 500 client in profile",
+                    "severity": "fabrication",
+                },
+            ]
+        }
+
     monkeypatch.setattr(llm_client, "call_llm", _fake)
 
     report = judge_content(c, "job posting text")
@@ -360,11 +443,13 @@ def test_judge_then_repair_end_to_end(monkeypatch):
     assert "300+ German banks" in bullet
     # Fabrication no longer survives.
     from hunter.claim_judge import quote_survives
+
     assert not quote_survives(fixed, "resume_en.experience[2].bullets[0]", "and Fortune 500 firms")
 
 
 def test_config_defaults():
     from hunter import config
+
     assert config.JUDGE_ENABLED is True
     assert config.JUDGE_MODE in ("report", "warn", "block")
     assert config.JUDGE_MAX_REPAIR_ROUNDS >= 1
@@ -375,24 +460,28 @@ def test_config_defaults():
 # repair_content severities filter
 # ---------------------------------------------------------------------------
 
+
 def test_repair_severities_filter_skips_exaggeration():
     """With severities={'fabrication'}, an exaggeration finding is left intact."""
     c = _content_7_roles()
     c["resume_en"]["skills"]["tools"] = "Figma, Jest, SonarQube"
-    report = JudgeReport(violations=[
-        Violation("resume_en.skills.tools", "Figma", "not in profile", "fabrication"),
-        Violation("resume_en.skills.tools", "SonarQube", "only in CI context", "exaggeration"),
-    ])
+    report = JudgeReport(
+        violations=[
+            Violation("resume_en.skills.tools", "Figma", "not in profile", "fabrication"),
+            Violation("resume_en.skills.tools", "SonarQube", "only in CI context", "exaggeration"),
+        ]
+    )
     fixed, fixes = repair_content(c, report, "job", severities={"fabrication"})
     tools = fixed["resume_en"]["skills"]["tools"]
-    assert "Figma" not in tools          # fabrication dropped
-    assert "SonarQube" in tools          # exaggeration kept
+    assert "Figma" not in tools  # fabrication dropped
+    assert "SonarQube" in tools  # exaggeration kept
     assert len(fixes) == 1
 
 
 # ---------------------------------------------------------------------------
 # run_judge_stage (mode-aware orchestration)
 # ---------------------------------------------------------------------------
+
 
 def _stage_content():
     c = _content_7_roles()
@@ -407,6 +496,7 @@ def _mock_judge(monkeypatch, violations):
 
 def test_run_judge_stage_disabled_is_noop(monkeypatch):
     from hunter.claim_judge import run_judge_stage
+
     c = _stage_content()
     out = run_judge_stage(c, "job", enabled=False, mode="warn")
     assert out.content is c
@@ -417,10 +507,18 @@ def test_run_judge_stage_disabled_is_noop(monkeypatch):
 
 def test_run_judge_stage_report_mode_no_change(monkeypatch):
     from hunter.claim_judge import run_judge_stage
-    _mock_judge(monkeypatch, [
-        {"field": "resume_en.skills.tools", "quote": "Figma",
-         "reason": "not in profile", "severity": "fabrication"},
-    ])
+
+    _mock_judge(
+        monkeypatch,
+        [
+            {
+                "field": "resume_en.skills.tools",
+                "quote": "Figma",
+                "reason": "not in profile",
+                "severity": "fabrication",
+            },
+        ],
+    )
     c = _stage_content()
     out = run_judge_stage(c, "job", enabled=True, mode="report")
     # report mode: judge ran (finding present) but content is untouched.
@@ -432,22 +530,35 @@ def test_run_judge_stage_report_mode_no_change(monkeypatch):
 
 def test_run_judge_stage_warn_repairs_fabrication_only(monkeypatch):
     from hunter.claim_judge import run_judge_stage
-    _mock_judge(monkeypatch, [
-        {"field": "resume_en.skills.tools", "quote": "Figma",
-         "reason": "not in profile", "severity": "fabrication"},
-        {"field": "resume_en.skills.tools", "quote": "SonarQube",
-         "reason": "CI tool", "severity": "exaggeration"},
-    ])
+
+    _mock_judge(
+        monkeypatch,
+        [
+            {
+                "field": "resume_en.skills.tools",
+                "quote": "Figma",
+                "reason": "not in profile",
+                "severity": "fabrication",
+            },
+            {
+                "field": "resume_en.skills.tools",
+                "quote": "SonarQube",
+                "reason": "CI tool",
+                "severity": "exaggeration",
+            },
+        ],
+    )
     out = run_judge_stage(_stage_content(), "job", enabled=True, mode="warn")
     tools = out.content["resume_en"]["skills"]["tools"]
-    assert "Figma" not in tools       # fabrication repaired
-    assert "SonarQube" in tools       # exaggeration surfaced, not dropped
+    assert "Figma" not in tools  # fabrication repaired
+    assert "SonarQube" in tools  # exaggeration surfaced, not dropped
     assert out.fixes
-    assert not out.blocked            # warn never blocks
+    assert not out.blocked  # warn never blocks
 
 
 def test_run_judge_stage_block_when_fabrication_survives(monkeypatch):
     from hunter.claim_judge import run_judge_stage
+
     # A fabrication the deterministic drop can't fully remove: the quote is the
     # entire summary sentence → drop empties it → LLM rewrite (mocked to no-op) →
     # quote still present → survivor → blocked.
@@ -458,12 +569,18 @@ def test_run_judge_stage_block_when_fabrication_survives(monkeypatch):
     def _router(**kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return {"violations": [
-                {"field": "resume_en.summary",
-                 "quote": "Senior Angular developer with 10+ years.",
-                 "reason": "fabricated", "severity": "fabrication"},
-            ]}
+            return {
+                "violations": [
+                    {
+                        "field": "resume_en.summary",
+                        "quote": "Senior Angular developer with 10+ years.",
+                        "reason": "fabricated",
+                        "severity": "fabrication",
+                    },
+                ]
+            }
         return {}  # rewrite no-op
+
     monkeypatch.setattr(llm_client, "call_llm", _router)
 
     c = _content_7_roles()  # summary == the flagged quote exactly
@@ -474,8 +591,11 @@ def test_run_judge_stage_block_when_fabrication_survives(monkeypatch):
 
 def test_run_judge_stage_judge_exception_safe(monkeypatch):
     from hunter.claim_judge import run_judge_stage
+
     monkeypatch.setattr(claim_judge, "LLM_API_KEY", "test-key")
-    monkeypatch.setattr(llm_client, "call_llm", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+    monkeypatch.setattr(
+        llm_client, "call_llm", lambda **kw: (_ for _ in ()).throw(RuntimeError("x"))
+    )
     c = _stage_content()
     out = run_judge_stage(c, "job", enabled=True, mode="block")
     assert out.content is c

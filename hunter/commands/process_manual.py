@@ -81,7 +81,8 @@ async def cmd_process_manual(update: Update, context: ContextTypes.DEFAULT_TYPE)
             failed += 1
             logger.error(
                 "[process_manual] FAIL: %s\n%s",
-                url, stderr.decode(errors="replace")[-300:],
+                url,
+                stderr.decode(errors="replace")[-300:],
             )
 
     await update.message.reply_text(

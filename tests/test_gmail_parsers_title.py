@@ -32,7 +32,7 @@ def test_title_from_linkedin_numeric_returns_empty():
 def test_parse_pracuj_title_matches_url_not_subject():
     subject = "Angular Developer (K/M/N): pracodawca zakończył rekrutację."
     html = (
-        'See this role: '
+        "See this role: "
         '<a href="https://www.pracuj.pl/praca/'
         'frontend-developer-react-next-js-warszawa,oferta,1004813501">link</a>'
     )

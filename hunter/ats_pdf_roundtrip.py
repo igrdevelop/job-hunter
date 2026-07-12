@@ -80,9 +80,7 @@ def _en_cv_pdf_text(folder: Path, log_prefix: str) -> tuple[Optional[Path], str]
         return None, ""
     pdf_text = extract_pdf_text(pdf_path)
     if not pdf_text.strip():
-        logger.info(
-            "[%s] PDF text extraction empty for %s — skipping", log_prefix, pdf_path.name
-        )
+        logger.info("[%s] PDF text extraction empty for %s — skipping", log_prefix, pdf_path.name)
         return pdf_path, ""
     return pdf_path, pdf_text
 
@@ -253,8 +251,10 @@ def nbsp_patch_missing_keywords(content: dict, missing_keywords: list[str]) -> i
                 # to lowercase mid-sentence.
                 pattern = re.compile(re.escape(kw), re.IGNORECASE)
                 if pattern.search(new_s):
+
                     def _repl(m, nbsp_kw=nbsp_kw):
                         return re.sub(r"\s+", NBSP, m.group(0))
+
                     new_s_after = pattern.sub(_repl, new_s)
                     if new_s_after != new_s:
                         patches += 1

@@ -175,10 +175,13 @@ def _generate_shadow(
 
     from hunter.config import GEN_SKIP_PL_FOR_EN
     from hunter.lang_guard import detect_posting_language
+
     posting_lang = detect_posting_language(job_text)
     pl_optional = GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"
 
-    user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+    user_message = (
+        f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+    )
     user_message += build_ats_keyword_checklist(job_text)
     user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)
     if base_cv:
@@ -210,7 +213,8 @@ def _generate_shadow(
                 user_message=(
                     "The JSON you returned has structural problems. Fix ALL issues "
                     "below and return the COMPLETE JSON again (same schema, every "
-                    "field):\n" + "\n".join(f"- {e}" for e in errors)
+                    "field):\n"
+                    + "\n".join(f"- {e}" for e in errors)
                     + f"\n\nPrevious JSON:\n{json.dumps(content, ensure_ascii=False)}"
                 ),
                 provider=prof.provider,
@@ -228,6 +232,7 @@ def _generate_shadow(
     # Content scrubs (parity with the boevoy pipeline).
     try:
         from hunter.resume_sanitizer import sanitize_content
+
         content = sanitize_content(content)
     except Exception as e:
         print(f"[dual] sanitizer failed (continuing): {e}")
@@ -246,8 +251,10 @@ def _generate_shadow(
     judge_report = None
     try:
         from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+
         if JUDGE_ENABLED:
             from hunter.claim_judge import run_judge_stage
+
             _mode = "warn" if JUDGE_MODE == "block" else JUDGE_MODE
             _outcome = run_judge_stage(content, job_text, base_cv, enabled=True, mode=_mode)
             content = _outcome.content
@@ -265,6 +272,7 @@ def _generate_shadow(
     # here unchanged rather than detected a second time.
     try:
         from hunter.apply_shared import enforce_language_separation
+
         content, _blocked, _report = enforce_language_separation(content)
     except Exception as e:
         print(f"[dual] language gate failed (continuing): {e}")
@@ -285,9 +293,7 @@ def _generate_shadow(
     content.setdefault("ats_score", "")
 
     content_path = sub / "content.json"
-    content_path.write_text(
-        json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    content_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
     (sub / "job_posting.txt").write_text(job_text, encoding="utf-8")
 
     # Audit trail — same artifact as the boevoy pipeline, so tools/judge_stats.py
@@ -340,6 +346,7 @@ def _generate_shadow(
     # Comparison-only: NO tracker stamp, NO Sheets, NO Telegram for the shadow.
     try:
         from hunter.ats_pdf_roundtrip import run_llm_verdict
+
         verdict = run_llm_verdict(folder=sub, job_text=job_text)
         if verdict is not None:
             # Verdict refine loop — mirror of the boevoy Step 7.7b, so the A/B
@@ -353,6 +360,7 @@ def _generate_shadow(
             # callback reuses gen_cmd, which is already --no-tracker and
             # never --force for a shadow.
             from hunter.config import ATS_VERDICT_MAX_REFINES, ATS_VERDICT_TARGET
+
             if (
                 float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
                 and ATS_VERDICT_MAX_REFINES > 0
@@ -368,7 +376,11 @@ def _generate_shadow(
                     _run_gen()
 
                 content, verdict = refine_loop(
-                    content, job_text, base_cv, sub, verdict,
+                    content,
+                    job_text,
+                    base_cv,
+                    sub,
+                    verdict,
                     regenerate_docs=_regen_shadow,
                     target=ATS_VERDICT_TARGET,
                     max_rounds=ATS_VERDICT_MAX_REFINES,
@@ -391,9 +403,11 @@ def _generate_shadow(
     # the shadow, so this is the only path its files reach Drive.
     try:
         from hunter.config import GDRIVE_ENABLED
+
         if GDRIVE_ENABLED:
             import asyncio
             from hunter.gdrive_sync import upload_shadow_folder
+
             url = asyncio.run(upload_shadow_folder(primary_folder, sub))
             if url:
                 print(f"[dual] uploaded to Drive: {url}")
@@ -404,6 +418,7 @@ def _generate_shadow(
 
 
 # ── Detached launcher ───────────────────────────────────────────────────────────
+
 
 def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> bool:
     """Fire-and-forget the shadow run in its OWN process and return immediately.
@@ -416,6 +431,7 @@ def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> b
     """
     try:
         from hunter.llm_profiles import dual_enabled
+
         if not dual_enabled():
             return False
     except Exception:
@@ -434,9 +450,8 @@ def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> b
     }
     try:
         if sys.platform == "win32":
-            kwargs["creationflags"] = (
-                getattr(subprocess, "DETACHED_PROCESS", 0)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
             )
         else:
             kwargs["start_new_session"] = True
@@ -454,6 +469,7 @@ def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> b
 # Running in its own process means the shadow can NEVER affect the primary apply's
 # exit code or the bot's APPLY_AGENT_TIMEOUT_SEC — the primary subprocess has already
 # returned by the time this runs. A watchdog hard-caps the shadow's own runtime.
+
 
 def _main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
@@ -473,6 +489,7 @@ def _main(argv: list[str]) -> int:
     # call or doc render can't leave an orphan running forever.
     try:
         from hunter.config import DUAL_SHADOW_TIMEOUT_SEC
+
         budget = max(60, int(DUAL_SHADOW_TIMEOUT_SEC))
     except Exception:
         budget = 900

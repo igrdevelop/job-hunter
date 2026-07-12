@@ -44,6 +44,7 @@ def _sources() -> list[tuple[str, object]]:
     if _SOURCE_CACHE is None:
         try:
             from hunter.sources import ALL_SOURCES
+
             _SOURCE_CACHE = [(s.name, s) for s in ALL_SOURCES]
         except Exception:
             _SOURCE_CACHE = []
@@ -84,6 +85,7 @@ def source_for_url(url: str) -> str:
 
 # ── Row classification ────────────────────────────────────────────────────────
 
+
 def _is_generated(ats_status: str) -> bool:
     """A CV was generated when the ATS column holds a numeric score (e.g. '85%')."""
     return bool(re.search(r"\d", ats_status or "")) and "%" in (ats_status or "")
@@ -105,13 +107,14 @@ def _is_answered(answer: str) -> bool:
 
 # ── Report dataclasses ────────────────────────────────────────────────────────
 
+
 @dataclass
 class FunnelCounts:
     tracked: int = 0
     generated: int = 0
     sent: int = 0
-    confirmed: int = 0   # ATS / board automated acknowledgement
-    answered: int = 0    # human reply (rejection / interview / offer)
+    confirmed: int = 0  # ATS / board automated acknowledgement
+    answered: int = 0  # human reply (rejection / interview / offer)
 
     def add(self, *, generated: bool, sent: bool, confirmed: bool, answered: bool) -> None:
         self.tracked += 1
@@ -148,6 +151,7 @@ class FunnelReport:
 
 # ── Aggregation ───────────────────────────────────────────────────────────────
 
+
 def _cutoff(days: int | None) -> str | None:
     if not days:
         return None
@@ -180,9 +184,7 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
         confirmed = _is_confirmed(r["confirmation"])
         answered = _is_answered(r["answer"])
 
-        report.overall.add(
-            generated=generated, sent=sent, confirmed=confirmed, answered=answered
-        )
+        report.overall.add(generated=generated, sent=sent, confirmed=confirmed, answered=answered)
         src = source_for_url(r["url"])
         report.by_source.setdefault(src, FunnelCounts()).add(
             generated=generated, sent=sent, confirmed=confirmed, answered=answered

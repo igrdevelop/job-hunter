@@ -11,8 +11,11 @@ from hunter.models import Job
 
 def test_telegram_text_includes_permalink_when_present() -> None:
     job = Job(
-        title="[LI post] hiring", company="Deloitte", location="",
-        salary=None, url="https://linkedin-scout.internal/posts/pabc",
+        title="[LI post] hiring",
+        company="Deloitte",
+        location="",
+        salary=None,
+        url="https://linkedin-scout.internal/posts/pabc",
         source="linkedin_scout_relay",
         raw={"permalink": "https://www.linkedin.com/posts/someone_activity-123"},
     )
@@ -22,8 +25,12 @@ def test_telegram_text_includes_permalink_when_present() -> None:
 
 def test_telegram_text_omits_permalink_line_when_absent() -> None:
     job = Job(
-        title="Angular Dev", company="Acme", location="Remote",
-        salary=None, url="https://justjoin.it/job-offer/acme", source="justjoin",
+        title="Angular Dev",
+        company="Acme",
+        location="Remote",
+        salary=None,
+        url="https://justjoin.it/job-offer/acme",
+        source="justjoin",
     )
     text = job.telegram_text()
     assert "Post:" not in text

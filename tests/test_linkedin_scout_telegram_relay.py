@@ -105,7 +105,10 @@ def test_build_payload_permalink_none_when_absent():
 
 def test_send_candidates_noop_without_config(tmp_path, monkeypatch):
     for var in (
-        "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_BOT_USERNAME", "TELEGRAM_USER_SESSION",
+        "TELEGRAM_API_ID",
+        "TELEGRAM_API_HASH",
+        "TELEGRAM_BOT_USERNAME",
+        "TELEGRAM_USER_SESSION",
     ):
         monkeypatch.delenv(var, raising=False)
 

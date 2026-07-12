@@ -8,10 +8,7 @@ from hunter.sources.html_fallback import clean_url, fetch_html
 
 
 def test_clean_url_strips_known_tracking_params() -> None:
-    url = (
-        "https://example.com/jobs/123"
-        "?utm_source=newsletter&utm_campaign=hot&trk=abc&keep=me"
-    )
+    url = "https://example.com/jobs/123?utm_source=newsletter&utm_campaign=hot&trk=abc&keep=me"
     assert clean_url(url) == "https://example.com/jobs/123?keep=me"
 
 

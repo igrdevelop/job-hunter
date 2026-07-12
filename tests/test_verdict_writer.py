@@ -23,6 +23,7 @@ from hunter.verdict_writer import (
 
 def _seed_db(monkeypatch, tmp_path):
     import hunter.db as db
+
     db_path = tmp_path / "tracker.db"
     monkeypatch.setattr(db, "TRACKER_DB_PATH", db_path)
     monkeypatch.setattr(vw, "DB_PATH", db_path)
@@ -61,6 +62,7 @@ def _captured_batch_args(service):
 
 
 # ── mirror_verdict_cell_sync ──────────────────────────────────────────────────
+
 
 def test_mirror_verdict_cell_writes_to_column_n(monkeypatch, tmp_path):
     db_path = _seed_db(monkeypatch, tmp_path)
@@ -123,14 +125,15 @@ def test_mirror_verdict_cell_swallows_sheets_error(monkeypatch, tmp_path):
     db_path = _seed_db(monkeypatch, tmp_path)
     _insert(db_path, id="abc", url="x", url_norm="x", sheets_row=5, ats_verdict=90.0)
     service = _make_service()
-    service.spreadsheets.return_value.values.return_value.update.return_value.execute.side_effect = (
-        RuntimeError("quota")
+    service.spreadsheets.return_value.values.return_value.update.return_value.execute.side_effect = RuntimeError(
+        "quota"
     )
     # Best-effort: returns False, never raises.
     assert mirror_verdict_cell_sync(service, "SHEET", "abc") is False
 
 
 # ── header + backfill ─────────────────────────────────────────────────────────
+
 
 def test_write_verdict_header_idempotent(monkeypatch, tmp_path):
     _seed_db(monkeypatch, tmp_path)
@@ -145,8 +148,8 @@ def test_backfill_writes_all_judged_rows_in_one_batch(monkeypatch, tmp_path):
     db_path = _seed_db(monkeypatch, tmp_path)
     _insert(db_path, id="a", url="1", url_norm="1", sheets_row=2, ats_verdict=91.0)
     _insert(db_path, id="b", url="2", url_norm="2", sheets_row=3, ats_verdict=87.5)
-    _insert(db_path, id="c", url="3", url_norm="3", sheets_row=4)          # no verdict
-    _insert(db_path, id="d", url="4", url_norm="4", ats_verdict=90.0)      # never mirrored
+    _insert(db_path, id="c", url="3", url_norm="3", sheets_row=4)  # no verdict
+    _insert(db_path, id="d", url="4", url_norm="4", ats_verdict=90.0)  # never mirrored
     service = _make_service()
 
     result = backfill_all_verdicts_sync(service, "SHEET")
@@ -193,4 +196,5 @@ def test_verdict_writer_never_touches_columns_a_through_m(monkeypatch, tmp_path)
 def test_columns_a_to_k_contract_untouched():
     """gsheets_client.COLUMNS must still end at K — L/M/N are writer-owned."""
     from hunter.gsheets_client import COLUMNS
+
     assert len(COLUMNS) == 11  # A..K

@@ -22,31 +22,44 @@ def _restore_state():
 
 def _row(url, date="2026-05-01", sent="", company="Acme"):
     return {
-        "Date": date, "Company": company, "Job Title": "Dev", "Stack": "Angular",
-        "ATS %": "85%", "URL": url, "Folder": "", "Sent": sent,
-        "Re-application": "", "To Learn": "", "ID": "x",
+        "Date": date,
+        "Company": company,
+        "Job Title": "Dev",
+        "Stack": "Angular",
+        "ATS %": "85%",
+        "URL": url,
+        "Folder": "",
+        "Sent": sent,
+        "Re-application": "",
+        "To Learn": "",
+        "ID": "x",
     }
 
 
 # ── _parse_date ───────────────────────────────────────────────────────────────
 
+
 def test_parse_date_iso():
     from datetime import date
+
     assert dedup_sheet._parse_date("2026-05-10") == date(2026, 5, 10)
 
 
 def test_parse_date_datetime_string():
     from datetime import date
+
     assert dedup_sheet._parse_date("2026-05-10 00:00:00") == date(2026, 5, 10)
 
 
 def test_parse_date_unknown_sorts_last():
     from datetime import date
+
     assert dedup_sheet._parse_date("garbage") == date.max
     assert dedup_sheet._parse_date("") == date.max
 
 
 # ── _pick_keeper ──────────────────────────────────────────────────────────────
+
 
 def test_pick_keeper_prefers_filled_sent():
     group = [
@@ -77,6 +90,7 @@ def test_pick_keeper_earliest_among_sent():
 
 
 # ── main (dry run / apply) ────────────────────────────────────────────────────
+
 
 def _patches(rows):
     return (

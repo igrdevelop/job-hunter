@@ -75,16 +75,12 @@ def test_format_salary_empty() -> None:
 
 
 def test_format_salary_min_only() -> None:
-    assert (
-        _format_salary(_sample_job_dict(minSalary=90000, maxSalary=None))
-        == "90 000+ USD/yr"
-    )
+    assert _format_salary(_sample_job_dict(minSalary=90000, maxSalary=None)) == "90 000+ USD/yr"
 
 
 def test_format_salary_max_only() -> None:
     assert (
-        _format_salary(_sample_job_dict(minSalary=None, maxSalary=70000))
-        == "up to 70 000 USD/yr"
+        _format_salary(_sample_job_dict(minSalary=None, maxSalary=70000)) == "up to 70 000 USD/yr"
     )
 
 
@@ -151,11 +147,10 @@ def test_fetch_text_falls_back_when_no_application_link_match() -> None:
         def json(self):
             return api_response
 
-    with patch(
-        "hunter.sources.himalayas.requests.get", return_value=_Resp()
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
-    ) as m_fb:
+    with (
+        patch("hunter.sources.himalayas.requests.get", return_value=_Resp()),
+        patch("hunter.sources.html_fallback.fetch_html", return_value="fallback") as m_fb,
+    ):
         text = src.fetch_text(url)
     assert text == "fallback"
     m_fb.assert_called_once()
@@ -212,9 +207,7 @@ def test_title_query_from_url() -> None:
 def test_fetch_text_falls_back_when_no_company_slug_in_url() -> None:
     src = HimalayasSource()
     url = "https://himalayas.app/jobs/some-legacy-path"
-    with patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
-    ) as m_fb:
+    with patch("hunter.sources.html_fallback.fetch_html", return_value="fallback") as m_fb:
         text = src.fetch_text(url)
     assert text == "fallback"
     m_fb.assert_called_once()

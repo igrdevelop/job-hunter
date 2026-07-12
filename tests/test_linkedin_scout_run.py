@@ -124,7 +124,10 @@ def test_dry_run_prints_expected_candidates(capsys):
 
 def test_dry_run_reports_no_matches_cleanly(tmp_path, capsys):
     fixture = tmp_path / "empty.txt"
-    fixture.write_text("Feed post\n\nSome Author\nFollow\nJust a status update, no hiring here.\n", encoding="utf-8")
+    fixture.write_text(
+        "Feed post\n\nSome Author\nFollow\nJust a status update, no hiring here.\n",
+        encoding="utf-8",
+    )
     run._run_dry_run(fixture)
     out = capsys.readouterr().out
     assert "no matches" in out
@@ -136,7 +139,9 @@ def test_dry_run_reports_no_matches_cleanly(tmp_path, capsys):
 def test_main_dry_run_does_not_touch_browser(monkeypatch, capsys):
     called = []
     monkeypatch.setattr(run.browser, "run_once", lambda *a, **k: called.append("run_once"))
-    monkeypatch.setattr(run.browser, "run_feed_once", lambda *a, **k: called.append("run_feed_once"))
+    monkeypatch.setattr(
+        run.browser, "run_feed_once", lambda *a, **k: called.append("run_feed_once")
+    )
 
     exit_code = run.main(["--dry-run"])
 
@@ -186,7 +191,9 @@ def test_main_real_run_calls_run_once_for_search_track(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "SEEN_STORE_PATH", tmp_path / "seen.json")
 
     calls = []
-    monkeypatch.setattr(run.browser, "run_once", lambda *a, **k: calls.append(("run_once", a, k)) or [])
+    monkeypatch.setattr(
+        run.browser, "run_once", lambda *a, **k: calls.append(("run_once", a, k)) or []
+    )
 
     exit_code = run.main(["--track", "search", "--no-jitter"])
 

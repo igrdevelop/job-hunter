@@ -7,10 +7,10 @@ import hashlib
 class Job:
     title: str
     company: str
-    location: str          # "Wrocław (Hybrid)" / "Remote" / "Wrocław (On-site)"
+    location: str  # "Wrocław (Hybrid)" / "Remote" / "Wrocław (On-site)"
     salary: Optional[str]  # "15 000–20 000 PLN B2B" — free-form text, each site differs
-    url: str               # canonical URL — used as unique key for dedup
-    source: str            # "justjoin" | "linkedin" | "nofluffjobs" | "pracuj"
+    url: str  # canonical URL — used as unique key for dedup
+    source: str  # "justjoin" | "linkedin" | "nofluffjobs" | "pracuj"
     raw: dict = field(default_factory=dict, repr=False)  # original API response for debugging
     # Gmail provenance (gmail_* sources only): which alert email this URL came from.
     # Keys: msg_id, date (datetime|None), subject, sender, aggregator. Empty for

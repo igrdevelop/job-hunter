@@ -1,4 +1,5 @@
 """Tests for tracker.add_applied, add_manual_jobleads_pending, apply_pull_updates."""
+
 from pathlib import Path
 
 from hunter import tracker
@@ -58,6 +59,7 @@ def test_add_applied_marks_reapplication_when_forced(tracker_db) -> None:
     assert tracker.add_applied(content, force=True) is True
 
     from hunter.db import get_db
+
     with get_db(tracker_db) as conn:
         rows = conn.execute(
             "SELECT reapplication FROM applications WHERE url_norm LIKE '%example.com/jobs/3%'"
@@ -81,9 +83,15 @@ def test_add_applied_accepts_non_numeric_ats_score(tracker_db) -> None:
 
 def test_add_applied_removes_manual_pending_row_first(tracker_db) -> None:
     url = "https://www.jobleads.com/pl/job/x--poland--aaa111deadbeef0000000000000000"
-    assert tracker.add_manual_jobleads_pending(
-        url=url, company="GammaInc", title="Dev", folder_abs=Path("/tmp/folder"),
-    ) is True
+    assert (
+        tracker.add_manual_jobleads_pending(
+            url=url,
+            company="GammaInc",
+            title="Dev",
+            folder_abs=Path("/tmp/folder"),
+        )
+        is True
+    )
 
     content = _build_content(url, Path("/tmp/folder"))
     assert tracker.add_applied(content, force=False) is True
@@ -124,15 +132,20 @@ def test_apply_pull_updates_updates_fields(tracker_db) -> None:
     assert rows
     row_id = rows[0]["id"]
 
-    count = apply_pull_updates([{
-        "ID": row_id,
-        "Sent": "2026-05-14",
-        "Re-application": "+",
-        "To Learn": "RxJS",
-    }])
+    count = apply_pull_updates(
+        [
+            {
+                "ID": row_id,
+                "Sent": "2026-05-14",
+                "Re-application": "+",
+                "To Learn": "RxJS",
+            }
+        ]
+    )
     assert count == 1
 
     from hunter.db import get_db
+
     with get_db(tracker_db) as conn:
         row = conn.execute(
             "SELECT sent, reapplication, to_learn FROM applications WHERE id=?", (row_id,)
@@ -154,10 +167,14 @@ def test_apply_pull_updates_noop_for_unknown_id(tracker_db) -> None:
     }
     assert add_applied(content)
 
-    count = apply_pull_updates([{
-        "ID": "nonexistent",
-        "Sent": "2026-05-14",
-        "Re-application": "",
-        "To Learn": "",
-    }])
+    count = apply_pull_updates(
+        [
+            {
+                "ID": "nonexistent",
+                "Sent": "2026-05-14",
+                "Re-application": "",
+                "To Learn": "",
+            }
+        ]
+    )
     assert count == 0

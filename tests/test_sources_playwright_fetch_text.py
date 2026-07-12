@@ -38,6 +38,7 @@ def _mk_html_response(text: str, status: int = 200, final_url: str | None = None
 
 # ── LinkedIn ────────────────────────────────────────────────────────────────
 
+
 def test_linkedin_matches_url() -> None:
     s = LinkedInSource()
     assert s.matches_url("https://www.linkedin.com/jobs/view/12345/")
@@ -48,6 +49,7 @@ def test_linkedin_matches_url() -> None:
 def test_linkedin_fetch_text_falls_back_when_no_playwright(monkeypatch) -> None:
     """If playwright is not installed, default fetch_text must fall back to fetch_html."""
     import builtins
+
     real_import = builtins.__import__
 
     def fail_on_playwright(name, *args, **kwargs):
@@ -84,6 +86,7 @@ def test_linkedin_fetch_text_falls_back_when_no_storage_state(monkeypatch) -> No
 
 # ── Inhire ──────────────────────────────────────────────────────────────────
 
+
 def test_inhire_matches_url() -> None:
     s = InhireSource()
     assert s.matches_url("https://app.inhire.io/oferty-pracy/x")
@@ -98,11 +101,7 @@ def test_inhire_fetch_text_from_json_ld() -> None:
         "hiringOrganization": {"name": "ExampleCo"},
         "description": "<p>" + ("Build cool stuff. " * 8) + "</p>",
     }
-    html = (
-        '<html><body>'
-        f'<script type="application/ld+json">{json.dumps(ld)}</script>'
-        '</body></html>'
-    )
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
     fake_scraper = MagicMock()
     fake_scraper.get.return_value = _mk_html_response(html)
     fake_cs = MagicMock()
@@ -117,6 +116,7 @@ def test_inhire_fetch_text_from_json_ld() -> None:
 
 def test_inhire_fetch_text_falls_back_without_cloudscraper(monkeypatch) -> None:
     import builtins
+
     real_import = builtins.__import__
 
     def fail_on_cs(name, *args, **kwargs):
@@ -137,6 +137,7 @@ def test_inhire_fetch_text_falls_back_without_cloudscraper(monkeypatch) -> None:
 
 # ── JobLeads ────────────────────────────────────────────────────────────────
 
+
 def test_jobleads_matches_url() -> None:
     s = JobLeadsSource()
     assert s.matches_url("https://www.jobleads.com/pl/job/x")
@@ -147,6 +148,7 @@ def test_jobleads_matches_url() -> None:
 def test_try_load_manual_job_posting_returns_none_when_no_file(tmp_path, monkeypatch) -> None:
     # Make manual_jobleads_job_posting_path return a path that doesn't exist
     from hunter import tracker as _tracker
+
     monkeypatch.setattr(
         _tracker, "manual_jobleads_job_posting_path", lambda url: tmp_path / "nope.txt"
     )
@@ -157,11 +159,11 @@ def test_try_load_manual_job_posting_returns_body_with_marker(tmp_path, monkeypa
     p = tmp_path / "job_posting.txt"
     body_text = "Senior Angular Developer at ExampleCo\n" + ("Real content. " * 30)
     p.write_text(
-        f"URL: https://www.jobleads.com/pl/job/x\n\n"
-        f"{JOBLEADS_PASTE_MARKER}\n{body_text}",
+        f"URL: https://www.jobleads.com/pl/job/x\n\n{JOBLEADS_PASTE_MARKER}\n{body_text}",
         encoding="utf-8",
     )
     from hunter import tracker as _tracker
+
     monkeypatch.setattr(_tracker, "manual_jobleads_job_posting_path", lambda url: p)
     out = try_load_manual_job_posting("https://www.jobleads.com/pl/job/x")
     assert out is not None
@@ -172,11 +174,11 @@ def test_jobleads_fetch_text_uses_manual_when_available(tmp_path, monkeypatch) -
     p = tmp_path / "job_posting.txt"
     body_text = "Senior Angular Developer at ExampleCo\n" + ("Real content. " * 30)
     p.write_text(
-        f"URL: https://www.jobleads.com/pl/job/x\n\n"
-        f"{JOBLEADS_PASTE_MARKER}\n{body_text}",
+        f"URL: https://www.jobleads.com/pl/job/x\n\n{JOBLEADS_PASTE_MARKER}\n{body_text}",
         encoding="utf-8",
     )
     from hunter import tracker as _tracker
+
     monkeypatch.setattr(_tracker, "manual_jobleads_job_posting_path", lambda url: p)
 
     out = JobLeadsSource().fetch_text("https://www.jobleads.com/pl/job/x")
@@ -185,6 +187,7 @@ def test_jobleads_fetch_text_uses_manual_when_available(tmp_path, monkeypatch) -
 
 def test_jobleads_fetch_text_from_json_ld(tmp_path, monkeypatch) -> None:
     from hunter import tracker as _tracker
+
     monkeypatch.setattr(
         _tracker, "manual_jobleads_job_posting_path", lambda url: tmp_path / "nope.txt"
     )
@@ -194,11 +197,7 @@ def test_jobleads_fetch_text_from_json_ld(tmp_path, monkeypatch) -> None:
         "hiringOrganization": {"name": "ExampleCo"},
         "description": "<p>" + ("Build amazing things. " * 8) + "</p>",
     }
-    html = (
-        '<html><body>'
-        f'<script type="application/ld+json">{json.dumps(ld)}</script>'
-        '</body></html>'
-    )
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
     with patch(
         "hunter.sources.jobleads._scraper.get",
         return_value=_mk_html_response(html),
@@ -212,18 +211,23 @@ def test_jobleads_fetch_text_raises_cloudflare_error_when_all_strategies_fail(
     tmp_path, monkeypatch
 ) -> None:
     from hunter import tracker as _tracker
+
     monkeypatch.setattr(
         _tracker, "manual_jobleads_job_posting_path", lambda url: tmp_path / "nope.txt"
     )
 
-    with patch(
-        "hunter.sources.jobleads._scraper.get",
-        return_value=_mk_html_response("<html><body>just a moment...</body></html>", status=403),
-    ), patch(
-        "hunter.sources.jobleads._try_detail_playwright", return_value=""
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html",
-        return_value="<html><body>just a moment</body></html>",
+    with (
+        patch(
+            "hunter.sources.jobleads._scraper.get",
+            return_value=_mk_html_response(
+                "<html><body>just a moment...</body></html>", status=403
+            ),
+        ),
+        patch("hunter.sources.jobleads._try_detail_playwright", return_value=""),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="<html><body>just a moment</body></html>",
+        ),
     ):
         with pytest.raises(JobLeadsCloudflareError):
             JobLeadsSource().fetch_text("https://www.jobleads.com/pl/job/x")

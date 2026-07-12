@@ -42,6 +42,7 @@ async def cmd_check_responses(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     try:
         from hunter.email_response_checker import run_confirmation_check
+
         results = await asyncio.to_thread(run_confirmation_check, days)
     except FileNotFoundError:
         await status_msg.edit_text(

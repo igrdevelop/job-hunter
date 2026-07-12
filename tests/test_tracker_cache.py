@@ -22,6 +22,7 @@ from hunter.db import get_db
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -66,6 +67,7 @@ ROW_C = make_row(
 def _insert_row(tracker_db: Path, row: dict) -> None:
     """Insert a tracker row dict directly into the test SQLite DB."""
     from hunter.tracker import normalize_url
+
     row_id = row.get("ID") or uuid.uuid4().hex[:8]
     url = row.get("URL", "")
     with get_db(tracker_db) as conn:
@@ -100,6 +102,7 @@ def _insert_row(tracker_db: Path, row: dict) -> None:
 # Load from DB
 # ---------------------------------------------------------------------------
 
+
 class TestLoadFromDB:
     def test_empty_when_db_empty(self, tracker_db):
         c = TrackerCache()
@@ -132,13 +135,14 @@ class TestLoadFromDB:
         """load_from_excel() still works (deprecated alias for load_from_db())."""
         _insert_row(tracker_db, ROW_A)
         c = TrackerCache()
-        run(c.load_from_excel())   # no path needed — reads from DB
+        run(c.load_from_excel())  # no path needed — reads from DB
         assert c.size == 1
 
 
 # ---------------------------------------------------------------------------
 # add()
 # ---------------------------------------------------------------------------
+
 
 class TestAdd:
     def test_add_single_row(self):
@@ -165,6 +169,7 @@ class TestAdd:
 # ---------------------------------------------------------------------------
 # update_*
 # ---------------------------------------------------------------------------
+
 
 class TestUpdate:
     def test_update_status(self):
@@ -199,6 +204,7 @@ class TestUpdate:
 # ---------------------------------------------------------------------------
 # Dedup reads
 # ---------------------------------------------------------------------------
+
 
 class TestDedup:
     def test_is_known_url_false_when_empty(self):
@@ -240,6 +246,7 @@ class TestDedup:
 # Stats
 # ---------------------------------------------------------------------------
 
+
 class TestStats:
     def test_unsent_count(self):
         c = TrackerCache()
@@ -274,12 +281,14 @@ class TestStats:
 # Concurrency
 # ---------------------------------------------------------------------------
 
+
 class TestConcurrency:
     def test_concurrent_adds_no_race(self):
         """100 concurrent adds should all land without corrupting indexes."""
         rows = [
-            make_row(ID=f"{i:08x}", URL=f"https://x.com/{i}",
-                     Company=f"Co{i}", **{"Job Title": "Dev"})
+            make_row(
+                ID=f"{i:08x}", URL=f"https://x.com/{i}", Company=f"Co{i}", **{"Job Title": "Dev"}
+            )
             for i in range(100)
         ]
 
@@ -294,6 +303,7 @@ class TestConcurrency:
 
     def test_concurrent_reads_and_writes(self):
         """Reads and writes can run concurrently without deadlock."""
+
         async def _run():
             c = TrackerCache()
             await c.add(ROW_A)
@@ -313,4 +323,3 @@ class TestConcurrency:
 
         c = asyncio.run(_run())
         assert c.rows["aaaaaaaa"]["ATS %"] == "SKIP"
-

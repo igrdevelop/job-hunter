@@ -74,9 +74,14 @@ _SKIP_LIVE_HOSTS = ("linkedin.com",)
 #     correctly, not new imprecision — narrowing them would only re-open the
 #     gap. New findings from these rules should still be scrutinized normally;
 #     this bucket exists only to not re-litigate old, now-unreachable rows.
-_PRE_EXISTING_POLICY_RULES = frozenset({
-    "is_ai_training_or_mill", "ai_mill_body", "is_unwanted_fullstack", "title_exclude_pattern",
-})
+_PRE_EXISTING_POLICY_RULES = frozenset(
+    {
+        "is_ai_training_or_mill",
+        "ai_mill_body",
+        "is_unwanted_fullstack",
+        "title_exclude_pattern",
+    }
+)
 
 
 @dataclass
@@ -109,6 +114,7 @@ class ReportRow:
 # Sheet ground truth (best-effort — calibration still runs offline without it)
 # ---------------------------------------------------------------------------
 
+
 def _load_sheet_rows() -> list[dict]:
     try:
         from hunter import gsheets_sync
@@ -116,7 +122,9 @@ def _load_sheet_rows() -> list[dict]:
 
         service = gsheets_sync._get_service()
         if service is None:
-            print("[calibrate] Sheets unavailable (GSHEETS_ENABLED/token) — no owner-note cross-check")
+            print(
+                "[calibrate] Sheets unavailable (GSHEETS_ENABLED/token) — no owner-note cross-check"
+            )
             return []
         gsheets_sync._state = gsheets_sync._read_state()
         sheet_id = gsheets_sync._sheet_id()
@@ -167,16 +175,19 @@ def _title_index(sheet_rows: list[dict]) -> dict[str, str]:
 # 1. Offline corpus
 # ---------------------------------------------------------------------------
 
+
 def _extract_url(text: str) -> str:
     for line in text.splitlines()[:3]:
         line = line.strip()
         if line.startswith("URL:"):
-            return line[len("URL:"):].strip()
+            return line[len("URL:") :].strip()
     return ""
 
 
 def load_offline_corpus(
-    sent_index: dict[str, str], title_index: dict[str, str], base_dirs: list[Path],
+    sent_index: dict[str, str],
+    title_index: dict[str, str],
+    base_dirs: list[Path],
 ) -> list[Posting]:
     postings: list[Posting] = []
     for base_dir in base_dirs:
@@ -195,10 +206,17 @@ def load_offline_corpus(
             url_norm = normalize_url(url) if url else ""
             owner_note = sent_index.get(url_norm, "") if url else ""
             title = title_index.get(url_norm, "") if url else ""
-            postings.append(Posting(
-                source="offline", company=company, title=title, url=url,
-                owner_note=owner_note, text=text, stale=is_job_expired(text),
-            ))
+            postings.append(
+                Posting(
+                    source="offline",
+                    company=company,
+                    title=title,
+                    url=url,
+                    owner_note=owner_note,
+                    text=text,
+                    stale=is_job_expired(text),
+                )
+            )
             found += 1
         print(f"[calibrate] Offline corpus: {found} job_posting.txt file(s) under {base_dir}")
     return postings
@@ -208,8 +226,10 @@ def load_offline_corpus(
 # 2. Live Sheet spot-check
 # ---------------------------------------------------------------------------
 
+
 def _candidate_live_rows(sheet_rows: list[dict], days: int) -> list[dict]:
     from datetime import date, timedelta
+
     cutoff = date.today() - timedelta(days=days)
     seen_urls: set[str] = set()
     candidates: list[dict] = []
@@ -234,7 +254,9 @@ def _candidate_live_rows(sheet_rows: list[dict], days: int) -> list[dict]:
     return candidates
 
 
-def load_live_sample(sheet_rows: list[dict], *, days: int, limit: int, delay: float) -> list[Posting]:
+def load_live_sample(
+    sheet_rows: list[dict], *, days: int, limit: int, delay: float
+) -> list[Posting]:
     from hunter.sources import fetch_job_text
 
     candidates = _candidate_live_rows(sheet_rows, days)
@@ -252,12 +274,21 @@ def load_live_sample(sheet_rows: list[dict], *, days: int, limit: int, delay: fl
         try:
             text = fetch_job_text(url)
             stale = is_job_expired(text)
-            postings.append(Posting(
-                source="live", company=company or url, title=title, url=url,
-                owner_note=row.get("Sent", ""), text=text, stale=stale,
-            ))
+            postings.append(
+                Posting(
+                    source="live",
+                    company=company or url,
+                    title=title,
+                    url=url,
+                    owner_note=row.get("Sent", ""),
+                    text=text,
+                    stale=stale,
+                )
+            )
             stale_tag = " [STALE/EXPIRED on re-fetch]" if stale else ""
-            print(f"[calibrate]   ({i}/{len(sample)}) OK — {company} ({len(text)} chars){stale_tag}")
+            print(
+                f"[calibrate]   ({i}/{len(sample)}) OK — {company} ({len(text)} chars){stale_tag}"
+            )
         except Exception as e:  # noqa: BLE001 — tolerant of dead/blocked links
             fetch_errors += 1
             print(f"[calibrate]   ({i}/{len(sample)}) FETCH FAILED — {company}: {e}")
@@ -271,16 +302,24 @@ def load_live_sample(sheet_rows: list[dict], *, days: int, limit: int, delay: fl
 # Report
 # ---------------------------------------------------------------------------
 
+
 def run_gate(postings: list[Posting]) -> list[ReportRow]:
     rows: list[ReportRow] = []
     for p in postings:
         findings: list[GateFinding] = assess_job_text(p.text, title=p.title, company=p.company)
         for f in findings:
-            rows.append(ReportRow(
-                company=p.company, rule=f.rule, severity=f.severity,
-                evidence=f.evidence, owner_note=p.owner_note,
-                source=p.source, url=p.url, stale=p.stale,
-            ))
+            rows.append(
+                ReportRow(
+                    company=p.company,
+                    rule=f.rule,
+                    severity=f.severity,
+                    evidence=f.evidence,
+                    owner_note=p.owner_note,
+                    source=p.source,
+                    url=p.url,
+                    stale=p.stale,
+                )
+            )
     return rows
 
 
@@ -291,8 +330,10 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
     print("-" * 100)
     for r in sorted(rows, key=lambda r: (r.severity, r.company)):
         stale_tag = " [STALE]" if r.stale else ""
-        print(f"{r.company[:28]:<28} {r.rule[:32]:<32} {r.severity:<5} "
-              f"{r.evidence[:60]!r} note={r.owner_note!r}{stale_tag}")
+        print(
+            f"{r.company[:28]:<28} {r.rule[:32]:<32} {r.severity:<5} "
+            f"{r.evidence[:60]!r} note={r.owner_note!r}{stale_tag}"
+        )
 
     n_hard = sum(1 for r in rows if r.severity == "hard")
     n_soft = sum(1 for r in rows if r.severity == "soft")
@@ -308,7 +349,9 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
 
     sent_hard = [r for r in rows if r.severity == "hard" and _sent_true(r.owner_note)]
     policy_excluded = [r for r in sent_hard if not r.stale and r.rule in _PRE_EXISTING_POLICY_RULES]
-    false_positives = [r for r in sent_hard if not r.stale and r.rule not in _PRE_EXISTING_POLICY_RULES]
+    false_positives = [
+        r for r in sent_hard if not r.stale and r.rule not in _PRE_EXISTING_POLICY_RULES
+    ]
     stale_excluded = [r for r in sent_hard if r.stale]
     print(f"\nHARD findings on rows the owner actually SENT (must be zero): {len(false_positives)}")
     for r in false_positives:
@@ -320,7 +363,9 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
             "is_job_expired() would already skip it in production before the gate runs):"
         )
         for r in stale_excluded:
-            print(f"  (stale) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
+            print(
+                f"  (stale) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})"
+            )
     if policy_excluded:
         print(
             f"\n({len(policy_excluded)} additional HARD hit(s) on sent rows excluded — "
@@ -329,7 +374,9 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
             "not a gate false positive — see _PRE_EXISTING_POLICY_RULES):"
         )
         for r in policy_excluded:
-            print(f"  (pre-policy) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})")
+            print(
+                f"  (pre-policy) {r.company} — {r.rule}: {r.evidence!r} (sent {r.owner_note!r}, {r.url})"
+            )
 
     bigbear = [r for r in rows if "bigbear" in r.company.lower() and r.severity == "hard"]
     megaport = [r for r in rows if "megaport" in r.company.lower() and r.severity == "soft"]
@@ -343,12 +390,22 @@ def print_report(postings: list[Posting], rows: list[ReportRow]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true", help="Also spot-check live Sheet URLs (network).")
-    parser.add_argument("--days", type=int, default=45, help="Live sample window in days (default 45).")
-    parser.add_argument("--limit", type=int, default=20, help="Max live URLs to fetch (default 20).")
-    parser.add_argument("--delay", type=float, default=2.5, help="Seconds between live fetches (default 2.5).")
     parser.add_argument(
-        "--dir", action="append", default=None,
+        "--live", action="store_true", help="Also spot-check live Sheet URLs (network)."
+    )
+    parser.add_argument(
+        "--days", type=int, default=45, help="Live sample window in days (default 45)."
+    )
+    parser.add_argument(
+        "--limit", type=int, default=20, help="Max live URLs to fetch (default 20)."
+    )
+    parser.add_argument(
+        "--delay", type=float, default=2.5, help="Seconds between live fetches (default 2.5)."
+    )
+    parser.add_argument(
+        "--dir",
+        action="append",
+        default=None,
         help="Offline corpus root; repeatable (default: Applications/ + any "
         "Applications_*/ folder present, e.g. the DeepSeek comparison runs).",
     )
@@ -368,7 +425,9 @@ def main() -> int:
         if not sheet_rows:
             print("[calibrate] --live requested but no Sheet rows available — skipping")
         else:
-            postings += load_live_sample(sheet_rows, days=args.days, limit=args.limit, delay=args.delay)
+            postings += load_live_sample(
+                sheet_rows, days=args.days, limit=args.limit, delay=args.delay
+            )
 
     rows = run_gate(postings)
     n_false_positives = print_report(postings, rows)

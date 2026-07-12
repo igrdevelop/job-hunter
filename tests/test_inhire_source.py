@@ -21,6 +21,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "sources"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
@@ -31,6 +32,7 @@ src = InhireSource()
 # ---------------------------------------------------------------------------
 # _parse — Vuex shapes
 # ---------------------------------------------------------------------------
+
 
 class TestParseVuexShapes:
     def test_basic_vuex_fixture(self):
@@ -107,6 +109,7 @@ class TestParseVuexShapes:
 # _parse — DOM fallback shape (old format with href + _text only)
 # ---------------------------------------------------------------------------
 
+
 class TestParseDomFallback:
     def test_dom_fixture_old_format(self):
         """Old format: href + _text only, no structured fields."""
@@ -133,6 +136,7 @@ class TestParseDomFallback:
 # _parse — new DOM format (structured fields extracted by updated _extract_dom)
 # ---------------------------------------------------------------------------
 
+
 class TestParseDomNew:
     def test_new_dom_fixture(self):
         """New format: structured title/company/salary/location extracted from card DOM."""
@@ -143,7 +147,10 @@ class TestParseDomNew:
         assert job.company == "Acme Software"
         assert job.salary == "20 000 - 26 000 PLN / miesiąc"
         assert job.location == "Remote within Poland"
-        assert job.url == "https://app.inhire.io/praca/senior-angular-developer-remote-wroclaw-job-arbeit-196946"
+        assert (
+            job.url
+            == "https://app.inhire.io/praca/senior-angular-developer-remote-wroclaw-job-arbeit-196946"
+        )
         assert job.source == "inhire"
 
     def test_new_dom_url_is_absolute(self):
@@ -164,12 +171,14 @@ class TestParseDomNew:
 # _is_relevant — pre-filter
 # ---------------------------------------------------------------------------
 
+
 class TestIsRelevant:
     def _make_raw(self, text: str = "") -> dict:
         return {"_text": text}
 
     def _make_job(self, title: str):
         from hunter.models import Job
+
         return Job(
             title=title,
             company="X",
@@ -211,6 +220,7 @@ class TestIsRelevant:
 # ---------------------------------------------------------------------------
 # _build_url
 # ---------------------------------------------------------------------------
+
 
 class TestBuildUrl:
     @pytest.mark.parametrize("key", ["offerUrl", "url", "offerAbsoluteUri", "href"])

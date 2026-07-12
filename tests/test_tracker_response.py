@@ -17,9 +17,17 @@ from hunter.db import get_db
 # Helper: insert a row directly into the DB
 # ---------------------------------------------------------------------------
 
-def _insert(tracker_db, *, company: str, title: str,
-            ats: str = "85%", url: str = "", sent: str = "",
-            confirmation: str = "") -> str:
+
+def _insert(
+    tracker_db,
+    *,
+    company: str,
+    title: str,
+    ats: str = "85%",
+    url: str = "",
+    sent: str = "",
+    confirmation: str = "",
+) -> str:
     """Insert a row and return its ID."""
     row_id = uuid.uuid4().hex[:8]
     if not url:
@@ -40,6 +48,7 @@ def _insert(tracker_db, *, company: str, title: str,
 # ---------------------------------------------------------------------------
 # _title_tokens
 # ---------------------------------------------------------------------------
+
 
 def test_title_tokens_strips_stop_words():
     tokens = _title_tokens("Senior Angular Developer")
@@ -68,6 +77,7 @@ def test_title_tokens_empty_string():
 # _title_similarity
 # ---------------------------------------------------------------------------
 
+
 def test_similarity_same_title():
     assert _title_similarity("Angular Developer", "Angular Developer") == 1.0
 
@@ -95,6 +105,7 @@ def test_similarity_empty_titles():
 # ---------------------------------------------------------------------------
 # lookup_by_company_and_title
 # ---------------------------------------------------------------------------
+
 
 def test_lookup_returns_empty_when_db_empty(tracker_db):
     assert tracker.lookup_by_company_and_title("Acme", "Angular Developer") == []
@@ -162,6 +173,7 @@ def test_lookup_returns_empty_confirmation_when_missing(tracker_db):
 # set_confirmation — now takes row_id (str), not row_num (int)
 # ---------------------------------------------------------------------------
 
+
 def test_set_confirmation_noop_for_empty_id(tracker_db):
     """No-op when row_id is empty string."""
     tracker.set_confirmation("", "2026-05-20")  # must not raise
@@ -207,8 +219,10 @@ def test_set_confirmation_roundtrip_via_lookup(tracker_db):
 # Schema: TRACKER_HEADERS includes Confirmation and Answer
 # ---------------------------------------------------------------------------
 
+
 def test_tracker_headers_include_confirmation_and_answer():
     from hunter.tracker import TRACKER_HEADERS
+
     assert "Confirmation" in TRACKER_HEADERS
     assert "Answer" in TRACKER_HEADERS
     assert TRACKER_HEADERS.index("Confirmation") == COL_CONFIRMATION - 1

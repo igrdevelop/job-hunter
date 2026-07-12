@@ -76,9 +76,7 @@ def test_measure_folder_collects_scores_and_skips_none(tmp_path, monkeypatch):
         calls.append((folder, job_text))
         return next(responses)
 
-    monkeypatch.setattr(
-        "hunter.ats_pdf_roundtrip.run_llm_verdict", _fake_verdict
-    )
+    monkeypatch.setattr("hunter.ats_pdf_roundtrip.run_llm_verdict", _fake_verdict)
     scores = verdict_noise.measure_folder(folder, k=3)
     assert scores == [80.0, 84.0]
     assert len(calls) == 3

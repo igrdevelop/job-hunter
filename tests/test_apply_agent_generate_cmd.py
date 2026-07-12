@@ -12,7 +12,11 @@ def test_build_generate_docs_cmd_uses_content_json_path() -> None:
         force=False,
         python_executable="python",
     )
-    assert cmd[:3] == ["python", str(Path("D:/LearningProject/Claude/generate_docs.py")), str(content_path)]
+    assert cmd[:3] == [
+        "python",
+        str(Path("D:/LearningProject/Claude/generate_docs.py")),
+        str(content_path),
+    ]
 
 
 def test_build_generate_docs_cmd_adds_flags() -> None:

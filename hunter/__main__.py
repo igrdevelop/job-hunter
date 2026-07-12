@@ -73,6 +73,7 @@ def main() -> None:
 
         async def _post_init(application):
             from hunter.main import run_hunt
+
             await run_hunt(application)
 
         app.post_init = _post_init

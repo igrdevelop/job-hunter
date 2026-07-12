@@ -94,9 +94,7 @@ def _stats_grid(rep: dict) -> list[list[str]]:
 
 def _ensure_stats_tab(service, sheet_id: str, tab: str) -> None:
     """Create the Stats tab if it does not exist yet."""
-    meta = service.spreadsheets().get(
-        spreadsheetId=sheet_id, fields="sheets.properties"
-    ).execute()
+    meta = service.spreadsheets().get(spreadsheetId=sheet_id, fields="sheets.properties").execute()
     titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
     if tab in titles:
         return
@@ -111,7 +109,8 @@ def _write_stats_tab(service, sheet_id: str, rep: dict, tab: str = "Stats") -> N
     """Overwrite the Stats tab with the current report (clears old content first)."""
     _ensure_stats_tab(service, sheet_id, tab)
     service.spreadsheets().values().clear(
-        spreadsheetId=sheet_id, range=f"'{tab}'!A:Z",
+        spreadsheetId=sheet_id,
+        range=f"'{tab}'!A:Z",
     ).execute()
     grid = _stats_grid(rep)
     service.spreadsheets().values().update(
@@ -126,11 +125,13 @@ def _write_stats_tab(service, sheet_id: str, rep: dict, tab: str = "Stats") -> N
 def main() -> int:
     parser = argparse.ArgumentParser(description="Statistics over the Sheets tracker (read-only).")
     parser.add_argument(
-        "--write-tab", action="store_true",
+        "--write-tab",
+        action="store_true",
         help="Also write the report into a 'Stats' tab. Without it, prints only (dry run).",
     )
     parser.add_argument(
-        "--tab", default="Tracker",
+        "--tab",
+        default="Tracker",
         help="Name of the data tab to read (default: Tracker).",
     )
     args = parser.parse_args()

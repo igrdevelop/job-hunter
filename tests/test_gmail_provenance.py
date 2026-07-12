@@ -11,7 +11,9 @@ from hunter.models import Job
 from hunter.sources.gmail import GmailSource, _aggregator_name
 
 
-def _msg(msg_id: str, sender: str, subject: str, html: str, date: str = "Mon, 09 Jun 2026 14:20:00 +0000") -> dict:
+def _msg(
+    msg_id: str, sender: str, subject: str, html: str, date: str = "Mon, 09 Jun 2026 14:20:00 +0000"
+) -> dict:
     """Minimal Gmail messages().get() 'full' payload with an HTML body."""
     import base64
 
@@ -106,7 +108,7 @@ def test_ack_subject_with_similar_offers_is_parsed_not_skipped():
     src = GmailSource()
     src.last_email_log = []
     html = (
-        'Your application has been sent successfully.'
+        "Your application has been sent successfully."
         '<a href="https://nofluffjobs.com/pl/job/senior-angular-developer-remote-link-group">a</a>'
         '<a href="https://nofluffjobs.com/pl/job/mid-angular-developer-link-group">b</a>'
         '<a href="https://nofluffjobs.com/pl/job/senior-angular-developer-xtb">c</a>'
@@ -151,25 +153,31 @@ def test_ack_subject_without_similar_offers_still_skipped():
 
 def test_parse_date_unparseable_returns_none():
     assert GmailSource._parse_date("(no date)") is None
-    assert isinstance(
-        GmailSource._parse_date("Mon, 09 Jun 2026 14:20:00 +0000"), datetime
-    )
+    assert isinstance(GmailSource._parse_date("Mon, 09 Jun 2026 14:20:00 +0000"), datetime)
 
 
 def test_email_meta_survives_enrichment():
     """The enricher recreates Job objects — email_meta must be carried over."""
     from hunter.gmail_enricher import _enrich_via_text
 
-    meta = {"msg_id": "m1", "subject": "digest", "aggregator": "nofluffjobs",
-            "sender": "x@nofluffjobs.com", "date": datetime.now(timezone.utc)}
+    meta = {
+        "msg_id": "m1",
+        "subject": "digest",
+        "aggregator": "nofluffjobs",
+        "sender": "x@nofluffjobs.com",
+        "date": datetime.now(timezone.utc),
+    }
     job = Job(
-        title="Jobs for you", company="[nofluffjobs]", location="", salary=None,
+        title="Jobs for you",
+        company="[nofluffjobs]",
+        location="",
+        salary=None,
         url="https://nofluffjobs.com/job/frontend-developer-beta-ltd-waw",
-        source="gmail_nofluffjobs", email_meta=meta,
+        source="gmail_nofluffjobs",
+        email_meta=meta,
     )
     enriched_text = (
-        "Job Title: Frontend Developer\nCompany: Beta Ltd\n"
-        "Location: Remote\nSalary: 12000 PLN\n"
+        "Job Title: Frontend Developer\nCompany: Beta Ltd\nLocation: Remote\nSalary: 12000 PLN\n"
     )
     with patch("hunter.sources.fetch_job_text", return_value=enriched_text):
         result = _enrich_via_text(job)

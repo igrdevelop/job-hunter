@@ -3,6 +3,7 @@ Hook: PreToolUse — block edits to protected files (.env, tracker.xlsx).
 Receives tool input as JSON on stdin.
 Exits with code 1 to block the tool call.
 """
+
 import sys
 import json
 import os
@@ -17,7 +18,9 @@ def main():
     except Exception:
         return  # Can't parse input — don't block
 
-    file_path = (data.get("tool_input", {}).get("file_path", "") or data.get("file_path", "")).replace("\\", "/")
+    file_path = (
+        data.get("tool_input", {}).get("file_path", "") or data.get("file_path", "")
+    ).replace("\\", "/")
     basename = os.path.basename(file_path)
 
     for name in PROTECTED:

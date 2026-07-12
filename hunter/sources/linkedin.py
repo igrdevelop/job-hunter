@@ -57,6 +57,7 @@ def _clean_detail_text(text: str) -> str:
 
 # ── URL parsing helpers (ported from job_fetch/linkedin_parse.py) ───────────
 
+
 def is_linkedin_url(url: str) -> bool:
     """True for any linkedin.com URL."""
     return "linkedin.com" in (urlparse(url).hostname or "")
@@ -206,7 +207,9 @@ class LinkedInSource(BaseSource):
         return text
 
     def search(self) -> list[Job]:
-        keywords_raw = os.environ.get("LINKEDIN_KEYWORDS", "angular,angular developer,frontend angular")
+        keywords_raw = os.environ.get(
+            "LINKEDIN_KEYWORDS", "angular,angular developer,frontend angular"
+        )
         geo_id = os.environ.get("LINKEDIN_GEO_ID", "105072130")  # Poland
         keywords_list = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
 
@@ -248,8 +251,8 @@ class LinkedInSource(BaseSource):
             "location": "Poland",
             "geoId": geo_id,
             "f_TPR": "r86400",  # last 24 hours
-            "f_E": "3,4",       # mid + senior
-            "sortBy": "DD",     # most recent
+            "f_E": "3,4",  # mid + senior
+            "sortBy": "DD",  # most recent
             "start": str(start),
         }
 
@@ -262,19 +265,16 @@ class LinkedInSource(BaseSource):
 
     def _parse_html(self, html: str) -> list[Job]:
         """Parse HTML fragments from the guest search API."""
-        titles = re.findall(
-            r'<h3[^>]*base-search-card__title[^>]*>\s*(.*?)\s*</h3>', html, re.S
-        )
+        titles = re.findall(r"<h3[^>]*base-search-card__title[^>]*>\s*(.*?)\s*</h3>", html, re.S)
         companies = re.findall(
-            r'<h4[^>]*base-search-card__subtitle[^>]*>\s*<a[^>]*>\s*(.*?)\s*</a>',
-            html, re.S,
+            r"<h4[^>]*base-search-card__subtitle[^>]*>\s*<a[^>]*>\s*(.*?)\s*</a>",
+            html,
+            re.S,
         )
         locations = re.findall(
-            r'<span[^>]*job-search-card__location[^>]*>\s*(.*?)\s*</span>', html, re.S
+            r"<span[^>]*job-search-card__location[^>]*>\s*(.*?)\s*</span>", html, re.S
         )
-        job_ids = re.findall(
-            r'data-entity-urn="urn:li:jobPosting:(\d+)"', html
-        )
+        job_ids = re.findall(r'data-entity-urn="urn:li:jobPosting:(\d+)"', html)
 
         jobs: list[Job] = []
         for i in range(len(job_ids)):
@@ -289,19 +289,23 @@ class LinkedInSource(BaseSource):
             # Strip company name suffix: "Senior Dev / VBET" -> "Senior Dev"
             if company:
                 title = re.sub(
-                    r'\s*[-/|]\s*' + re.escape(company.strip()) + r'\s*$',
-                    '', title, flags=re.I,
+                    r"\s*[-/|]\s*" + re.escape(company.strip()) + r"\s*$",
+                    "",
+                    title,
+                    flags=re.I,
                 ).strip()
 
-            jobs.append(Job(
-                title=title,
-                company=company,
-                location=location,
-                salary=None,
-                url=f"https://www.linkedin.com/jobs/view/{job_id}/",
-                source=self.name,
-                raw={"jobId": job_id},
-            ))
+            jobs.append(
+                Job(
+                    title=title,
+                    company=company,
+                    location=location,
+                    salary=None,
+                    url=f"https://www.linkedin.com/jobs/view/{job_id}/",
+                    source=self.name,
+                    raw={"jobId": job_id},
+                )
+            )
 
         return jobs
 

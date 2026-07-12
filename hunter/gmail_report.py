@@ -45,7 +45,7 @@ class JobOutcome:
     url: str
     title: str
     company: str
-    status: str            # taken | dup_url | dup_ct | cooldown | filtered
+    status: str  # taken | dup_url | dup_ct | cooldown | filtered
     reason: str | None = None  # filter reason key when status == "filtered"
 
     @classmethod
@@ -141,9 +141,7 @@ def build_gmail_report(
     total_emails = len(email_log)
     total_found = sum(r.get("extracted", 0) for r in email_log)
     total_taken = sum(1 for o in outcomes if o.status == "taken")
-    zero_url = sum(
-        1 for r in email_log if not r.get("skipped") and r.get("extracted", 0) == 0
-    )
+    zero_url = sum(1 for r in email_log if not r.get("skipped") and r.get("extracted", 0) == 0)
     skipped = sum(1 for r in email_log if r.get("skipped"))
 
     header = [

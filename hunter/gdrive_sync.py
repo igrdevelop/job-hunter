@@ -51,6 +51,7 @@ def _get_service() -> Any | None:
     if _service is None:
         try:
             from hunter.gdrive_client import build_service
+
             _service = build_service(GSHEETS_CREDENTIALS_FILE, GSHEETS_TOKEN_FILE)
         except Exception as e:
             log.error("gdrive_sync: failed to build service: %s", e)
@@ -65,6 +66,7 @@ def _ready() -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 async def _do_upload(folder_path: Path) -> str:
     """Core upload logic — raises on error. Called by both public functions."""
     from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
@@ -75,9 +77,7 @@ async def _do_upload(folder_path: Path) -> str:
     if GDRIVE_ROOT_FOLDER_ID:
         root_id = GDRIVE_ROOT_FOLDER_ID
     else:
-        root_id = await asyncio.to_thread(
-            get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
-        )
+        root_id = await asyncio.to_thread(get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
     date_id = await asyncio.to_thread(get_or_create_folder, svc, date_name, root_id)
     company_id = await asyncio.to_thread(upload_folder, svc, folder_path, date_id)
@@ -114,6 +114,7 @@ async def upload_application_folder(
         log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
         if job_url:
             from hunter.tracker import set_drive_url
+
             await asyncio.to_thread(set_drive_url, job_url, url)
         return url
     except Exception as e:
@@ -174,7 +175,9 @@ async def delete_application_folder(drive_url: str) -> bool:
 
     folder_id = folder_id_from_url(drive_url)
     if not folder_id:
-        log.warning("gdrive_sync.delete_application_folder: cannot parse folder_id from %r", drive_url)
+        log.warning(
+            "gdrive_sync.delete_application_folder: cannot parse folder_id from %r", drive_url
+        )
         return False
 
     try:
@@ -234,7 +237,7 @@ async def upload_log_file(
     today_lines: list[str] = []
     in_today = False
     for line in content.splitlines(keepends=True):
-        if _LOG_HEADER_RE.match(line):          # new log entry
+        if _LOG_HEADER_RE.match(line):  # new log entry
             in_today = line.startswith(today)
         if in_today:
             today_lines.append(line)
@@ -242,7 +245,8 @@ async def upload_log_file(
     if not today_lines:
         log.debug(
             "gdrive_sync.upload_log_file: no entries for %s in %s — skipping",
-            today, log_path.name,
+            today,
+            log_path.name,
         )
         return None
 
@@ -263,14 +267,14 @@ async def upload_log_file(
                 get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
             )
 
-        logs_folder_id = await asyncio.to_thread(
-            get_or_create_folder, svc, "Logs", root_id
-        )
+        logs_folder_id = await asyncio.to_thread(get_or_create_folder, svc, "Logs", root_id)
         file_id = await asyncio.to_thread(upload_file, svc, dated_file, logs_folder_id)
         url = f"https://drive.google.com/file/d/{file_id}/view"
         log.info(
             "gdrive_sync: uploaded %s (%d lines) → %s",
-            dated_file.name, len(today_lines), url,
+            dated_file.name,
+            len(today_lines),
+            url,
         )
         return url
     except Exception as e:
@@ -307,9 +311,12 @@ async def upload_missing_folders(
     """
     if not _ready():
         return {
-            "uploaded": 0, "already_uploaded": 0, "skipped_missing": 0,
+            "uploaded": 0,
+            "already_uploaded": 0,
+            "skipped_missing": 0,
             "errors": ["GDRIVE_ENABLED is false or service not ready"],
-            "shadow_uploaded": 0, "shadow_errors": [],
+            "shadow_uploaded": 0,
+            "shadow_errors": [],
         }
 
     from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
@@ -350,9 +357,12 @@ async def upload_missing_folders(
 
     if not to_upload:
         return {
-            "uploaded": 0, "already_uploaded": already_uploaded,
-            "skipped_missing": skipped_missing, "errors": [],
-            "shadow_uploaded": shadow_uploaded, "shadow_errors": shadow_errors,
+            "uploaded": 0,
+            "already_uploaded": already_uploaded,
+            "skipped_missing": skipped_missing,
+            "errors": [],
+            "shadow_uploaded": shadow_uploaded,
+            "shadow_errors": shadow_errors,
         }
 
     svc = _get_service()
@@ -370,9 +380,12 @@ async def upload_missing_folders(
             )
     except Exception as e:
         return {
-            "uploaded": 0, "already_uploaded": already_uploaded,
-            "skipped_missing": skipped_missing, "errors": [f"root folder: {e}"],
-            "shadow_uploaded": shadow_uploaded, "shadow_errors": shadow_errors,
+            "uploaded": 0,
+            "already_uploaded": already_uploaded,
+            "skipped_missing": skipped_missing,
+            "errors": [f"root folder: {e}"],
+            "shadow_uploaded": shadow_uploaded,
+            "shadow_errors": shadow_errors,
         }
 
     total = len(to_upload)

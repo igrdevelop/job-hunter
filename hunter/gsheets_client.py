@@ -25,14 +25,26 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
 ]
 
-COLUMNS = ["Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-           "Folder", "Sent", "Re-application", "To Learn", "ID"]
+COLUMNS = [
+    "Date",
+    "Company",
+    "Job Title",
+    "Stack",
+    "ATS %",
+    "URL",
+    "Folder",
+    "Sent",
+    "Re-application",
+    "To Learn",
+    "ID",
+]
 COL_COUNT = len(COLUMNS)  # 11
 
 
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
+
 
 def build_service(credentials_file: Path, token_file: Path) -> Any:
     """Load credentials and return a Sheets API service object."""
@@ -43,15 +55,19 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             from hunter.oauth_alert import refresh_or_alert
+
             refresh_or_alert(
-                creds, Request(), token_file,
-                service="Google Sheets", reauth_cmd="python tools/gsheets_auth.py",
+                creds,
+                Request(),
+                token_file,
+                service="Google Sheets",
+                reauth_cmd="python tools/gsheets_auth.py",
             )
         else:
             from hunter.oauth_alert import alert_oauth_expired
+
             err = RuntimeError(
-                "gsheets_token.json is missing or invalid. "
-                "Run: python tools/gsheets_auth.py"
+                "gsheets_token.json is missing or invalid. Run: python tools/gsheets_auth.py"
             )
             alert_oauth_expired("Google Sheets", err, reauth_cmd="python tools/gsheets_auth.py")
             raise err
@@ -62,6 +78,7 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
 # ---------------------------------------------------------------------------
 # Schema helpers
 # ---------------------------------------------------------------------------
+
 
 def _range(tab: str, start_row: int | None = None, end_row: int | None = None) -> str:
     """Return an A1 range string for the full tab or a specific row range."""
@@ -88,6 +105,7 @@ def _list_to_row(values: list[str]) -> dict:
 # Read
 # ---------------------------------------------------------------------------
 
+
 def read_all(service: Any, sheet_id: str, tab: str = "Tracker") -> list[tuple[int, dict]]:
     """
     Read all data rows (excluding header).
@@ -97,10 +115,7 @@ def read_all(service: Any, sheet_id: str, tab: str = "Tracker") -> list[tuple[in
     """
     try:
         result = (
-            service.spreadsheets()
-            .values()
-            .get(spreadsheetId=sheet_id, range=_range(tab))
-            .execute()
+            service.spreadsheets().values().get(spreadsheetId=sheet_id, range=_range(tab)).execute()
         )
     except HttpError as e:
         log.error("gsheets read_all failed: %s", e)
@@ -120,6 +135,7 @@ def read_all(service: Any, sheet_id: str, tab: str = "Tracker") -> list[tuple[in
 # ---------------------------------------------------------------------------
 # Write — append
 # ---------------------------------------------------------------------------
+
 
 def append_rows(
     service: Any,
@@ -174,6 +190,7 @@ def _parse_start_row(range_str: str) -> int:
 # Write — update existing rows/cells
 # ---------------------------------------------------------------------------
 
+
 def update_row(
     service: Any,
     sheet_id: str,
@@ -224,6 +241,7 @@ def update_cell(
 # Create spreadsheet
 # ---------------------------------------------------------------------------
 
+
 def create_spreadsheet(service: Any, title: str) -> str:
     """Create a new spreadsheet with a 'Tracker' tab and a bold frozen header.
 
@@ -267,11 +285,7 @@ def create_spreadsheet(service: Any, title: str) -> str:
                             "startRowIndex": 0,
                             "endRowIndex": 1,
                         },
-                        "cell": {
-                            "userEnteredFormat": {
-                                "textFormat": {"bold": True}
-                            }
-                        },
+                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
                         "fields": "userEnteredFormat.textFormat.bold",
                     }
                 },
@@ -296,6 +310,7 @@ def create_spreadsheet(service: Any, title: str) -> str:
 # Delete row
 # ---------------------------------------------------------------------------
 
+
 def get_tab_sheet_id(service: Any, spreadsheet_id: str, tab: str = "Tracker") -> int | None:
     """Return the integer sheetId for the named tab.
 
@@ -312,7 +327,9 @@ def get_tab_sheet_id(service: Any, spreadsheet_id: str, tab: str = "Tracker") ->
             props = sheet.get("properties", {})
             if props.get("title") == tab:
                 return props["sheetId"]
-        log.warning("gsheets get_tab_sheet_id: tab %r not found in spreadsheet %s", tab, spreadsheet_id)
+        log.warning(
+            "gsheets get_tab_sheet_id: tab %r not found in spreadsheet %s", tab, spreadsheet_id
+        )
         return None
     except HttpError as e:
         log.error("gsheets get_tab_sheet_id failed: %s", e)
@@ -343,16 +360,18 @@ def delete_sheet_row(
         service.spreadsheets().batchUpdate(
             spreadsheetId=sheet_id,
             body={
-                "requests": [{
-                    "deleteDimension": {
-                        "range": {
-                            "sheetId": tab_sheet_id,
-                            "dimension": "ROWS",
-                            "startIndex": start_index,
-                            "endIndex": start_index + 1,
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": tab_sheet_id,
+                                "dimension": "ROWS",
+                                "startIndex": start_index,
+                                "endIndex": start_index + 1,
+                            }
                         }
                     }
-                }]
+                ]
             },
         ).execute()
         log.info("gsheets delete_sheet_row: deleted row %d (tab=%r)", row_idx, tab)
@@ -364,6 +383,7 @@ def delete_sheet_row(
 # ---------------------------------------------------------------------------
 # Batch write (migration / full upload)
 # ---------------------------------------------------------------------------
+
 
 def batch_write_all(
     service: Any,

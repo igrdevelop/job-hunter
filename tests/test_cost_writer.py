@@ -24,6 +24,7 @@ from hunter.cost_writer import (
 def _seed_db(monkeypatch, tmp_path):
     """Point hunter.cost_writer at a fresh tracker DB schema for the test."""
     import hunter.db as db
+
     db_path = tmp_path / "tracker.db"
     monkeypatch.setattr(db, "TRACKER_DB_PATH", db_path)
     monkeypatch.setattr(cw, "DB_PATH", db_path)
@@ -125,8 +126,8 @@ def test_mirror_cost_cell_swallows_sheets_error(monkeypatch, tmp_path):
     service = _make_service()
     # Make the value write (second call) raise.
     service.spreadsheets.return_value.values.return_value.update.return_value.execute.side_effect = [
-        {},                          # header write succeeds
-        RuntimeError("API down"),    # value write fails
+        {},  # header write succeeds
+        RuntimeError("API down"),  # value write fails
     ]
 
     ok = mirror_cost_cell_sync(service, "SHEET", "abc")
@@ -176,9 +177,7 @@ def test_backfill_only_header_when_no_priced_rows(monkeypatch, tmp_path):
     assert result == {"written": 0, "skipped_no_row": 0, "skipped_no_cost": 0}
     # No batchUpdate; header written via the single-cell update path.
     assert _captured_batch_args(service) == []
-    assert any(
-        u["range"].endswith("!M1") for u in _captured_update_args(service)
-    )
+    assert any(u["range"].endswith("!M1") for u in _captured_update_args(service))
 
 
 def test_cost_writer_never_touches_columns_a_through_l(monkeypatch, tmp_path):

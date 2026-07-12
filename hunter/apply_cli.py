@@ -39,6 +39,7 @@ from hunter.services.apply_service import build_generate_docs_cmd
 
 # ── Folder detection helpers ──────────────────────────────────────────────────
 
+
 def _get_existing_folders() -> set[str]:
     """Return relative paths of all known application folders.
 
@@ -100,13 +101,17 @@ def _find_new_folder(before: set[str], timeout: int = 300) -> str | None:
 
 # ── CLI availability check ────────────────────────────────────────────────────
 
+
 def _is_cli_available() -> bool:
     """Check if Claude CLI is installed and logged in (Pro subscription)."""
     try:
         r = subprocess.run(
             ["claude", "--version"],
-            capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=15,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
         )
         if r.returncode != 0:
             return False
@@ -119,6 +124,7 @@ def _is_cli_available() -> bool:
 
 
 # ── CLI pipeline ──────────────────────────────────────────────────────────────
+
 
 def main_cli(
     url: str,
@@ -150,6 +156,7 @@ def main_cli(
     if not paste_text and _already_processed(url, skip_dedup=skip_dedup):
         try:
             from hunter.tracker import lookup_url
+
             rows = lookup_url(url)
             detail = ""
             if rows:
@@ -181,6 +188,7 @@ def main_cli(
         apply_input = url
         try:
             from hunter.sources import fetch_job_text
+
             job_text = fetch_job_text(url)
             if job_text and len(job_text) > 100:
                 apply_input = f"URL: {url}\n\n{job_text}"
@@ -191,11 +199,13 @@ def main_cli(
     # Check for expired offer before spinning up Claude CLI
     if job_text:
         from hunter.expired_check import is_job_expired
+
         if is_job_expired(job_text):
             notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
             print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
             try:
                 from hunter.tracker import add_expired
+
                 add_expired(url)
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
@@ -207,9 +217,11 @@ def main_cli(
         # rule name, so this coarser message duplicated it (owner report
         # 2026-07-11: every flagged paste warned twice).
         from hunter.config import DOOMED_GATE_ENABLED as _doomed_gate_on
+
         if not _doomed_gate_on:
             try:
                 from hunter.filters import screen_job_text
+
                 screen_reason = screen_job_text(job_text)
                 if screen_reason:
                     notify(
@@ -229,8 +241,10 @@ def main_cli(
         # run, which degrades to warn. A plain manual paste is NOT an
         # override anymore (see the paste plan).
         from hunter.apply_shared import run_doomed_gate
+
         if run_doomed_gate(
-            job_text, url,
+            job_text,
+            url,
             is_force_override=skip_dedup,
         ):
             return
@@ -257,7 +271,9 @@ def main_cli(
         except subprocess.TimeoutExpired:
             new_folder_on_timeout = _find_new_folder(folders_before, timeout=0)
             if new_folder_on_timeout:
-                print(f"\n[apply_agent] Claude timed out but folder created: {new_folder_on_timeout}")
+                print(
+                    f"\n[apply_agent] Claude timed out but folder created: {new_folder_on_timeout}"
+                )
                 result = None
                 new_folder_timeout = new_folder_on_timeout
                 break
@@ -269,12 +285,14 @@ def main_cli(
         if result.returncode == 0:
             break
 
-        output = (result.stderr or result.stdout or "")
+        output = result.stderr or result.stdout or ""
         is_overloaded = "overloaded" in output.lower() or "529" in output
 
         if is_overloaded and attempt < CLI_MAX_RETRIES:
             wait = CLI_RETRY_DELAY * attempt
-            print(f"[apply_agent] Claude overloaded (529), retry {attempt}/{CLI_MAX_RETRIES} in {wait}s...")
+            print(
+                f"[apply_agent] Claude overloaded (529), retry {attempt}/{CLI_MAX_RETRIES} in {wait}s..."
+            )
             notify(f"⚠️ Claude overloaded (529), retry {attempt}/{CLI_MAX_RETRIES} in {wait}s...")
             time.sleep(wait)
             continue
@@ -335,6 +353,7 @@ def main_cli(
                     print(f"[apply_agent] SKIP — React-only stack: {_cli_content.get('stack')}")
                     try:
                         from hunter.tracker import add_react_skipped
+
                         add_react_skipped(_cli_content, url)
                     except Exception as e:
                         print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
@@ -352,6 +371,7 @@ def main_cli(
                         _strip_prestige_claims,
                         enforce_language_separation,
                     )
+
                     # Deterministic scrubs (parity with the API pipeline): drop
                     # fabricated prestige claims + collapse skills gloss pairs.
                     # Any fix means the already-generated docs are stale and must
@@ -372,9 +392,11 @@ def main_cli(
                     # doc-regeneration path below. A surviving fabrication in
                     # JUDGE_MODE=block deletes the docs and aborts.
                     from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+
                     if JUDGE_ENABLED:
                         try:
                             from hunter.claim_judge import run_judge_stage
+
                             _outcome = run_judge_stage(
                                 _cli_content, job_text or "", enabled=True, mode=JUDGE_MODE
                             )
@@ -384,7 +406,8 @@ def main_cli(
                                     (folder_path / "judge_report.json").write_text(
                                         json.dumps(
                                             _outcome.report.to_dict(),
-                                            ensure_ascii=False, indent=2,
+                                            ensure_ascii=False,
+                                            indent=2,
                                         ),
                                         encoding="utf-8",
                                     )
@@ -396,9 +419,8 @@ def main_cli(
                             if JUDGE_MODE in ("warn", "block") and _outcome.report.actionable:
                                 notify(_outcome.report.telegram_summary(url))
                             if _outcome.blocked:
-                                for _f in (
-                                    list(folder_path.glob("*.pdf"))
-                                    + list(folder_path.glob("*.docx"))
+                                for _f in list(folder_path.glob("*.pdf")) + list(
+                                    folder_path.glob("*.docx")
                                 ):
                                     try:
                                         _f.unlink()
@@ -428,8 +450,8 @@ def main_cli(
                             encoding="utf-8",
                         )
                         if _blocked:
-                            for _f in (
-                                list(folder_path.glob("*.pdf")) + list(folder_path.glob("*.docx"))
+                            for _f in list(folder_path.glob("*.pdf")) + list(
+                                folder_path.glob("*.docx")
                             ):
                                 try:
                                     _f.unlink()
@@ -447,8 +469,8 @@ def main_cli(
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed
                         # regeneration (e.g. LibreOffice down) can't leave a stale
                         # contaminated PDF behind for created_files to pick up and send.
-                        for _stale in (
-                            list(folder_path.glob("*.pdf")) + list(folder_path.glob("*.docx"))
+                        for _stale in list(folder_path.glob("*.pdf")) + list(
+                            folder_path.glob("*.docx")
                         ):
                             try:
                                 _stale.unlink()
@@ -473,7 +495,9 @@ def main_cli(
                         )
                         print("[apply_agent] lang-gate: regenerated docs from cleaned content")
                 except Exception as _lang_err:
-                    print(f"[apply_agent] Warning: CLI language gate failed (continuing): {_lang_err}")
+                    print(
+                        f"[apply_agent] Warning: CLI language gate failed (continuing): {_lang_err}"
+                    )
 
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")
@@ -492,6 +516,7 @@ def main_cli(
                     nbsp_patch_missing_keywords,
                     run_pdf_roundtrip,
                 )
+
                 try:
                     _cli_content_for_score = json.loads(
                         content_json_path.read_text(encoding="utf-8")
@@ -550,7 +575,9 @@ def main_cli(
                             if pdf_check_2 is not None:
                                 pdf_check = pdf_check_2
                         except subprocess.TimeoutExpired:
-                            print("[apply_agent] self-heal regen timed out (120s) — keeping original PDF")
+                            print(
+                                "[apply_agent] self-heal regen timed out (120s) — keeping original PDF"
+                            )
 
                 if pdf_check is not None and _cli_content_for_score is not None:
                     _cli_content_for_score["ats_check_pdf"] = pdf_check
@@ -570,6 +597,7 @@ def main_cli(
         if job_text:
             try:
                 from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+
                 verdict = run_llm_verdict(folder=folder_path, job_text=job_text)
                 if verdict is not None:
                     # Verdict refine loop (mirror of apply_api Step 7.7b): rewrite
@@ -584,6 +612,7 @@ def main_cli(
                         ATS_VERDICT_TARGET,
                         LLM_API_KEY,
                     )
+
                     if (
                         float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
                         and ATS_VERDICT_MAX_REFINES > 0
@@ -634,7 +663,11 @@ def main_cli(
 
                                 _to_learn_before_refine = _refine_content.get("to_learn")
                                 _refine_content, verdict = refine_loop(
-                                    _refine_content, job_text, "", folder_path, verdict,
+                                    _refine_content,
+                                    job_text,
+                                    "",
+                                    folder_path,
+                                    verdict,
                                     regenerate_docs=_regen_for_refine,
                                     target=ATS_VERDICT_TARGET,
                                     max_rounds=ATS_VERDICT_MAX_REFINES,
@@ -648,20 +681,25 @@ def main_cli(
                                 # the change post-hoc (same contract as the
                                 # verdict stamp below).
                                 if (
-                                    url and "paste://" not in url
+                                    url
+                                    and "paste://" not in url
                                     and _refine_content.get("to_learn") != _to_learn_before_refine
                                 ):
                                     try:
                                         from hunter.tracker import set_to_learn
+
                                         set_to_learn(url, _refine_content.get("to_learn") or "")
                                     except Exception as _tl_err:
-                                        print(f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}")
+                                        print(
+                                            f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}"
+                                        )
                     # Stamp the tracker row (same contract as apply_api Step 7.7:
                     # DB only — the bot process mirrors Sheet column N later).
                     # Paste flow has no URL to match a row by — skip.
                     if url and "paste://" not in url:
                         try:
                             from hunter.tracker import set_ats_verdict
+
                             set_ats_verdict(url, float(verdict["score"]))
                         except Exception as _tr_err:
                             print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
@@ -695,6 +733,7 @@ def main_cli(
         # Outreach draft (issue #138): same hook as apply_api Step 7.8 —
         # outreach.md next to the CV, best-effort, never fails the apply.
         from hunter.outreach import run_outreach
+
         run_outreach(folder_path, url)
 
         created_files = list(folder_path.glob("*.docx")) + list(folder_path.glob("*.pdf"))
@@ -710,7 +749,9 @@ def main_cli(
                 f"Review and send when ready."
             )
             send_telegram_documents(created_files)
-            print(f"\n[apply_agent] Done! Folder: Applications/{new_folder}/ ({len(created_files)} files)")
+            print(
+                f"\n[apply_agent] Done! Folder: Applications/{new_folder}/ ({len(created_files)} files)"
+            )
             # Success: return the folder so apply_agent.main() can run the
             # dual-apply shadow comparison (if enabled).
             return folder_path
@@ -727,7 +768,11 @@ def main_cli(
         notify(
             f"❌ <b>CLI exited 0 but no folder created</b>\n"
             f"🔗 {url}\n\n"
-            + (f"Claude output:\n<pre>{stdout_preview}</pre>" if stdout_preview else "No CLI output captured.")
+            + (
+                f"Claude output:\n<pre>{stdout_preview}</pre>"
+                if stdout_preview
+                else "No CLI output captured."
+            )
         )
         print("\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
         raise ApplyError("No output folder created")

@@ -14,6 +14,7 @@ from hunter.sources.base import BaseSource
 
 class DummySource(BaseSource):
     """Minimal concrete source — only implements search() so we can test defaults."""
+
     name = "dummy"
 
     def search(self) -> list[Job]:
@@ -49,6 +50,7 @@ def test_base_source_still_requires_search_override() -> None:
 def test_all_concrete_sources_inherit_new_methods() -> None:
     """Every registered source must expose matches_url + fetch_text."""
     from hunter.sources import ALL_SOURCES
+
     for src in ALL_SOURCES:
         assert hasattr(src, "matches_url"), f"{src.name} missing matches_url"
         assert hasattr(src, "fetch_text"), f"{src.name} missing fetch_text"

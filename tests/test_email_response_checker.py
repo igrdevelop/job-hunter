@@ -39,6 +39,7 @@ from hunter.tracker import normalize_url, lookup_by_company_and_title
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _encode(text: str) -> str:
     return base64.urlsafe_b64encode(text.encode()).decode()
 
@@ -51,10 +52,12 @@ def _make_msg(
 ) -> dict:
     parts = []
     if body_text:
-        parts.append({
-            "mimeType": "text/plain",
-            "body": {"data": _encode(body_text)},
-        })
+        parts.append(
+            {
+                "mimeType": "text/plain",
+                "body": {"data": _encode(body_text)},
+            }
+        )
     return {
         "internalDate": str(internal_date_ms),
         "payload": {
@@ -69,9 +72,16 @@ def _make_msg(
     }
 
 
-def _insert_tracker_row(tracker_db, *, company: str = "Acme", title: str = "Dev",
-                         ats: str = "85%", url: str = "", row_id: str = "",
-                         confirmation: str = "") -> str:
+def _insert_tracker_row(
+    tracker_db,
+    *,
+    company: str = "Acme",
+    title: str = "Dev",
+    ats: str = "85%",
+    url: str = "",
+    row_id: str = "",
+    confirmation: str = "",
+) -> str:
     """Insert a row into the test DB. Returns the row ID used."""
     if not url:
         url = f"https://example.com/{uuid.uuid4().hex[:6]}"
@@ -94,32 +104,39 @@ def _insert_tracker_row(tracker_db, *, company: str = "Acme", title: str = "Dev"
 # _is_confirmation_subject — real-world subjects
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("subject", [
-    # eRecruiter pattern (real)
-    "NASK - Dziękujemy za złożenie aplikacji na stanowisko Senior Frontend Developer",
-    "EXATEL - Dziękujemy za złożenie aplikacji na stanowisko Frontend Developer",
-    # SmartRecruiters (real)
-    "Thank you for applying to Sigma Software",
-    # Generic English
-    "Thanks for applying!",
-    "Thank you for submitting your application",
-    "Application submitted",
-    "Application received",
-    # Polish generic
-    "Potwierdzenie aplikacji na stanowisko Angular Developer",
-    "Dziękujemy za zainteresowanie ofertą",
-])
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        # eRecruiter pattern (real)
+        "NASK - Dziękujemy za złożenie aplikacji na stanowisko Senior Frontend Developer",
+        "EXATEL - Dziękujemy za złożenie aplikacji na stanowisko Frontend Developer",
+        # SmartRecruiters (real)
+        "Thank you for applying to Sigma Software",
+        # Generic English
+        "Thanks for applying!",
+        "Thank you for submitting your application",
+        "Application submitted",
+        "Application received",
+        # Polish generic
+        "Potwierdzenie aplikacji na stanowisko Angular Developer",
+        "Dziękujemy za zainteresowanie ofertą",
+    ],
+)
 def test_is_confirmation_subject_true(subject):
     assert _is_confirmation_subject(subject) is True
 
 
-@pytest.mark.parametrize("subject", [
-    "10 new Angular jobs for you",
-    "New jobs matching your profile",
-    "Nowe oferty pracy dla Ciebie",
-    "Weekly jobs digest",
-    "Your saved jobs this week",
-])
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "10 new Angular jobs for you",
+        "New jobs matching your profile",
+        "Nowe oferty pracy dla Ciebie",
+        "Weekly jobs digest",
+        "Your saved jobs this week",
+    ],
+)
 def test_is_confirmation_subject_false(subject):
     assert _is_confirmation_subject(subject) is False
 
@@ -127,6 +144,7 @@ def test_is_confirmation_subject_false(subject):
 # ---------------------------------------------------------------------------
 # _parse_erecruiter — real-world email format
 # ---------------------------------------------------------------------------
+
 
 def test_parse_erecruiter_nask():
     """Real NASK email via eRecruiter."""
@@ -157,7 +175,7 @@ def test_parse_erecruiter_body_fallback():
     """When subject doesn't match, extract title from body."""
     body = "dziękujemy za złożenie aplikacji na stanowisko Angular Developer i czas poświęcony."
     company, title = _parse_erecruiter("Dziękujemy za złożenie aplikacji", body)
-    assert company == ""        # no company in subject without the dash pattern
+    assert company == ""  # no company in subject without the dash pattern
     assert title == "Angular Developer"
 
 
@@ -170,6 +188,7 @@ def test_parse_erecruiter_no_match():
 # ---------------------------------------------------------------------------
 # _parse_smartrecruiters — real-world email format
 # ---------------------------------------------------------------------------
+
 
 def test_parse_smartrecruiters_sigma_software():
     """Real Sigma Software email via SmartRecruiters."""
@@ -220,6 +239,7 @@ def test_parse_smartrecruiters_no_title():
 # _parse_direct — direct company emails
 # ---------------------------------------------------------------------------
 
+
 def test_parse_direct_polish_body():
     """Inspeerity-style email: Polish stanowisko in body."""
     body = "dziękujemy za złożenie aplikacji na stanowisko Angular Developer."
@@ -266,6 +286,7 @@ def test_parse_direct_english_body_position():
 # _parse_pracuj_status — real Pracuj.pl status emails
 # ---------------------------------------------------------------------------
 
+
 def test_parse_pracuj_status_title_from_subject():
     title_in_subject = "Frontend Developer (Angular + AI)"
     company, title = _parse_pracuj_status(
@@ -299,6 +320,7 @@ def test_parse_pracuj_status_no_match():
 # _parse_smartjobs — real SmartJobs Smart Tracker emails
 # ---------------------------------------------------------------------------
 
+
 def test_parse_smartjobs_from_body():
     """Real SmartJobs email body contains stanowisko + w firmie."""
     body = (
@@ -318,7 +340,9 @@ def test_parse_smartjobs_hiberus():
         "Oto Smart Tracker dla Twojej aplikacji na stanowisko Frontend Developer (Angular + AI) "
         "w firmie Hiberus Poland."
     )
-    company, title = _parse_smartjobs("Twój Smart Tracker dla Frontend Developer (Angular + AI)", body)
+    company, title = _parse_smartjobs(
+        "Twój Smart Tracker dla Frontend Developer (Angular + AI)", body
+    )
     assert company == "Hiberus Poland"
     assert title == "Frontend Developer (Angular + AI)"
 
@@ -336,6 +360,7 @@ def test_parse_smartjobs_title_fallback_from_subject():
 # ---------------------------------------------------------------------------
 # _parse_theprotocol — real theprotocol.it confirmation emails
 # ---------------------------------------------------------------------------
+
 
 def test_parse_theprotocol_iteamly():
     """Real theprotocol.it subject."""
@@ -358,6 +383,7 @@ def test_parse_theprotocol_no_match():
 # _parse_recruitify — real Recruitify.ai emails
 # ---------------------------------------------------------------------------
 
+
 def test_parse_recruitify_title_from_body():
     body = "Hello Igor\n\nThanks for applying. Your application is being processed.\n\nPosition: Frontend Developer (Angular)\n"
     company, title = _parse_recruitify(
@@ -377,6 +403,7 @@ def test_parse_recruitify_no_body():
 # ---------------------------------------------------------------------------
 # _parse_message routing — new platforms
 # ---------------------------------------------------------------------------
+
 
 def test_parse_message_pracuj_status():
     msg = _make_msg(
@@ -435,6 +462,7 @@ def test_parse_message_recruitify():
 # _extract_body_text
 # ---------------------------------------------------------------------------
 
+
 def test_extract_body_text_plain():
     payload = {
         "mimeType": "text/plain",
@@ -461,6 +489,7 @@ def test_extract_body_text_empty():
 # _message_date
 # ---------------------------------------------------------------------------
 
+
 def test_message_date_returns_iso():
     msg = {"internalDate": "1716307200000"}
     assert _message_date(msg) == "2024-05-21"
@@ -469,6 +498,7 @@ def test_message_date_returns_iso():
 # ---------------------------------------------------------------------------
 # _parse_message — integration across parsers
 # ---------------------------------------------------------------------------
+
 
 def test_parse_message_erecruiter_nask():
     msg = _make_msg(
@@ -483,7 +513,9 @@ def test_parse_message_erecruiter_nask():
 
 
 def test_parse_message_smartrecruiters():
-    body = "Thank you for submitting your application for the position of Middle Front-End Developer."
+    body = (
+        "Thank you for submitting your application for the position of Middle Front-End Developer."
+    )
     msg = _make_msg(
         subject="Thank you for applying to Sigma Software",
         sender="Sigma Software <notification@smartrecruiters.com>",
@@ -521,16 +553,23 @@ def test_parse_message_skips_non_confirmation():
 # match_email
 # ---------------------------------------------------------------------------
 
+
 def test_match_email_no_company(tracker_db):
-    email = ConfirmationEmail(company="", title="Angular Dev", date="2026-05-20",
-                              subject="...", platform="erecruiter")
+    email = ConfirmationEmail(
+        company="", title="Angular Dev", date="2026-05-20", subject="...", platform="erecruiter"
+    )
     assert match_email(email).match_type == "no_match"
 
 
 def test_match_email_exact(tracker_db):
     _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
-    email = ConfirmationEmail(company="NASK", title="Senior Frontend Developer",
-                              date="2026-05-20", subject="...", platform="erecruiter")
+    email = ConfirmationEmail(
+        company="NASK",
+        title="Senior Frontend Developer",
+        date="2026-05-20",
+        subject="...",
+        platform="erecruiter",
+    )
     result = match_email(email)
     assert result.match_type == "exact"
     assert result.row_id is not None
@@ -539,8 +578,13 @@ def test_match_email_exact(tracker_db):
 def test_match_email_fuzzy_partial_title(tracker_db):
     _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
     # "Frontend Developer" vs "Senior Frontend Developer" — "senior" is stop word → exact
-    email = ConfirmationEmail(company="NASK", title="Frontend Developer",
-                              date="2026-05-20", subject="...", platform="erecruiter")
+    email = ConfirmationEmail(
+        company="NASK",
+        title="Frontend Developer",
+        date="2026-05-20",
+        subject="...",
+        platform="erecruiter",
+    )
     result = match_email(email)
     assert result.match_type in ("exact", "fuzzy")
     assert result.row_id is not None
@@ -548,47 +592,55 @@ def test_match_email_fuzzy_partial_title(tracker_db):
 
 def test_match_email_no_match_wrong_company(tracker_db):
     _insert_tracker_row(tracker_db, company="Other Corp", title="Angular Developer")
-    email = ConfirmationEmail(company="NASK", title="Angular Developer",
-                              date="2026-05-20", subject="...", platform="erecruiter")
+    email = ConfirmationEmail(
+        company="NASK",
+        title="Angular Developer",
+        date="2026-05-20",
+        subject="...",
+        platform="erecruiter",
+    )
     assert match_email(email).match_type == "no_match"
 
 
 def test_match_email_ambiguous(tracker_db):
-    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer",
-                        row_id="id0id0id")
-    _insert_tracker_row(tracker_db, company="Acme", title="Angular Engineer",
-                        row_id="id1id1id")
-    email = ConfirmationEmail(company="Acme", title="Angular Dev",
-                              date="2026-05-20", subject="...", platform="erecruiter")
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer", row_id="id0id0id")
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Engineer", row_id="id1id1id")
+    email = ConfirmationEmail(
+        company="Acme", title="Angular Dev", date="2026-05-20", subject="...", platform="erecruiter"
+    )
     result = match_email(email)
     assert result.match_type == "ambiguous"
     assert result.row_id is None
 
 
 def test_match_email_no_title_single_row(tracker_db):
-    _insert_tracker_row(tracker_db, company="Sigma Software",
-                        title="Middle Front-End Developer")
+    _insert_tracker_row(tracker_db, company="Sigma Software", title="Middle Front-End Developer")
     # SmartRecruiters email where title couldn't be extracted
-    email = ConfirmationEmail(company="Sigma Software", title="",
-                              date="2026-05-20", subject="...", platform="smartrecruiters")
+    email = ConfirmationEmail(
+        company="Sigma Software",
+        title="",
+        date="2026-05-20",
+        subject="...",
+        platform="smartrecruiters",
+    )
     result = match_email(email)
     assert result.match_type == "fuzzy"
     assert result.row_id is not None
 
 
 def test_match_email_no_title_multiple_rows_ambiguous(tracker_db):
-    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer",
-                        row_id="id0id0id")
-    _insert_tracker_row(tracker_db, company="Acme", title="React Developer",
-                        row_id="id1id1id")
-    email = ConfirmationEmail(company="Acme", title="",
-                              date="2026-05-20", subject="...", platform="direct")
+    _insert_tracker_row(tracker_db, company="Acme", title="Angular Developer", row_id="id0id0id")
+    _insert_tracker_row(tracker_db, company="Acme", title="React Developer", row_id="id1id1id")
+    email = ConfirmationEmail(
+        company="Acme", title="", date="2026-05-20", subject="...", platform="direct"
+    )
     assert match_email(email).match_type == "ambiguous"
 
 
 # ---------------------------------------------------------------------------
 # fetch_confirmation_emails (mocked Gmail service)
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_returns_empty_on_gmail_error():
     service = MagicMock()
@@ -622,7 +674,9 @@ def test_fetch_parses_erecruiter_confirmation():
 
 
 def test_fetch_parses_smartrecruiters_confirmation():
-    body = "Thank you for submitting your application for the position of Middle Front-End Developer."
+    body = (
+        "Thank you for submitting your application for the position of Middle Front-End Developer."
+    )
     msg = _make_msg(
         subject="Thank you for applying to Sigma Software",
         sender="Sigma Software <notification@smartrecruiters.com>",
@@ -641,20 +695,22 @@ def test_fetch_parses_smartrecruiters_confirmation():
 # run_confirmation_check — writes CONFIRMED to tracker
 # ---------------------------------------------------------------------------
 
+
 def test_run_writes_confirmed(tracker_db, monkeypatch):
     import hunter.email_response_checker as checker
 
     _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer")
 
     confirmed_email = ConfirmationEmail(
-        company="NASK", title="Senior Frontend Developer",
-        date="2026-05-20", subject="NASK - Dziękujemy...", platform="erecruiter",
+        company="NASK",
+        title="Senior Frontend Developer",
+        date="2026-05-20",
+        subject="NASK - Dziękujemy...",
+        platform="erecruiter",
     )
-    monkeypatch.setattr(checker, "fetch_confirmation_emails",
-                        lambda svc, days: [confirmed_email])
+    monkeypatch.setattr(checker, "fetch_confirmation_emails", lambda svc, days: [confirmed_email])
 
-    with patch("hunter.email_response_checker.get_gmail_service",
-               return_value=MagicMock()):
+    with patch("hunter.email_response_checker.get_gmail_service", return_value=MagicMock()):
         results = checker.run_confirmation_check(lookback_days=7)
 
     assert results[0].match_type in ("exact", "fuzzy")
@@ -666,18 +722,20 @@ def test_run_writes_confirmed(tracker_db, monkeypatch):
 def test_run_does_not_overwrite_existing_confirmation(tracker_db, monkeypatch):
     import hunter.email_response_checker as checker
 
-    _insert_tracker_row(tracker_db, company="NASK", title="Senior Frontend Developer",
-                        confirmation="2026-04-01")
+    _insert_tracker_row(
+        tracker_db, company="NASK", title="Senior Frontend Developer", confirmation="2026-04-01"
+    )
 
     confirmed_email = ConfirmationEmail(
-        company="NASK", title="Senior Frontend Developer",
-        date="2026-05-20", subject="...", platform="erecruiter",
+        company="NASK",
+        title="Senior Frontend Developer",
+        date="2026-05-20",
+        subject="...",
+        platform="erecruiter",
     )
-    monkeypatch.setattr(checker, "fetch_confirmation_emails",
-                        lambda svc, days: [confirmed_email])
+    monkeypatch.setattr(checker, "fetch_confirmation_emails", lambda svc, days: [confirmed_email])
 
-    with patch("hunter.email_response_checker.get_gmail_service",
-               return_value=MagicMock()):
+    with patch("hunter.email_response_checker.get_gmail_service", return_value=MagicMock()):
         checker.run_confirmation_check(lookback_days=7)
 
     rows = lookup_by_company_and_title("NASK", "Senior Frontend Developer")
