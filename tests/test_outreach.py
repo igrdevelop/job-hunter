@@ -85,6 +85,24 @@ def test_paste_url_not_rendered(tmp_path) -> None:
     assert "paste://" not in out.read_text(encoding="utf-8")
 
 
+def test_source_permalink_preferred_over_synthetic_url(tmp_path) -> None:
+    """A scout-relay job's `url` is a synthetic dedup key, not something the
+    owner can open — when content.json carries a captured `source_permalink`
+    (see apply_api.py Step 6), the rendered outreach.md must show that
+    instead, so there's an actual link to go apply/message on."""
+    folder = _make_folder(tmp_path)
+    content_path = folder / "content.json"
+    content = json.loads(content_path.read_text(encoding="utf-8"))
+    content["source_permalink"] = "https://www.linkedin.com/posts/someone_activity-123"
+    content_path.write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+
+    with _llm_ok():
+        out = run_outreach(folder, "https://linkedin-scout.internal/posts/pdeadbeef")
+    text = out.read_text(encoding="utf-8")
+    assert "https://www.linkedin.com/posts/someone_activity-123" in text
+    assert "linkedin-scout.internal" not in text
+
+
 def test_no_contact_still_writes_message_with_hint(tmp_path) -> None:
     folder = _make_folder(tmp_path, job_text=EN_POSTING)
     with _llm_ok():

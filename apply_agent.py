@@ -58,7 +58,6 @@ from hunter.apply_shared import (  # noqa: F401
 from hunter.apply_api import main_api  # noqa: F401
 from hunter.apply_cli import _is_cli_available, main_cli  # noqa: F401
 
-
 # ── Main dispatcher ────────────────────────────────────────────────────────────
 
 def main(
@@ -69,10 +68,11 @@ def main(
     paste_text: str = "",
     jobleads_company: str = "",
     jobleads_title: str = "",
+    permalink: str = "",
 ) -> None:
     """Dispatch to CLI or API pipeline based on availability and flags."""
     if force_cli or APPLY_USE_CLI:
-        folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+        folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink)
         _maybe_run_shadow(folder, full=full)
         return
 
@@ -80,7 +80,7 @@ def main(
     if cli_ok:
         print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
         try:
-            folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text)
+            folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink)
             _maybe_run_shadow(folder, full=full)
             return
         except (ApplyError, SystemExit) as e:
@@ -99,6 +99,7 @@ def main(
             full_mode=full,
             jobleads_company=jobleads_company,
             jobleads_title=jobleads_title,
+            permalink=permalink,
         )
         _maybe_run_shadow(folder, full=full)
     else:
@@ -123,17 +124,17 @@ def _maybe_run_shadow(folder, full: bool) -> None:
 
 def parse_apply_cli_argv(
     argv: list[str],
-) -> tuple[str, bool, bool, bool, str, str, str, bool]:
+) -> tuple[str, bool, bool, bool, str, str, str, bool, str]:
     """Parse argv (including script name).
 
-    Returns: url, force_cli, force, full, company, title, paste_file, notify_start
+    Returns: url, force_cli, force, full, company, title, paste_file, notify_start, permalink
     """
     args = argv[1:]
     force_cli = "--cli" in args
     force = "--force" in args
     full = "--full" in args
     notify_start = "--notify-start" in args
-    company, title, paste_file = "", "", ""
+    company, title, paste_file, permalink = "", "", "", ""
     pos: list[str] = []
     i = 0
     while i < len(args):
@@ -150,26 +151,28 @@ def parse_apply_cli_argv(
             paste_file = args[i + 1]
             i += 2
             continue
+        if a == "--permalink" and i + 1 < len(args):
+            permalink = args[i + 1]
+            i += 2
+            continue
         if a.startswith("--"):
             i += 1
             continue
         pos.append(a)
         i += 1
     url = pos[0] if pos else ""
-    return url, force_cli, force, full, company, title, paste_file, notify_start
+    return url, force_cli, force, full, company, title, paste_file, notify_start, permalink
 
 
 # ── __main__ block ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(
-            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
-            "[--company NAME] [--title TITLE] [--paste-file PATH] [--notify-start]",
-        )
+        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--company NAME] "
+              "[--title TITLE] [--paste-file PATH] [--permalink URL] [--notify-start]")
         sys.exit(1)
 
-    url, force_cli, force, full, co, ti, paste_file, notify_start = parse_apply_cli_argv(sys.argv)
+    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(sys.argv)
 
     paste_text = ""
     if paste_file:
@@ -183,10 +186,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
     if not url and not paste_text:
-        print(
-            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] "
-            "[--paste-file PATH] ...",
-        )
+        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--paste-file PATH] ...")
         sys.exit(1)
 
     if notify_start:
@@ -194,4 +194,4 @@ if __name__ == "__main__":
         notify(f"🔄 <b>Processing...</b>\n🔗 {label}\n\nFetching job text & calling LLM…")
 
     main(url, force_cli=force_cli, force=force, full=full, paste_text=paste_text,
-         jobleads_company=co, jobleads_title=ti)
+         jobleads_company=co, jobleads_title=ti, permalink=permalink)

@@ -9,7 +9,16 @@ MIN_JOB_TEXT_LEN = 300  # P-2.2: raised from 200 — real postings are rarely <3
 # stay a leaf module, and tracker.py also needs this marker without pulling in
 # the whole hunter.sources package. No trailing slash: normalize_url() strips
 # it, and pre-#144 rows in prod are stored as the bare collapsed form.
-SCOUT_POSTS_URL_MARKER = "linkedin.com/scout-posts"
+# Deliberately NOT "linkedin.com/..." — that collided with LinkedInSource.
+# matches_url() (hostname-only "linkedin.com" in host check), routing any
+# non-paste-text fetch of a scout URL to the real LinkedIn fetcher instead of
+# the relay's own "no fetchable URL" error.
+SCOUT_POSTS_URL_MARKER = "linkedin-scout.internal/posts"
+
+# Old (pre-fix) prefix — kept only so already-recorded prod rows still match
+# the lower text-length floor / retry-exclusion / expired-check-skip logic
+# below after this deploy; new rows always use SCOUT_POSTS_URL_MARKER.
+_LEGACY_SCOUT_POSTS_URL_MARKER = "linkedin.com/scout-posts"
 
 # Scout feed posts are legitimately short ("We're hiring an Angular dev — DM
 # me") and already passed is_hiring_post() heuristics on the owner's desktop;
@@ -29,7 +38,11 @@ TELEGRAM_POST_URL_MARKER = "//t.me/"
 def min_job_text_len_for(url: str) -> int:
     """Return the too-short floor for this apply: scout/telegram posts get a lower one."""
     u = url or ""
-    if SCOUT_POSTS_URL_MARKER in u or TELEGRAM_POST_URL_MARKER in u:
+    if (
+        SCOUT_POSTS_URL_MARKER in u
+        or _LEGACY_SCOUT_POSTS_URL_MARKER in u
+        or TELEGRAM_POST_URL_MARKER in u
+    ):
         return MIN_SCOUT_TEXT_LEN
     return MIN_JOB_TEXT_LEN
 

@@ -126,6 +126,7 @@ def main_cli(
     skip_dedup: bool = False,
     full_mode: bool = False,
     paste_text: str = "",
+    permalink: str = "",
 ) -> Path | None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
 
@@ -138,6 +139,8 @@ def main_cli(
     skip_dedup: When True, bypass tracker dedup check.
     full_mode:  When True, pass --full to generate_docs.py (DOCX + PDF, PL CV).
     paste_text: Pre-supplied job text (skips HTTP fetch). CLI receives it directly.
+    permalink:  Real, clickable source URL when `url` is a synthetic dedup key
+                (see apply_api.main_api's matching parameter for the full story).
 
     Raises ApplyError on failure so apply_agent.main() can try API fallback.
     """
@@ -307,7 +310,10 @@ def main_cli(
         if job_text:
             try:
                 job_posting_path = folder_path / "job_posting.txt"
-                job_posting_path.write_text(f"URL: {url}\n\n{job_text}", encoding="utf-8")
+                post_line = f"Post: {permalink}\n\n" if permalink else ""
+                job_posting_path.write_text(
+                    f"URL: {url}\n\n{post_line}{job_text}", encoding="utf-8"
+                )
                 print(f"[apply_agent] Saved job posting -> {job_posting_path.name}")
             except Exception as e:
                 print(f"[apply_agent] Warning: could not save job_posting.txt: {e}")
@@ -674,6 +680,11 @@ def main_cli(
             if verdict is not None:
                 _cli_content["ats_verdict"] = verdict
             _cli_content["cost"] = {"mode": "cli", "total_usd": None}
+            if permalink:
+                # Real, clickable link (e.g. a captured LinkedIn Scout post
+                # permalink) — distinct from the synthetic dedup `url`. See
+                # apply_api.py's matching comment; read by outreach.py.
+                _cli_content["source_permalink"] = permalink
             content_json_path.write_text(
                 json.dumps(_cli_content, ensure_ascii=False, indent=2),
                 encoding="utf-8",

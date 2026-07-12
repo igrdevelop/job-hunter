@@ -65,13 +65,24 @@ logger = logging.getLogger(__name__)
 QUEUE_PATH = PROJECT_DIR / "linkedin_scout" / "pending_candidates.json"
 
 # Synthetic URL prefix — a dedup key for tracker.db, not a real navigable
-# LinkedIn URL. Distinctive enough to never collide with a real linkedin.com
-# URL, so it needs no special precedence handling in the fetch dispatcher.
+# LinkedIn URL. Deliberately NOT on the linkedin.com host: an earlier version
+# used "https://linkedin.com/scout-posts/p..." which LOOKED distinctive but
+# still collided with LinkedInSource.matches_url() (hostname-only check,
+# "linkedin.com" in host — matches any path) — and LinkedInSource is
+# registered before this source in _fetch_roster(). Any fetch_job_text(url)
+# call for a scout URL that ISN'T short-circuited by paste_text (a synthetic
+# row picked up by /debug_url, or by expired_marker's periodic unsent-row
+# check — FAIL rows aren't excluded from iter_unsent_rows) got silently
+# routed to the real LinkedIn fetcher instead of raising the intended
+# "no fetchable URL" error, and it tried to actually fetch a nonexistent
+# linkedin.com path. The ".internal" pseudo-TLD below can never resolve to a
+# real host and matches no other source's matches_url() (all check real
+# domains), so no precedence handling is needed and none can ever be needed.
 # The per-post hash MUST live in the path, not the fragment: normalize_url()
 # strips fragments, and a fragment-based key made every scout job normalize
 # to the same url_norm — dedup then dropped every candidate after the first
 # (issue #144).
-URL_PREFIX = "https://linkedin.com/scout-posts/p"
+URL_PREFIX = "https://linkedin-scout.internal/posts/p"
 
 # Guards QUEUE_PATH read/append/clear against the append (called from the
 # async /scoutfound command handler, via asyncio.to_thread) racing the drain

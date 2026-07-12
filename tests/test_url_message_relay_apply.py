@@ -47,8 +47,8 @@ def test_relay_job_apply_uses_paste_file(tmp_path):
     query = _FakeQuery()
     captured_calls = []
 
-    async def fake_run_apply_agent(url, force=False, paste_file=None):
-        captured_calls.append((url, force, paste_file))
+    async def fake_run_apply_agent(url, force=False, paste_file=None, permalink=None):
+        captured_calls.append((url, force, paste_file, permalink))
 
     async def scenario():
         await _handle_apply(query, job, "job_id_1", context=None)
@@ -60,11 +60,44 @@ def test_relay_job_apply_uses_paste_file(tmp_path):
         _run(scenario())
 
     assert len(captured_calls) == 1
-    url, force, paste_file = captured_calls[0]
+    url, force, paste_file, permalink = captured_calls[0]
     assert url == job.url
     assert paste_file is not None
+    assert permalink is None
     saved_text = Path(paste_file).read_text(encoding="utf-8")
     assert "We're hiring an Angular Developer" in saved_text
+    Path(paste_file).unlink(missing_ok=True)
+
+
+def test_relay_job_apply_forwards_permalink(tmp_path):
+    job = Job(
+        title="[LI post] hiring",
+        company="Deloitte",
+        location="",
+        salary=None,
+        url="https://linkedin-scout.internal/posts/pabc123",
+        source="linkedin_scout_relay",
+        raw={
+            "post_text": "We're hiring an Angular Developer, remote.",
+            "permalink": "https://www.linkedin.com/posts/someone_activity-123",
+        },
+    )
+    query = _FakeQuery()
+    captured_calls = []
+
+    async def fake_run_apply_agent(url, force=False, paste_file=None, permalink=None):
+        captured_calls.append((url, force, paste_file, permalink))
+
+    async def scenario():
+        await _handle_apply(query, job, "job_id_3", context=None)
+        await asyncio.sleep(0)
+
+    with patch("hunter.commands.url_message._run_apply_agent", fake_run_apply_agent):
+        _run(scenario())
+
+    assert len(captured_calls) == 1
+    _, _, paste_file, permalink = captured_calls[0]
+    assert permalink == "https://www.linkedin.com/posts/someone_activity-123"
     Path(paste_file).unlink(missing_ok=True)
 
 
@@ -76,8 +109,8 @@ def test_normal_job_apply_does_not_use_paste_file():
     query = _FakeQuery()
     captured_calls = []
 
-    async def fake_run_apply_agent(url, force=False, paste_file=None):
-        captured_calls.append((url, force, paste_file))
+    async def fake_run_apply_agent(url, force=False, paste_file=None, permalink=None):
+        captured_calls.append((url, force, paste_file, permalink))
 
     async def scenario():
         await _handle_apply(query, job, "job_id_2", context=None)
@@ -87,6 +120,7 @@ def test_normal_job_apply_does_not_use_paste_file():
         _run(scenario())
 
     assert len(captured_calls) == 1
-    url, force, paste_file = captured_calls[0]
+    url, force, paste_file, permalink = captured_calls[0]
     assert url == job.url
     assert paste_file is None
+    assert permalink is None
