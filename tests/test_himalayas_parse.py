@@ -1,7 +1,10 @@
 """Himalayas source parsing (no network)."""
 
+from unittest.mock import patch
+
 from hunter.sources.himalayas import (
     HimalayasSource,
+    _company_slug_from_url,
     _format_location,
     _format_salary,
     _prefilter_context,
@@ -94,3 +97,75 @@ def test_prefilter_context_includes_categories() -> None:
     assert "TypeScript" in ctx
     assert "Engineering" in ctx
     assert "Angular" in ctx
+
+
+def test_matches_url() -> None:
+    src = HimalayasSource()
+    assert src.matches_url("https://himalayas.app/companies/x/jobs/y") is True
+    assert src.matches_url("https://www.himalayas.app/companies/x/jobs/y") is True
+    assert src.matches_url("https://example.com/x") is False
+
+
+def test_company_slug_from_url() -> None:
+    url = "https://himalayas.app/companies/about-source/jobs/lead-frontend-dev"
+    assert _company_slug_from_url(url) == "about-source"
+    assert _company_slug_from_url("https://himalayas.app/companies/") == ""
+    assert _company_slug_from_url("https://example.com/other/path") == ""
+
+
+def test_fetch_text_returns_description_for_matching_application_link() -> None:
+    src = HimalayasSource()
+    url = "https://himalayas.app/companies/about-source/jobs/lead-frontend-dev"
+    api_response = {
+        "jobs": [
+            _sample_job_dict(applicationLink="https://himalayas.app/companies/x/jobs/other"),
+            _sample_job_dict(
+                applicationLink=url,
+                description="<p>Right <b>one</b></p>",
+            ),
+        ]
+    }
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return api_response
+
+    with patch("hunter.sources.himalayas.requests.get", return_value=_Resp()):
+        text = src.fetch_text(url)
+    assert text == "Right one"
+
+
+def test_fetch_text_falls_back_when_no_application_link_match() -> None:
+    src = HimalayasSource()
+    url = "https://himalayas.app/companies/about-source/jobs/missing"
+    api_response = {"jobs": [_sample_job_dict(applicationLink="https://himalayas.app/other")]}
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return api_response
+
+    with patch(
+        "hunter.sources.himalayas.requests.get", return_value=_Resp()
+    ), patch(
+        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
+    ) as m_fb:
+        text = src.fetch_text(url)
+    assert text == "fallback"
+    m_fb.assert_called_once()
+
+
+def test_fetch_text_falls_back_when_no_company_slug_in_url() -> None:
+    src = HimalayasSource()
+    url = "https://himalayas.app/jobs/some-legacy-path"
+    with patch(
+        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
+    ) as m_fb:
+        text = src.fetch_text(url)
+    assert text == "fallback"
+    m_fb.assert_called_once()

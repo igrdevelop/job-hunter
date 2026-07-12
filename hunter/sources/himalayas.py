@@ -49,9 +49,42 @@ class HimalayasSource(BaseSource):
         host = (urlparse(url).hostname or "").lower()
         return "himalayas.app" in host
 
-    # fetch_text uses BaseSource default — Himalayas had no dedicated entry in
-    # the legacy job_fetch dispatcher, so its URLs were routed through the
-    # generic HTML fallback. We preserve that behaviour explicitly.
+    def fetch_text(self, url: str) -> str:
+        """Re-query the search API by company slug and return the stored description.
+
+        Every Himalayas job's ``applicationLink`` points back at a himalayas.app
+        page (there is no external-ATS variant observed) and that page 403s to a
+        plain ``requests.get`` (Cloudflare) — the generic HTML fallback this
+        source used to rely on therefore failed on 100% of Himalayas jobs. The
+        public search API has no per-job GET endpoint, but it already carries
+        the full ``description`` in every hit and supports ``?company=<slug>``
+        filtering, so re-querying by the company slug parsed out of the URL and
+        matching on ``applicationLink`` recovers the text without ever hitting
+        the blocked HTML page.
+        """
+        slug = _company_slug_from_url(url)
+        if slug:
+            try:
+                desc = self._fetch_description(slug, url)
+                if desc:
+                    return desc
+            except Exception as e:
+                logger.warning(f"[Himalayas] company lookup failed ({e}), using html_fallback")
+        from hunter.sources.html_fallback import fetch_html
+
+        return fetch_html(url)
+
+    def _fetch_description(self, company_slug: str, url: str) -> str:
+        params = {"company": company_slug}
+        resp = requests.get(API_SEARCH_URL, params=params, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        for raw in data.get("jobs", []):
+            if not isinstance(raw, dict):
+                continue
+            if (raw.get("applicationLink") or "").strip() == url:
+                return strip_html(raw.get("description"), 20000)
+        return ""
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()
@@ -139,6 +172,17 @@ class HimalayasSource(BaseSource):
             source=self.name,
             raw=raw,
         )
+
+
+def _company_slug_from_url(url: str) -> str:
+    """Extract the company slug from a himalayas.app job URL.
+
+    URL shape: https://himalayas.app/companies/{company-slug}/jobs/{job-slug}
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "companies":
+        return parts[1]
+    return ""
 
 
 def _format_location(raw: dict) -> str:
