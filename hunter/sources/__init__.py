@@ -16,6 +16,7 @@ from hunter.config import (
     JUSTREMOTE_ENABLED,
     REMOTEOK_ENABLED,
     HIMALAYAS_ENABLED,
+    FINDMYREMOTE_ENABLED,
     FOURDAYWEEK_ENABLED,
     WEWORKREMOTELY_ENABLED,
     REMOTELEAF_ENABLED,
@@ -113,6 +114,11 @@ if HIMALAYAS_ENABLED:
 
     ALL_SOURCES.append(HimalayasSource())
 
+if FINDMYREMOTE_ENABLED:
+    from hunter.sources.findmyremote import FindMyRemoteSource
+
+    ALL_SOURCES.append(FindMyRemoteSource())
+
 if FOURDAYWEEK_ENABLED:
     from hunter.sources.fourdayweek import FourdayweekSource
 
@@ -172,6 +178,7 @@ def _fetch_roster() -> list:
     from hunter.sources.arbeitnow import ArbeitnowSource
     from hunter.sources.ats_aggregator import AtsAggregatorSource
     from hunter.sources.bulldogjob import BulldogJobSource
+    from hunter.sources.findmyremote import FindMyRemoteSource
     from hunter.sources.fourdayweek import FourdayweekSource
     from hunter.sources.himalayas import HimalayasSource
     from hunter.sources.inhire import InhireSource
@@ -211,6 +218,7 @@ def _fetch_roster() -> list:
         JustRemoteSource(),
         RemoteOkSource(),
         HimalayasSource(),
+        FindMyRemoteSource(),
         FourdayweekSource(),
         WeworkremotelySource(),
         RemoteleafSource(),
