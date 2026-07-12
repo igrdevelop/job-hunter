@@ -165,11 +165,7 @@ class BulldogJobSource(BaseSource):
             raise ValueError(f"No __NEXT_DATA__ on Bulldogjob page: {job_url}")
 
         data = json.loads(m.group(1))
-        apollo = (
-            data.get("props", {})
-            .get("pageProps", {})
-            .get("__APOLLO_STATE__", {})
-        )
+        apollo = data.get("props", {}).get("pageProps", {}).get("__APOLLO_STATE__", {})
 
         job_key = f"Job:{job_id}"
         job_data = apollo.get(job_key)
@@ -220,11 +216,7 @@ class BulldogJobSource(BaseSource):
                 logger.warning(f"[Bulldogjob] No __NEXT_DATA__ on {url}")
                 return []
             data = json.loads(m.group(1))
-            jobs = (
-                data.get("props", {})
-                .get("pageProps", {})
-                .get("jobs", [])
-            )
+            jobs = data.get("props", {}).get("pageProps", {}).get("jobs", [])
             return jobs if isinstance(jobs, list) else []
         except Exception as e:
             logger.error(f"[Bulldogjob] fetch listing {url}: {e}")

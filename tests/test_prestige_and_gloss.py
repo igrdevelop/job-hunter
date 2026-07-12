@@ -169,9 +169,7 @@ def test_gloss_uk_us_spelling_collapsed() -> None:
 
 def test_gloss_substring_collapsed_keeps_first() -> None:
     assert (
-        _collapse_gloss_item(
-            "technical documentation / High-quality technical documentation"
-        )
+        _collapse_gloss_item("technical documentation / High-quality technical documentation")
         == "technical documentation"
     )
 
@@ -179,8 +177,7 @@ def test_gloss_substring_collapsed_keeps_first() -> None:
 def test_gloss_rephrasing_collapsed() -> None:
     assert (
         _collapse_gloss_item(
-            "functional requirements validation / "
-            "defining and validating functional requirements"
+            "functional requirements validation / defining and validating functional requirements"
         )
         == "functional requirements validation"
     )
@@ -188,8 +185,7 @@ def test_gloss_rephrasing_collapsed() -> None:
 
 def test_distinct_skills_with_slash_kept() -> None:
     assert (
-        _collapse_gloss_item("OpenShift / container platforms")
-        == "OpenShift / container platforms"
+        _collapse_gloss_item("OpenShift / container platforms") == "OpenShift / container platforms"
     )
 
 

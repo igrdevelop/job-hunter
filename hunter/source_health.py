@@ -59,6 +59,7 @@ def _ensure_table(conn) -> None:
 
 # ── Data rows ─────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class RunRow:
     source: str
@@ -74,21 +75,25 @@ class HealthRow:
     last_ts: str | None
     last_yield: int | None
     last_ok: bool
-    avg_yield: float          # mean yield over recorded OK runs (0.0 if none)
-    runs: int                 # number of recorded runs
-    zero_streak: int          # leading consecutive runs with 0 yield or error
-    ever_positive: bool       # any recorded run had yield > 0
-    status: str               # OK | IDLE | BROKEN? | ERROR | NODATA
+    avg_yield: float  # mean yield over recorded OK runs (0.0 if none)
+    runs: int  # number of recorded runs
+    zero_streak: int  # leading consecutive runs with 0 yield or error
+    ever_positive: bool  # any recorded run had yield > 0
+    status: str  # OK | IDLE | BROKEN? | ERROR | NODATA
 
     @property
     def icon(self) -> str:
         return {
-            "OK": "✅", "IDLE": "💤", "BROKEN?": "⚠️",
-            "ERROR": "❌", "NODATA": "—",
+            "OK": "✅",
+            "IDLE": "💤",
+            "BROKEN?": "⚠️",
+            "ERROR": "❌",
+            "NODATA": "—",
         }.get(self.status, "—")
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
+
 
 def record_run(source: str, yield_count: int, ok: bool = True, error: str = "") -> None:
     """Persist one source run. Best-effort: never raises into the hunt loop."""
@@ -122,6 +127,7 @@ def _prune(conn, source: str) -> None:
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
+
 def recent_runs(source: str, limit: int = 20) -> list[RunRow]:
     """Return up to `limit` most recent runs for `source`, newest first."""
     try:
@@ -135,10 +141,7 @@ def recent_runs(source: str, limit: int = 20) -> list[RunRow]:
     except Exception as e:  # noqa: BLE001
         log.warning("source_health.recent_runs failed for %s: %s", source, e)
         return []
-    return [
-        RunRow(r["source"], r["ts"], r["yield"], bool(r["ok"]), r["error"])
-        for r in rows
-    ]
+    return [RunRow(r["source"], r["ts"], r["yield"], bool(r["ok"]), r["error"]) for r in rows]
 
 
 def _classify(runs: list[RunRow], source: str = "") -> HealthRow:
@@ -223,8 +226,4 @@ def newly_broken(source: str) -> bool:
     that is simply always-empty for our filters never alerts.
     """
     h = source_health(source)
-    return (
-        h.status == "BROKEN?"
-        and h.ever_positive
-        and h.zero_streak == SOURCE_HEALTH_ALERT_STREAK
-    )
+    return h.status == "BROKEN?" and h.ever_positive and h.zero_streak == SOURCE_HEALTH_ALERT_STREAK

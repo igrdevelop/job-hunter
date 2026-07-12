@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 
 
-def test_run_tracker_backup_copies_tracker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_tracker_backup_copies_tracker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import hunter.config as cfg
     import hunter.tracker_backup as tb
 

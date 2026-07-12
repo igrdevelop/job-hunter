@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 import openpyxl
 from openpyxl.styles import Font
 
-TRACKER_PATH  = ROOT / "tracker.xlsx"
+TRACKER_PATH = ROOT / "tracker.xlsx"
 APPLY = "--apply" in sys.argv
 
 BROKEN_URL_RE = re.compile(r"^https://www\.pracuj\.pl/praca/oferta,(\d+)$")
@@ -48,7 +48,7 @@ def fix_file(path: Path) -> int:
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
 
     try:
-        url_col   = headers.index("URL") + 1
+        url_col = headers.index("URL") + 1
         title_col = headers.index("Job Title") + 1
     except ValueError as e:
         print(f"  [skip] {path.name}: column not found: {e}")
@@ -58,7 +58,7 @@ def fix_file(path: Path) -> int:
     skipped = 0
 
     for row in range(2, ws.max_row + 1):
-        url   = str(ws.cell(row, url_col).value or "").strip()
+        url = str(ws.cell(row, url_col).value or "").strip()
         title = str(ws.cell(row, title_col).value or "").strip()
 
         m = BROKEN_URL_RE.match(url)
@@ -101,7 +101,7 @@ def main():
 
     print("📋 tracker.xlsx:")
     total = fix_file(TRACKER_PATH)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if total == 0:
         print("[fix_pracuj] Nothing to fix.")
     elif not APPLY:
@@ -112,4 +112,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

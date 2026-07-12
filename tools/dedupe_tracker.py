@@ -4,6 +4,7 @@ Keeps the best row per URL: highest ATS quality, then Sent filled, then earliest
 
 Usage: python tools/dedupe_tracker.py
 """
+
 from __future__ import annotations
 
 import shutil
@@ -48,9 +49,7 @@ def main() -> None:
         print(f"No tracker at {TRACKER_PATH}")
         return
 
-    backup = TRACKER_PATH.with_suffix(
-        f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    )
+    backup = TRACKER_PATH.with_suffix(f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
     shutil.copy2(TRACKER_PATH, backup)
     print(f"Backup: {backup}")
 
@@ -68,7 +67,7 @@ def main() -> None:
         groups[nu].append(r)
 
     to_delete: list[int] = []
-    for nu, rows in groups.items():
+    for rows in groups.values():
         if len(rows) <= 1:
             continue
         best = max(rows, key=lambda rn: _row_score(ws, rn))

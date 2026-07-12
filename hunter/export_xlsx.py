@@ -19,8 +19,8 @@ from hunter.tracker import TRACKER_HEADERS, read_all_tracker_rows
 logger = logging.getLogger(__name__)
 
 # Header row style — mirrors the original tracker formatting
-_HEADER_FONT  = Font(bold=True, color="FFFFFF")
-_HEADER_FILL  = PatternFill("solid", fgColor="1F4E79")
+_HEADER_FONT = Font(bold=True, color="FFFFFF")
+_HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 _HEADER_ALIGN = Alignment(horizontal="center", wrap_text=True)
 
 # Approximate column widths (characters) — nice default for human reading
@@ -59,8 +59,8 @@ def export_tracker_xlsx(output_path: Path) -> int:
     ws.append(TRACKER_HEADERS)
     for col_idx, header in enumerate(TRACKER_HEADERS, start=1):
         cell = ws.cell(row=1, column=col_idx)
-        cell.font  = _HEADER_FONT
-        cell.fill  = _HEADER_FILL
+        cell.font = _HEADER_FONT
+        cell.fill = _HEADER_FILL
         cell.alignment = _HEADER_ALIGN
         col_letter = get_column_letter(col_idx)
         ws.column_dimensions[col_letter].width = _COL_WIDTHS.get(header, 15)

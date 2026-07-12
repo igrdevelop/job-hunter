@@ -103,8 +103,12 @@ def test_relay_job_apply_forwards_permalink(tmp_path):
 
 def test_normal_job_apply_does_not_use_paste_file():
     job = Job(
-        title="Angular Dev", company="Acme", location="Remote", salary=None,
-        url="https://justjoin.it/job-offer/acme", source="justjoin",
+        title="Angular Dev",
+        company="Acme",
+        location="Remote",
+        salary=None,
+        url="https://justjoin.it/job-offer/acme",
+        source="justjoin",
     )
     query = _FakeQuery()
     captured_calls = []

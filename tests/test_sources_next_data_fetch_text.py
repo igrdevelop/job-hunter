@@ -35,6 +35,7 @@ def _mk_html_response(text: str, status: int = 200, final_url: str | None = None
 
 # ── Bulldogjob ──────────────────────────────────────────────────────────────
 
+
 def test_bulldogjob_matches_url() -> None:
     s = BulldogJobSource()
     assert s.matches_url("https://bulldogjob.com/companies/jobs/12345")
@@ -95,6 +96,7 @@ def test_bulldogjob_fetch_text_raises_when_no_next_data() -> None:
 
 # ── SolidJobs ───────────────────────────────────────────────────────────────
 
+
 def test_solidjobs_matches_url() -> None:
     s = SolidJobsSource()
     assert s.matches_url("https://solid.jobs/offer/12345/angular-developer")
@@ -128,11 +130,7 @@ def test_solidjobs_fetch_text_from_json_ld() -> None:
         "description": "<p>" + ("Build great stuff. " * 6) + "</p>",
         "employmentType": "FULL_TIME",
     }
-    html = (
-        '<html><body>'
-        f'<script type="application/ld+json">{json.dumps(ld)}</script>'
-        '</body></html>'
-    )
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
     with patch(
         "hunter.sources.solidjobs.requests.get",
         return_value=_mk_html_response(html, final_url="https://solid.jobs/o/x"),
@@ -145,19 +143,23 @@ def test_solidjobs_fetch_text_from_json_ld() -> None:
 
 
 def test_solidjobs_fetch_text_falls_back_when_network_fails() -> None:
-    with patch(
-        "hunter.sources.solidjobs.requests.get",
-        side_effect=Exception("net down"),
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html",
-        return_value="fallback ok",
-    ) as m:
+    with (
+        patch(
+            "hunter.sources.solidjobs.requests.get",
+            side_effect=Exception("net down"),
+        ),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="fallback ok",
+        ) as m,
+    ):
         out = SolidJobsSource().fetch_text("https://solid.jobs/offer/123/x")
     assert out == "fallback ok"
     m.assert_called_once()
 
 
 # ── theprotocol ─────────────────────────────────────────────────────────────
+
 
 def test_theprotocol_matches_url() -> None:
     s = TheProtocolSource()
@@ -173,11 +175,7 @@ def test_theprotocol_fetch_text_from_json_ld() -> None:
         "hiringOrganization": {"name": "ExampleCo"},
         "description": "<p>" + ("Do cool things. " * 8) + "</p>",
     }
-    html = (
-        '<html><body>'
-        f'<script type="application/ld+json">{json.dumps(ld)}</script>'
-        '</body></html>'
-    )
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
     with patch(
         "hunter.sources.theprotocol._scraper.get",
         return_value=_mk_html_response(html),
@@ -239,18 +237,23 @@ def test_theprotocol_fetch_text_from_next_data_offer() -> None:
 
 
 def test_theprotocol_fetch_text_falls_back_on_network_error() -> None:
-    with patch(
-        "hunter.sources.theprotocol._scraper.get",
-        side_effect=Exception("blocked"),
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback ok",
-    ) as m:
+    with (
+        patch(
+            "hunter.sources.theprotocol._scraper.get",
+            side_effect=Exception("blocked"),
+        ),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="fallback ok",
+        ) as m,
+    ):
         out = TheProtocolSource().fetch_text("https://theprotocol.it/x")
     assert out == "fallback ok"
     m.assert_called_once()
 
 
 # ── Pracuj ──────────────────────────────────────────────────────────────────
+
 
 def test_pracuj_matches_url() -> None:
     s = PracujSource()
@@ -277,11 +280,7 @@ def test_pracuj_fetch_text_from_json_ld() -> None:
         "hiringOrganization": {"name": "ExampleCo"},
         "description": "<p>" + ("Cool gig. " * 12) + "</p>",
     }
-    html = (
-        '<html><body>'
-        f'<script type="application/ld+json">{json.dumps(ld)}</script>'
-        '</body></html>'
-    )
+    html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
     with patch(
         "hunter.sources.pracuj._scraper.get",
         return_value=_mk_html_response(html),
@@ -299,10 +298,10 @@ def test_pracuj_fetch_text_appends_archived_notice() -> None:
         "description": "<p>" + ("Stuff. " * 12) + "</p>",
     }
     html = (
-        '<html><body>'
+        "<html><body>"
         f'<script type="application/ld+json">{json.dumps(ld)}</script>'
         '<div data-test="section-archived">closed</div>'
-        '</body></html>'
+        "</body></html>"
     )
     with patch(
         "hunter.sources.pracuj._scraper.get",
@@ -316,21 +315,27 @@ def test_pracuj_fetch_text_appends_archived_notice() -> None:
 def test_pracuj_fetch_text_falls_back_through_all_strategies() -> None:
     # cloudscraper raises → plain requests (dynamically imported inside _fetch_detail_html)
     # also raises → final fetch_html fallback wins.
-    with patch(
-        "hunter.sources.pracuj._scraper.get",
-        side_effect=Exception("blocked"),
-    ), patch(
-        "requests.get",
-        side_effect=Exception("plain blocked too"),
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback ok",
-    ) as m:
+    with (
+        patch(
+            "hunter.sources.pracuj._scraper.get",
+            side_effect=Exception("blocked"),
+        ),
+        patch(
+            "requests.get",
+            side_effect=Exception("plain blocked too"),
+        ),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="fallback ok",
+        ) as m,
+    ):
         out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
     assert out == "fallback ok"
     m.assert_called_once()
 
 
 # ── Pracuj 429 backoff ────────────────────────────────────────────────────────
+
 
 def _http_error(status: int, retry_after: str | None = None) -> Exception:
     """Build a requests-style HTTPError carrying a response with a status code."""
@@ -347,13 +352,14 @@ def test_pracuj_429_retries_then_raises_without_fallback() -> None:
     from hunter.sources.pracuj import _RATE_LIMIT_MAX_RETRIES
 
     scraper_get = MagicMock(side_effect=_http_error(429))
-    with patch("hunter.sources.pracuj._scraper.get", scraper_get), patch(
-        "hunter.sources.pracuj.time.sleep"
-    ) as sleep_mock, patch(
-        "requests.get", side_effect=AssertionError("plain requests must not run on 429")
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html",
-        side_effect=AssertionError("html_fallback must not run on 429"),
+    with (
+        patch("hunter.sources.pracuj._scraper.get", scraper_get),
+        patch("hunter.sources.pracuj.time.sleep") as sleep_mock,
+        patch("requests.get", side_effect=AssertionError("plain requests must not run on 429")),
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            side_effect=AssertionError("html_fallback must not run on 429"),
+        ),
     ):
         with pytest.raises(Exception) as exc_info:
             PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
@@ -372,11 +378,10 @@ def test_pracuj_429_then_success_returns_text() -> None:
         "description": "<p>" + ("Body. " * 12) + "</p>",
     }
     html = f'<html><body><script type="application/ld+json">{json.dumps(ld)}</script></body></html>'
-    scraper_get = MagicMock(
-        side_effect=[_http_error(429), _mk_html_response(html)]
-    )
-    with patch("hunter.sources.pracuj._scraper.get", scraper_get), patch(
-        "hunter.sources.pracuj.time.sleep"
+    scraper_get = MagicMock(side_effect=[_http_error(429), _mk_html_response(html)])
+    with (
+        patch("hunter.sources.pracuj._scraper.get", scraper_get),
+        patch("hunter.sources.pracuj.time.sleep"),
     ):
         out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
 
@@ -386,11 +391,11 @@ def test_pracuj_429_then_success_returns_text() -> None:
 
 def test_pracuj_non_429_error_still_falls_back() -> None:
     """A non-429 cloudscraper failure keeps the existing plain-requests/html_fallback path."""
-    with patch(
-        "hunter.sources.pracuj._scraper.get", side_effect=Exception("blocked")
-    ), patch("requests.get", side_effect=Exception("plain blocked too")), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback ok"
-    ) as m:
+    with (
+        patch("hunter.sources.pracuj._scraper.get", side_effect=Exception("blocked")),
+        patch("requests.get", side_effect=Exception("plain blocked too")),
+        patch("hunter.sources.html_fallback.fetch_html", return_value="fallback ok") as m,
+    ):
         out = PracujSource().fetch_text("https://www.pracuj.pl/praca/x,oferta,abc")
     assert out == "fallback ok"
     m.assert_called_once()

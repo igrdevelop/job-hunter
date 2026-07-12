@@ -1,6 +1,5 @@
 """Tests for tracker.get_drive_url_by_url and tracker.set_drive_url."""
 
-
 from hunter import tracker
 from hunter.db import get_db
 
@@ -22,6 +21,7 @@ def _insert_row(tracker_db, *, url: str, drive_url: str = "", row_id: str = "abc
 # ---------------------------------------------------------------------------
 # get_drive_url_by_url
 # ---------------------------------------------------------------------------
+
 
 def test_get_drive_url_returns_none_when_no_tracker(tracker_db):
     assert tracker.get_drive_url_by_url("https://example.com/jobs/1") is None
@@ -53,6 +53,7 @@ def test_get_drive_url_normalizes_job_url(tracker_db):
 # ---------------------------------------------------------------------------
 # set_drive_url
 # ---------------------------------------------------------------------------
+
 
 def test_set_drive_url_noop_when_empty_db(tracker_db):
     # Should not raise even if no rows exist
@@ -88,9 +89,7 @@ def test_set_drive_url_updates_all_matching_rows(tracker_db):
     tracker.set_drive_url("https://example.com/jobs/1", drive)
 
     with get_db(tracker_db) as conn:
-        rows = conn.execute(
-            "SELECT drive_url FROM applications ORDER BY rowid"
-        ).fetchall()
+        rows = conn.execute("SELECT drive_url FROM applications ORDER BY rowid").fetchall()
     # Both rows updated (SQLite UPDATE without LIMIT updates all matching)
     assert all(r["drive_url"] == drive for r in rows)
 
@@ -98,6 +97,7 @@ def test_set_drive_url_updates_all_matching_rows(tracker_db):
 # ---------------------------------------------------------------------------
 # read_all_tracker_rows includes Drive URL
 # ---------------------------------------------------------------------------
+
 
 def test_read_all_tracker_rows_includes_drive_url(tracker_db):
     drive = "https://drive.google.com/drive/folders/abc"

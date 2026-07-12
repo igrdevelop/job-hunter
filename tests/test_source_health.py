@@ -29,6 +29,7 @@ def _feed(source, *yields):
 
 # ── record / recent ───────────────────────────────────────────────────────────
 
+
 def test_record_and_recent_newest_first(health_db):
     _feed("justjoin", 5, 3, 8)
     runs = source_health.recent_runs("justjoin")
@@ -51,6 +52,7 @@ def test_prune_keeps_only_keep_rows(health_db, monkeypatch):
 
 
 # ── status classification ─────────────────────────────────────────────────────
+
 
 def test_status_ok(health_db):
     _feed("a", 4, 5, 6)
@@ -105,15 +107,16 @@ def test_error_run_counts_toward_streak(health_db):
 
 # ── newly_broken (alert-once semantics) ───────────────────────────────────────
 
+
 def test_newly_broken_fires_once_at_threshold(health_db):
     _feed("a", 8, 8)
-    source_health.record_run("a", 0)       # streak 1
+    source_health.record_run("a", 0)  # streak 1
     assert not source_health.newly_broken("a")
-    source_health.record_run("a", 0)       # streak 2
+    source_health.record_run("a", 0)  # streak 2
     assert not source_health.newly_broken("a")
-    source_health.record_run("a", 0)       # streak 3 → fire
+    source_health.record_run("a", 0)  # streak 3 → fire
     assert source_health.newly_broken("a")
-    source_health.record_run("a", 0)       # streak 4 → no longer "newly"
+    source_health.record_run("a", 0)  # streak 4 → no longer "newly"
     assert not source_health.newly_broken("a")
 
 
@@ -123,6 +126,7 @@ def test_newly_broken_false_when_never_positive(health_db):
 
 
 # ── health_report ─────────────────────────────────────────────────────────────
+
 
 def test_health_report_all_sources_sorted_by_severity(health_db):
     _feed("good", 5, 5, 5)
@@ -146,6 +150,7 @@ def test_health_report_named_sources_include_nodata(health_db):
 
 # ── /health command report builder ────────────────────────────────────────────
 
+
 def test_build_report_sections(health_db, monkeypatch):
     """The /health text groups sources into attention / healthy / idle / nodata."""
     # A real source name + a synthetic broken/idle set; _build_report uses the
@@ -165,4 +170,3 @@ def test_build_report_sections(health_db, monkeypatch):
     assert good in text
     # Sources never recorded show up under "No data yet".
     assert "No data yet" in text
-

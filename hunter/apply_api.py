@@ -52,9 +52,21 @@ _BASE_CV_FILES = {
 }
 
 _AI_KEYWORDS = {
-    "llm", "ai engineer", "ai developer", "ml engineer", "machine learning",
-    "prompt engineer", "langchain", "openai", "anthropic", "llm integration",
-    "ai-first", "ai first", "agentic", "copilot", "cursor ide",
+    "llm",
+    "ai engineer",
+    "ai developer",
+    "ml engineer",
+    "machine learning",
+    "prompt engineer",
+    "langchain",
+    "openai",
+    "anthropic",
+    "llm integration",
+    "ai-first",
+    "ai first",
+    "agentic",
+    "copilot",
+    "cursor ide",
 }
 
 
@@ -133,6 +145,7 @@ def main_api(
     if _already_processed(url, skip_dedup=skip_dedup):
         try:
             from hunter.tracker import lookup_url
+
             rows = lookup_url(url)
             detail = ""
             if rows:
@@ -157,6 +170,7 @@ def main_api(
     # would be a huge whitespace diff. The finally block guarantees pop
     # regardless of how the function exits.
     from llm_client import pop_usage_log, push_usage_log
+
     _usage_log = push_usage_log()
     try:
         return _run_main_api(
@@ -202,6 +216,7 @@ def _run_main_api(
         print("[apply_agent] Step 1: Fetching job posting...")
         try:
             from hunter.sources import fetch_job_text
+
             job_text = fetch_job_text(url)
             print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
         except Exception as e:
@@ -209,7 +224,9 @@ def _run_main_api(
                 _handle_jobleads_fetch_blocked(
                     url, str(e), company=jobleads_company, title=jobleads_title
                 )
-            notify(f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>")
+            notify(
+                f"❌ <b>Failed to fetch job posting</b>\nURL: {url}\n\n<pre>{str(e)[:400]}</pre>"
+            )
             if is_transient_fetch_error(e, url):
                 # Transient anti-bot block (429 anywhere, or 403/Cloudflare on a
                 # known anti-bot host like pracuj/LinkedIn) — signal the caller to
@@ -225,22 +242,27 @@ def _run_main_api(
     # passed is_hiring_post() heuristics (min_job_text_len_for dispatches on
     # the synthetic scout URL).
     from hunter.validation import is_job_text_too_short, min_job_text_len_for
+
     _min_len = min_job_text_len_for(url)
     if is_job_text_too_short(job_text, _min_len):
         notify(
             f"⚠️ <b>Job text too short — skipped</b>\n"
             f"Got {len((job_text or '').strip())} chars (min {_min_len}).\n🔗 {url}"
         )
-        print(f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}")
+        print(
+            f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}"
+        )
         sys.exit(0)
 
     # Step 1.5b — Check for expired offer
     from hunter.expired_check import is_job_expired
+
     if is_job_expired(job_text):
         notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
         print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
         try:
             from hunter.tracker import add_expired
+
             add_expired(url)
         except Exception as e:
             print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
@@ -250,14 +272,15 @@ def _run_main_api(
     # Skip only when skip_dedup is False (force mode bypasses all stack filters).
     if not skip_dedup and is_react_only_job_text(job_text):
         notify(
-            f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n"
-            f"🔗 {url}"
-            f"{_REACT_SKIP_FORCE_HINT}"
+            f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
         print(f"[apply_agent] SKIP (pre-LLM) — React-only job text: {url}")
         try:
             from hunter.tracker import add_react_skipped
-            add_react_skipped({"stack": "React (pre-LLM)", "company_name": "", "job_title": ""}, url)
+
+            add_react_skipped(
+                {"stack": "React (pre-LLM)", "company_name": "", "job_title": ""}, url
+            )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
         return
@@ -265,9 +288,7 @@ def _run_main_api(
     # Step 1.5d — Pre-LLM backend-only text check (no FE framework + explicit BE required)
     if not skip_dedup and is_backend_only_job_text(job_text):
         notify(
-            f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n"
-            f"🔗 {url}"
-            f"{_REACT_SKIP_FORCE_HINT}"
+            f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
         print(f"[apply_agent] SKIP (pre-LLM) — backend-only job text: {url}")
         return
@@ -281,9 +302,11 @@ def _run_main_api(
     # this coarser reason-only message duplicated it — every flagged paste warned
     # twice with the same evidence (owner report 2026-07-11).
     from hunter.config import DOOMED_GATE_ENABLED as _doomed_gate_on
+
     if not _doomed_gate_on:
         try:
             from hunter.filters import screen_job_text
+
             screen_reason = screen_job_text(job_text)
             if screen_reason:
                 notify(
@@ -305,8 +328,10 @@ def _run_main_api(
     # paste is treated the same as an auto-discovered job (real $ was wasted
     # on pasted postings a HARD rule would have caught — see the paste plan).
     if run_doomed_gate(
-        job_text, url,
-        title=jobleads_title, company=jobleads_company,
+        job_text,
+        url,
+        title=jobleads_title,
+        company=jobleads_company,
         is_force_override=skip_dedup,
     ):
         return
@@ -331,25 +356,31 @@ def _run_main_api(
     if base_cv:
         print(f"[apply_agent] Step 2.5: Loaded base CV for stack '{stack_hint}'")
     else:
-        print(f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch")
+        print(
+            f"[apply_agent] Step 2.5: No base CV for stack '{stack_hint or 'unknown'}' — generating from scratch"
+        )
 
     # Posting language — computed here (moved up from the former Step 4.75) so
     # the first generation call can skip the _pl fields for an EN posting in
     # short mode (M4, docs/LLM_COST_REDUCTION_PLAN.md). Reused unchanged at
     # the language gate below and when persisted to content["primary_lang"].
     from hunter.lang_guard import detect_posting_language
+
     posting_lang = detect_posting_language(job_text)
 
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
     try:
         from llm_client import call_llm, LLMError
+
         url_hint = (
             url
             if url and url != PASTE_NO_URL_PLACEHOLDER
             else "(none — text pasted directly by user)"
         )
-        user_message = f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+        user_message = (
+            f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+        )
         user_message += build_ats_keyword_checklist(job_text)
         user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)
         if base_cv:
@@ -395,6 +426,7 @@ def _run_main_api(
     # Step 4 — Validate JSON
     print("[apply_agent] Step 3: Validating LLM output...")
     from hunter.config import GEN_SKIP_PL_FOR_EN
+
     _pl_optional = GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"
     errors = validate_content(content, pl_optional=_pl_optional)
     if errors:
@@ -416,6 +448,7 @@ def _run_main_api(
                 f"Previous JSON to fix:\n{json.dumps(content, ensure_ascii=False)}"
             )
             from llm_client import call_llm as _repair_call_llm
+
             _repaired = _repair_call_llm(
                 system_prompt=system_prompt,
                 user_message=_repair_msg,
@@ -439,13 +472,13 @@ def _run_main_api(
     if errors:
         notify(
             f"⚠️ <b>LLM output validation issues (after repair)</b>\n"
-            f"URL: {url}\n\n"
-            + "\n".join(f"• {e}" for e in errors[:10])
+            f"URL: {url}\n\n" + "\n".join(f"• {e}" for e in errors[:10])
         )
 
     # Step 4.4 — ATS boost pass (force mode only): if score < 95%, do a second LLM pass
     if skip_dedup:
         from hunter.tracker import _parse_ats_score
+
         _raw_ats = str(content.get("ats_score", "") or "")
         _, _ats_num = _parse_ats_score(_raw_ats)
         if _ats_num is not None and _ats_num < 95:
@@ -465,6 +498,7 @@ def _run_main_api(
                     f"Current resume content (JSON):\n{json.dumps(content, ensure_ascii=False)}"
                 )
                 from llm_client import call_llm
+
                 _boosted = call_llm(
                     system_prompt=system_prompt,
                     user_message=_boost_msg,
@@ -492,6 +526,7 @@ def _run_main_api(
         print(f"[apply_agent] SKIP — React-only stack: {content.get('stack')}")
         try:
             from hunter.tracker import add_react_skipped
+
             add_react_skipped(content, url)
         except Exception as e:
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
@@ -505,6 +540,7 @@ def _run_main_api(
     print("[apply_agent] Step 4.7: Sanitizing resume content...")
     try:
         from hunter.resume_sanitizer import sanitize_content
+
         content = sanitize_content(content)
     except Exception as _san_err:
         print(f"[apply_agent] Warning: resume sanitizer failed (continuing): {_san_err}")
@@ -513,6 +549,7 @@ def _run_main_api(
     # belong to the employer's self-description, not the candidate's expertise.
     try:
         from hunter.apply_shared import _strip_compliance_claims
+
         content, _compliance_fixes = _strip_compliance_claims(content)
         for _fix in _compliance_fixes:
             print(f"[apply_agent] compliance-scrub: {_fix}")
@@ -524,6 +561,7 @@ def _run_main_api(
     # pairs the ATS rewrite leaves in the skills section.
     try:
         from hunter.apply_shared import _dedup_skill_glosses, _strip_prestige_claims
+
         content, _prestige_fixes = _strip_prestige_claims(content, job_text)
         for _fix in _prestige_fixes:
             print(f"[apply_agent] prestige-scrub: {_fix}")
@@ -540,13 +578,13 @@ def _run_main_api(
     # stays the last word). Best-effort — never fatal. See docs/CV_JUDGE_PLAN.md.
     judge_report = None
     from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+
     if JUDGE_ENABLED:
         print("[apply_agent] Step 4.72: Claim judge verifying content...")
         try:
             from hunter.claim_judge import run_judge_stage
-            _outcome = run_judge_stage(
-                content, job_text, base_cv, enabled=True, mode=JUDGE_MODE
-            )
+
+            _outcome = run_judge_stage(content, job_text, base_cv, enabled=True, mode=JUDGE_MODE)
             content = _outcome.content
             judge_report = _outcome.report
             for _v in judge_report.actionable:
@@ -577,6 +615,7 @@ def _run_main_api(
     print(f"[apply_agent] Step 4.75: Language gate (posting language: {posting_lang})...")
     try:
         from hunter.apply_shared import enforce_language_separation
+
         content, _lang_blocked, _lang_report = enforce_language_separation(content)
         for _line in _lang_report:
             print(f"[apply_agent] lang-gate: {_line}")
@@ -600,6 +639,7 @@ def _run_main_api(
     print("[apply_agent] Step 4.9: Running content QA checks...")
     try:
         from hunter.content_qa import run_qa
+
         qa = run_qa(content)
         print(qa.summary())
         if not qa.passed:
@@ -611,10 +651,10 @@ def _run_main_api(
     company = content.get("company_name", "Unknown")
 
     from hunter.validation import is_bogus_company
+
     if is_bogus_company(company):
         notify(
-            f"⚠️ <b>Bogus company name — skipped</b>\n"
-            f"LLM returned: <code>{company}</code>\n🔗 {url}"
+            f"⚠️ <b>Bogus company name — skipped</b>\nLLM returned: <code>{company}</code>\n🔗 {url}"
         )
         print(f"[apply_agent] ABORT — bogus company name {company!r}: {url}")
         sys.exit(0)
@@ -643,9 +683,7 @@ def _run_main_api(
     def _persist_content() -> None:
         """Serialize the live `content` dict to content.json. Single write
         path for Steps 6/6.5/7.5/7.7 so the serialization can't diverge."""
-        content_path.write_text(
-            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        content_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
 
     _persist_content()
     print(f"[apply_agent] Wrote {content_path}")
@@ -694,6 +732,7 @@ def _run_main_api(
     cost_dict: dict | None = None
     try:
         from hunter.llm_cost import price_usage as _price_usage
+
         cost_dict = _price_usage(_usage_log)
         content["cost"] = cost_dict
         try:
@@ -795,7 +834,9 @@ def _run_main_api(
                         if pdf_check_2 is not None:
                             pdf_check = pdf_check_2
                     except subprocess.TimeoutExpired:
-                        print("[apply_agent] self-heal regen timed out (120s) — keeping original PDF")
+                        print(
+                            "[apply_agent] self-heal regen timed out (120s) — keeping original PDF"
+                        )
 
             if pdf_check is not None:
                 content["ats_check_pdf"] = pdf_check
@@ -813,6 +854,7 @@ def _run_main_api(
     if gen_ok:
         try:
             from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+
             verdict = run_llm_verdict(folder=output_folder, job_text=job_text)
             if verdict is not None:
                 # Step 7.7b — Verdict refine loop: if the independent verdict is
@@ -820,6 +862,7 @@ def _run_main_api(
                 # its own feedback, re-render, and re-verdict — keeping only
                 # strict improvements. See docs/VERDICT_REFINE_PLAN.md.
                 from hunter.config import ATS_VERDICT_MAX_REFINES, ATS_VERDICT_TARGET
+
                 if (
                     float(verdict.get("score") or 0) < ATS_VERDICT_TARGET
                     and ATS_VERDICT_MAX_REFINES > 0
@@ -858,7 +901,11 @@ def _run_main_api(
 
                     _to_learn_before_refine = content.get("to_learn")
                     content, verdict = refine_loop(
-                        content, job_text, base_cv, output_folder, verdict,
+                        content,
+                        job_text,
+                        base_cv,
+                        output_folder,
+                        verdict,
                         regenerate_docs=_regen_for_refine,
                         target=ATS_VERDICT_TARGET,
                         max_rounds=ATS_VERDICT_MAX_REFINES,
@@ -868,14 +915,18 @@ def _run_main_api(
                     # pre-loop value) — stamp the change post-hoc, same
                     # contract as the verdict stamp below.
                     if (
-                        url and url != PASTE_NO_URL_PLACEHOLDER
+                        url
+                        and url != PASTE_NO_URL_PLACEHOLDER
                         and content.get("to_learn") != _to_learn_before_refine
                     ):
                         try:
                             from hunter.tracker import set_to_learn
+
                             set_to_learn(url, content.get("to_learn") or "")
                         except Exception as _tl_err:
-                            print(f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}")
+                            print(
+                                f"[apply_agent] Warning: to_learn tracker stamp failed: {_tl_err}"
+                            )
                 content["ats_verdict"] = verdict
                 print(f"[apply_agent] {format_verdict(verdict)}")
                 # Stamp the score on the tracker row (created by generate_docs
@@ -886,6 +937,7 @@ def _run_main_api(
                 if url and url != PASTE_NO_URL_PLACEHOLDER:
                     try:
                         from hunter.tracker import set_ats_verdict
+
                         set_ats_verdict(url, float(verdict["score"]))
                     except Exception as _tr_err:
                         print(f"[apply_agent] Warning: verdict tracker stamp failed: {_tr_err}")
@@ -900,10 +952,12 @@ def _run_main_api(
                 # URL to match a row by — skip the stamp there.
                 try:
                     from hunter.llm_cost import price_usage as _price_usage2
+
                     cost_dict = _price_usage2(_usage_log)
                     content["cost"] = cost_dict
                     if url and url != PASTE_NO_URL_PLACEHOLDER:
                         from hunter.tracker import set_cost
+
                         set_cost(url, float(cost_dict.get("total_usd") or 0.0))
                 except Exception as _cost_err:
                     print(f"[apply_agent] Warning: verdict re-pricing failed: {_cost_err}")
@@ -916,6 +970,7 @@ def _run_main_api(
     # to the CV so it rides the Drive folder upload. Best-effort — run_outreach
     # never raises and must never fail/delay the apply.
     from hunter.outreach import run_outreach
+
     run_outreach(output_folder, url)
 
     # Step 8 — Notify success (cost was already priced + persisted in Step 6.5).
@@ -931,6 +986,7 @@ def _run_main_api(
         if verdict is not None:
             ats_line = f"ATS: {verdict.get('score')}% (independent, PDF)"
             from hunter.ats_pdf_roundtrip import format_gap_report
+
             gap = format_gap_report(verdict)
             if gap:
                 gap_line = f"{gap}\n"
@@ -939,6 +995,7 @@ def _run_main_api(
         cost_line = ""
         if cost_dict is not None:
             from hunter.llm_cost import format_summary as _cost_summary
+
             cost_line = f"\n{_cost_summary(cost_dict)}"
         issues_note = ""
         if not gen_ok:
@@ -976,7 +1033,7 @@ def _run_main_api(
         notify(
             f"⚠️ <b>content.json OK but no docs generated</b>\n"
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n"
-            f"Run manually: python generate_docs.py \"{content_path}\""
+            f'Run manually: python generate_docs.py "{content_path}"'
         )
         print("\n[apply_agent] WARNING: No .docx/.pdf files found, but content.json is saved.")
         sys.exit(1)

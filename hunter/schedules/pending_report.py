@@ -14,6 +14,7 @@ async def scheduled_pending_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Scheduled job: report how many unsent applications are in tracker."""
     try:
         from hunter.tracker_cache import cache
+
         if not cache.loaded:
             await cache.load_from_db()
         total = await cache.unsent_count()

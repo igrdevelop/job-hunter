@@ -34,8 +34,7 @@ def test_parse_minimal() -> None:
     assert job.location == "Europe (Remote)"
     assert job.salary == "$80k-$100k"
     assert job.url == (
-        "https://www.workingnomads.com/jobs/"
-        "senior-frontend-developer-angular-viabill-1641531"
+        "https://www.workingnomads.com/jobs/senior-frontend-developer-angular-viabill-1641531"
     )
     assert job.source == "workingnomads"
 
@@ -58,14 +57,8 @@ def test_format_location() -> None:
 
 
 def test_slug_from_url() -> None:
-    assert (
-        _slug_from_url("https://www.workingnomads.com/jobs/abc-123")
-        == "abc-123"
-    )
-    assert (
-        _slug_from_url("https://www.workingnomads.com/jobs/abc-123/")
-        == "abc-123"
-    )
+    assert _slug_from_url("https://www.workingnomads.com/jobs/abc-123") == "abc-123"
+    assert _slug_from_url("https://www.workingnomads.com/jobs/abc-123/") == "abc-123"
     assert _slug_from_url("https://www.workingnomads.com/about") == ""
 
 
@@ -119,11 +112,10 @@ def test_fetch_text_falls_back_when_no_slug_match() -> None:
         def json(self):
             return es_response
 
-    with patch(
-        "hunter.sources.workingnomads.requests.post", return_value=_Resp()
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
-    ) as m_fb:
+    with (
+        patch("hunter.sources.workingnomads.requests.post", return_value=_Resp()),
+        patch("hunter.sources.html_fallback.fetch_html", return_value="fallback") as m_fb,
+    ):
         text = src.fetch_text("https://www.workingnomads.com/jobs/missing-slug")
     assert text == "fallback"
     m_fb.assert_called_once()

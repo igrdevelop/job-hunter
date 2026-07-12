@@ -24,9 +24,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
 # Location tokens that mean "no geographic restriction" — collapsed to plain
 # "Remote" by sources that want to drop the synonym rather than keep it as a hint.
-REMOTE_ANY = frozenset(
-    {"anywhere", "worldwide", "global", "anywhere in the world", "remote"}
-)
+REMOTE_ANY = frozenset({"anywhere", "worldwide", "global", "anywhere in the world", "remote"})
 
 
 def strip_html(html: str | None, max_len: int) -> str:

@@ -111,7 +111,11 @@ DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").stri
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
-GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")
+GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 # Skip generating the _pl fields (resume_pl/cover_letter_pl/about_me_pl) on the
 # FIRST generation call for an English-language posting in short mode — they
 # are ~40-50% of that call's output tokens and short mode never delivers them
@@ -142,7 +146,9 @@ CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 # Track per-source raw yield per hunt run; alert when a source that used to
 # produce jobs goes dry for N consecutive runs (broken selector / renamed field).
 SOURCE_HEALTH_ENABLED: bool = os.getenv("SOURCE_HEALTH_ENABLED", "true").lower() in (
-    "true", "1", "yes",
+    "true",
+    "1",
+    "yes",
 )
 # Consecutive zero/error runs (for a previously-working source) before alerting.
 SOURCE_HEALTH_ALERT_STREAK: int = int(os.getenv("SOURCE_HEALTH_ALERT_STREAK", "3"))
@@ -248,7 +254,11 @@ REMOTIVE_ENABLED: bool = os.getenv("REMOTIVE_ENABLED", "true").lower() in ("true
 
 # ── Working Nomads source config ──────────────────────────────────────────────
 # Public Elasticsearch index (jobsapi/_search); JSON, no auth.
-WORKINGNOMADS_ENABLED: bool = os.getenv("WORKINGNOMADS_ENABLED", "true").lower() in ("true", "1", "yes")
+WORKINGNOMADS_ENABLED: bool = os.getenv("WORKINGNOMADS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # ── Jobspresso source config ──────────────────────────────────────────────────
 # WP Job Manager RSS feed (~10 most recent listings, no pagination).
@@ -305,7 +315,9 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
 # cards on the bot's own hunt schedule. No scraping happens here — see
 # hunter/sources/linkedin_scout_relay.py + linkedin_scout/README.md.
 LINKEDIN_SCOUT_RELAY_ENABLED: bool = os.getenv("LINKEDIN_SCOUT_RELAY_ENABLED", "true").lower() in (
-    "true", "1", "yes",
+    "true",
+    "1",
+    "yes",
 )
 
 # ── Telegram channels source config ──────────────────────────────────────────
@@ -313,7 +325,9 @@ LINKEDIN_SCOUT_RELAY_ENABLED: bool = os.getenv("LINKEDIN_SCOUT_RELAY_ENABLED", "
 # owner-curated channel list. See docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md +
 # hunter/sources/telegram_channels.py.
 TELEGRAM_CHANNELS_ENABLED: bool = os.getenv("TELEGRAM_CHANNELS_ENABLED", "true").lower() in (
-    "true", "1", "yes",
+    "true",
+    "1",
+    "yes",
 )
 TELEGRAM_CHANNELS_FILE: Path = Path(
     os.getenv("TELEGRAM_CHANNELS_FILE", str(PROJECT_DIR / "telegram_channels.json"))
@@ -332,7 +346,11 @@ GMAIL_LOOKBACK_HOURS: int = int(os.getenv("GMAIL_LOOKBACK_HOURS", "25"))
 # warns that emails were truncated (raise this if you subscribe to many alerts).
 GMAIL_MAX_RESULTS: int = int(os.getenv("GMAIL_MAX_RESULTS", "100"))
 # Fetch real title/company/location/salary for each URL extracted from alert emails.
-GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in ("true", "1", "yes")
+GMAIL_ENRICH_ENABLED: bool = os.getenv("GMAIL_ENRICH_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 # Max parallel HTTP requests during enrichment (global cap, across all hosts)
 GMAIL_ENRICH_CONCURRENCY: int = int(os.getenv("GMAIL_ENRICH_CONCURRENCY", "5"))
 # Per-job HTTP timeout (seconds) for enrichment fetches

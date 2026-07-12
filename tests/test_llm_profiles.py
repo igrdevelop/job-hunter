@@ -7,6 +7,7 @@ import hunter.llm_profiles as lp
 
 # ── Profile registry ────────────────────────────────────────────────────────────
 
+
 def test_all_expected_profiles_present():
     names = set(lp.PROFILES)
     assert "sonnet" in names
@@ -50,6 +51,7 @@ def test_openrouter_2026_profiles_present():
 
 # ── API-key availability ────────────────────────────────────────────────────────
 
+
 def test_profile_is_available_when_env_key_set(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
     assert lp.PROFILES["gpt-4.1"].is_available()
@@ -71,6 +73,7 @@ def test_profile_falls_back_to_llm_api_key(monkeypatch):
 
 
 # ── get_active() resolution order ──────────────────────────────────────────────
+
 
 def test_get_active_prefers_llm_default_profile_env(monkeypatch, tmp_path):
     """LLM_DEFAULT_PROFILE wins over backward-compat LLM_PROVIDER+LLM_MODEL."""
@@ -109,6 +112,7 @@ def test_get_active_db_overrides_env(monkeypatch):
 
 # ── Cost estimate ───────────────────────────────────────────────────────────────
 
+
 def test_cost_estimate_returns_string_with_dollar():
     for name, prof in lp.PROFILES.items():
         est = prof.cost_estimate()
@@ -125,6 +129,7 @@ def test_cost_estimate_gpt_mini_cheapest_gpt():
 
 
 # ── set_active validation ───────────────────────────────────────────────────────
+
 
 def test_set_active_unknown_name_raises(monkeypatch):
     monkeypatch.setattr(lp, "_db_set", lambda *a: None)

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ── Callback handler (Apply / Skip buttons) ──────────────────────────────────
 
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -50,8 +51,10 @@ async def _handle_skip(query, job: Job, job_id: str) -> None:
     if row:
         try:
             from hunter.tracker_cache import cache
+
             await cache.add(row)
             from hunter import gsheets_sync
+
             await gsheets_sync.mirror_new_row(row)
         except Exception as _e:
             logger.warning("[skip] cache/gsheets update failed: %s", _e)
@@ -109,18 +112,22 @@ def _write_paste_temp_file(text: str) -> Optional[str]:
     import tempfile
 
     try:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", suffix=".txt", prefix="li_scout_paste_", delete=False,
-        )
-        with tmp as fh:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".txt",
+            prefix="li_scout_paste_",
+            delete=False,
+        ) as fh:
             fh.write(text)
-        return tmp.name
+        return fh.name
     except OSError as e:
         logger.exception("[Apply] failed to write linkedin_scout paste temp file: %s", e)
         return None
 
 
 # ── URL message handler ───────────────────────────────────────────────────────
+
 
 async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle plain text messages.
@@ -163,7 +170,11 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    from hunter.sources.linkedin import is_linkedin_search, parse_linkedin_job_ids, normalize_linkedin_url
+    from hunter.sources.linkedin import (
+        is_linkedin_search,
+        parse_linkedin_job_ids,
+        normalize_linkedin_url,
+    )
 
     # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
     text = normalize_linkedin_url(text)
@@ -198,6 +209,7 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         only_manual = all(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
         if only_manual:
             from hunter.sources.jobleads import try_load_manual_job_posting
+
             manual_content = await asyncio.to_thread(try_load_manual_job_posting, text)
             if manual_content:
                 await update.message.reply_text(
@@ -206,12 +218,14 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
-                logger.info(f"[URL handler] MANUAL row with ready file, launching apply_agent: {text}")
+                logger.info(
+                    f"[URL handler] MANUAL row with ready file, launching apply_agent: {text}"
+                )
                 asyncio.create_task(_run_apply_agent(text))
                 return
             else:
                 e = entries[-1]
-                folder_info = f'\n📁 <code>{e["folder"]}</code>' if e.get("folder") else ""
+                folder_info = f"\n📁 <code>{e['folder']}</code>" if e.get("folder") else ""
                 await update.message.reply_text(
                     f"📝 <b>Vacancy waiting for text (MANUAL)</b>\n\n"
                     f"  ID {e['id']}: <b>{e['company']}</b> - {e['title']}{folder_info}\n\n"
@@ -224,11 +238,11 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         lines = []
         for e in entries:
-            sent_info = f' | Sent: {e["sent"]}' if e["sent"] else ""
-            folder_info = f'\n    Folder: <code>{e["folder"]}</code>' if e["folder"] else ""
+            sent_info = f" | Sent: {e['sent']}" if e["sent"] else ""
+            folder_info = f"\n    Folder: <code>{e['folder']}</code>" if e["folder"] else ""
             lines.append(
-                f'  ID {e["id"]}: <b>{e["company"]}</b> - {e["title"]}\n'
-                f'    ATS: {e["ats"]}{sent_info}{folder_info}'
+                f"  ID {e['id']}: <b>{e['company']}</b> - {e['title']}\n"
+                f"    ATS: {e['ats']}{sent_info}{folder_info}"
             )
         detail = "\n".join(lines)
         await update.message.reply_text(

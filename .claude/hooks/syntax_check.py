@@ -3,6 +3,7 @@ Hook: PostToolUse — syntax check after Edit/Write on .py files.
 Receives tool input as JSON on stdin.
 Exits with code 1 if SyntaxError found (Claude sees the error).
 """
+
 import sys
 import json
 import py_compile

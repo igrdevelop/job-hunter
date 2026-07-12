@@ -70,6 +70,4 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as e:  # noqa: BLE001
         logger.exception("[/health] failed to build report")
         text = f"❌ Could not build health report: {str(e)[:200]}"
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)

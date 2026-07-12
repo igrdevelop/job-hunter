@@ -147,9 +147,7 @@ def _is_job_link_candidate(href: str) -> bool:
     host = (urlparse(href).netloc or "").lower()
     if host in ("t.me", "telegram.me", "www.t.me", "www.telegram.me"):
         return False
-    if host in _PHOTO_WRAPPER_HOSTS and "/file/" in urlparse(href).path:
-        return False
-    return True
+    return not (host in _PHOTO_WRAPPER_HOSTS and "/file/" in urlparse(href).path)
 
 
 def _extract_text_and_links(text_div) -> tuple[str, list[str]]:
@@ -189,8 +187,10 @@ def _parse_posts(html: str, channel: str) -> list[TgPost]:
         # "<Author> pinned Deleted message") — real but useless content that
         # would otherwise synthesize a garbage job title.
         classes = msg.get("class") or []
-        text_div = None if "service_message" in classes else msg.find(
-            "div", class_="tgme_widget_message_text"
+        text_div = (
+            None
+            if "service_message" in classes
+            else msg.find("div", class_="tgme_widget_message_text")
         )
         if text_div is None:
             # Media-only / service message (e.g. "pinned", deleted) — no body text.
@@ -265,9 +265,7 @@ def passes_prefilter(text: str, kind: str) -> bool:
         return False
     if any(p.search(text) for p in SPAM_RES):
         return False
-    if kind == "authored" and not any(p.search(text) for p in HIRING_SIGNAL_RES):
-        return False
-    return True
+    return not (kind == "authored" and not any(p.search(text) for p in HIRING_SIGNAL_RES))
 
 
 def _load_channels() -> list[dict]:

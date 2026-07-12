@@ -40,8 +40,17 @@ BACKUP_DIR = ROOT / "backups"
 DRY_RUN = "--apply" not in sys.argv
 
 HEADERS = [
-    "Date", "Company", "Job Title", "Stack",
-    "ATS %", "URL", "Folder", "Sent", "Re-application", "To Learn", "ID",
+    "Date",
+    "Company",
+    "Job Title",
+    "Stack",
+    "ATS %",
+    "URL",
+    "Folder",
+    "Sent",
+    "Re-application",
+    "To Learn",
+    "ID",
 ]
 # 1-based column indices
 COL_DATE, COL_COMPANY, COL_TITLE, COL_STACK = 1, 2, 3, 4
@@ -87,20 +96,22 @@ def load_tracker_rows(ws) -> list[dict]:
     """Read all data rows from tracker worksheet into list of dicts."""
     rows = []
     for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        rows.append({
-            "row_num": i,
-            "date": row[0],
-            "company": row[1],
-            "title": row[2],
-            "stack": row[3],
-            "ats": row[4],
-            "url": row[5],
-            "folder": row[6],
-            "sent": row[7],
-            "reapp": row[8],
-            "tolearn": row[9],
-            "id": row[10],
-        })
+        rows.append(
+            {
+                "row_num": i,
+                "date": row[0],
+                "company": row[1],
+                "title": row[2],
+                "stack": row[3],
+                "ats": row[4],
+                "url": row[5],
+                "folder": row[6],
+                "sent": row[7],
+                "reapp": row[8],
+                "tolearn": row[9],
+                "id": row[10],
+            }
+        )
     return rows
 
 
@@ -137,19 +148,21 @@ def scan_applications() -> list[dict]:
             ats_raw = data.get("ats_score", "")
             folder_abs = str(co_dir)
 
-            found.append({
-                "date": folder_date,
-                "company": company,
-                "title": title,
-                "stack": stack,
-                "ats": str(ats_raw) if ats_raw else "",
-                "url": url,
-                "folder": folder_abs,
-                "sent": None,
-                "reapp": None,
-                "tolearn": (data.get("to_learn") or ""),
-                "id": None,  # will be assigned if missing
-            })
+            found.append(
+                {
+                    "date": folder_date,
+                    "company": company,
+                    "title": title,
+                    "stack": stack,
+                    "ats": str(ats_raw) if ats_raw else "",
+                    "url": url,
+                    "folder": folder_abs,
+                    "sent": None,
+                    "reapp": None,
+                    "tolearn": (data.get("to_learn") or ""),
+                    "id": None,  # will be assigned if missing
+                }
+            )
 
     print(f"[repair] Applications/: {len(found)} content.json files")
     return found
@@ -227,9 +240,7 @@ def main():
     print(f"[repair] tracker.xlsx: {len(existing_rows)} data rows")
 
     # Build known URL set
-    known_urls: set[str] = {
-        _normalize_url(r["url"]) for r in existing_rows if r.get("url")
-    }
+    known_urls: set[str] = {_normalize_url(r["url"]) for r in existing_rows if r.get("url")}
 
     # Identify garbage rows (URL-only, no real data)
     garbage = [r for r in existing_rows if _row_is_garbage(r)]

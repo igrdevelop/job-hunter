@@ -10,10 +10,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -23,9 +23,11 @@ def run(coro):
 # _ready()
 # ---------------------------------------------------------------------------
 
+
 def test_ready_false_when_disabled():
     with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
         from hunter import gdrive_sync
+
         assert not gdrive_sync._ready()
 
 
@@ -35,6 +37,7 @@ def test_ready_false_when_no_service():
         patch("hunter.gdrive_sync._get_service", return_value=None),
     ):
         from hunter import gdrive_sync
+
         assert not gdrive_sync._ready()
 
 
@@ -44,6 +47,7 @@ def test_ready_true_when_enabled_and_service():
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
+
         assert gdrive_sync._ready()
 
 
@@ -51,9 +55,11 @@ def test_ready_true_when_enabled_and_service():
 # upload_application_folder — no-op cases
 # ---------------------------------------------------------------------------
 
+
 def test_upload_noop_when_disabled():
     with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(Path("/tmp/fake")))
     assert result is None
 
@@ -65,6 +71,7 @@ def test_upload_noop_when_folder_missing(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(missing))
     assert result is None
 
@@ -72,6 +79,7 @@ def test_upload_noop_when_folder_missing(tmp_path):
 # ---------------------------------------------------------------------------
 # upload_application_folder — happy path
 # ---------------------------------------------------------------------------
+
 
 def test_upload_creates_drive_structure(tmp_path):
     # Create Applications/2026-05-15/Acme with a file
@@ -90,10 +98,14 @@ def test_upload_creates_drive_structure(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=mock_svc),
         patch("hunter.gdrive_client.get_or_create_folder") as mock_goc,
         patch("hunter.gdrive_client.upload_folder", return_value=company_folder_id) as mock_uf,
-        patch("hunter.gdrive_client.folder_url", return_value="https://drive.google.com/drive/folders/company_folder_id"),
+        patch(
+            "hunter.gdrive_client.folder_url",
+            return_value="https://drive.google.com/drive/folders/company_folder_id",
+        ),
     ):
         mock_goc.side_effect = ["root_id", "date_id"]
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(folder))
 
     # Should create root "Job Hunter", then date folder, then upload company folder
@@ -120,9 +132,13 @@ def test_upload_uses_root_folder_id_when_set(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
         patch("hunter.gdrive_client.get_or_create_folder", return_value="date_id") as mock_goc,
         patch("hunter.gdrive_client.upload_folder", return_value="company_id"),
-        patch("hunter.gdrive_client.folder_url", return_value="https://drive.google.com/drive/folders/company_id"),
+        patch(
+            "hunter.gdrive_client.folder_url",
+            return_value="https://drive.google.com/drive/folders/company_id",
+        ),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(folder))
 
     # Should skip root folder creation — only 1 call for the date folder
@@ -138,6 +154,7 @@ def test_upload_uses_root_folder_id_when_set(tmp_path):
 # upload_application_folder — error handling
 # ---------------------------------------------------------------------------
 
+
 def test_upload_returns_none_on_error(tmp_path):
     folder = tmp_path / "2026-05-15" / "Broken"
     folder.mkdir(parents=True)
@@ -149,6 +166,7 @@ def test_upload_returns_none_on_error(tmp_path):
         patch("hunter.gdrive_client.get_or_create_folder", side_effect=RuntimeError("API down")),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_application_folder(folder))
 
     # Error must be swallowed — never propagated
@@ -184,6 +202,7 @@ def test_upload_log_file_noop_when_disabled(tmp_path):
     log_file = _make_log(tmp_path)
     with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
     assert result is None
 
@@ -195,6 +214,7 @@ def test_upload_log_file_noop_when_missing(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(missing, date_str=_TEST_DATE))
     assert result is None
 
@@ -208,6 +228,7 @@ def test_upload_log_file_noop_when_no_entries_for_date(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
     assert result is None
 
@@ -226,14 +247,15 @@ def test_upload_log_file_happy_path(tmp_path):
     ):
         mock_goc.side_effect = ["root_id", "logs_folder_id"]
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
     # Creates root → Logs subfolder → uploads dated file
     assert mock_goc.call_count == 2
     assert mock_goc.call_args_list[0].args[1] == "Job Hunter"
-    assert mock_goc.call_args_list[0].args[2] is None      # root has no parent
+    assert mock_goc.call_args_list[0].args[2] is None  # root has no parent
     assert mock_goc.call_args_list[1].args[1] == "Logs"
-    assert mock_goc.call_args_list[1].args[2] == "root_id" # Logs is inside root
+    assert mock_goc.call_args_list[1].args[2] == "root_id"  # Logs is inside root
     # The file uploaded must be named YYYY-MM-DD.log (not the original filename)
     uploaded_path = mock_uf.call_args.args[1]
     assert uploaded_path.name == f"{_TEST_DATE}.log"
@@ -257,13 +279,14 @@ def test_upload_log_file_dated_content_excludes_old_entries(tmp_path):
         patch("hunter.gdrive_client.upload_file", side_effect=fake_upload),
     ):
         from hunter import gdrive_sync
+
         run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
     assert captured, "upload_file was not called"
     content = captured[0]
-    assert _TEST_DATE in content                     # today's entries present
-    assert "old day entry" not in content            # old day excluded
-    assert "TimeoutError" in content                 # traceback continuation kept
+    assert _TEST_DATE in content  # today's entries present
+    assert "old day entry" not in content  # old day excluded
+    assert "TimeoutError" in content  # traceback continuation kept
     assert "Traceback (most recent call last)" in content
 
 
@@ -278,6 +301,7 @@ def test_upload_log_file_uses_existing_root_id(tmp_path):
         patch("hunter.gdrive_client.upload_file", return_value="fid"),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
     # Only one get_or_create_folder call: Logs/ under the preset root (no root lookup)
@@ -297,6 +321,7 @@ def test_upload_log_file_returns_none_on_error(tmp_path):
         patch("hunter.gdrive_client.get_or_create_folder", side_effect=RuntimeError("API down")),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_log_file(log_file, date_str=_TEST_DATE))
 
     assert result is None  # best-effort — error swallowed
@@ -306,10 +331,14 @@ def test_upload_log_file_returns_none_on_error(tmp_path):
 # upload_shadow_folder — dual-apply comparison subfolder nested under company
 # ---------------------------------------------------------------------------
 
+
 def test_upload_shadow_folder_noop_when_disabled(tmp_path):
     with patch("hunter.gdrive_sync.GDRIVE_ENABLED", False):
         from hunter import gdrive_sync
-        result = run(gdrive_sync.upload_shadow_folder(tmp_path / "Acme", tmp_path / "Acme" / "deepseek-v3"))
+
+        result = run(
+            gdrive_sync.upload_shadow_folder(tmp_path / "Acme", tmp_path / "Acme" / "deepseek-v3")
+        )
     assert result is None
 
 
@@ -321,6 +350,7 @@ def test_upload_shadow_folder_noop_when_missing(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_shadow_folder(primary, primary / "deepseek-v3"))
     assert result is None
 
@@ -338,10 +368,14 @@ def test_upload_shadow_folder_nests_under_company(tmp_path):
         patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
         patch("hunter.gdrive_client.get_or_create_folder") as mock_goc,
         patch("hunter.gdrive_client.upload_folder", return_value="shadow_id") as mock_uf,
-        patch("hunter.gdrive_client.folder_url", return_value="https://drive.google.com/drive/folders/shadow_id"),
+        patch(
+            "hunter.gdrive_client.folder_url",
+            return_value="https://drive.google.com/drive/folders/shadow_id",
+        ),
     ):
         mock_goc.side_effect = ["root_id", "date_id", "company_id"]
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_shadow_folder(primary, shadow))
 
     # root -> date -> company (3 get_or_create calls), then upload_folder(shadow) under company_id
@@ -367,6 +401,7 @@ def test_upload_shadow_folder_returns_none_on_error(tmp_path):
         patch("hunter.gdrive_client.get_or_create_folder", side_effect=RuntimeError("API down")),
     ):
         from hunter import gdrive_sync
+
         result = run(gdrive_sync.upload_shadow_folder(primary, shadow))
 
     assert result is None
@@ -375,6 +410,7 @@ def test_upload_shadow_folder_returns_none_on_error(tmp_path):
 # ---------------------------------------------------------------------------
 # _upload_shadow_subfolders — scan helper used by upload_missing_folders
 # ---------------------------------------------------------------------------
+
 
 def test_upload_shadow_subfolders_finds_known_profile_dirs(tmp_path):
     company = tmp_path / "2026-05-15" / "Acme"
@@ -385,8 +421,12 @@ def test_upload_shadow_subfolders_finds_known_profile_dirs(tmp_path):
     (company / "random_dir").mkdir()
     (company / "random_dir" / "junk.txt").write_bytes(b"x")
 
-    with patch("hunter.gdrive_sync.upload_shadow_folder", return_value="https://drive.google.com/drive/folders/x") as mock_upload:
+    with patch(
+        "hunter.gdrive_sync.upload_shadow_folder",
+        return_value="https://drive.google.com/drive/folders/x",
+    ) as mock_upload:
         from hunter import gdrive_sync
+
         uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
     assert uploaded == 1
@@ -400,6 +440,7 @@ def test_upload_shadow_subfolders_skips_empty_dirs(tmp_path):
 
     with patch("hunter.gdrive_sync.upload_shadow_folder") as mock_upload:
         from hunter import gdrive_sync
+
         uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
     assert uploaded == 0
@@ -415,6 +456,7 @@ def test_upload_shadow_subfolders_records_failure(tmp_path):
 
     with patch("hunter.gdrive_sync.upload_shadow_folder", return_value=None):
         from hunter import gdrive_sync
+
         uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
     assert uploaded == 0

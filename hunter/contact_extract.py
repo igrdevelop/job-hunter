@@ -19,17 +19,24 @@ from dataclasses import dataclass, field
 # ── Building blocks ───────────────────────────────────────────────────────────
 
 # One capitalized name token, Polish diacritics included ("Łukasz", "Zofia").
-_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż'’\-]+"
+_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż'’\-]+"  # noqa: S105 — regex fragment, not a credential
 # "Anna Kowalska" / "Anna Maria Kowalska-Nowak". Horizontal whitespace ONLY —
 # \s+ would swallow the newline and capture the next line's first word.
 _FULL_NAME = rf"{_NAME_TOKEN}(?:[ \t]+{_NAME_TOKEN}){{1,2}}"
 
 # Labels that explicitly introduce a contact person (PL + EN).
 _LABELS = (
-    r"kontakt", r"osoba\s+kontaktowa", r"contact(?:\s+person)?",
-    r"recruiter", r"rekruter(?:ka)?", r"hiring\s+manager",
-    r"aplikuj\s+do", r"cv\s+(?:wyślij|prześlij|send)\s+(?:do|to)",
-    r"pytania\s+(?:kieruj\s+)?do", r"questions\s+to", r"reach\s+out\s+to",
+    r"kontakt",
+    r"osoba\s+kontaktowa",
+    r"contact(?:\s+person)?",
+    r"recruiter",
+    r"rekruter(?:ka)?",
+    r"hiring\s+manager",
+    r"aplikuj\s+do",
+    r"cv\s+(?:wyślij|prześlij|send)\s+(?:do|to)",
+    r"pytania\s+(?:kieruj\s+)?do",
+    r"questions\s+to",
+    r"reach\s+out\s+to",
 )
 # The label match is case-insensitive, but the name itself must keep real
 # capitalization — `(?-i:...)` scopes that (otherwise "do"/"and" match as name
@@ -43,8 +50,15 @@ _LABELED_NAME_RE = re.compile(
 # Signature block: a full name on its own line, the NEXT line a recruiting
 # role ("Anna Kowalska\nSenior IT Recruiter"). Common in agency postings.
 _ROLE_WORDS = (
-    r"recruit", r"rekrut", r"talent", r"sourcing", r"people\s", r"hr\b",
-    r"human\s+resources", r"hiring", r"employer\s+branding",
+    r"recruit",
+    r"rekrut",
+    r"talent",
+    r"sourcing",
+    r"people\s",
+    r"hr\b",
+    r"human\s+resources",
+    r"hiring",
+    r"employer\s+branding",
 )
 _SIGNATURE_RE = re.compile(
     r"^[ \t>*•\-]*((?-i:" + _FULL_NAME + r"))[ \t]*$\n"
@@ -77,6 +91,7 @@ _EVIDENCE_LEN = 120
 @dataclass
 class Contact:
     """One extracted contact. All fields optional except evidence."""
+
     name: str = ""
     email: str = ""
     phone: str = ""

@@ -43,8 +43,7 @@ def test_genuine_pl_hiring_post_passes():
 
 def test_candidate_side_singular_szukam_rejected():
     text = (
-        "Szukam nowego projektu jako Frontend Developer (Angular). "
-        "Otwarta na oferty B2B, zdalnie."
+        "Szukam nowego projektu jako Frontend Developer (Angular). Otwarta na oferty B2B, zdalnie."
     )
     assert is_hiring_post(text) is False
 

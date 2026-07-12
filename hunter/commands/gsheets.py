@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show Google Sheets integration status."""
     from hunter import gsheets_sync
+
     try:
         report = await gsheets_sync.status_report()
     except Exception as e:
@@ -35,7 +36,7 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lines = ["📊 <b>Google Sheets status</b>"]
     lines.append(f"  Service: {'✅ OK' if report['service_ok'] else '❌ not initialized'}")
     if report.get("sheet_url"):
-        lines.append(f"  Sheet: <a href=\"{report['sheet_url']}\">open</a>")
+        lines.append(f'  Sheet: <a href="{report["sheet_url"]}">open</a>')
     elif report.get("sheet_id"):
         lines.append(f"  ID: <code>{report['sheet_id']}</code>")
     else:
@@ -54,6 +55,7 @@ async def cmd_gsheets_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_gsheets_push_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Push tracker.xlsx rows that are absent from Google Sheets (by ID)."""
     from hunter import gsheets_sync
+
     await update.message.reply_text(
         "⏳ Looking for tracker.xlsx rows absent from Sheets…",
         parse_mode=ParseMode.HTML,
@@ -87,6 +89,7 @@ async def cmd_gsheets_push_sent(update: Update, context: ContextTypes.DEFAULT_TY
     works even after bot restart (reads tracker.xlsx directly, no cache needed).
     """
     from hunter import gsheets_sync
+
     if not GSHEETS_ENABLED:
         await update.message.reply_text("ℹ️ Google Sheets disabled.")
         return
@@ -103,7 +106,7 @@ async def cmd_gsheets_push_sent(update: Update, context: ContextTypes.DEFAULT_TY
 
     checked = result["checked"]
     updated = result["updated"]
-    errors  = result["errors"]
+    errors = result["errors"]
     await update.message.reply_text(
         f"✅ <b>gsheets_push_sent</b>\n"
         f"  🔍 Rows with Sent in tracker: {checked}\n"

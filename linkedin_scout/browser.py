@@ -89,9 +89,7 @@ _SEARCH_OFFSCREEN_ARGS: tuple[str, ...] = ("--window-position=-3000,0",)
 
 # Real installed Chrome (not bundled Chromium) + stealth flags — headless
 # Chromium got flagged within 2-3 loads in the live probe (plan §4.6 #4).
-STEALTH_CHROME_ARGS: tuple[str, ...] = (
-    "--disable-blink-features=AutomationControlled",
-)
+STEALTH_CHROME_ARGS: tuple[str, ...] = ("--disable-blink-features=AutomationControlled",)
 
 _HIDE_WEBDRIVER_INIT_SCRIPT = (
     "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
@@ -119,7 +117,7 @@ _BETWEEN_KEYWORD_WAIT_RANGE_SEC = (10.0, 30.0)
 # session (same caveat as every other DOM-shape assumption in this module —
 # see the module docstring); a failed lookup logs and moves on, it never
 # raises or blocks the run.
-_POST_CONTAINER_SELECTORS: tuple[str, ...] = ('[data-urn]', '[role="article"]')
+_POST_CONTAINER_SELECTORS: tuple[str, ...] = ("[data-urn]", '[role="article"]')
 _MENU_BUTTON_SELECTORS: tuple[str, ...] = (
     'button[aria-label*="Open control menu" i]',
     'button[aria-label*="More actions" i]',
@@ -329,7 +327,9 @@ def _click_menu_and_copy_link(page, button) -> str | None:
             return None
         button.click(timeout=_MENU_CLICK_TIMEOUT_MS)
         _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
-        page.get_by_text(_COPY_LINK_ITEM_TEXT, exact=False).first.click(timeout=_MENU_CLICK_TIMEOUT_MS)
+        page.get_by_text(_COPY_LINK_ITEM_TEXT, exact=False).first.click(
+            timeout=_MENU_CLICK_TIMEOUT_MS
+        )
         _sleep_human(_MENU_CLICK_WAIT_RANGE_SEC)
         link = page.evaluate("() => navigator.clipboard.readText()")
         if link and "linkedin.com" in link:
@@ -365,7 +365,9 @@ def _copy_link_via_menu(page, author: str, body: str) -> str | None:
 
     if author:
         try:
-            button = page.get_by_role("button", name=f"Open control menu for post by {author}").first
+            button = page.get_by_role(
+                "button", name=f"Open control menu for post by {author}"
+            ).first
             link = _click_menu_and_copy_link(page, button)
             if link:
                 return link
@@ -523,9 +525,11 @@ def _open_scroll_extract(
             # same generic message it uses for a real navigation.
             page.route(
                 "**/*",
-                lambda route: route.abort()
-                if route.request.resource_type in ("image", "media", "font")
-                else route.continue_(),
+                lambda route: (
+                    route.abort()
+                    if route.request.resource_type in ("image", "media", "font")
+                    else route.continue_()
+                ),
             )
             page.goto(url, wait_until="domcontentloaded")
             _sleep_human(_POST_LOAD_WAIT_RANGE_SEC)
@@ -568,7 +572,8 @@ def _open_scroll_extract(
                 if max_duration_sec is not None and (time.monotonic() - start) >= max_duration_sec:
                     logger.info(
                         "[linkedin_scout] scroll time budget (%.0fs) reached after %d scroll(s)",
-                        max_duration_sec, iterations_done,
+                        max_duration_sec,
+                        iterations_done,
                     )
                     break
 
@@ -589,7 +594,8 @@ def _open_scroll_extract(
                     logger.warning(
                         "[linkedin_scout] evaluate failed mid-scroll (%s) — "
                         "stopping early with %d scroll(s) done",
-                        e, iterations_done,
+                        e,
+                        iterations_done,
                     )
                     break
                 if looks_like_anti_bot(text) or looks_like_anti_bot(page.url):
@@ -603,7 +609,9 @@ def _open_scroll_extract(
                         logger.info(
                             "[linkedin_scout] scroll plateaued (%d scroll(s) with no new posts) — "
                             "stopping early after %d/%d",
-                            plateau_streak, iterations_done, scroll_iterations,
+                            plateau_streak,
+                            iterations_done,
+                            scroll_iterations,
                         )
                         break
                 else:
@@ -611,7 +619,8 @@ def _open_scroll_extract(
 
             logger.info(
                 "[linkedin_scout] posts visible after %d scroll(s): %d",
-                iterations_done, post_count,
+                iterations_done,
+                post_count,
             )
 
             if permalink_sink is not None:

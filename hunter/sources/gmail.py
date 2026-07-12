@@ -65,17 +65,15 @@ class GmailSource(BaseSource):
         self.last_capped = len(messages) >= GMAIL_MAX_RESULTS
         logger.info(
             "[gmail] Found %d matching email(s) in the last %dh%s",
-            len(messages), GMAIL_LOOKBACK_HOURS,
+            len(messages),
+            GMAIL_LOOKBACK_HOURS,
             " (CEILING hit — emails may be truncated)" if self.last_capped else "",
         )
 
         jobs: list[Job] = []
         for stub in messages:
             msg = (
-                service.users()
-                .messages()
-                .get(userId="me", id=stub["id"], format="full")
-                .execute()
+                service.users().messages().get(userId="me", id=stub["id"], format="full").execute()
             )
             found = self._parse_message(msg)
             jobs.extend(found)
@@ -84,6 +82,7 @@ class GmailSource(BaseSource):
 
         if jobs and GMAIL_ENRICH_ENABLED:
             from hunter.gmail_enricher import enrich_jobs
+
             jobs = enrich_jobs(jobs)
             logger.info("[gmail] After enrichment: %d job(s)", len(jobs))
 
@@ -106,20 +105,20 @@ class GmailSource(BaseSource):
         "application received",
         "application was sent",
         # Polish — Pracuj.pl activity notifications
-        "zapoznał się z twoją aplikacją",   # employer viewed your application
-        "twoja aplikacja została wysłana",   # your application was sent
-        "potwierdzenie aplikacji",           # application confirmation
-        "aplikacja została przyjęta",        # application accepted
-        "dziękujemy za aplikację",           # thank you for applying
-        "pracodawca zaprosił cię",           # employer invited you
-        "zaproszenie do rozmowy",            # invitation to interview
+        "zapoznał się z twoją aplikacją",  # employer viewed your application
+        "twoja aplikacja została wysłana",  # your application was sent
+        "potwierdzenie aplikacji",  # application confirmation
+        "aplikacja została przyjęta",  # application accepted
+        "dziękujemy za aplikację",  # thank you for applying
+        "pracodawca zaprosił cię",  # employer invited you
+        "zaproszenie do rozmowy",  # invitation to interview
     )
 
     def _parse_message(self, msg: dict) -> list[Job]:
         headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
         subject = headers.get("Subject", "(no subject)")
-        sender  = headers.get("From", "(unknown sender)")
-        date    = headers.get("Date", "(no date)")
+        sender = headers.get("From", "(unknown sender)")
+        date = headers.get("Date", "(no date)")
 
         msg_id = msg.get("id", "")
         parsed_date = self._parse_date(date)
@@ -170,17 +169,22 @@ class GmailSource(BaseSource):
                 if found:
                     logger.info(
                         "[gmail]    → %s: extracted %d URL(s)%s:",
-                        domain, len(found),
+                        domain,
+                        len(found),
                         " (similar offers in ACK email)" if is_ack_subject else "",
                     )
                     for job in found:
                         logger.info("[gmail]       %s", job.url)
                     return found
                 if is_ack_subject:
-                    logger.info("[gmail]    → SKIP (confirmation/activity email, no similar offers)")
+                    logger.info(
+                        "[gmail]    → SKIP (confirmation/activity email, no similar offers)"
+                    )
                     record["skipped"] = True
                     return []
-                logger.info("[gmail]    → %s: 0 URLs extracted (no matching pattern in body)", domain)
+                logger.info(
+                    "[gmail]    → %s: 0 URLs extracted (no matching pattern in body)", domain
+                )
                 return []
 
         # No parser matched the sender. Honor SKIP for ACK-shaped subjects so

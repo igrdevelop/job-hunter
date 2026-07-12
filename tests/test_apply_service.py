@@ -204,7 +204,14 @@ def test_run_apply_agent_subprocess_omits_title_flags_when_unknown(monkeypatch) 
         _fake_create_subprocess_exec,
     )
 
-    blank = Job(title="", company="", location="", salary=None, url="https://example.com/jobs/2", source="test")
+    blank = Job(
+        title="",
+        company="",
+        location="",
+        salary=None,
+        url="https://example.com/jobs/2",
+        source="test",
+    )
     asyncio.run(
         run_apply_agent_subprocess(
             blank,
@@ -273,8 +280,13 @@ def test_run_apply_agent_subprocess_does_not_swallow_unexpected_errors(monkeypat
 
 def _job_with_paste_text(url: str, post_text: str) -> Job:
     return Job(
-        title="", company="Deloitte", location="", salary=None,
-        url=url, source="linkedin_scout_relay", raw={"post_text": post_text},
+        title="",
+        company="Deloitte",
+        location="",
+        salary=None,
+        url=url,
+        source="linkedin_scout_relay",
+        raw={"post_text": post_text},
     )
 
 
@@ -295,7 +307,10 @@ def test_run_apply_agent_subprocess_uses_paste_file_when_post_text_present(monke
     )
     result = asyncio.run(
         run_apply_agent_subprocess(
-            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+            job,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
         )
     )
 
@@ -329,7 +344,10 @@ def test_run_apply_agent_subprocess_paste_file_contains_post_text(monkeypatch) -
     )
     asyncio.run(
         run_apply_agent_subprocess(
-            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+            job,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
         )
     )
 
@@ -349,8 +367,12 @@ def test_run_apply_agent_subprocess_passes_permalink_when_present(monkeypatch) -
     )
 
     job = Job(
-        title="", company="Deloitte", location="", salary=None,
-        url="https://linkedin-scout.internal/posts/pabc", source="linkedin_scout_relay",
+        title="",
+        company="Deloitte",
+        location="",
+        salary=None,
+        url="https://linkedin-scout.internal/posts/pabc",
+        source="linkedin_scout_relay",
         raw={
             "post_text": "We're hiring an Angular Developer.",
             "permalink": "https://www.linkedin.com/posts/someone_activity-123",
@@ -358,13 +380,18 @@ def test_run_apply_agent_subprocess_passes_permalink_when_present(monkeypatch) -
     )
     asyncio.run(
         run_apply_agent_subprocess(
-            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+            job,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
         )
     )
 
     cmd = captured_cmds[0]
     assert "--permalink" in cmd
-    assert cmd[cmd.index("--permalink") + 1] == "https://www.linkedin.com/posts/someone_activity-123"
+    assert (
+        cmd[cmd.index("--permalink") + 1] == "https://www.linkedin.com/posts/someone_activity-123"
+    )
 
 
 def test_run_apply_agent_subprocess_omits_permalink_when_absent(monkeypatch) -> None:
@@ -384,7 +411,10 @@ def test_run_apply_agent_subprocess_omits_permalink_when_absent(monkeypatch) -> 
     )
     asyncio.run(
         run_apply_agent_subprocess(
-            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+            job,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
         )
     )
 
@@ -406,7 +436,9 @@ def test_run_apply_agent_subprocess_no_paste_file_for_normal_job(monkeypatch) ->
     asyncio.run(
         run_apply_agent_subprocess(
             _job("https://example.com/jobs/6"),
-            timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
         )
     )
 
@@ -417,6 +449,7 @@ def test_run_apply_agent_subprocess_no_paste_file_for_normal_job(monkeypatch) ->
 # apply_agent prints its diagnostics to STDOUT ("[apply_agent] LLM ERROR: …")
 # before sys.exit(1); stderr is usually empty on those paths. The Telegram
 # failure message used to show an unactionable "(no stderr)".
+
 
 def _run_for_url(monkeypatch, proc: "_FakeProc"):
     from hunter.services.apply_service import run_apply_agent_for_url

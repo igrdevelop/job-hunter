@@ -57,6 +57,7 @@ def _insert_db_row(tracker_db, *, row_id, url, **extra):
 
 # ── insert_pulled_rows ────────────────────────────────────────────────────────
 
+
 def test_insert_pulled_rows_inserts_missing(tracker_db):
     rows = [
         (2, _sheet_row("aaaaaaaa", "https://example.com/jobs/1")),
@@ -131,6 +132,7 @@ def test_insert_pulled_rows_empty_input(tracker_db):
 
 # ── pull_full_snapshot integration ────────────────────────────────────────────
 
+
 def test_pull_full_snapshot_inserts_then_updates(tracker_db):
     """Pull inserts a missing row and applies conflict matrix to an existing one."""
     # Existing DB row that the Sheet has a newer Sent for
@@ -148,11 +150,12 @@ def test_pull_full_snapshot_inserts_then_updates(tracker_db):
         patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
     ):
         from hunter import gsheets_sync
+
         result = run(gsheets_sync.pull_full_snapshot())
 
     assert result["pulled"] == 2
-    assert result["inserted"] == 1   # newrow11 inserted
-    assert result["updated"] == 1    # exist000 Sent updated
+    assert result["inserted"] == 1  # newrow11 inserted
+    assert result["updated"] == 1  # exist000 Sent updated
 
     known = tracker.get_known_urls()
     assert tracker.normalize_url("https://example.com/new") in known
@@ -181,6 +184,7 @@ def test_pull_self_heals_blind_dedup(tracker_db):
         patch("hunter.gsheets_client.read_all", return_value=sheets_rows),
     ):
         from hunter import gsheets_sync
+
         run(gsheets_sync.pull_full_snapshot())
 
     known = tracker.get_known_urls()

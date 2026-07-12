@@ -11,6 +11,7 @@ async def scheduled_gsheets_resync(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Every-5-min job: push dirty rows to Google Sheets (no-op if disabled)."""
     try:
         from hunter import gsheets_sync
+
         synced = await gsheets_sync.resync_dirty()
         if synced:
             logger.info("[scheduled_gsheets_resync] pushed %d dirty row(s)", synced)
@@ -22,9 +23,11 @@ async def scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Periodic job: pull Sheets → tracker.xlsx (every GSHEETS_REFRESH_INTERVAL_MIN)."""
     try:
         from hunter.tracker_cache import cache
+
         if not cache.loaded:
             await cache.load_from_db()
         from hunter import gsheets_sync
+
         result = await gsheets_sync.pull_full_snapshot()
         updated = result.get("updated", 0)
         inserted = result.get("inserted", 0)
@@ -32,7 +35,9 @@ async def scheduled_gsheets_pull(context: ContextTypes.DEFAULT_TYPE) -> None:
         if updated or inserted or reconciled:
             logger.info(
                 "[scheduled_gsheets_pull] %d updated, %d inserted, %d reconciled from Sheets",
-                updated, inserted, reconciled,
+                updated,
+                inserted,
+                reconciled,
             )
             # Pull wrote directly to the DB; refresh the in-memory cache so /unsent,
             # /status and dedup reflect the new state without a bot restart.

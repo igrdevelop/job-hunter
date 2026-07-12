@@ -9,11 +9,28 @@ def test_fetch_roster_includes_all_detail_sources() -> None:
     """The dispatcher roster must cover every source with detail-page support."""
     names = {src.name for src in _fetch_roster()}
     expected = {
-        "justjoin", "nofluffjobs", "linkedin", "bulldogjob", "pracuj",
-        "theprotocol", "solidjobs", "inhire", "jobleads", "arbeitnow",
-        "remotive", "workingnomads", "jobspresso", "builtin", "justremote",
-        "remoteok", "himalayas", "fourdayweek", "weworkremotely",
-        "remoteleaf", "ats_aggregator", "linkedin_scout_relay",
+        "justjoin",
+        "nofluffjobs",
+        "linkedin",
+        "bulldogjob",
+        "pracuj",
+        "theprotocol",
+        "solidjobs",
+        "inhire",
+        "jobleads",
+        "arbeitnow",
+        "remotive",
+        "workingnomads",
+        "jobspresso",
+        "builtin",
+        "justremote",
+        "remoteok",
+        "himalayas",
+        "fourdayweek",
+        "weworkremotely",
+        "remoteleaf",
+        "ats_aggregator",
+        "linkedin_scout_relay",
         "telegram_channels",
     }
     assert names == expected, f"missing or extra sources: {expected ^ names}"
@@ -33,13 +50,16 @@ def test_fetch_roster_is_independent_of_enabled_flags() -> None:
 
 def test_fetch_job_text_routes_to_matching_source() -> None:
     """justjoin.it URL must hit JustJoinSource.fetch_text, not html_fallback."""
-    with patch(
-        "hunter.sources.justjoin.JustJoinSource.fetch_text",
-        return_value="justjoin payload",
-    ) as m_jj, patch(
-        "hunter.sources.html_fallback.fetch_html",
-        return_value="fallback payload",
-    ) as m_fb:
+    with (
+        patch(
+            "hunter.sources.justjoin.JustJoinSource.fetch_text",
+            return_value="justjoin payload",
+        ) as m_jj,
+        patch(
+            "hunter.sources.html_fallback.fetch_html",
+            return_value="fallback payload",
+        ) as m_fb,
+    ):
         out = fetch_job_text("https://justjoin.it/job-offer/abc-warsaw")
     assert out == "justjoin payload"
     m_jj.assert_called_once()
@@ -60,9 +80,7 @@ def test_fetch_job_text_strips_tracking_params_before_dispatch() -> None:
         _capture,
     ):
         # use a tracking-tagged URL
-        fetch_job_text(
-            "https://justjoin.it/job-offer/abc?utm_source=newsletter&utm_campaign=x"
-        )
+        fetch_job_text("https://justjoin.it/job-offer/abc?utm_source=newsletter&utm_campaign=x")
     assert "utm_source" not in seen_url["url"]
     assert "utm_campaign" not in seen_url["url"]
 

@@ -25,11 +25,11 @@ FIXTURES_DIR = PROJECT_DIR / "tests" / "fixtures" / "sample_jobs"
 OUTPUT_DIR = PROJECT_DIR / "tests" / "output"
 
 TRACKS = {
-    "angular":               "angular.txt",
-    "react":                 "react.txt",
-    "ai":                    "ai.txt",
+    "angular": "angular.txt",
+    "react": "react.txt",
+    "ai": "ai.txt",
     "fullstack_angular_nest": "fullstack_angular_nest.txt",
-    "fullstack_react_next":  "fullstack_react_next.txt",
+    "fullstack_react_next": "fullstack_react_next.txt",
 }
 
 
@@ -42,22 +42,23 @@ def run_track(track: str) -> bool:
     out_dir = OUTPUT_DIR / track
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Track: {track}")
     print(f"  Fixture: {fixture.name}")
     print(f"  Output: tests/output/{track}/")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     env = os.environ.copy()
-    env["APPLICATIONS_DIR"] = str(out_dir)   # CLI reads this via $APPLICATIONS_DIR in apply.md
-    env["TELEGRAM_BOT_TOKEN"] = ""           # suppress Telegram notifications
+    env["APPLICATIONS_DIR"] = str(out_dir)  # CLI reads this via $APPLICATIONS_DIR in apply.md
+    env["TELEGRAM_BOT_TOKEN"] = ""  # suppress Telegram notifications
     env["TELEGRAM_CHAT_ID"] = "0"
 
     cmd = [
         sys.executable,
         str(PROJECT_DIR / "apply_agent.py"),
-        "--paste-file", str(fixture),
-        "--force",                        # skip dedup (same fixture would be skipped otherwise)
+        "--paste-file",
+        str(fixture),
+        "--force",  # skip dedup (same fixture would be skipped otherwise)
     ]
 
     result = subprocess.run(cmd, env=env, cwd=str(PROJECT_DIR))
@@ -90,9 +91,9 @@ def main() -> None:
     for track in tracks:
         results[track] = run_track(track)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for track, ok in results.items():
         status = "OK" if ok else "FAILED"
         print(f"  {track:<30} {status}")

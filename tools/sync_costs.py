@@ -28,20 +28,21 @@ from hunter.gsheets_sync import _sheet_id  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dry-run", action="store_true",
-                    help="show what would be written without touching Sheets")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="show what would be written without touching Sheets"
+    )
     args = ap.parse_args()
 
     sheet_id = _sheet_id()
     if not sheet_id:
-        print("error: GSHEETS_TRACKER_ID is not set / no sheet bootstrapped",
-              file=sys.stderr)
+        print("error: GSHEETS_TRACKER_ID is not set / no sheet bootstrapped", file=sys.stderr)
         return 2
 
     if args.dry_run:
         import sqlite3
         from hunter.config import TRACKER_DB_PATH
         from hunter.tracker import _format_cost
+
         con = sqlite3.connect(str(TRACKER_DB_PATH))
         con.row_factory = sqlite3.Row
         rows = con.execute(
@@ -54,13 +55,14 @@ def main() -> int:
             "SELECT count(*) FROM applications WHERE sheets_row IS NULL"
         ).fetchone()[0]
         no_cost = con.execute(
-            "SELECT count(*) FROM applications "
-            "WHERE sheets_row IS NOT NULL AND cost_usd IS NULL"
+            "SELECT count(*) FROM applications WHERE sheets_row IS NOT NULL AND cost_usd IS NULL"
         ).fetchone()[0]
         print(f"would write {len(rows)} rows to M column:")
         for r in rows:
-            print(f"  M{r['sheets_row']:>4}  {_format_cost(r['cost_usd']):>10}  "
-                  f"{r['company'][:30]:30s}  {r['title'][:40]}")
+            print(
+                f"  M{r['sheets_row']:>4}  {_format_cost(r['cost_usd']):>10}  "
+                f"{r['company'][:30]:30s}  {r['title'][:40]}"
+            )
         print(f"\nskipped: no_sheets_row={no_row}  no_cost_measured={no_cost}")
         return 0
 

@@ -86,9 +86,8 @@ def mirror_verdict_cell_sync(
         # No sheets_row yet (A–K append hasn't happened) or no verdict
         # (feature disabled / no judge key / PDF unreadable). Nothing to write.
         return True
-    if not _header_written.get(sheet_id):
-        if write_verdict_header_sync(service, sheet_id, tab):
-            _header_written[sheet_id] = True
+    if not _header_written.get(sheet_id) and write_verdict_header_sync(service, sheet_id, tab):
+        _header_written[sheet_id] = True
     cell = f"'{tab}'!{VERDICT_COL_LETTER}{sheet_row}"
     try:
         service.spreadsheets().values().update(
@@ -99,9 +98,7 @@ def mirror_verdict_cell_sync(
         ).execute()
         return True
     except Exception as e:
-        log.error(
-            "verdict_writer: failed to write N%s for %s: %s", sheet_row, row_id, e
-        )
+        log.error("verdict_writer: failed to write N%s for %s: %s", sheet_row, row_id, e)
         return False
 
 
@@ -138,9 +135,7 @@ def backfill_all_verdicts_sync(
     Returns {"written": N, "skipped_no_row": N, "skipped_no_verdict": N}.
     """
     with get_db(DB_PATH) as conn:
-        rows = conn.execute(
-            "SELECT id, sheets_row, ats_verdict FROM applications"
-        ).fetchall()
+        rows = conn.execute("SELECT id, sheets_row, ats_verdict FROM applications").fetchall()
 
     data = []
     no_row = 0
@@ -152,17 +147,22 @@ def backfill_all_verdicts_sync(
         if r["ats_verdict"] is None:
             no_verdict += 1
             continue
-        data.append({
-            "range": f"'{tab}'!{VERDICT_COL_LETTER}{r['sheets_row']}",
-            "values": [[_format_verdict(r["ats_verdict"])]],
-        })
+        data.append(
+            {
+                "range": f"'{tab}'!{VERDICT_COL_LETTER}{r['sheets_row']}",
+                "values": [[_format_verdict(r["ats_verdict"])]],
+            }
+        )
 
     # Header always — pin it before any data write so a fresh sheet gets the
     # column labelled even when there are no judged rows yet.
-    data.insert(0, {
-        "range": f"'{tab}'!{VERDICT_COL_LETTER}1",
-        "values": [[VERDICT_HEADER]],
-    })
+    data.insert(
+        0,
+        {
+            "range": f"'{tab}'!{VERDICT_COL_LETTER}1",
+            "values": [[VERDICT_HEADER]],
+        },
+    )
 
     if len(data) == 1:
         write_verdict_header_sync(service, sheet_id, tab)

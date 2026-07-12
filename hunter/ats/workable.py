@@ -115,9 +115,7 @@ def _format_location(raw: dict) -> str:
         or ""
     ).strip()
     is_remote = bool(
-        raw.get("telecommuting")
-        or raw.get("remote")
-        or location_obj.get("telecommuting")
+        raw.get("telecommuting") or raw.get("remote") or location_obj.get("telecommuting")
     )
 
     parts = [p for p in (city, country) if p]

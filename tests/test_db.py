@@ -12,6 +12,7 @@ from hunter.db import get_db, init_db, migrate_from_excel, row_to_dict
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture()
 def db_path(tmp_path: Path) -> Path:
     """Isolated SQLite database path (no auto-migration from real tracker.xlsx)."""
@@ -23,6 +24,7 @@ def db_path(tmp_path: Path) -> Path:
 
 # ── Schema / init ─────────────────────────────────────────────────────────────
 
+
 def test_init_db_creates_file(tmp_path: Path) -> None:
     p = tmp_path / "tracker.db"
     assert not p.exists()
@@ -32,25 +34,35 @@ def test_init_db_creates_file(tmp_path: Path) -> None:
 
 def test_init_db_creates_applications_table(db_path: Path) -> None:
     with get_db(db_path) as conn:
-        tables = {
-            r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "applications" in tables
 
 
 def test_init_db_has_all_columns(db_path: Path) -> None:
     expected = {
-        "id", "date", "company", "title", "stack", "ats_status",
-        "url", "url_norm", "folder", "sent", "reapplication", "to_learn",
-        "drive_url", "confirmation", "answer", "sheets_row", "sheets_dirty",
-        "fail_count", "cost_usd", "ats_verdict",
+        "id",
+        "date",
+        "company",
+        "title",
+        "stack",
+        "ats_status",
+        "url",
+        "url_norm",
+        "folder",
+        "sent",
+        "reapplication",
+        "to_learn",
+        "drive_url",
+        "confirmation",
+        "answer",
+        "sheets_row",
+        "sheets_dirty",
+        "fail_count",
+        "cost_usd",
+        "ats_verdict",
     }
     with get_db(db_path) as conn:
-        cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(applications)")
-        }
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
     assert expected == cols
 
 
@@ -80,7 +92,8 @@ def test_init_db_idempotent(tmp_path: Path) -> None:
 def test_init_db_creates_indexes(db_path: Path) -> None:
     with get_db(db_path) as conn:
         indexes = {
-            r[1] for r in conn.execute(
+            r[1]
+            for r in conn.execute(
                 "SELECT * FROM sqlite_master WHERE type='index' AND tbl_name='applications'"
             )
         }
@@ -90,11 +103,10 @@ def test_init_db_creates_indexes(db_path: Path) -> None:
 
 # ── get_db context manager ───────────────────────────────────────────────────
 
+
 def test_get_db_commits_on_success(db_path: Path) -> None:
     with get_db(db_path) as conn:
-        conn.execute(
-            "INSERT INTO applications (id, company, title) VALUES ('aaa11111','X','Y')"
-        )
+        conn.execute("INSERT INTO applications (id, company, title) VALUES ('aaa11111','X','Y')")
     # Open a fresh connection — data should be persisted
     with get_db(db_path) as conn:
         row = conn.execute("SELECT company FROM applications WHERE id='aaa11111'").fetchone()
@@ -131,6 +143,7 @@ def test_get_db_row_factory(db_path: Path) -> None:
 
 # ── row_to_dict ───────────────────────────────────────────────────────────────
 
+
 def test_row_to_dict(db_path: Path) -> None:
     with get_db(db_path) as conn:
         conn.execute(
@@ -147,6 +160,7 @@ def test_row_to_dict(db_path: Path) -> None:
 
 # ── migrate_from_excel ────────────────────────────────────────────────────────
 
+
 def _make_xlsx(path: Path) -> None:
     """Create a minimal tracker.xlsx with two data rows."""
     import openpyxl
@@ -154,9 +168,20 @@ def _make_xlsx(path: Path) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
     headers = [
-        "Date", "Company", "Job Title", "Stack", "ATS %", "URL",
-        "Folder", "Sent", "Re-application", "To Learn", "ID",
-        "Drive URL", "Confirmation", "Answer",
+        "Date",
+        "Company",
+        "Job Title",
+        "Stack",
+        "ATS %",
+        "URL",
+        "Folder",
+        "Sent",
+        "Re-application",
+        "To Learn",
+        "ID",
+        "Drive URL",
+        "Confirmation",
+        "Answer",
     ]
     for i, h in enumerate(headers, 1):
         ws.cell(row=1, column=i, value=h)
@@ -206,9 +231,7 @@ def test_migrate_skips_no_id_row(tmp_path: Path) -> None:
     migrate_from_excel(xlsx, db)
     with get_db(db) as conn:
         # No-ID row must not exist
-        row = conn.execute(
-            "SELECT * FROM applications WHERE company='No ID Corp'"
-        ).fetchone()
+        row = conn.execute("SELECT * FROM applications WHERE company='No ID Corp'").fetchone()
     assert row is None
 
 
@@ -219,9 +242,7 @@ def test_migrate_stores_url_norm(tmp_path: Path) -> None:
     init_db(db)
     migrate_from_excel(xlsx, db)
     with get_db(db) as conn:
-        row = conn.execute(
-            "SELECT url_norm FROM applications WHERE id='abcd1234'"
-        ).fetchone()
+        row = conn.execute("SELECT url_norm FROM applications WHERE id='abcd1234'").fetchone()
     assert row is not None
     # normalize_url strips trailing slash / downcases host
     assert "acme.com" in row["url_norm"]
@@ -279,11 +300,10 @@ def test_init_db_no_auto_migrate_when_db_exists(tmp_path: Path) -> None:
 
 # ── Sheets columns ────────────────────────────────────────────────────────────
 
+
 def test_sheets_dirty_default_is_zero(db_path: Path) -> None:
     with get_db(db_path) as conn:
-        conn.execute(
-            "INSERT INTO applications (id, company, title) VALUES ('zzz99999','X','Y')"
-        )
+        conn.execute("INSERT INTO applications (id, company, title) VALUES ('zzz99999','X','Y')")
     with get_db(db_path) as conn:
         row = conn.execute(
             "SELECT sheets_dirty, sheets_row FROM applications WHERE id='zzz99999'"
@@ -294,12 +314,8 @@ def test_sheets_dirty_default_is_zero(db_path: Path) -> None:
 
 def test_can_set_sheets_row_and_dirty(db_path: Path) -> None:
     with get_db(db_path) as conn:
-        conn.execute(
-            "INSERT INTO applications (id, company, title) VALUES ('www88888','A','B')"
-        )
-        conn.execute(
-            "UPDATE applications SET sheets_row=5, sheets_dirty=1 WHERE id='www88888'"
-        )
+        conn.execute("INSERT INTO applications (id, company, title) VALUES ('www88888','A','B')")
+        conn.execute("UPDATE applications SET sheets_row=5, sheets_dirty=1 WHERE id='www88888'")
     with get_db(db_path) as conn:
         row = conn.execute(
             "SELECT sheets_row, sheets_dirty FROM applications WHERE id='www88888'"

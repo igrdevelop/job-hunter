@@ -1,6 +1,5 @@
 """B3 — tracker must persist normalised URLs so dedup is param-order-independent."""
 
-
 from hunter.tracker import (
     add_applied,
     add_skipped,
@@ -17,6 +16,7 @@ from hunter.models import Job
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_content(url: str, company: str = "Acme", title: str = "Angular Dev") -> dict:
     return {
         "company_name": company,
@@ -31,13 +31,13 @@ def _make_content(url: str, company: str = "Acme", title: str = "Angular Dev") -
 
 
 def _make_job(url: str, company: str = "Acme", title: str = "Angular Dev") -> Job:
-    return Job(title=title, company=company, location="Remote", salary=None,
-               url=url, source="test")
+    return Job(title=title, company=company, location="Remote", salary=None, url=url, source="test")
 
 
 # ---------------------------------------------------------------------------
 # add_applied writes normalised URL
 # ---------------------------------------------------------------------------
+
 
 def test_add_applied_writes_normalized_url(tracker_db) -> None:
     raw_url = (
@@ -81,6 +81,7 @@ def test_add_applied_url_dedup_catches_different_params(tracker_db) -> None:
 # add_skipped writes normalised URL
 # ---------------------------------------------------------------------------
 
+
 def test_add_skipped_writes_normalized_url(tracker_db) -> None:
     raw_url = "https://nofluffjobs.com/pl/job/acme-angular-dev?ref=homepage&utm_campaign=X"
     expected = normalize_url(raw_url)
@@ -95,6 +96,7 @@ def test_add_skipped_writes_normalized_url(tracker_db) -> None:
 # add_failed writes normalised URL
 # ---------------------------------------------------------------------------
 
+
 def test_add_failed_writes_normalized_url(tracker_db) -> None:
     raw_url = "https://justjoin.it/job-offer/acme-dev?trackingId=T99&utm_source=jj"
     expected = normalize_url(raw_url)
@@ -108,6 +110,7 @@ def test_add_failed_writes_normalized_url(tracker_db) -> None:
 # ---------------------------------------------------------------------------
 # add_expired writes normalised URL
 # ---------------------------------------------------------------------------
+
 
 def test_add_expired_writes_normalized_url(tracker_db) -> None:
     raw_url = "https://www.pracuj.pl/praca/dev,oferta,5555?sendid=XXX"
@@ -134,6 +137,7 @@ def test_add_expired_marks_sent_not_ats(tracker_db) -> None:
 # ---------------------------------------------------------------------------
 # get_known_urls — round-trip sanity
 # ---------------------------------------------------------------------------
+
 
 def test_get_known_urls_matches_normalized_lookup(tracker_db) -> None:
     """After write, get_known_urls must return the same key used by the hunt loop."""

@@ -83,7 +83,9 @@ def main():
         key = "TELEGRAM_USER_SESSION"
         if key not in env_text:
             with open(ENV_PATH, "a", encoding="utf-8") as f:
-                f.write(f"\n# Telegram user session for linkedin_scout/telegram_relay.py\n{key}={session_path}\n")
+                f.write(
+                    f"\n# Telegram user session for linkedin_scout/telegram_relay.py\n{key}={session_path}\n"
+                )
             print(f"[telegram_user_login] Added {key}={session_path} to .env")
         else:
             print(f"[telegram_user_login] {key} already set in .env — no changes.")

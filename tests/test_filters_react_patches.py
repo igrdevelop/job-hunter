@@ -5,17 +5,23 @@ P-3.1: _is_react_only_title() — title-based check for all sources
 P-3.2: Gmail bypass no longer silences exclude_pattern / react checks
 P-3.3: react native added to exclude_patterns
 """
+
 import pytest
 from hunter.filters import apply_filters, apply_filters_with_stats, _is_react_only_title
 from hunter.models import Job
 
 
-def _job(*, title: str, location: str = "Wroclaw", source: str = "test",
-         raw: dict | None = None) -> Job:
+def _job(
+    *, title: str, location: str = "Wroclaw", source: str = "test", raw: dict | None = None
+) -> Job:
     return Job(
-        title=title, company="Acme", location=location, salary=None,
+        title=title,
+        company="Acme",
+        location=location,
+        salary=None,
         url=f"https://example.com/{title.lower().replace(' ', '-')}",
-        source=source, raw=raw or {},
+        source=source,
+        raw=raw or {},
     )
 
 
@@ -27,24 +33,31 @@ def _gmail_job(*, title: str, location: str = "remote") -> Job:
 # P-3.1 — _is_react_only_title unit tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("title", [
-    "React Developer",
-    "React Engineer",
-    "React Native Engineer",
-    "React.js Developer",
-    "Frontend Developer (React)",
-    "Software Engineer React",
-])
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "React Developer",
+        "React Engineer",
+        "React Native Engineer",
+        "React.js Developer",
+        "Frontend Developer (React)",
+        "Software Engineer React",
+    ],
+)
 def test_is_react_only_title_positive(title: str) -> None:
     assert _is_react_only_title(title), f"Expected True for: {title!r}"
 
 
-@pytest.mark.parametrize("title", [
-    "Angular Developer",
-    "Senior Frontend Developer (Angular/React)",  # angular present → False
-    "Frontend Developer",                          # no react mention → False
-    "React + Angular Developer",                   # angular present → False
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Angular Developer",
+        "Senior Frontend Developer (Angular/React)",  # angular present → False
+        "Frontend Developer",  # no react mention → False
+        "React + Angular Developer",  # angular present → False
+    ],
+)
 def test_is_react_only_title_negative(title: str) -> None:
     assert not _is_react_only_title(title), f"Expected False for: {title!r}"
 
@@ -52,6 +65,7 @@ def test_is_react_only_title_negative(title: str) -> None:
 # ---------------------------------------------------------------------------
 # P-3.1 — applied via apply_filters for regular sources
 # ---------------------------------------------------------------------------
+
 
 def test_react_developer_title_blocked_for_regular_source() -> None:
     jobs = [_job(title="React Developer")]
@@ -68,6 +82,7 @@ def test_react_native_engineer_blocked() -> None:
 # ---------------------------------------------------------------------------
 # P-3.2 — Gmail bypass no longer silences React / exclude-pattern checks
 # ---------------------------------------------------------------------------
+
 
 def test_react_developer_blocked_even_from_gmail() -> None:
     """Gmail source must NOT bypass React-only title check.
@@ -125,6 +140,7 @@ def test_junior_blocked_from_gmail() -> None:
 # P-3.3 — React Native in exclude_patterns
 # (Use gmail source so title_kw is bypassed and we test the real target filter)
 # ---------------------------------------------------------------------------
+
 
 def test_react_native_blocked_via_gmail() -> None:
     """React Native in a Gmail job title is blocked (P-3.1 title check or P-3.3 pattern)."""

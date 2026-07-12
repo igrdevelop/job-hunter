@@ -53,9 +53,7 @@ def _enrich_justjoin(job: Job) -> Job:
         return job
     slug = match.group(1)
 
-    resp = requests.get(
-        f"{_DETAIL_API}/{slug}", headers=_JJ_HEADERS, timeout=GMAIL_ENRICH_TIMEOUT
-    )
+    resp = requests.get(f"{_DETAIL_API}/{slug}", headers=_JJ_HEADERS, timeout=GMAIL_ENRICH_TIMEOUT)
     if resp.status_code == 404:
         return job
     resp.raise_for_status()
@@ -130,7 +128,16 @@ def _enrich_one(job: Job) -> Job:
     try:
         if "justjoin.it" in domain:
             result = _enrich_justjoin(job)
-        elif any(d in domain for d in ("nofluffjobs.com", "bulldogjob.com", "bulldogjob.pl", "pracuj.pl", "linkedin.com")):
+        elif any(
+            d in domain
+            for d in (
+                "nofluffjobs.com",
+                "bulldogjob.com",
+                "bulldogjob.pl",
+                "pracuj.pl",
+                "linkedin.com",
+            )
+        ):
             result = _enrich_via_text(job)
         else:
             logger.info("[gmail_enricher]   → no enricher for %r — keeping stub", domain)
@@ -141,7 +148,9 @@ def _enrich_one(job: Job) -> Job:
         else:
             logger.info(
                 "[gmail_enricher]   → enriched: %r @ %r  loc=%r",
-                result.title, result.company, result.location,
+                result.title,
+                result.company,
+                result.location,
             )
         return result
     except Exception as e:
@@ -191,9 +200,11 @@ def enrich_jobs(jobs: list[Job]) -> list[Job]:
 
     enriched = asyncio.run(_enrich_jobs_async(jobs))
 
-    ok = sum(1 for orig, res in zip(jobs, enriched) if res is not orig)
+    ok = sum(1 for orig, res in zip(jobs, enriched, strict=False) if res is not orig)
     logger.info(
         "[gmail_enricher] done: %d/%d enriched, %d kept as stub",
-        ok, len(jobs), len(jobs) - ok,
+        ok,
+        len(jobs),
+        len(jobs) - ok,
     )
     return enriched

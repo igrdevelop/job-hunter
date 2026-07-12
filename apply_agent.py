@@ -60,6 +60,7 @@ from hunter.apply_cli import _is_cli_available, main_cli  # noqa: F401
 
 # ── Main dispatcher ────────────────────────────────────────────────────────────
 
+
 def main(
     url: str,
     force_cli: bool = False,
@@ -72,7 +73,9 @@ def main(
 ) -> None:
     """Dispatch to CLI or API pipeline based on availability and flags."""
     if force_cli or APPLY_USE_CLI:
-        folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink)
+        folder = main_cli(
+            url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
+        )
         _maybe_run_shadow(folder, full=full)
         return
 
@@ -80,7 +83,9 @@ def main(
     if cli_ok:
         print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
         try:
-            folder = main_cli(url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink)
+            folder = main_cli(
+                url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
+            )
             _maybe_run_shadow(folder, full=full)
             return
         except (ApplyError, SystemExit) as e:
@@ -115,12 +120,14 @@ def _maybe_run_shadow(folder, full: bool) -> None:
         return
     try:
         from hunter.dual_apply import launch_detached
+
         launch_detached(folder, full_mode=full)
     except Exception as e:
         print(f"[apply_agent] dual-apply shadow launch skipped: {e}")
 
 
 # ── CLI argument parser ────────────────────────────────────────────────────────
+
 
 def parse_apply_cli_argv(
     argv: list[str],
@@ -168,11 +175,15 @@ def parse_apply_cli_argv(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--company NAME] "
-              "[--title TITLE] [--paste-file PATH] [--permalink URL] [--notify-start]")
+        print(
+            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--company NAME] "
+            "[--title TITLE] [--paste-file PATH] [--permalink URL] [--notify-start]"
+        )
         sys.exit(1)
 
-    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(sys.argv)
+    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(
+        sys.argv
+    )
 
     paste_text = ""
     if paste_file:
@@ -186,12 +197,22 @@ if __name__ == "__main__":
             sys.exit(1)
 
     if not url and not paste_text:
-        print("Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--paste-file PATH] ...")
+        print(
+            "Usage: python apply_agent.py <job_url> [--cli] [--force] [--full] [--paste-file PATH] ..."
+        )
         sys.exit(1)
 
     if notify_start:
         label = url if url else "(pasted text)"
         notify(f"🔄 <b>Processing...</b>\n🔗 {label}\n\nFetching job text & calling LLM…")
 
-    main(url, force_cli=force_cli, force=force, full=full, paste_text=paste_text,
-         jobleads_company=co, jobleads_title=ti, permalink=permalink)
+    main(
+        url,
+        force_cli=force_cli,
+        force=force,
+        full=full,
+        paste_text=paste_text,
+        jobleads_company=co,
+        jobleads_title=ti,
+        permalink=permalink,
+    )

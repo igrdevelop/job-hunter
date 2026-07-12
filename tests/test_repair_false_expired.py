@@ -29,8 +29,10 @@ def test_no_url_treated_live() -> None:
 
 def test_url_still_expired_kept() -> None:
     row = {"url": "https://x/1"}
-    with patch.object(repair, "fetch_job_text", return_value="x" * 500), \
-         patch.object(repair, "is_job_expired", return_value=True):
+    with (
+        patch.object(repair, "fetch_job_text", return_value="x" * 500),
+        patch.object(repair, "is_job_expired", return_value=True),
+    ):
         live, reason = repair._is_live(row, trust=False)
     assert live is False
     assert "verified" in reason
@@ -38,8 +40,10 @@ def test_url_still_expired_kept() -> None:
 
 def test_url_live_cleared() -> None:
     row = {"url": "https://x/1"}
-    with patch.object(repair, "fetch_job_text", return_value="x" * 500), \
-         patch.object(repair, "is_job_expired", return_value=False):
+    with (
+        patch.object(repair, "fetch_job_text", return_value="x" * 500),
+        patch.object(repair, "is_job_expired", return_value=False),
+    ):
         live, reason = repair._is_live(row, trust=False)
     assert live is True
 

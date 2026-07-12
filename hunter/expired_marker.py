@@ -55,22 +55,32 @@ def _fetch_quick_html(url: str) -> tuple[str, int]:
     Tries cloudscraper first, falls back to plain requests.
     """
     from hunter.sources.html_fallback import clean_url
+
     fetch_url = clean_url(url)
 
     try:
         import cloudscraper
+
         scraper = cloudscraper.create_scraper()
         resp = scraper.get(fetch_url, timeout=_QUICK_TIMEOUT)
-        logger.debug("[expired_marker] quick fetch %s → HTTP %s, %d bytes",
-                     fetch_url, resp.status_code, len(resp.text))
+        logger.debug(
+            "[expired_marker] quick fetch %s → HTTP %s, %d bytes",
+            fetch_url,
+            resp.status_code,
+            len(resp.text),
+        )
         return (resp.text if resp.status_code == 200 else ""), resp.status_code
     except Exception as cs_err:
         logger.debug("[expired_marker] cloudscraper failed (%s), trying plain requests", cs_err)
 
     try:
         resp = requests.get(fetch_url, headers=_QUICK_HEADERS, timeout=_QUICK_TIMEOUT)
-        logger.debug("[expired_marker] plain-requests fetch %s → HTTP %s, %d bytes",
-                     fetch_url, resp.status_code, len(resp.text))
+        logger.debug(
+            "[expired_marker] plain-requests fetch %s → HTTP %s, %d bytes",
+            fetch_url,
+            resp.status_code,
+            len(resp.text),
+        )
         return (resp.text if resp.status_code == 200 else ""), resp.status_code
     except Exception as req_err:
         logger.debug("[expired_marker] plain-requests also failed: %s", req_err)
@@ -128,13 +138,11 @@ def _is_cloudflare_challenge(html: str) -> bool:
             or "cf-browser-verification" in lower
         )
     lower = html.lower()
-    return (
-        "just a moment" in lower
-        and ("cloudflare" in lower or "_cf_chl" in lower)
-    )
+    return "just a moment" in lower and ("cloudflare" in lower or "_cf_chl" in lower)
 
 
 # ── Core check ────────────────────────────────────────────────────────────────
+
 
 async def run_check(
     progress_cb: Callable[[str], Awaitable[None]] | None = None,
@@ -178,6 +186,7 @@ async def run_check(
         # fetch_text always raises by design) — skip outright instead of
         # burning a request that's guaranteed to error.
         from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
+
         if SCOUT_POSTS_URL_MARKER in url or _LEGACY_SCOUT_POSTS_URL_MARKER in url:
             done += 1
             if progress_cb and done % PROGRESS_EVERY == 0:
@@ -225,6 +234,7 @@ async def run_check(
             is_jobleads_cf = False
             try:
                 from hunter.sources.jobleads import JobLeadsCloudflareError
+
                 is_jobleads_cf = isinstance(e, JobLeadsCloudflareError)
             except ImportError:
                 pass
@@ -272,6 +282,7 @@ async def run_check(
         # Update in-memory cache too (best-effort)
         try:
             from hunter.tracker_cache import cache
+
             for row_id in updates:
                 await cache.update_sent(row_id, "EXPIRED")
         except Exception as e:
@@ -280,6 +291,7 @@ async def run_check(
         # Mirror EXPIRED stamps to Google Sheets (best-effort)
         try:
             from hunter import gsheets_sync
+
             await gsheets_sync.mirror_expired_batch(set(updates.keys()))
         except Exception as e:
             logger.warning("[expired_marker] gsheets mirror failed: %s", e)

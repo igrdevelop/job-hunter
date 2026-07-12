@@ -81,6 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_company
 
 # ── Connection factory ────────────────────────────────────────────────────────
 
+
 @contextmanager
 def get_db(path: Path = TRACKER_DB_PATH) -> Generator[sqlite3.Connection, None, None]:
     """Open a connection to the SQLite tracker DB.
@@ -111,6 +112,7 @@ def get_db(path: Path = TRACKER_DB_PATH) -> Generator[sqlite3.Connection, None, 
 
 # ── Schema init ───────────────────────────────────────────────────────────────
 
+
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add any missing columns (incremental schema migrations for existing DBs).
 
@@ -119,20 +121,20 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
     migrations = [
-        ("sheets_row",   "INTEGER"),
+        ("sheets_row", "INTEGER"),
         ("sheets_dirty", "INTEGER NOT NULL DEFAULT 0"),
-        ("fail_count",   "INTEGER NOT NULL DEFAULT 0"),
+        ("fail_count", "INTEGER NOT NULL DEFAULT 0"),
         # cost_usd is the per-vacancy total USD spent on LLM calls (rounded
         # to 4 decimals). NULL means "not measured" — either a pre-cost-
         # tracking row, or a CLI-mode run (Pro subscription, no per-token
         # visibility). The Sheets mirror renders NULL as an empty cell.
-        ("cost_usd",     "REAL"),
+        ("cost_usd", "REAL"),
         # ats_verdict is the independent PDF-verdict score (0-100): one cheap
         # judge-model call scoring the text extracted from the rendered EN CV
         # PDF. NULL means "no verdict" (feature disabled, no judge key, PDF
         # unreadable, or a pre-verdict row). Mirrored to Sheet column N by
         # hunter.verdict_writer (parallel to cost_usd -> column M).
-        ("ats_verdict",  "REAL"),
+        ("ats_verdict", "REAL"),
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -147,8 +149,12 @@ def _dedup_url_norm(conn: sqlite3.Connection) -> int:
     Returns number of rows deleted.
     """
     _STATUS_RANK = {
-        "fail": 0, "skip": 0, "": 0, "?": 0,
-        "manual": 1, "expired": 1,
+        "fail": 0,
+        "skip": 0,
+        "": 0,
+        "?": 0,
+        "manual": 1,
+        "expired": 1,
     }
 
     def _rank(ats: str) -> int:
@@ -185,13 +191,16 @@ def _dedup_url_norm(conn: sqlite3.Connection) -> int:
         ids_to_delete = [r["id"] for r in rows_sorted[1:]]
         if ids_to_delete:
             conn.execute(
-                f"DELETE FROM applications WHERE id IN ({','.join('?' * len(ids_to_delete))})",
+                # f-string only expands the placeholder count; values are bound.
+                f"DELETE FROM applications WHERE id IN ({','.join('?' * len(ids_to_delete))})",  # noqa: S608
                 ids_to_delete,
             )
             deleted += len(ids_to_delete)
             log.info(
                 "db.dedup: removed %d duplicate(s) for url_norm=%s (kept %s)",
-                len(ids_to_delete), url_norm[:60], keep_id,
+                len(ids_to_delete),
+                url_norm[:60],
+                keep_id,
             )
 
     return deleted
@@ -233,6 +242,7 @@ def init_db(
 
 
 # ── Migration ─────────────────────────────────────────────────────────────────
+
 
 def migrate_from_excel(
     xlsx_path: Path = TRACKER_PATH,
@@ -279,7 +289,7 @@ def migrate_from_excel(
         # Pad row to max column we care about
         padded = list(row) + [""] * max(0, COL_ANSWER - len(row))
 
-        def cell(idx: int) -> str:  # 1-based column index
+        def cell(idx: int, padded: list = padded) -> str:  # 1-based column index
             v = padded[idx - 1]
             return str(v).strip() if v is not None else ""
 
@@ -288,25 +298,27 @@ def migrate_from_excel(
             continue  # rows without ID cannot be synced — skip
 
         raw_url = cell(URL_COL_INDEX)
-        rows_to_insert.append({
-            "id":           row_id,
-            "date":         cell(1),
-            "company":      cell(COMPANY_COL_INDEX),
-            "title":        cell(TITLE_COL_INDEX),
-            "stack":        cell(4),
-            "ats_status":   cell(ATS_COL_INDEX),
-            "url":          raw_url,
-            "url_norm":     normalize_url(raw_url) if raw_url else "",
-            "folder":       cell(7),
-            "sent":         cell(SENT_COL_INDEX),
-            "reapplication": cell(9),
-            "to_learn":     cell(10),
-            "drive_url":    cell(COL_DRIVE_URL),
-            "confirmation": cell(COL_CONFIRMATION),
-            "answer":       cell(COL_ANSWER) if len(padded) >= COL_ANSWER else "",
-            "sheets_row":   None,
-            "sheets_dirty": 0,
-        })
+        rows_to_insert.append(
+            {
+                "id": row_id,
+                "date": cell(1),
+                "company": cell(COMPANY_COL_INDEX),
+                "title": cell(TITLE_COL_INDEX),
+                "stack": cell(4),
+                "ats_status": cell(ATS_COL_INDEX),
+                "url": raw_url,
+                "url_norm": normalize_url(raw_url) if raw_url else "",
+                "folder": cell(7),
+                "sent": cell(SENT_COL_INDEX),
+                "reapplication": cell(9),
+                "to_learn": cell(10),
+                "drive_url": cell(COL_DRIVE_URL),
+                "confirmation": cell(COL_CONFIRMATION),
+                "answer": cell(COL_ANSWER) if len(padded) >= COL_ANSWER else "",
+                "sheets_row": None,
+                "sheets_dirty": 0,
+            }
+        )
 
     wb.close()
 
@@ -326,9 +338,7 @@ def migrate_from_excel(
                     """,
                     r,
                 )
-                if conn.execute(
-                    "SELECT changes()"
-                ).fetchone()[0]:
+                if conn.execute("SELECT changes()").fetchone()[0]:
                     inserted += 1
             except Exception as e:
                 log.warning("db.migrate_from_excel: skipping row %s: %s", r.get("id"), e)
@@ -338,6 +348,7 @@ def migrate_from_excel(
 
 
 # ── Convenience helpers ───────────────────────────────────────────────────────
+
 
 def row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain Python dict."""

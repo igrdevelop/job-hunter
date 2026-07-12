@@ -112,10 +112,7 @@ def _coerce_text(value) -> str:
 
 def _extract_company(data: dict) -> str:
     return (
-        data.get("name")
-        or _dig(data, "company.name")
-        or _dig(data, "company.companyName")
-        or "N/A"
+        data.get("name") or _dig(data, "company.name") or _dig(data, "company.companyName") or "N/A"
     )
 
 
@@ -212,14 +209,13 @@ class NoFluffJobsSource(BaseSource):
         """Try the posting detail API first, fall back to generic HTML extraction."""
         slug = _extract_posting_slug(url)
         try:
-            resp = requests.get(
-                f"{POSTING_API}/{slug}", headers=POSTING_HEADERS, timeout=TIMEOUT
-            )
+            resp = requests.get(f"{POSTING_API}/{slug}", headers=POSTING_HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
             return _format_posting_text(data)
         except Exception:
             from hunter.sources.html_fallback import fetch_html
+
             return fetch_html(url)
 
     def search(self) -> list[Job]:

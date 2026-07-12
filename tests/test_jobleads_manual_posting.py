@@ -1,6 +1,5 @@
 """JobLeads MANUAL flow: pasted job_posting.txt + tracker path resolution."""
 
-
 from hunter import tracker
 from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER, try_load_manual_job_posting
 
@@ -10,12 +9,15 @@ def test_try_load_manual_job_posting_returns_none_until_paste(tmp_path, tracker_
     folder.mkdir(parents=True)
     url = "https://www.jobleads.com/pl/job/angular-dev--poland--abc123deadbeef000000000000000"
 
-    assert tracker.add_manual_jobleads_pending(
-        url=url,
-        company="AcmeCo",
-        title="Angular Dev",
-        folder_abs=folder,
-    ) is True
+    assert (
+        tracker.add_manual_jobleads_pending(
+            url=url,
+            company="AcmeCo",
+            title="Angular Dev",
+            folder_abs=folder,
+        )
+        is True
+    )
 
     jp = folder / "job_posting.txt"
     jp.write_text(
@@ -37,7 +39,10 @@ def test_get_url_status_flags_treats_manual_as_not_success(tmp_path, tracker_db)
     folder.mkdir(parents=True)
     url = "https://www.jobleads.com/pl/job/fe--poland--def456deadbeef0000000000000000"
     tracker.add_manual_jobleads_pending(
-        url=url, company="Beta", title="FE", folder_abs=folder,
+        url=url,
+        company="Beta",
+        title="FE",
+        folder_abs=folder,
     )
     flags = tracker.get_url_status_flags(url)
     assert flags["has_success"] is False

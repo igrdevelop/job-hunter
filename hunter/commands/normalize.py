@@ -18,7 +18,8 @@ async def cmd_normalize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         result = await normalize_sheet_async()
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Error: <code>{e}</code>", parse_mode=ParseMode.HTML,
+            f"❌ Error: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
         )
         return
 

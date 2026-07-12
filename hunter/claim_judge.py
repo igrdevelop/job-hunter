@@ -51,12 +51,13 @@ _VALID_SEVERITIES = frozenset({"fabrication", "exaggeration", "style"})
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Violation:
-    field: str        # dotted path, e.g. "resume_en.experience[2].bullets[1]"
-    quote: str        # verbatim substring of the offending text
-    reason: str       # one-line human-readable explanation
-    severity: str     # "fabrication" | "exaggeration" | "style"
+    field: str  # dotted path, e.g. "resume_en.experience[2].bullets[1]"
+    quote: str  # verbatim substring of the offending text
+    reason: str  # one-line human-readable explanation
+    severity: str  # "fabrication" | "exaggeration" | "style"
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -96,15 +97,15 @@ class JudgeReport:
         for v in self.actionable[:5]:
             icon = "🚫" if v.severity == "fabrication" else "⚠️"
             lines.append(f"{icon} <b>{v.field}</b>: {v.reason[:120]}")
-        return (
-            f"⚖️ <b>Claim judge: {len(self.actionable)} issue(s)</b>\n"
-            f"🔗 {url}\n\n" + "\n".join(lines)
+        return f"⚖️ <b>Claim judge: {len(self.actionable)} issue(s)</b>\n🔗 {url}\n\n" + "\n".join(
+            lines
         )
 
 
 # ---------------------------------------------------------------------------
 # Field iteration + dotted-path resolution
 # ---------------------------------------------------------------------------
+
 
 # Skill categories whose value is a comma-joined string of keywords; these are
 # the ATS-mirroring injection point and worth judging. `languages` is excluded
@@ -131,8 +132,10 @@ def iter_judged_fields(content: dict[str, Any]) -> dict[str, str]:
             for cat, val in skills.items():
                 if cat == "languages":
                     continue
-                text = val if isinstance(val, str) else (
-                    ", ".join(str(i) for i in val) if isinstance(val, list) else ""
+                text = (
+                    val
+                    if isinstance(val, str)
+                    else (", ".join(str(i) for i in val) if isinstance(val, list) else "")
                 )
                 if text.strip():
                     out[f"{rk}.skills.{cat}"] = text
@@ -204,6 +207,7 @@ def quote_survives(content: dict[str, Any], path: str, quote: str) -> bool:
 # Judge call
 # ---------------------------------------------------------------------------
 
+
 def _load_rules() -> str:
     path = PROMPTS_DIR / "judge_rules.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
@@ -272,6 +276,7 @@ def judge_content(content: dict[str, Any], job_text: str, base_cv: str = "") -> 
 
     try:
         from llm_client import call_llm
+
         raw = call_llm(
             system_prompt=_load_rules(),
             user_message=_build_user_message(fields, job_text, base_cv),
@@ -296,9 +301,22 @@ def judge_content(content: dict[str, Any], job_text: str, base_cv: str = "") -> 
 # firms", "dev SERVING Fortune 500 clients"). Used as a left clause boundary so
 # the drop excises only the embellishment, never the honest clause before it.
 _DROP_CONNECTORS = (
-    "and", "or", "including", "serving", "for", "with", "as well as",
-    "such as", "like", "alongside",
-    "oraz", "i", "w tym", "takich jak", "dla", "wraz z",
+    "and",
+    "or",
+    "including",
+    "serving",
+    "for",
+    "with",
+    "as well as",
+    "such as",
+    "like",
+    "alongside",
+    "oraz",
+    "i",
+    "w tym",
+    "takich jak",
+    "dla",
+    "wraz z",
 )
 _DROP_CONNECTOR_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(c) for c in _DROP_CONNECTORS) + r")\b",
@@ -326,8 +344,11 @@ def _drop_quote(text: str, quote: str) -> str:
     # IMMEDIATELY preceding word, not the whole clause, so an essential earlier
     # connector ("apps FOR 300+ German banks ...") is never swallowed.
     pre = text[:start]
-    m = re.search(r"(\s*\b(?:" + "|".join(re.escape(c) for c in _DROP_CONNECTORS)
-                  + r")\b\s*)$", pre, re.IGNORECASE)
+    m = re.search(
+        r"(\s*\b(?:" + "|".join(re.escape(c) for c in _DROP_CONNECTORS) + r")\b\s*)$",
+        pre,
+        re.IGNORECASE,
+    )
     drop_start = start - len(m.group(1)) if m else start
 
     remainder = (text[:drop_start] + text[end:]).strip()
@@ -340,12 +361,14 @@ def _drop_quote(text: str, quote: str) -> str:
 
     # Cleanup: whitespace, double/dangling punctuation, trailing connectors.
     candidate = re.sub(r"\s{2,}", " ", candidate)
-    candidate = re.sub(r"\s+([,.;:])", r"\1", candidate)        # " ,"  -> ","
-    candidate = re.sub(r"([,;:])\s*(?=[,;:])", "", candidate)   # ", ," -> ","
-    candidate = re.sub(r"[,;:]\s*([.!?])", r"\1", candidate)    # ",."  -> "."
+    candidate = re.sub(r"\s+([,.;:])", r"\1", candidate)  # " ,"  -> ","
+    candidate = re.sub(r"([,;:])\s*(?=[,;:])", "", candidate)  # ", ," -> ","
+    candidate = re.sub(r"[,;:]\s*([.!?])", r"\1", candidate)  # ",."  -> "."
     candidate = re.sub(
         r"\s+(?:and|or|including|serving|with|oraz|i|dla)\s*([.;,]|$)",
-        r"\1", candidate, flags=re.IGNORECASE,
+        r"\1",
+        candidate,
+        flags=re.IGNORECASE,
     )
     candidate = re.sub(r"^\s*[,;:.\-]\s*", "", candidate)
     candidate = re.sub(r"\s*[,;:]\s*$", "", candidate)
@@ -379,9 +402,7 @@ def _deterministic_repair(
     return still_broken, fixes
 
 
-def _llm_rewrite(
-    content: dict[str, Any], violations: list[Violation], job_text: str
-) -> list[str]:
+def _llm_rewrite(content: dict[str, Any], violations: list[Violation], job_text: str) -> list[str]:
     """One targeted rewrite call for fields a deterministic drop can't fix.
 
     Rewrites ONLY the affected fields, instructs the model to remove/correct the
@@ -394,8 +415,9 @@ def _llm_rewrite(
         return []
 
     viol_lines = "\n".join(
-        f"- in `{v.field}`: remove/correct \"{v.quote}\" ({v.reason})"
-        for v in violations if v.field in field_texts
+        f'- in `{v.field}`: remove/correct "{v.quote}" ({v.reason})'
+        for v in violations
+        if v.field in field_texts
     )
     user_message = (
         "The following resume/cover-letter fields contain unsupported claims. "
@@ -408,6 +430,7 @@ def _llm_rewrite(
     )
     try:
         from llm_client import call_llm
+
         rewritten = call_llm(
             system_prompt=(
                 "You correct individual resume fields. Output strict JSON mapping "
@@ -545,10 +568,7 @@ def run_judge_stage(
         print(f"[claim_judge] repair failed (skipping): {e}")
         return JudgeOutcome(content=content, report=report)
 
-    survivors = [
-        v for v in report.fabrications
-        if quote_survives(content, v.field, v.quote)
-    ]
+    survivors = [v for v in report.fabrications if quote_survives(content, v.field, v.quote)]
     blocked = mode == "block" and bool(survivors)
     return JudgeOutcome(
         content=content, report=report, fixes=fixes, survivors=survivors, blocked=blocked

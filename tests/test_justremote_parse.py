@@ -31,8 +31,7 @@ def test_parse_minimal() -> None:
     assert job.company == "Acme"
     assert job.location == "Fully Remote — United States"
     assert job.url == (
-        "https://justremote.co/remote-developer-jobs/"
-        "senior-frontend-developer-angular-acme"
+        "https://justremote.co/remote-developer-jobs/senior-frontend-developer-angular-acme"
     )
     assert job.source == "justremote"
 
@@ -67,8 +66,7 @@ def test_format_location() -> None:
 
 def test_slug_from_url() -> None:
     assert (
-        _slug_from_url("https://justremote.co/remote-developer-jobs/foo-bar-acme")
-        == "foo-bar-acme"
+        _slug_from_url("https://justremote.co/remote-developer-jobs/foo-bar-acme") == "foo-bar-acme"
     )
     assert (
         _slug_from_url("https://justremote.co/remote-developer-jobs/foo-bar-acme/")
@@ -139,11 +137,10 @@ def test_fetch_text_assembles_sections() -> None:
 
 def test_fetch_text_falls_back_on_non_dict() -> None:
     src = JustRemoteSource()
-    with patch(
-        "hunter.sources.justremote.requests.get", return_value=_resp([1, 2, 3])
-    ), patch(
-        "hunter.sources.html_fallback.fetch_html", return_value="fallback"
-    ) as m_fb:
+    with (
+        patch("hunter.sources.justremote.requests.get", return_value=_resp([1, 2, 3])),
+        patch("hunter.sources.html_fallback.fetch_html", return_value="fallback") as m_fb,
+    ):
         text = src.fetch_text("https://justremote.co/remote-developer-jobs/x-acme")
     assert text == "fallback"
     m_fb.assert_called_once()

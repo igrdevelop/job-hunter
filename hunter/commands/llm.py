@@ -37,8 +37,7 @@ def _build_status_text() -> str:
             continue
         marker = " ← active" if name == active.name else ""
         lines.append(
-            f"  • <code>/llm {name}</code> — {prof.model} "
-            f"({prof.cost_estimate()}){marker}"
+            f"  • <code>/llm {name}</code> — {prof.model} ({prof.cost_estimate()}){marker}"
         )
 
     unavailable = [name for name, p in PROFILES.items() if name not in available_names]
@@ -81,6 +80,4 @@ async def cmd_llm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         name = args[0].strip().lower()
         text = await asyncio.to_thread(_switch_profile, name)
 
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)

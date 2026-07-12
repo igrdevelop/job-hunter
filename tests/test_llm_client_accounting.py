@@ -18,14 +18,24 @@ from llm_client import (
 
 def test_account_usage_collects_records_from_nested_calls() -> None:
     with account_usage() as log:
-        _record_usage("claude-sonnet-4-6", MagicMock(
-            input_tokens=1000, output_tokens=500,
-            cache_creation_input_tokens=0, cache_read_input_tokens=0,
-        ))
-        _record_usage("claude-haiku-4-5-20251001", MagicMock(
-            input_tokens=200, output_tokens=100,
-            cache_creation_input_tokens=0, cache_read_input_tokens=0,
-        ))
+        _record_usage(
+            "claude-sonnet-4-6",
+            MagicMock(
+                input_tokens=1000,
+                output_tokens=500,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
+        _record_usage(
+            "claude-haiku-4-5-20251001",
+            MagicMock(
+                input_tokens=200,
+                output_tokens=100,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
     assert len(log) == 2
     assert log[0]["model"] == "claude-sonnet-4-6"
     assert log[0]["input_tokens"] == 1000
@@ -58,10 +68,15 @@ def test_push_pop_manual_pair_for_pipelines_with_early_returns() -> None:
     # sys.exit / return paths. Verify the manual API works identically to
     # the context manager.
     log = push_usage_log()
-    _record_usage("sonnet-4-6", MagicMock(
-        input_tokens=500, output_tokens=200,
-        cache_creation_input_tokens=0, cache_read_input_tokens=0,
-    ))
+    _record_usage(
+        "sonnet-4-6",
+        MagicMock(
+            input_tokens=500,
+            output_tokens=200,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+        ),
+    )
     popped = pop_usage_log()
     assert popped is log
     assert len(popped) == 1
@@ -88,6 +103,7 @@ def test_record_usage_tolerates_attribute_missing() -> None:
     class StubUsage:
         input_tokens = 100
         output_tokens = 50
+
     with account_usage() as log:
         _record_usage("sonnet-4-6", StubUsage())
     assert log[0]["input_tokens"] == 100
@@ -100,15 +116,25 @@ def test_nested_account_usage_isolated() -> None:
     # Outer log records its own call. Not a usage pattern we depend on in
     # the apply pipeline, but the reentrant-safe behaviour is documented.
     with account_usage() as outer:
-        _record_usage("sonnet-4-6", MagicMock(
-            input_tokens=10, output_tokens=5,
-            cache_creation_input_tokens=0, cache_read_input_tokens=0,
-        ))
+        _record_usage(
+            "sonnet-4-6",
+            MagicMock(
+                input_tokens=10,
+                output_tokens=5,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
         with account_usage() as inner:
-            _record_usage("haiku-4-5", MagicMock(
-                input_tokens=2, output_tokens=1,
-                cache_creation_input_tokens=0, cache_read_input_tokens=0,
-            ))
+            _record_usage(
+                "haiku-4-5",
+                MagicMock(
+                    input_tokens=2,
+                    output_tokens=1,
+                    cache_creation_input_tokens=0,
+                    cache_read_input_tokens=0,
+                ),
+            )
         assert len(inner) == 1
         assert inner[0]["model"] == "haiku-4-5"
     assert len(outer) == 1

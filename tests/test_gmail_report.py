@@ -20,8 +20,12 @@ def _rec(msg_id, agg, subj, extracted, skipped=False, date=None):
 
 def _out(msg_id, status, reason=None, title="Angular Dev", company="Acme"):
     return JobOutcome(
-        msg_id=msg_id, url=f"https://x/{title}-{status}", title=title,
-        company=company, status=status, reason=reason,
+        msg_id=msg_id,
+        url=f"https://x/{title}-{status}",
+        title=title,
+        company=company,
+        status=status,
+        reason=reason,
     )
 
 
@@ -31,8 +35,12 @@ def test_empty_returns_no_chunks():
 
 def test_from_job_pulls_email_meta():
     job = Job(
-        title="Senior Angular", company="Acme", location="Remote", salary=None,
-        url="https://x/1", source="gmail_linkedin",
+        title="Senior Angular",
+        company="Acme",
+        location="Remote",
+        salary=None,
+        url="https://x/1",
+        source="gmail_linkedin",
         email_meta={"msg_id": "m1"},
     )
     o = JobOutcome.from_job(job, "taken")
@@ -107,8 +115,7 @@ def test_newest_email_first():
     older = _rec("old", "linkedin", "older", 1, date=datetime(2026, 6, 1, tzinfo=timezone.utc))
     newer = _rec("new", "linkedin", "newer", 1, date=datetime(2026, 6, 9, tzinfo=timezone.utc))
     text = "\n".join(
-        build_gmail_report([older, newer], False, 100,
-                           [_out("old", "taken"), _out("new", "taken")])
+        build_gmail_report([older, newer], False, 100, [_out("old", "taken"), _out("new", "taken")])
     )
     assert text.index("newer") < text.index("older")
 

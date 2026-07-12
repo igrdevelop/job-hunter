@@ -68,7 +68,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("path", type=Path, help="apply folder or directory of them")
     ap.add_argument("--limit", type=int, default=0, help="cap folders processed (0 = no cap)")
-    ap.add_argument("--json", action="store_true", help="emit machine-readable JSON instead of a table")
+    ap.add_argument(
+        "--json", action="store_true", help="emit machine-readable JSON instead of a table"
+    )
     args = ap.parse_args()
 
     if not args.path.exists():
@@ -103,7 +105,9 @@ def main() -> int:
             continue
         rows.append(
             {
-                "folder": str(folder.relative_to(args.path) if args.path in folder.parents else folder),
+                "folder": str(
+                    folder.relative_to(args.path) if args.path in folder.parents else folder
+                ),
                 "pdf_score": pdf_check["score"],
                 "json_score": content.get("ats_score"),
                 "delta": pdf_check.get("delta_from_json"),
@@ -129,8 +133,10 @@ def main() -> int:
 
     deltas = [r["delta"] for r in rows if isinstance(r.get("delta"), (int, float))]
     if deltas:
-        print(f"\nΔ stats over {len(deltas)} folders: "
-              f"min={min(deltas):+.1f}  median={statistics.median(deltas):+.1f}  max={max(deltas):+.1f}")
+        print(
+            f"\nΔ stats over {len(deltas)} folders: "
+            f"min={min(deltas):+.1f}  median={statistics.median(deltas):+.1f}  max={max(deltas):+.1f}"
+        )
         n_bad = sum(1 for d in deltas if d <= -5)
         print(f"folders with PDF score ≥5pp BELOW JSON: {n_bad}/{len(deltas)}")
     return 0

@@ -41,11 +41,11 @@ SHORT_POST = (
 
 
 def _job(url: str, company: str = "Acme", title: str = "Angular Dev") -> Job:
-    return Job(title=title, company=company, location="Remote",
-               salary=None, url=url, source="test")
+    return Job(title=title, company=company, location="Remote", salary=None, url=url, source="test")
 
 
 # ── #143: min_job_text_len_for ────────────────────────────────────────────────
+
 
 def test_scout_url_gets_lower_floor() -> None:
     assert min_job_text_len_for(SCOUT_URL) == MIN_SCOUT_TEXT_LEN
@@ -73,17 +73,22 @@ def test_marker_stays_consistent_with_relay_url_prefix() -> None:
     """Drift guard: the marker in hunter.validation must match the relay's
     URL_PREFIX — they are defined separately to keep validation a leaf module."""
     from hunter.sources.linkedin_scout_relay import URL_PREFIX
+
     assert SCOUT_POSTS_URL_MARKER in URL_PREFIX
 
 
 # ── #143: apply_api wiring (Step 1.5a) ────────────────────────────────────────
 
+
 def _run_main_api(url: str, paste_text: str):
     from hunter.apply_api import main_api
-    with patch("hunter.apply_api._already_processed", return_value=False), \
-         patch("hunter.apply_api.notify"), \
-         patch("hunter.expired_check.is_job_expired", return_value=True), \
-         patch("hunter.tracker.add_expired"):
+
+    with (
+        patch("hunter.apply_api._already_processed", return_value=False),
+        patch("hunter.apply_api.notify"),
+        patch("hunter.expired_check.is_job_expired", return_value=True),
+        patch("hunter.tracker.add_expired"),
+    ):
         return main_api(url, paste_text=paste_text, skip_dedup=True)
 
 
@@ -101,8 +106,10 @@ def test_apply_api_short_text_on_normal_url_still_aborts() -> None:
 
 # ── #142: get_failed_jobs excludes scout relay rows ───────────────────────────
 
+
 def test_get_failed_jobs_excludes_scout_rows(tracker_db) -> None:
     from hunter import tracker
+
     tracker.add_failed(_job(SCOUT_URL))
     tracker.add_failed(_job(BOARD_URL, company="Other Co", title="Frontend Dev"))
 
@@ -115,6 +122,7 @@ def test_get_failed_jobs_scout_row_still_recorded(tracker_db) -> None:
     """The FAIL row itself is kept (dedup must still see it) — only the
     retry loop skips it."""
     from hunter import tracker
+
     tracker.add_failed(_job(SCOUT_URL))
     assert tracker.is_known(SCOUT_URL, "Acme", "Angular Dev")
     assert tracker.get_failed_jobs() == []
@@ -124,15 +132,18 @@ def test_get_failed_jobs_excludes_legacy_collapsed_scout_rows(tracker_db) -> Non
     """Rows written before #144 have the bare collapsed URL (fragment stripped
     at write time) — the marker must exclude those too."""
     from hunter import tracker
+
     tracker.add_failed(_job(LEGACY_SCOUT_URL))
     assert tracker.get_failed_jobs() == []
 
 
 # ── #144: scout URLs must survive normalization distinctly ────────────────────
 
+
 def test_scout_urls_normalize_distinctly() -> None:
     from hunter.sources.linkedin_scout_relay import URL_PREFIX
     from hunter.tracker import normalize_url
+
     n1 = normalize_url(f"{URL_PREFIX}aaaa1111bbbb2222")
     n2 = normalize_url(f"{URL_PREFIX}cccc3333dddd4444")
     assert n1 != n2

@@ -108,8 +108,10 @@ def main() -> None:
         print(f"[verdict_noise] no usable folders (EN CV PDF + job_posting.txt) found under {root}")
         return
 
-    print(f"[verdict_noise] sampling {len(folders)} folder(s) x {args.k} verdict call(s) "
-          f"= up to {len(folders) * args.k} Haiku calls")
+    print(
+        f"[verdict_noise] sampling {len(folders)} folder(s) x {args.k} verdict call(s) "
+        f"= up to {len(folders) * args.k} Haiku calls"
+    )
 
     per_folder: dict[str, list[float]] = {}
     for folder in folders:

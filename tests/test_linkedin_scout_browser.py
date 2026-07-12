@@ -222,7 +222,9 @@ def test_run_once_trips_and_alerts_exactly_once_on_anti_bot(tmp_path, monkeypatc
 
     monkeypatch.setattr(browser, "scout_keyword", _raise)
     alerts = []
-    monkeypatch.setattr(browser, "_send_circuit_breaker_alert", lambda reason: alerts.append(reason))
+    monkeypatch.setattr(
+        browser, "_send_circuit_breaker_alert", lambda reason: alerts.append(reason)
+    )
 
     result = run_once(
         ["angular hiring"],
@@ -316,7 +318,9 @@ def test_run_once_searches_every_keyword_in_one_call(tmp_path, monkeypatch):
         browser, "scout_keyword", lambda keyword, **k: seen_keywords.append(keyword) or ""
     )
 
-    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+    run_once(
+        ["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state
+    )
 
     assert sorted(seen_keywords) == ["a", "b", "c"]
     assert len(seen_keywords) == 3  # each keyword searched exactly once
@@ -337,7 +341,9 @@ def test_run_once_shuffles_keyword_order(tmp_path, monkeypatch):
         lambda seq: (shuffle_calls.append(list(seq)), original_shuffle(seq))[1],
     )
 
-    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+    run_once(
+        ["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state
+    )
 
     assert len(shuffle_calls) == 1  # random.shuffle() was actually invoked
 
@@ -349,7 +355,9 @@ def test_run_once_sleeps_between_keywords_not_after_last(tmp_path, monkeypatch):
     sleep_calls = []
     monkeypatch.setattr(browser, "_sleep_human", lambda range_sec: sleep_calls.append(range_sec))
 
-    run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+    run_once(
+        ["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state
+    )
 
     # 3 keywords -> 2 between-keyword pauses, none after the last one
     assert len(sleep_calls) == 2
@@ -369,7 +377,9 @@ def test_run_once_stops_remaining_keywords_after_trip(tmp_path, monkeypatch):
 
     monkeypatch.setattr(browser, "scout_keyword", _scout)
 
-    result = run_once(["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state)
+    result = run_once(
+        ["a", "b", "c"], profile_dir=tmp_path / "profile", storage_state_path=None, state=state
+    )
 
     assert result == []
     # tripped on whichever keyword came first in the randomized order —
@@ -412,7 +422,9 @@ def test_run_feed_once_trips_and_alerts_exactly_once_on_anti_bot(tmp_path, monke
 
     monkeypatch.setattr(browser, "scout_feed", _raise)
     alerts = []
-    monkeypatch.setattr(browser, "_send_circuit_breaker_alert", lambda reason: alerts.append(reason))
+    monkeypatch.setattr(
+        browser, "_send_circuit_breaker_alert", lambda reason: alerts.append(reason)
+    )
 
     result = run_feed_once(
         profile_dir=tmp_path / "feed_profile",
@@ -515,9 +527,7 @@ def test_scout_keyword_launches_offscreen(tmp_path, monkeypatch):
     )
 
     try:
-        browser.scout_keyword(
-            "angular", profile_dir=tmp_path / "profile", storage_state_path=None
-        )
+        browser.scout_keyword("angular", profile_dir=tmp_path / "profile", storage_state_path=None)
     except AntiBotDetected:
         pass  # expected — the fake context stops right after launch
 
@@ -590,7 +600,9 @@ class _FakeLocator:
     behavior is injected via a callback so tests can assert click order and
     simulate failures without a real browser."""
 
-    def __init__(self, count: int = 0, on_click=None, children: dict[str, "_FakeLocator"] | None = None):
+    def __init__(
+        self, count: int = 0, on_click=None, children: dict[str, "_FakeLocator"] | None = None
+    ):
         self._count = count
         self._on_click = on_click
         self._children = children or {}
@@ -632,7 +644,11 @@ class _FakePage:
         self.keyboard = self
 
     def locator(self, selector: str):
-        return self._container if selector == browser._POST_CONTAINER_SELECTORS[0] else _FakeLocator(count=0)
+        return (
+            self._container
+            if selector == browser._POST_CONTAINER_SELECTORS[0]
+            else _FakeLocator(count=0)
+        )
 
     def get_by_role(self, role: str, name: str = ""):
         if self._role_button is not None and role == "button" and name == self._role_button_name:
@@ -656,10 +672,14 @@ def test_copy_link_via_menu_happy_path():
     container = _FakeLocator(count=1, children={browser._MENU_BUTTON_SELECTORS[0]: button})
     copy_item = _FakeLocator(count=1)
     page = _FakePage(
-        container, copy_item, clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/"
+        container,
+        copy_item,
+        clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/",
     )
 
-    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+    link = browser._copy_link_via_menu(
+        page, "Deloitte Poland", "We're hiring an Angular Developer."
+    )
 
     assert link == "https://www.linkedin.com/feed/update/urn:li:activity:1/"
 
@@ -681,14 +701,19 @@ def test_copy_link_via_menu_author_based_lookup_wins_over_container(monkeypatch)
         role_button_name="Open control menu for post by Deloitte Poland",
     )
 
-    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+    link = browser._copy_link_via_menu(
+        page, "Deloitte Poland", "We're hiring an Angular Developer."
+    )
 
     assert link == "https://www.linkedin.com/posts/deloitte-poland_hiring-activity-1-abcd/"
 
 
 def test_copy_link_via_menu_no_container_returns_none():
     page = _FakePage(_FakeLocator(count=0), _FakeLocator(count=0))
-    assert browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.") is None
+    assert (
+        browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+        is None
+    )
 
 
 def test_copy_link_via_menu_clipboard_not_linkedin_returns_none():
@@ -697,7 +722,9 @@ def test_copy_link_via_menu_clipboard_not_linkedin_returns_none():
     copy_item = _FakeLocator(count=1)
     page = _FakePage(container, copy_item, clipboard_text="not a link")
 
-    link = browser._copy_link_via_menu(page, "Deloitte Poland", "We're hiring an Angular Developer.")
+    link = browser._copy_link_via_menu(
+        page, "Deloitte Poland", "We're hiring an Angular Developer."
+    )
 
     assert link is None
 
@@ -729,7 +756,9 @@ def test_fetch_menu_permalinks_captures_for_hiring_candidate():
     container = _FakeLocator(count=1, children={browser._MENU_BUTTON_SELECTORS[0]: button})
     copy_item = _FakeLocator(count=1)
     page = _FakePage(
-        container, copy_item, clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/"
+        container,
+        copy_item,
+        clipboard_text="https://www.linkedin.com/feed/update/urn:li:activity:1/",
     )
 
     result = browser._fetch_menu_permalinks(page, raw_text)
@@ -749,7 +778,9 @@ def test_fetch_menu_permalinks_caps_at_max_attempts(monkeypatch):
         "We're hiring an Angular Developer #2. Fully remote across Poland.\n"
     )
     calls = []
-    monkeypatch.setattr(browser, "_copy_link_via_menu", lambda page, author, body: calls.append(author) or None)
+    monkeypatch.setattr(
+        browser, "_copy_link_via_menu", lambda page, author, body: calls.append(author) or None
+    )
     result = browser._fetch_menu_permalinks(_FakePage(_FakeLocator(), _FakeLocator()), raw_text)
 
     assert len(calls) == 1

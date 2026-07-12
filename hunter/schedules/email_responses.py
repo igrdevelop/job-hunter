@@ -15,6 +15,7 @@ async def scheduled_check_email_responses(context: ContextTypes.DEFAULT_TYPE) ->
     """Periodic job: check Gmail for new confirmation emails; notify only if new ones found."""
     try:
         from hunter.email_response_checker import run_confirmation_check
+
         results = await asyncio.to_thread(run_confirmation_check)
     except FileNotFoundError:
         logger.debug("[scheduled_check_email_responses] gmail_token.json missing — skipping")
@@ -25,7 +26,8 @@ async def scheduled_check_email_responses(context: ContextTypes.DEFAULT_TYPE) ->
 
     # Only notify about rows that were just written (response was empty before this run)
     newly_confirmed = [
-        r for r in results
+        r
+        for r in results
         if r.match_type in ("exact", "fuzzy")
         and r.row_id is not None
         and not r.candidates[0].get("confirmation", "")

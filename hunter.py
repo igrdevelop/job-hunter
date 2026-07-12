@@ -7,6 +7,7 @@ Preferred invocations:
   python -m hunter        (package mode)
   hunter                  (CLI script after pip install)
 """
+
 from hunter.__main__ import main
 
 if __name__ == "__main__":

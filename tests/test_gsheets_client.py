@@ -26,6 +26,7 @@ from hunter.gsheets_client import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def mock_service():
     """Return a MagicMock that chains .spreadsheets().values().xxx().execute()."""
     svc = MagicMock()
@@ -51,6 +52,7 @@ SAMPLE_ROW = {
 # Schema helpers
 # ---------------------------------------------------------------------------
 
+
 class TestRowHelpers:
     def test_row_to_list_full(self):
         lst = _row_to_list(SAMPLE_ROW)
@@ -70,8 +72,19 @@ class TestRowHelpers:
         assert lst[10] == "abc"
 
     def test_list_to_row_full(self):
-        lst = ["2026-05-14", "Acme", "SFE", "Angular", "85",
-               "https://x.com", "/app", "", "", "", "abcd1234"]
+        lst = [
+            "2026-05-14",
+            "Acme",
+            "SFE",
+            "Angular",
+            "85",
+            "https://x.com",
+            "/app",
+            "",
+            "",
+            "",
+            "abcd1234",
+        ]
         row = _list_to_row(lst)
         assert row["Company"] == "Acme"
         assert row["ID"] == "abcd1234"
@@ -110,6 +123,7 @@ class TestRowHelpers:
 # read_all
 # ---------------------------------------------------------------------------
 
+
 class TestReadAll:
     def test_returns_empty_for_no_data(self):
         svc = mock_service()
@@ -120,11 +134,20 @@ class TestReadAll:
     def test_skips_header_row(self):
         svc = mock_service()
         header = COLUMNS
-        data_row = ["2026-05-14", "Acme", "SFE", "Angular", "85",
-                    "https://x.com", "/app", "", "", "", "abcd1234"]
-        svc.spreadsheets().values().get().execute.return_value = {
-            "values": [header, data_row]
-        }
+        data_row = [
+            "2026-05-14",
+            "Acme",
+            "SFE",
+            "Angular",
+            "85",
+            "https://x.com",
+            "/app",
+            "",
+            "",
+            "",
+            "abcd1234",
+        ]
+        svc.spreadsheets().values().get().execute.return_value = {"values": [header, data_row]}
         result = read_all(svc, "sheet123")
         assert len(result) == 1
         row_idx, row = result[0]
@@ -136,13 +159,22 @@ class TestReadAll:
         svc = mock_service()
         header = COLUMNS
         rows = [
-            ["2026-05-14", f"Co{i}", "Dev", "JS", "70",
-             f"https://x.com/{i}", "", "", "", "", f"id{i:08x}"]
+            [
+                "2026-05-14",
+                f"Co{i}",
+                "Dev",
+                "JS",
+                "70",
+                f"https://x.com/{i}",
+                "",
+                "",
+                "",
+                "",
+                f"id{i:08x}",
+            ]
             for i in range(3)
         ]
-        svc.spreadsheets().values().get().execute.return_value = {
-            "values": [header] + rows
-        }
+        svc.spreadsheets().values().get().execute.return_value = {"values": [header] + rows}
         result = read_all(svc, "sheet123")
         assert len(result) == 3
         assert result[0][0] == 2
@@ -152,9 +184,7 @@ class TestReadAll:
 
     def test_header_only_returns_empty(self):
         svc = mock_service()
-        svc.spreadsheets().values().get().execute.return_value = {
-            "values": [COLUMNS]
-        }
+        svc.spreadsheets().values().get().execute.return_value = {"values": [COLUMNS]}
         result = read_all(svc, "sheet123")
         assert result == []
 
@@ -162,6 +192,7 @@ class TestReadAll:
 # ---------------------------------------------------------------------------
 # append_rows
 # ---------------------------------------------------------------------------
+
 
 class TestAppendRows:
     def test_empty_list_returns_empty(self):
@@ -203,6 +234,7 @@ class TestAppendRows:
 # update_row
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateRow:
     def test_calls_update_with_correct_range(self):
         svc = mock_service()
@@ -222,6 +254,7 @@ class TestUpdateRow:
 # ---------------------------------------------------------------------------
 # update_cell
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateCell:
     def test_correct_cell_range(self):
@@ -248,19 +281,21 @@ class TestUpdateCell:
 
     def test_all_columns_have_correct_letter(self):
         """Verify every column maps to the expected letter."""
-        expected = dict(zip(COLUMNS, "ABCDEFGHIJK"))
+        expected = dict(zip(COLUMNS, "ABCDEFGHIJK", strict=True))
         svc = mock_service()
         svc.spreadsheets().values().update().execute.return_value = {}
         for col, expected_letter in expected.items():
             update_cell(svc, "sheet123", 1, col, "x")
             call_kwargs = svc.spreadsheets().values().update.call_args.kwargs
-            assert f"{expected_letter}1" in call_kwargs["range"], \
+            assert f"{expected_letter}1" in call_kwargs["range"], (
                 f"Column {col!r} should map to letter {expected_letter!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # create_spreadsheet
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSpreadsheet:
     def _setup_create_mock(self, svc):
@@ -282,10 +317,7 @@ class TestCreateSpreadsheet:
         self._setup_create_mock(svc)
         create_spreadsheet(svc, "Job Tracker")
         update_calls = svc.spreadsheets().values().update.call_args_list
-        header_call = next(
-            c for c in update_calls
-            if "'Tracker'!A1:K1" in str(c)
-        )
+        header_call = next(c for c in update_calls if "'Tracker'!A1:K1" in str(c))
         assert header_call.kwargs["body"]["values"] == [COLUMNS]
 
     def test_formats_header_bold(self):
@@ -314,6 +346,7 @@ class TestCreateSpreadsheet:
 # ---------------------------------------------------------------------------
 # batch_write_all
 # ---------------------------------------------------------------------------
+
 
 class TestBatchWriteAll:
     def test_empty_rows_noop(self):

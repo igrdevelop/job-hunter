@@ -48,9 +48,7 @@ def test_retry_stops_after_three_consecutive_failures(monkeypatch):
 def test_retry_success_resets_consecutive_counter(monkeypatch):
     jobs = [_job(i) for i in range(5)]
     # fail, fail, ok, fail, fail → never 3 in a row → all processed, no break.
-    apply_mock = _wire(
-        monkeypatch, jobs, outcomes=["fail", "fail", "ok", "fail", "fail"]
-    )
+    apply_mock = _wire(monkeypatch, jobs, outcomes=["fail", "fail", "ok", "fail", "fail"])
 
     asyncio.run(main._retry_failed(context=None))
 

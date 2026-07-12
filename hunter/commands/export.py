@@ -46,4 +46,5 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 def _do_export(out_path: Path) -> int:
     """Synchronous worker — called via asyncio.to_thread."""
     from hunter.export_xlsx import export_tracker_xlsx
+
     return export_tracker_xlsx(out_path)

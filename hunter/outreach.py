@@ -89,6 +89,7 @@ def _run_outreach(folder: Path, url: str) -> Path | None:
     lang = (content.get("primary_lang") or "").upper()
     if lang not in ("PL", "EN"):
         from hunter.lang_guard import detect_posting_language
+
         lang = detect_posting_language(job_text) if job_text else "EN"
 
     message, message_en = _draft_messages(content, job_text, lang)
@@ -102,19 +103,23 @@ def _run_outreach(folder: Path, url: str) -> Path | None:
         _render(content, url, contacts, message, message_en, lang),
         encoding="utf-8",
     )
-    print(f"[outreach] wrote {out_path.name} "
-          f"({len(contacts)} contact(s), message: {'yes' if message else 'DRAFT FAILED'})")
+    print(
+        f"[outreach] wrote {out_path.name} "
+        f"({len(contacts)} contact(s), message: {'yes' if message else 'DRAFT FAILED'})"
+    )
     return out_path
 
 
 # ── Message drafting ──────────────────────────────────────────────────────────
+
 
 def _candidate_summary(content: dict) -> str:
     resume = content.get("resume_en") or {}
     parts = [
         str(resume.get("summary") or ""),
         "Key skills: " + ", ".join(map(str, (resume.get("skills") or [])[:10]))
-        if resume.get("skills") else "",
+        if resume.get("skills")
+        else "",
     ]
     return "\n".join(p for p in parts if p).strip()
 
@@ -133,10 +138,12 @@ def _draft_messages(content: dict, job_text: str, lang: str) -> tuple[str, str]:
     lang_name = "Polish" if lang == "PL" else "English"
     extra = (
         "Also provide an English version in message_en."
-        if lang == "PL" else "Set message_en to null."
+        if lang == "PL"
+        else "Set message_en to null."
     )
     try:
         from llm_client import call_llm
+
         raw = call_llm(
             system_prompt=_SYSTEM_PROMPT.format(
                 limit=MESSAGE_CHAR_LIMIT, lang_name=lang_name, extra_lang=extra
@@ -177,6 +184,7 @@ def _clean(value) -> str:
 
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
+
 
 def _render(
     content: dict,

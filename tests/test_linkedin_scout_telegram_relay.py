@@ -18,13 +18,13 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "scout_payload_v1.json"
 
 
 def _candidate(**overrides) -> ScoutCandidate:
-    defaults = dict(
-        keyword="angular hiring",
-        author="Deloitte Poland",
-        body="We're hiring an Angular Developer. Fully remote.",
-        scouted_at="2026-07-08T12:00:00+00:00",
-        permalink="https://www.linkedin.com/feed/update/urn:li:share:1/",
-    )
+    defaults = {
+        "keyword": "angular hiring",
+        "author": "Deloitte Poland",
+        "body": "We're hiring an Angular Developer. Fully remote.",
+        "scouted_at": "2026-07-08T12:00:00+00:00",
+        "permalink": "https://www.linkedin.com/feed/update/urn:li:share:1/",
+    }
     defaults.update(overrides)
     return ScoutCandidate(**defaults)
 
@@ -105,7 +105,10 @@ def test_build_payload_permalink_none_when_absent():
 
 def test_send_candidates_noop_without_config(tmp_path, monkeypatch):
     for var in (
-        "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_BOT_USERNAME", "TELEGRAM_USER_SESSION",
+        "TELEGRAM_API_ID",
+        "TELEGRAM_API_HASH",
+        "TELEGRAM_BOT_USERNAME",
+        "TELEGRAM_USER_SESSION",
     ):
         monkeypatch.delenv(var, raising=False)
 

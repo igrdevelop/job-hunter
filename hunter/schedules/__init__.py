@@ -73,7 +73,10 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             )
             logger.info(
                 "[Schedule] %s at %02d:%02d %s",
-                source.name, fire_hour, fire_min, TIMEZONE,
+                source.name,
+                fire_hour,
+                fire_min,
+                TIMEZONE,
             )
 
     # ── Twice-daily pending report ────────────────────────────────────────────

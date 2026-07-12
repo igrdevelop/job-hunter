@@ -18,10 +18,20 @@ _CLEAN_EN_RESUME = {
         "languages": "English (Fluent), Polish (B2)",
     },
     "experience": [
-        {"company": c, "stack_line": "Stack: Angular, TypeScript",
-         "bullets": ["Built scalable applications for in-house projects"]}
-        for c in ("Alten Poland", "Fairmarkit", "Venture Labs", "SII",
-                  "Altoros", "SolbegSoft", "Staronka")
+        {
+            "company": c,
+            "stack_line": "Stack: Angular, TypeScript",
+            "bullets": ["Built scalable applications for in-house projects"],
+        }
+        for c in (
+            "Alten Poland",
+            "Fairmarkit",
+            "Venture Labs",
+            "SII",
+            "Altoros",
+            "SolbegSoft",
+            "Staronka",
+        )
     ],
 }
 
@@ -32,10 +42,20 @@ _CLEAN_PL_RESUME = {
         "languages": "Angielski (Płynny), Polski (B2)",
     },
     "experience": [
-        {"company": c, "stack_line": "Stack: Angular, TypeScript",
-         "bullets": ["Zbudowałem skalowalne aplikacje na projekty wewnętrzne"]}
-        for c in ("Alten Poland", "Fairmarkit", "Venture Labs", "SII",
-                  "Altoros", "SolbegSoft", "Staronka")
+        {
+            "company": c,
+            "stack_line": "Stack: Angular, TypeScript",
+            "bullets": ["Zbudowałem skalowalne aplikacje na projekty wewnętrzne"],
+        }
+        for c in (
+            "Alten Poland",
+            "Fairmarkit",
+            "Venture Labs",
+            "SII",
+            "Altoros",
+            "SolbegSoft",
+            "Staronka",
+        )
     ],
 }
 
@@ -174,9 +194,10 @@ def test_both_sides_dirty_pl_repaired_from_cleaned_en(monkeypatch, with_api_key)
     out, blocked, report = apply_shared.enforce_language_separation(content)
     assert blocked is False
     from hunter import lang_guard as lg
+
     final = lg.scan_content(out)
-    assert not final["en_strong"]       # EN cleaned
-    assert not final["pl_english"]      # PL repaired from clean EN
+    assert not final["en_strong"]  # EN cleaned
+    assert not final["pl_english"]  # PL repaired from clean EN
     assert any("final PL pass" in r for r in report)
 
 
@@ -197,8 +218,10 @@ def test_no_api_key_no_repair(monkeypatch):
 
 # ── _translate_p / translate-model wiring (docs/LLM_COST_REDUCTION_PLAN.md M5) ─
 
+
 def test_translate_p_uses_translate_config_when_key_present(monkeypatch):
     from hunter import config
+
     monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
     monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
     monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
@@ -210,6 +233,7 @@ def test_translate_p_uses_translate_config_when_key_present(monkeypatch):
 
 def test_translate_p_falls_back_to_main_profile_when_no_key(monkeypatch):
     from hunter import config
+
     monkeypatch.setattr(config, "TRANSLATE_API_KEY", "")
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile("main-key"))
     prof = apply_shared._translate_p()
@@ -218,6 +242,7 @@ def test_translate_p_falls_back_to_main_profile_when_no_key(monkeypatch):
 
 def test_translate_resume_calls_with_translate_profile(monkeypatch, with_api_key):
     from hunter import config
+
     monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
     monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
     monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
@@ -237,6 +262,7 @@ def test_translate_resume_calls_with_translate_profile(monkeypatch, with_api_key
 
 def test_translate_plain_calls_with_translate_profile(monkeypatch, with_api_key):
     from hunter import config
+
     monkeypatch.setattr(config, "TRANSLATE_API_KEY", "haiku-key")
     monkeypatch.setattr(config, "TRANSLATE_PROVIDER", "anthropic")
     monkeypatch.setattr(config, "TRANSLATE_MODEL", "claude-haiku-4-5-20251001")
@@ -258,6 +284,7 @@ def test_translate_resume_falls_back_to_main_profile(monkeypatch):
     """No translate key resolves — translation must not fail outright, it
     uses the main profile instead."""
     from hunter import config
+
     monkeypatch.setattr(config, "TRANSLATE_API_KEY", "")
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile("main-key"))
 

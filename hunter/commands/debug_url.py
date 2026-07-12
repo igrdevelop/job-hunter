@@ -15,7 +15,7 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     Usage: /debug_url <url>
     """
-    args = (context.args or [])
+    args = context.args or []
     if not args:
         await update.message.reply_text(
             "Usage: /debug_url &lt;url&gt;\n"
@@ -53,7 +53,7 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         def _url_matches(row_url: str) -> bool:
             if offer_id and offer_id in row_url:
                 return True
-            return row_url == clean or row_url == url
+            return row_url in (clean, url)
 
         rows = await asyncio.to_thread(iter_unsent_rows)
         matching = [r for r in rows if _url_matches(r.get("url", ""))]
@@ -74,11 +74,11 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     r = candidates[0]
                     return {
                         "company": r["company"],
-                        "title":   r["title"],
-                        "ats":     r["ats"],
-                        "sent":    r["sent"],
-                        "id":      r["id"],
-                        "url":     url,
+                        "title": r["title"],
+                        "ats": r["ats"],
+                        "sent": r["sent"],
+                        "id": r["id"],
+                        "url": url,
                     }
                 # offer_id fallback for pracuj.pl-style URLs
                 if offer_id:
@@ -91,11 +91,11 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     if row:
                         return {
                             "company": row["company"],
-                            "title":   row["title"],
-                            "ats":     row["ats_status"],
-                            "sent":    row["sent"],
-                            "id":      row["id"],
-                            "url":     row["url"],
+                            "title": row["title"],
+                            "ats": row["ats_status"],
+                            "sent": row["sent"],
+                            "id": row["id"],
+                            "url": row["url"],
                         }
                 return None
 
@@ -105,7 +105,9 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 sent = found_row["sent"]
                 row_id = found_row["id"]
                 lines.append(f"   Found in all rows: {found_row['company']} — {found_row['title']}")
-                lines.append(f"   ATS={repr(ats)} | Sent={repr(sent)} | ID={repr(row_id[:8] if row_id else '')}")
+                lines.append(
+                    f"   ATS={repr(ats)} | Sent={repr(sent)} | ID={repr(row_id[:8] if row_id else '')}"
+                )
                 reasons = []
                 if ats == "SKIP":
                     reasons.append("ATS=SKIP")
@@ -116,13 +118,16 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 if reasons:
                     lines.append(f"   ❌ Excluded because: {', '.join(reasons)}")
                 else:
-                    lines.append("   ⚠️ No obvious exclusion reason — URL matching may have missed it")
+                    lines.append(
+                        "   ⚠️ No obvious exclusion reason — URL matching may have missed it"
+                    )
             else:
                 lines.append("   ❌ Not found in tracker at all (not applied, or URL mismatch)")
 
         # 2. Quick HTML check — use _fetch_quick_html so we don't double-fetch
         from hunter.expired_marker import _fetch_quick_html, _check_html_expired
         from hunter.expired_check import HTML_EXPIRED_MARKERS
+
         lines.append("\n<b>Step 1 — quick HTML check:</b>")
         try:
             fetch_html, fetch_status = await asyncio.to_thread(_fetch_quick_html, url)

@@ -4,6 +4,7 @@ Gmail-sourced jobs used to skip _matches_location entirely.
 After the fix they go through the standard whitelist check — the same
 one applied to LinkedIn, JustJoin, etc.
 """
+
 from unittest.mock import patch
 
 
@@ -14,6 +15,7 @@ from hunter.filters import apply_filters_with_stats
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
 
 def _gmail_job(title: str, location: str, source: str = "gmail_linkedin") -> Job:
     return Job(
@@ -40,6 +42,7 @@ _PATCH_FILTER = {
 # ---------------------------------------------------------------------------
 # Gmail jobs with location must satisfy the whitelist
 # ---------------------------------------------------------------------------
+
 
 def test_gmail_remote_location_passes():
     """Gmail job with location='Remote' should pass location check."""

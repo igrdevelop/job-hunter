@@ -74,9 +74,7 @@ FEED_PROFILE_DIR = _BASE_DIR / ".profile_feed"
 SEARCH_STATE_PATH = _BASE_DIR / "search_state.json"
 FEED_STATE_PATH = _BASE_DIR / "feed_state.json"
 SEEN_STORE_PATH = _BASE_DIR / "seen_posts.json"
-DEFAULT_DRY_RUN_FIXTURE = (
-    _REPO_ROOT / "tests" / "fixtures" / "linkedin_scout" / "feed_sample.txt"
-)
+DEFAULT_DRY_RUN_FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "linkedin_scout" / "feed_sample.txt"
 
 _TRACKS = ("search", "feed")
 
@@ -146,10 +144,14 @@ def _run_dry_run(fixture_path: Path) -> None:
         if check_location(post.body) is LocationVerdict.REJECT:
             continue
         candidates.append(
-            ScoutCandidate(keyword="dry-run", author=post.author, body=post.body, scouted_at=scouted_at)
+            ScoutCandidate(
+                keyword="dry-run", author=post.author, body=post.body, scouted_at=scouted_at
+            )
         )
 
-    print(f"[dry-run] {len(posts)} posts parsed from {fixture_path}, {len(candidates)} would be sent:\n")
+    print(
+        f"[dry-run] {len(posts)} posts parsed from {fixture_path}, {len(candidates)} would be sent:\n"
+    )
     if not candidates:
         print("(no matches)")
     for candidate in candidates:
@@ -194,15 +196,15 @@ def _run_track(track: str, *, headless: bool) -> None:
     sent = telegram_relay.send_candidates(candidates, seen_store)
     logger.info(
         "[linkedin_scout] %s: %d candidates, %d relayed to the bot (rest already seen)",
-        track, len(candidates), sent,
+        track,
+        len(candidates),
+        sent,
     )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LinkedIn posts scout")
-    parser.add_argument(
-        "--track", choices=list(_TRACKS), help="which scout track to run"
-    )
+    parser.add_argument("--track", choices=list(_TRACKS), help="which scout track to run")
     parser.add_argument(
         "--reset",
         action="store_true",

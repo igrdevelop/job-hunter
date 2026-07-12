@@ -19,6 +19,7 @@ async def cmd_sync_sent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("⏳ Syncing Sheets → tracker.xlsx…")
     try:
         from hunter import gsheets_sync
+
         result = await gsheets_sync.pull_full_snapshot()
     except Exception as e:
         await update.message.reply_text(

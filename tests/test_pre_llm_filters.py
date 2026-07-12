@@ -5,6 +5,7 @@
                   extra_anti_hybrid_cities from config
 3. apply_shared — is_react_only_job_text, is_backend_only_job_text
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -84,25 +85,17 @@ class TestNewExpiredPatterns:
 
 class TestHtmlMarkersNoFluffJobs:
     def test_nofluffjobs_ta_oferta(self):
-        assert is_expired_by_html(
-            '<div>ta oferta nie jest już dostępna</div>', "nofluffjobs.com"
-        )
+        assert is_expired_by_html("<div>ta oferta nie jest już dostępna</div>", "nofluffjobs.com")
 
     def test_nofluffjobs_oferta_pracy(self):
-        assert is_expired_by_html(
-            "oferta pracy nie została odnaleziona", "nofluffjobs.com"
-        )
+        assert is_expired_by_html("oferta pracy nie została odnaleziona", "nofluffjobs.com")
 
     def test_nofluffjobs_existing_marker(self):
-        assert is_expired_by_html(
-            "This offer is no longer available", "nofluffjobs.com"
-        )
+        assert is_expired_by_html("This offer is no longer available", "nofluffjobs.com")
 
     def test_different_domain_not_triggered(self):
         # nofluffjobs marker should NOT fire for pracuj.pl domain
-        assert not is_expired_by_html(
-            "ta oferta nie jest już dostępna", "pracuj.pl"
-        )
+        assert not is_expired_by_html("ta oferta nie jest już dostępna", "pracuj.pl")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -117,89 +110,123 @@ from hunter.filters import (
 
 
 def _make_job(**kwargs) -> Job:
-    defaults = dict(
-        title="Senior Angular Developer",
-        company="Acme",
-        location="remote",
-        salary=None,
-        url="https://example.com/job/1",
-        source="test",
-        raw={},
-    )
+    defaults = {
+        "title": "Senior Angular Developer",
+        "company": "Acme",
+        "location": "remote",
+        "salary": None,
+        "url": "https://example.com/job/1",
+        "source": "test",
+        "raw": {},
+    }
     defaults.update(kwargs)
     return Job(**defaults)
 
 
 # ── Contract filter ──────────────────────────────────────────────────────────
 
+
 class TestIsUnacceptableContract:
     def test_part_time_in_description(self):
         job = _make_job(raw={"description": "This is a part-time position, 20h/week."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}
+        ):
             from hunter.filters import _is_unacceptable_contract as fn
+
             assert fn(job)
 
     def test_pol_etatu_polish(self):
         job = _make_job(raw={"description": "Wymiar pracy: pół etatu (0,5 FTE)."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}
+        ):
             from hunter.filters import _is_unacceptable_contract as fn
+
             assert fn(job)
 
     def test_one_month_contract(self):
         job = _make_job(raw={"description": "This is a 1-month contract assignment."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}
+        ):
             from hunter.filters import _is_unacceptable_contract as fn
+
             assert fn(job)
 
     def test_full_time_not_blocked(self):
         job = _make_job(raw={"description": "Full-time permanent position. 40h/week."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": True}
+        ):
             from hunter.filters import _is_unacceptable_contract as fn
+
             assert not fn(job)
 
     def test_disabled_by_config(self):
         job = _make_job(raw={"description": "This is a part-time role."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_unacceptable_contract": False}):
+        with patch(
+            "hunter.filters.FILTER",
+            {**_make_filter_patch(), "exclude_unacceptable_contract": False},
+        ):
             from hunter.filters import _is_unacceptable_contract as fn
+
             assert not fn(job)
 
 
 # ── Relocation filter ────────────────────────────────────────────────────────
 
+
 class TestRequiresRelocation:
     def test_relocation_required(self):
         job = _make_job(raw={"description": "Relocation is required to our Warsaw office."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}
+        ):
             from hunter.filters import _requires_relocation as fn
+
             assert fn(job)
 
     def test_must_relocate(self):
         job = _make_job(raw={"description": "Candidates must be willing to relocate."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}
+        ):
             from hunter.filters import _requires_relocation as fn
+
             assert fn(job)
 
     def test_relokacja_wymagana_polish(self):
         job = _make_job(raw={"description": "Relokacja jest wymagana do biura w Helsinkach."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}
+        ):
             from hunter.filters import _requires_relocation as fn
+
             assert fn(job)
 
     def test_relocation_package_not_blocked(self):
         # "relocation package provided" should NOT trigger
         job = _make_job(raw={"description": "We offer a generous relocation package."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": True}
+        ):
             from hunter.filters import _requires_relocation as fn
+
             assert not fn(job)
 
     def test_disabled_by_config(self):
         job = _make_job(raw={"description": "Relocation is required."})
-        with patch("hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": False}):
+        with patch(
+            "hunter.filters.FILTER", {**_make_filter_patch(), "exclude_relocation_required": False}
+        ):
             from hunter.filters import _requires_relocation as fn
+
             assert not fn(job)
 
 
 # ── Extra anti-hybrid cities merged from config ──────────────────────────────
+
 
 class TestExtraAntiHybridCities:
     def test_helsinki_in_set(self):
@@ -226,6 +253,7 @@ class TestExtraAntiHybridCities:
 
 
 # ── reason_counts includes new keys ──────────────────────────────────────────
+
 
 class TestReasonCountsKeys:
     def test_new_keys_present(self):
@@ -304,7 +332,9 @@ class TestIsBackendOnlyJobText:
 
     def test_python_as_bonus_passes(self):
         # Python mentioned but no hard-requirement qualifier
-        text = "Angular developer. Knowledge of Python would be a bonus. Angular experience required."
+        text = (
+            "Angular developer. Knowledge of Python would be a bonus. Angular experience required."
+        )
         assert not is_backend_only_job_text(text)
 
     def test_no_be_lang_passes(self):
@@ -324,7 +354,9 @@ class TestIsBackendOnlyJobText:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _make_filter_patch() -> dict:
     """Minimal FILTER dict so patching works without breaking other checks."""
     from hunter.config import FILTER
+
     return dict(FILTER)

@@ -27,10 +27,12 @@ from hunter.config import (
 
 # ── LLM profile helper ───────────────────────────────────────────────────────
 
+
 def _llm_p():
     """Return the currently active LLM profile. Resolved fresh each call so a
     /llm switch in Telegram takes effect on the next vacancy without restart."""
     from hunter.llm_profiles import get_active
+
     return get_active()
 
 
@@ -42,10 +44,14 @@ def _translate_p():
     ANTHROPIC_API_KEY/LLM_API_KEY fallback) — a translation call must never
     fail outright just because the cheaper profile has no key configured."""
     from hunter.config import TRANSLATE_API_KEY, TRANSLATE_MODEL, TRANSLATE_PROVIDER
+
     if not TRANSLATE_API_KEY:
         return _llm_p()
     from types import SimpleNamespace
-    return SimpleNamespace(provider=TRANSLATE_PROVIDER, model=TRANSLATE_MODEL, api_key=TRANSLATE_API_KEY)
+
+    return SimpleNamespace(
+        provider=TRANSLATE_PROVIDER, model=TRANSLATE_MODEL, api_key=TRANSLATE_API_KEY
+    )
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -53,9 +59,15 @@ def _translate_p():
 PROMPTS_DIR = PROJECT_DIR / "prompts"
 
 REQUIRED_JSON_KEYS: list[str] = [
-    "company_name", "stack", "lang", "job_title",
-    "resume_en", "cover_letter_en", "cover_letter_pl",
-    "about_me_en", "about_me_pl",
+    "company_name",
+    "stack",
+    "lang",
+    "job_title",
+    "resume_en",
+    "cover_letter_en",
+    "cover_letter_pl",
+    "about_me_en",
+    "about_me_pl",
 ]
 if GENERATE_PL_RESUME:
     REQUIRED_JSON_KEYS.append("resume_pl")
@@ -103,12 +115,15 @@ def is_transient_fetch_error(exc: Exception, url: str = "") -> bool:
     if is_rate_limit_error(exc):
         return True
     from urllib.parse import urlparse
+
     msg = str(exc).lower()
     host = (urlparse(url).hostname or "").lower() if url else ""
     on_antibot = any(h in host for h in _ANTIBOT_HOSTS) or any(h in msg for h in _ANTIBOT_HOSTS)
-    if on_antibot and ("403" in msg or "forbidden" in msg or "cloudscraper" in msg or "cloudflare" in msg):
-        return True
-    return False
+    return bool(
+        on_antibot
+        and ("403" in msg or "forbidden" in msg or "cloudscraper" in msg or "cloudflare" in msg)
+    )
+
 
 # Shown after React-only auto-skip.
 _REACT_SKIP_FORCE_HINT = (
@@ -178,11 +193,13 @@ def is_backend_only_job_text(text: str) -> bool:
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
+
 class ApplyError(RuntimeError):
     """Raised when an apply attempt fails and fallback should be tried."""
 
 
 # ── Tracker dedup ─────────────────────────────────────────────────────────────
+
 
 def _already_processed(url: str, skip_dedup: bool = False) -> bool:
     """Check tracker.xlsx before calling LLM.
@@ -199,12 +216,14 @@ def _already_processed(url: str, skip_dedup: bool = False) -> bool:
         return False
     try:
         from hunter.services.tracker_service import should_skip_url
+
         return should_skip_url(url)
     except Exception:
         return False
 
 
 # ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ──────────────────────────────
+
 
 def run_doomed_gate(
     job_text: str,
@@ -236,11 +255,13 @@ def run_doomed_gate(
     been treated the same as any other source.
     """
     from hunter.config import DOOMED_GATE_ENABLED, DOOMED_GATE_HARD_ACTION
+
     if not DOOMED_GATE_ENABLED:
         return False
 
     try:
         from hunter.filters import assess_job_text
+
         findings = assess_job_text(job_text, title=title, company=company)
     except Exception as e:  # noqa: BLE001 — best-effort, never block apply
         print(f"[apply_agent] Warning: doomed gate failed (continuing): {e}")
@@ -255,18 +276,22 @@ def run_doomed_gate(
     if hard and DOOMED_GATE_HARD_ACTION == "skip" and not is_force_override:
         finding = hard[0]
         reason = f'{finding.rule} — "{finding.evidence}"'
-        notify(
-            f"⛔ <b>Skipped before generation</b>\n"
-            f"Reason: {reason}\n🔗 {url}"
-        )
+        notify(f"⛔ <b>Skipped before generation</b>\nReason: {reason}\n🔗 {url}")
         print(f"[apply_agent] SKIP (doomed gate, HARD) — {reason}: {url}")
         try:
             from hunter.models import Job
             from hunter.tracker import add_skipped
-            add_skipped(Job(
-                title=title, company=company, location="", salary=None,
-                url=url, source="doomed_gate",
-            ))
+
+            add_skipped(
+                Job(
+                    title=title,
+                    company=company,
+                    location="",
+                    salary=None,
+                    url=url,
+                    source="doomed_gate",
+                )
+            )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write doomed-gate SKIP to tracker: {e}")
         return True
@@ -314,7 +339,9 @@ def notify(message: str) -> None:
         # breaks HTML parsing. That silently ate failure notifications: the
         # owner saw a bare "apply_agent failed" with no reason (2026-07-11).
         # Resend once as plain text with our own formatting tags stripped.
-        print(f"[apply_agent] Telegram rejected HTML message (HTTP {resp.status_code}) — resending plain")
+        print(
+            f"[apply_agent] Telegram rejected HTML message (HTTP {resp.status_code}) — resending plain"
+        )
         requests.post(
             api_url,
             json={
@@ -389,7 +416,9 @@ _BANNED_OPENER_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"^\s*the best\s+\w[\w\s-]*?\bI know\b", re.IGNORECASE),
     re.compile(r"^\s*great\s+\w[\w\s-]*?\bdon['‘’]t just\b", re.IGNORECASE),
     re.compile(r"\bis what I bring to\b", re.IGNORECASE),
-    re.compile(r"\bis exactly what\s+.{1,80}?(?:requires|needs|is looking for|is after)\b", re.IGNORECASE),
+    re.compile(
+        r"\bis exactly what\s+.{1,80}?(?:requires|needs|is looking for|is after)\b", re.IGNORECASE
+    ),
     re.compile(
         r"\bexactly the challenges you['‘’]?re\s+(?:facing|tackling|solving)\b",
         re.IGNORECASE,
@@ -397,7 +426,9 @@ _BANNED_OPENER_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"^\s*I['‘’]ve had the opportunity to\b", re.IGNORECASE),
     re.compile(r"^\s*I had the opportunity to\b", re.IGNORECASE),
     re.compile(r"^\s*I am passionate about\b", re.IGNORECASE),
-    re.compile(r"^\s*As a (?:lifelong|passionate|dedicated|seasoned|highly[- ]skilled)\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*As a (?:lifelong|passionate|dedicated|seasoned|highly[- ]skilled)\b", re.IGNORECASE
+    ),
     re.compile(r"^\s*Engineering teams\s+succeed\b", re.IGNORECASE),
     re.compile(
         r"^\s*Working with\s+\w.{0,60}for the past\s+\w.{0,40}I (?:have seen|learned|observed|know)\b",
@@ -676,6 +707,7 @@ def _review_cover_letter(letter: str, expected_lang: str = "EN") -> tuple[str, i
 
     try:
         from llm_client import call_llm
+
         result = call_llm(
             system_prompt=_REVIEW_SYSTEM,
             user_message=user_msg,
@@ -744,6 +776,7 @@ def _translate_resume(source_resume: dict, target_lang: str, *, expected_roles: 
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
         from llm_client import call_llm
+
         result = call_llm(
             system_prompt=_RESUME_TRANSLATE_SYS,
             user_message=(
@@ -795,6 +828,7 @@ def _translate_plain(text: str, target_lang: str, kind: str) -> str:
     lang_name = "English" if target_lang.upper() == "EN" else "Polish"
     try:
         from llm_client import call_llm
+
         result = call_llm(
             system_prompt="You are a professional translator. Respond ONLY with JSON.",
             user_message=(
@@ -858,7 +892,9 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
         return content, False, report
 
     contaminated = sorted(
-        set(scan.get("en_strong", {})) | set(scan.get("en_soft", {})) | set(scan.get("pl_english", {}))
+        set(scan.get("en_strong", {}))
+        | set(scan.get("en_soft", {}))
+        | set(scan.get("pl_english", {}))
     )
     report.append(f"contamination in {len(contaminated)} field(s): {', '.join(contaminated[:8])}")
     expected_roles = _expected_role_count(content)
@@ -881,7 +917,11 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
         en_dirty = not _is_unit_clean(scan, en_key, "en")
         pl_dirty = not _is_unit_clean(scan, pl_key, "pl")
 
-        kind = "cover letter" if "letter" in en_key else ("about-me text" if "about" in en_key else "text")
+        kind = (
+            "cover letter"
+            if "letter" in en_key
+            else ("about-me text" if "about" in en_key else "text")
+        )
         if en_dirty and content.get(pl_key) and not pl_dirty:
             fixed = _retranslate(content[pl_key], "EN", is_resume, kind)
             if fixed:
@@ -903,15 +943,17 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
             break
         # en_strong is keyed by field PATH; collapse to distinct UNITS so a resume
         # with several contaminated fields is re-translated once, not once per field.
-        dirty_units = dict.fromkeys(
-            k.split(".")[0] for k in final_scan.get("en_strong", {})
-        )
+        dirty_units = dict.fromkeys(k.split(".")[0] for k in final_scan.get("en_strong", {}))
         for unit_key in dirty_units:
             is_resume = en_keys.get(unit_key, False)
             src = content.get(unit_key)
             if not src:
                 continue
-            kind = "cover letter" if "letter" in unit_key else ("about-me text" if "about" in unit_key else "text")
+            kind = (
+                "cover letter"
+                if "letter" in unit_key
+                else ("about-me text" if "about" in unit_key else "text")
+            )
             fixed = _retranslate(src, "EN", is_resume, kind)
             if fixed and fixed != src:
                 content[unit_key] = fixed
@@ -921,13 +963,22 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
     # was skipped by Round 0 (it only translates from an already-clean side). Now that
     # the EN side has been cleaned, translate any still-contaminated PL field from it.
     pl_scan = scan_content(content)
+
     def _en_strong_dirty(en_key: str) -> bool:
         bucket = pl_scan.get("en_strong", {})
         return any(p == en_key or p.startswith(en_key + ".") for p in bucket)
+
     for en_key, pl_key, is_resume in units:
-        if (not _is_unit_clean(pl_scan, pl_key, "pl")
-                and content.get(en_key) and not _en_strong_dirty(en_key)):
-            kind = "cover letter" if "letter" in pl_key else ("about-me text" if "about" in pl_key else "text")
+        if (
+            not _is_unit_clean(pl_scan, pl_key, "pl")
+            and content.get(en_key)
+            and not _en_strong_dirty(en_key)
+        ):
+            kind = (
+                "cover letter"
+                if "letter" in pl_key
+                else ("about-me text" if "about" in pl_key else "text")
+            )
             fixed = _retranslate(content[en_key], "PL", is_resume, kind)
             if fixed:
                 content[pl_key] = fixed
@@ -946,7 +997,7 @@ def enforce_language_separation(content: dict) -> tuple[dict, bool, list[str]]:
 
 
 _ATS_THRESHOLD = 95.0
-_ATS_MAX_ROUNDS = 2   # honest rounds; after this: soft → aggressive → final check
+_ATS_MAX_ROUNDS = 2  # honest rounds; after this: soft → aggressive → final check
 
 # Regulatory / compliance terms that job postings list as the EMPLOYER's own
 # credentials ("we work in accordance with DORA, RODO"). The ATS keyword extractor
@@ -954,10 +1005,22 @@ _ATS_MAX_ROUNDS = 2   # honest rounds; after this: soft → aggressive → final
 # the candidate's Skills as if they were personal expertise — a fabrication. These
 # are stripped from the ATS "missing keywords" so the rewrite never adds them.
 # (Mirrors the RED LINE in prompts/generation_rules.md.)
-_ATS_KEYWORD_BLOCKLIST = frozenset({
-    "dora", "rodo", "gdpr", "iso", "iso 27001", "iso27001", "soc2", "soc 2",
-    "hipaa", "pci", "pci-dss", "pci dss",
-})
+_ATS_KEYWORD_BLOCKLIST = frozenset(
+    {
+        "dora",
+        "rodo",
+        "gdpr",
+        "iso",
+        "iso 27001",
+        "iso27001",
+        "soc2",
+        "soc 2",
+        "hipaa",
+        "pci",
+        "pci-dss",
+        "pci dss",
+    }
+)
 
 
 def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
@@ -1091,7 +1154,9 @@ def _strip_compliance_claims(content: dict) -> tuple[dict, list[str]]:
                     if new != val:
                         skills[cat] = new
                         fixes.append(f"[{label}] removed compliance terms from skills.{cat}")
-                elif isinstance(val, list) and any(_COMPLIANCE_CLAIM_RE.search(str(i)) for i in val):
+                elif isinstance(val, list) and any(
+                    _COMPLIANCE_CLAIM_RE.search(str(i)) for i in val
+                ):
                     skills[cat] = [i for i in val if not _COMPLIANCE_CLAIM_RE.search(str(i))]
                     fixes.append(f"[{label}] removed compliance terms from skills.{cat}")
         return skills
@@ -1171,8 +1236,7 @@ _PRESTIGE_TRAILING_NOUNS = (
 def _prestige_claim_re(job_text: str) -> re.Pattern | None:
     """Combined matcher for prestige terms NOT present in the job posting.
     Returns None when every term is legitimised by the posting."""
-    active = [t for t in _PRESTIGE_TERMS
-              if not re.search(t, job_text or "", re.IGNORECASE)]
+    active = [t for t in _PRESTIGE_TERMS if not re.search(t, job_text or "", re.IGNORECASE)]
     if not active:
         return None
     return re.compile(r"\b(?:" + "|".join(active) + r")\b", re.IGNORECASE)
@@ -1239,14 +1303,13 @@ def _strip_prestige_claims(content: dict, job_text: str = "") -> tuple[dict, lis
         if isinstance(skills, dict):
             for cat, val in list(skills.items()):
                 if isinstance(val, str) and claim_re.search(val):
-                    items = [i.strip() for i in _split_skill_items(val)
-                             if not claim_re.search(i)]
+                    items = [i.strip() for i in _split_skill_items(val) if not claim_re.search(i)]
                     skills[cat] = ", ".join(i for i in items if i)
                     fixes.append(f"[{lang}] removed prestige claim from skills.{cat}")
                 elif isinstance(val, list) and any(claim_re.search(str(i)) for i in val):
                     skills[cat] = [i for i in val if not claim_re.search(str(i))]
                     fixes.append(f"[{lang}] removed prestige claim from skills.{cat}")
-        for role in (r.get("experience") or []):
+        for role in r.get("experience") or []:
             if not isinstance(role, dict):
                 continue
             bullets = role.get("bullets")
@@ -1280,10 +1343,27 @@ def _strip_prestige_claims(content: dict, job_text: str = "") -> tuple[dict, lis
 # are kept; only near-duplicate sides are collapsed (keep the first side — the
 # base-CV phrasing).
 
-_GLOSS_STOPWORDS = frozenset({
-    "and", "or", "of", "the", "a", "an", "in", "with", "by", "to", "high-quality",
-    "i", "oraz", "z", "w", "do", "na",
-})
+_GLOSS_STOPWORDS = frozenset(
+    {
+        "and",
+        "or",
+        "of",
+        "the",
+        "a",
+        "an",
+        "in",
+        "with",
+        "by",
+        "to",
+        "high-quality",
+        "i",
+        "oraz",
+        "z",
+        "w",
+        "do",
+        "na",
+    }
+)
 
 
 def _split_skill_items(value: str) -> list[str]:
@@ -1324,9 +1404,7 @@ def _gloss_stem(token: str) -> str:
 
 def _gloss_tokens(side: str) -> frozenset[str]:
     words = re.findall(r"[\w+#.-]+", side.lower())
-    return frozenset(
-        _gloss_stem(w) for w in words if w not in _GLOSS_STOPWORDS
-    )
+    return frozenset(_gloss_stem(w) for w in words if w not in _GLOSS_STOPWORDS)
 
 
 def _sides_are_gloss(a: str, b: str) -> bool:
@@ -1373,9 +1451,7 @@ def _dedup_skill_glosses(content: dict) -> tuple[dict, list[str]]:
                     skills[cat] = new
                     fixes.append(f"[{lang}] collapsed gloss pair(s) in skills.{cat}")
             elif isinstance(val, list):
-                new_list = [
-                    _collapse_gloss_item(i) if isinstance(i, str) else i for i in val
-                ]
+                new_list = [_collapse_gloss_item(i) if isinstance(i, str) else i for i in val]
                 if new_list != val:
                     skills[cat] = new_list
                     fixes.append(f"[{lang}] collapsed gloss pair(s) in skills.{cat}")
@@ -1496,7 +1572,11 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     import copy
 
     def _exp_of(r: object) -> list:
-        return r.get("experience") if isinstance(r, dict) and isinstance(r.get("experience"), list) else []
+        return (
+            r.get("experience")
+            if isinstance(r, dict) and isinstance(r.get("experience"), list)
+            else []
+        )
 
     _orig_exp_en = copy.deepcopy(_exp_of(content.get("resume_en")))
     _orig_exp_pl = copy.deepcopy(_exp_of(content.get("resume_pl")))
@@ -1582,6 +1662,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
 
         try:
             from llm_client import call_llm
+
             print(f"[apply_agent] ATS rewrite attempt {attempt}/{_TOTAL_ROUNDS} ({mode} mode)...")
             boosted = call_llm(
                 system_prompt=(
@@ -1593,8 +1674,7 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
                 model=_llm_p().model,
                 api_key=_llm_p().api_key,
             )
-            for key in ("resume_en", "resume_pl",
-                        "ats_score", "stack", "to_learn", "skills"):
+            for key in ("resume_en", "resume_pl", "ats_score", "stack", "to_learn", "skills"):
                 if boosted.get(key):
                     content[key] = boosted[key]
             # Guard: the rewrite must never drop roles (truncated input can make
@@ -1652,6 +1732,7 @@ def _cover_letter_review_loop(content: dict, max_rounds: int = 3) -> dict:
 
 # ── Output folder logic ───────────────────────────────────────────────────────
 
+
 def compute_output_folder(company_name: str) -> Path:
     """Compute Applications/{date}/{Company} with _2, _3 suffixes if needed."""
     today = date.today().strftime("%Y-%m-%d")
@@ -1679,9 +1760,8 @@ def _sanitize_folder_company(name: str) -> str:
 
 # ── JobLeads MANUAL flow ──────────────────────────────────────────────────────
 
-def _handle_jobleads_fetch_blocked(
-    url: str, err: str, company: str = "", title: str = ""
-) -> None:
+
+def _handle_jobleads_fetch_blocked(url: str, err: str, company: str = "", title: str = "") -> None:
     """Stub job_posting.txt + MANUAL tracker row; Telegram instructs user; process exits 44."""
     from hunter.tracker import (
         add_manual_jobleads_pending,
@@ -1790,7 +1870,9 @@ def validate_content(data: dict, *, pl_optional: bool = False) -> list[str]:
             if sub not in resume:
                 errors.append(f"resume_en missing: {sub}")
         if isinstance(resume.get("experience"), list) and len(resume["experience"]) < 7:
-            errors.append(f"resume_en.experience has only {len(resume['experience'])} jobs (expected 7 — ALL roles required)")
+            errors.append(
+                f"resume_en.experience has only {len(resume['experience'])} jobs (expected 7 — ALL roles required)"
+            )
     else:
         errors.append("resume_en is not a dict")
 

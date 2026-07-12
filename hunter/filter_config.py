@@ -27,10 +27,8 @@ FILTER = {
         "javascript",
         "typescript",
     ],
-
     # Angular not required in title — many Angular jobs are titled just "Frontend Developer"
     "require_angular": False,
-
     "exclude_levels": [
         "junior",
         "intern",
@@ -53,7 +51,6 @@ FILTER = {
         "part time",
         "parttime",
     ],
-
     "locations": [
         # Always accept: fully remote regardless of city
         "remote",
@@ -63,7 +60,6 @@ FILTER = {
         "wrocław",
         "wroclaw",
     ],
-
     # Title matching ANY regex → skip
     "exclude_patterns": [
         r"\bjava\b",
@@ -89,9 +85,9 @@ FILTER = {
         r"\breact\s+native\b",
         r"\breact[- ]native\b",
         # P-4.1: eCommerce/CMS platforms — not web-FE stack
-        r"\bhyv[äa]\b",           # Hyva (Magento theme) — Finnish spelling variants
-        r"\badobe\s+commerce\b",   # Adobe Commerce = Magento rebranded
-        r"\bpwa\s+studio\b",       # Magento PWA Studio
+        r"\bhyv[äa]\b",  # Hyva (Magento theme) — Finnish spelling variants
+        r"\badobe\s+commerce\b",  # Adobe Commerce = Magento rebranded
+        r"\bpwa\s+studio\b",  # Magento PWA Studio
         r"\bshopware\b",
         r"\bshopify\b",
         r"\bbigcommerce\b",
@@ -104,7 +100,7 @@ FILTER = {
         r"\bsalesforce\b",
         r"\bdevops\b",
         r"\bdev-ops\b",
-        r"\bsre\b",                    # Site Reliability Engineer
+        r"\bsre\b",  # Site Reliability Engineer
         r"\bplatform\s+engineer\b",
         r"\bcloud\s+engineer\b",
         r"\binfrastructure\s+engineer\b",
@@ -131,10 +127,8 @@ FILTER = {
         r"\bdata\s+annotat\w*\b",
         r"\bdata\s+label(?:l)?ing\b",
     ],
-
     # Skip jobs that mention React but NOT Angular (React-only roles)
     "exclude_react_without_angular": True,
-
     # Fullstack policy: a "Full Stack / Fullstack" title with NO Angular is always
     # blocked (handled in filters._is_unwanted_fullstack). When Angular IS present
     # the role is blocked only if it is paired with a *heavy backend* stack below
@@ -153,7 +147,6 @@ FILTER = {
         r"\bphp\b",
         r"\bruby\s+on\s+rails\b",
     ],
-
     # Disqualifiers hidden in the job BODY (title looks like clean FE, but the
     # description reveals a stack/platform the candidate doesn't want). Checked
     # against the full job text blob, mirroring the German/contract/relocation gates.
@@ -168,18 +161,15 @@ FILTER = {
         r"\bmagento\b",
         r"\bsharepoint\b",
     ],
-
     # Reject when the BODY couples an on-site / hybrid signal with a city outside the
     # Wrocław area (the listing's location field frequently says "remote"/"Poland"
     # while the description demands N days/week in a Kraków/Warsaw/foreign office).
     "exclude_body_onsite_city": True,
-
     # Exception to the two location gates above: KEEP a hybrid role that only needs
     # the office ~1 day/week, but ONLY for Warsaw / Kraków (commutable from Wrocław
     # once a week). Detected from the body frequency phrasing. More than 1 day/week,
     # an unspecified frequency, or any other far city → still rejected.
     "allow_weekly_hybrid_warsaw_krakow": True,
-
     # Reject AI-data-labeling / staffing-mill roles by company name (titles are often
     # clean "Angular Developer" so only the company gives them away — micro1 fronts).
     "exclude_ai_training": True,
@@ -191,40 +181,56 @@ FILTER = {
         "mercor",
         "outlier ai",
     ],
-
     # Drop roles that require German (checked in title + location + raw description-like fields).
     # Set false if you speak German or use boards where this produces false positives.
     "exclude_german_language_required": True,
-
     # Drop part-time / very short contract roles (checked in full job text, not only title).
     # Catches cases where "part-time" appears in the description but not the job title.
     "exclude_unacceptable_contract": True,
-
     # Drop jobs that explicitly require relocation outside Poland / outside Wrocław region.
     # Catches "hybrid Helsinki", "relocation to Barcelona required", etc. in the full text.
     "exclude_relocation_required": True,
-
     # Extra anti-hybrid cities appended to _ANTI_HYBRID_CITIES in filters.py.
     # These are non-Polish cities that appeared as hybrid requirements in the tracker.
     "extra_anti_hybrid_cities": [
         # EU cities outside Poland that appeared in hybrid job descriptions
-        "helsinki", "helsingfors",
-        "barcelona", "madrid", "lisbon", "lisboa",
-        "berlin", "munich", "münchen", "hamburg", "frankfurt",
-        "amsterdam", "rotterdam",
-        "prague", "brno",
+        "helsinki",
+        "helsingfors",
+        "barcelona",
+        "madrid",
+        "lisbon",
+        "lisboa",
+        "berlin",
+        "munich",
+        "münchen",
+        "hamburg",
+        "frankfurt",
+        "amsterdam",
+        "rotterdam",
+        "prague",
+        "brno",
         "bratislava",
         "budapest",
         "bucharest",
         "sofia",
         "zagreb",
         # Cyprus (recruiter posts / XM, GRS — hybrid in Limassol/Nicosia/Larnaca)
-        "limassol", "nicosia", "larnaca", "larnaka", "paphos", "pafos",
+        "limassol",
+        "nicosia",
+        "larnaca",
+        "larnaka",
+        "paphos",
+        "pafos",
         # Non-EU / remote-but-actually-not regions
-        "islamabad", "karachi", "lahore",   # Pakistan
-        "bangalore", "mumbai", "delhi",     # India
+        "islamabad",
+        "karachi",
+        "lahore",  # Pakistan
+        "bangalore",
+        "mumbai",
+        "delhi",  # India
         "singapore",
-        "dubai", "abu dhabi",
+        "dubai",
+        "abu dhabi",
         "hong kong",
         "tokyo",
     ],

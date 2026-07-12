@@ -27,9 +27,7 @@ STACK_KEYWORD_RE = re.compile(r"\bangular\b", re.IGNORECASE)
 # A stronger form that also counts as "prominent" even outside the first 200
 # chars — "Angular Developer", "Angular Engineer", "Angular Frontend" read as a
 # role title, not a stack-dump mention.
-_ANGULAR_ROLE_RE = re.compile(
-    r"\bangular\s+(?:developer|engineer|frontend)\b", re.IGNORECASE
-)
+_ANGULAR_ROLE_RE = re.compile(r"\bangular\s+(?:developer|engineer|frontend)\b", re.IGNORECASE)
 
 _ANGULAR_PROMINENCE_WINDOW = 200
 
@@ -62,11 +60,11 @@ HIRING_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bjoin\s+(?:our|the)\s+team\b",
         r"#hiring\b",
         r"#rekrutacja\b",
-        r"\bszukamy\b",       # PL plural "we are looking" — hiring
+        r"\bszukamy\b",  # PL plural "we are looking" — hiring
         r"\bposzukujemy\b",
         r"\bzatrudnimy\b",
         r"\bpraca\s+dla\b",
-        r"\bищем\b",          # RU "we are looking (for)" — hiring
+        r"\bищем\b",  # RU "we are looking (for)" — hiring
         r"\bтребуется\b",
         r"\bвакансия\b",
         r"\bнабираем\b",
@@ -87,7 +85,7 @@ CANDIDATE_SIDE_RES: tuple[re.Pattern[str], ...] = tuple(
         # round 2 live finding) — do not "fix" it into a looser stem match.
         r"\bszukam\b\s+pracy",
         r"#opentowork\b",
-        r"\bищу\s+работу\b",   # RU "I'm looking for work" — candidate-side
+        r"\bищу\s+работу\b",  # RU "I'm looking for work" — candidate-side
         r"\bв\s+поиске\s+работы\b",
         r"#ищу_?работу\b",
     )
@@ -112,7 +110,15 @@ SPAM_RES: tuple[re.Pattern[str], ...] = tuple(
 # --- US-staffing negatives (plan §4.6 round 2 live finding) --------------------
 
 _US_STATE_CODES = (
-    "VA", "NJ", "NY", "TX", "SC", "CA", "GA", "FL", "IL",
+    "VA",
+    "NJ",
+    "NY",
+    "TX",
+    "SC",
+    "CA",
+    "GA",
+    "FL",
+    "IL",
 )
 
 US_STAFFING_RES: tuple[re.Pattern[str], ...] = tuple(
@@ -134,8 +140,19 @@ US_STAFFING_RES: tuple[re.Pattern[str], ...] = tuple(
 # rule would let a "Remote (India Only)" post through location regardless, so
 # this must be a hard `is_hiring_post` disqualifier, not a location-gate tweak.)
 _INDIA_CITIES = (
-    "hyderabad", "chennai", "bangalore", "bengaluru", "pune", "mumbai",
-    "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "kochi", "jaipur",
+    "hyderabad",
+    "chennai",
+    "bangalore",
+    "bengaluru",
+    "pune",
+    "mumbai",
+    "noida",
+    "gurgaon",
+    "gurugram",
+    "kolkata",
+    "ahmedabad",
+    "kochi",
+    "jaipur",
 )
 
 INDIA_STAFFING_RES: tuple[re.Pattern[str], ...] = tuple(
@@ -196,8 +213,8 @@ _REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
         r"\bzdalnie\b",
         r"\bpraca\s+zdalna\b",
         r"\bzdaln\w*",
-        r"\bудал[её]нн?\w*",   # RU "remote(ly)" — удалённо/удаленка/удаленный
-        r"\bдистанцион\w*",   # RU "distance/remote work"
+        r"\bудал[её]нн?\w*",  # RU "remote(ly)" — удалённо/удаленка/удаленный
+        r"\bдистанцион\w*",  # RU "distance/remote work"
     )
 )
 

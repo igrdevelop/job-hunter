@@ -152,7 +152,9 @@ def _exp_len(resume: object) -> int:
     return 0
 
 
-def _rewrite_round(content: dict, job_text: str, feedback: str, *, round_num: int, kind: str) -> dict | None:
+def _rewrite_round(
+    content: dict, job_text: str, feedback: str, *, round_num: int, kind: str
+) -> dict | None:
     """One LLM call: rewrite resume_en per the round's policy. Raises on
     transport/LLM errors so the caller's best-effort wrapper can stop the
     whole loop (a broken rewrite call is not worth retrying mid-round)."""
@@ -208,6 +210,7 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
 
     try:
         from hunter.resume_sanitizer import sanitize_content
+
         content = sanitize_content(content)
     except Exception as e:  # noqa: BLE001 — best-effort
         report.append(f"sanitize failed: {e}")
@@ -218,6 +221,7 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
             _strip_compliance_claims,
             _strip_prestige_claims,
         )
+
         content, fixes = _strip_compliance_claims(content)
         report.extend(fixes)
         content, fixes = _strip_prestige_claims(content, job_text)
@@ -230,6 +234,7 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
     try:
         from hunter.claim_judge import run_judge_stage
         from hunter.config import JUDGE_ENABLED, JUDGE_MODE
+
         mode = "warn" if JUDGE_MODE == "block" else JUDGE_MODE
         outcome = run_judge_stage(content, job_text, base_cv, enabled=JUDGE_ENABLED, mode=mode)
         content = outcome.content
@@ -240,6 +245,7 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
     blocked = False
     try:
         from hunter.apply_shared import enforce_language_separation
+
         content, blocked, lang_report = enforce_language_separation(content)
         report.extend(lang_report)
     except Exception as e:  # noqa: BLE001
@@ -248,7 +254,9 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
     return content, blocked, report
 
 
-def _rollback(content_path: Path, best_content: dict, folder: Path, regenerate_docs: Callable[[Path], None]) -> None:
+def _rollback(
+    content_path: Path, best_content: dict, folder: Path, regenerate_docs: Callable[[Path], None]
+) -> None:
     try:
         content_path.write_text(
             json.dumps(best_content, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -330,16 +338,22 @@ def refine_loop(
                 f"verdict {score} < target {target} — rewriting..."
             )
 
-            revised = _rewrite_round(best_content, job_text, feedback, round_num=round_num, kind=kind)
+            revised = _rewrite_round(
+                best_content, job_text, feedback, round_num=round_num, kind=kind
+            )
             if revised is None:
-                print(f"[verdict_refine] round {round_num}: rewrite returned no usable resume — stopping")
+                print(
+                    f"[verdict_refine] round {round_num}: rewrite returned no usable resume — stopping"
+                )
                 break
 
             candidate = copy.deepcopy(best_content)
             candidate["resume_en"] = revised["resume_en"]
 
             if _exp_len(candidate["resume_en"]) < _exp_len(best_content.get("resume_en")):
-                print(f"[verdict_refine] round {round_num}: rewrite dropped roles — discarding round")
+                print(
+                    f"[verdict_refine] round {round_num}: rewrite dropped roles — discarding round"
+                )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
                     break
@@ -353,7 +367,9 @@ def refine_loop(
             for line in safety_report:
                 print(f"[verdict_refine] round {round_num}: {line}")
             if blocked:
-                print(f"[verdict_refine] round {round_num}: language gate blocked — discarding round")
+                print(
+                    f"[verdict_refine] round {round_num}: language gate blocked — discarding round"
+                )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
                     break
@@ -361,7 +377,9 @@ def refine_loop(
                 continue
 
             if len(validate_content(candidate)) > len(validate_content(best_content)):
-                print(f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round")
+                print(
+                    f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round"
+                )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
                     break
@@ -376,7 +394,9 @@ def refine_loop(
             new_score = float(new_verdict.get("score")) if isinstance(new_verdict, dict) else None
 
             if new_score is not None and new_score > score:
-                print(f"[verdict_refine] round {round_num}: verdict improved {score} -> {new_score} — accepted")
+                print(
+                    f"[verdict_refine] round {round_num}: verdict improved {score} -> {new_score} — accepted"
+                )
                 best_content, best_verdict = candidate, new_verdict
                 last_round_failed = False
             else:
@@ -402,8 +422,11 @@ def refine_loop(
     if best_content is not content and str(best_content.get("primary_lang") or "").upper() == "PL":
         try:
             from hunter.apply_shared import _translate_resume
+
             mirrored = _translate_resume(
-                best_content["resume_en"], "PL", expected_roles=_exp_len(best_content.get("resume_en"))
+                best_content["resume_en"],
+                "PL",
+                expected_roles=_exp_len(best_content.get("resume_en")),
             )
             if mirrored:
                 best_content["resume_pl"] = mirrored

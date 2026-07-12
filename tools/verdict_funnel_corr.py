@@ -91,6 +91,7 @@ def compute_bands(rows: list[dict], days: int | None = None) -> dict[str, BandCo
         if cutoff is not None:
             d = (r.get("date") or "").strip()
             import re
+
             if not re.match(r"^\d{4}-\d{2}-\d{2}", d) or d < cutoff:
                 continue
         label = band_for(float(verdict))

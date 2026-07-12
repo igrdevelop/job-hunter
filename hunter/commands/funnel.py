@@ -69,6 +69,4 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as e:  # noqa: BLE001
         logger.exception("[/funnel] failed to build report")
         text = f"❌ Could not build funnel report: {str(e)[:200]}"
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)

@@ -61,9 +61,7 @@ class AtsAggregatorSource(BaseSource):
             return True
         if host.endswith(".recruitee.com"):
             return True
-        if "jobs.ashbyhq.com" in host:
-            return True
-        return False
+        return "jobs.ashbyhq.com" in host
 
     def fetch_text(self, url: str) -> str:
         """Workable goes through its public JSON API; others use html_fallback.
@@ -145,6 +143,7 @@ def _parse_workable_path(path: str, full_url: str) -> tuple[str | None, str | No
 
 def _workable_html_headers() -> dict[str, str]:
     from hunter.sources.html_fallback import HEADERS
+
     return dict(HEADERS)
 
 
@@ -215,6 +214,7 @@ def _workable_html_to_text(html: str) -> str:
         return ""
     try:
         from bs4 import BeautifulSoup
+
         return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
     except Exception:
         t = re.sub(r"<[^>]+>", " ", html)
@@ -234,7 +234,7 @@ def _workable_dict_to_text(data: dict) -> str:
         if not loc_s:
             loc_s = str(loc)
     else:
-        loc_s = (str(loc).strip() if loc else "")
+        loc_s = str(loc).strip() if loc else ""
 
     if data.get("remote"):
         loc_s = f"{loc_s} (Remote)" if loc_s else "Remote"

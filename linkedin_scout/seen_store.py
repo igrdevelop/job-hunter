@@ -19,7 +19,7 @@ def dedup_key(author: str, text: str) -> str:
     """md5(author + first 200 chars of post text) — task spec §3.3."""
     snippet = (text or "")[:_SNIPPET_CHARS]
     payload = f"{author or ''}{snippet}".encode("utf-8")
-    return hashlib.md5(payload).hexdigest()
+    return hashlib.md5(payload, usedforsecurity=False).hexdigest()
 
 
 class SeenStore:

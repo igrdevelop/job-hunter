@@ -81,9 +81,7 @@ class WorkingNomadsSource(BaseSource):
             "sort": [{"pub_date": {"order": "desc"}}],
             "query": {
                 "bool": {
-                    "must": [
-                        {"match": {"title": {"query": TITLE_TERMS, "operator": "or"}}}
-                    ],
+                    "must": [{"match": {"title": {"query": TITLE_TERMS, "operator": "or"}}}],
                     "filter": [{"term": {"expired": False}}],
                 }
             },

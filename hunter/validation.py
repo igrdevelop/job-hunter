@@ -1,4 +1,5 @@
 """Input validation helpers for the apply pipeline."""
+
 import re
 
 MIN_JOB_TEXT_LEN = 300  # P-2.2: raised from 200 — real postings are rarely <300 chars
@@ -46,16 +47,19 @@ def min_job_text_len_for(url: str) -> int:
         return MIN_SCOUT_TEXT_LEN
     return MIN_JOB_TEXT_LEN
 
-_BOGUS_NAMES: frozenset[str] = frozenset({
-    "unknown",
-    "unknowncompany",
-    "pracujportal",
-    "generaljobboard",
-    "generaljobposting",
-    "generaljobsearch",
-    "jobportal",
-    "portal",
-})
+
+_BOGUS_NAMES: frozenset[str] = frozenset(
+    {
+        "unknown",
+        "unknowncompany",
+        "pracujportal",
+        "generaljobboard",
+        "generaljobposting",
+        "generaljobsearch",
+        "jobportal",
+        "portal",
+    }
+)
 
 
 def is_bogus_company(name: str) -> bool:

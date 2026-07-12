@@ -131,7 +131,8 @@ def _format_detail_json_ld(jp: dict) -> str:
     elif isinstance(loc, list):
         cities = [
             (lc.get("address") or {}).get("addressLocality", "")
-            for lc in loc if isinstance(lc, dict)
+            for lc in loc
+            if isinstance(lc, dict)
         ]
         if any(cities):
             parts.append(f"Location: {', '.join(c for c in cities if c)}")
@@ -154,7 +155,8 @@ def _format_detail_json_ld(jp: dict) -> str:
 def _try_detail_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     for raw in matches:
         try:
@@ -181,9 +183,7 @@ def _try_detail_bs4(html: str) -> str:
     og_desc = soup.find("meta", property="og:description")
     if og_desc and og_desc.get("content"):
         parts.append(f"Summary: {og_desc['content']}")
-    for tag in soup.find_all(
-        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
-    ):
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
     detail_sections = [
         ("div", {"data-testid": "job-description"}),
@@ -390,7 +390,11 @@ class JobLeadsSource(BaseSource):
                     continue
                 if _SALARY_RE.search(text):
                     salary = salary or text
-                elif text.lower() in _REMOTE_LABELS | _HYBRID_LABELS | {"on-site", "on site", "stacjonarnie"}:
+                elif text.lower() in _REMOTE_LABELS | _HYBRID_LABELS | {
+                    "on-site",
+                    "on site",
+                    "stacjonarnie",
+                }:
                     work_type = work_type or text
 
         return {
@@ -427,7 +431,7 @@ class JobLeadsSource(BaseSource):
 
         company = (raw.get("company") or "Unknown").strip() or "Unknown"
         location = self._build_location(raw)
-        salary = (raw.get("salary") or None)
+        salary = raw.get("salary") or None
 
         return Job(
             title=title,

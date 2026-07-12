@@ -11,12 +11,11 @@ import llm_client
 
 def _fake_anthropic(monkeypatch, captured: dict):
     """Patch anthropic.Anthropic with a fake that records create() kwargs."""
+
     class FakeMessages:
         def create(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(
-                content=[SimpleNamespace(type="text", text='{"ok": 1}')]
-            )
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"ok": 1}')])
 
     class FakeClient:
         def __init__(self, **kw):
@@ -26,6 +25,7 @@ def _fake_anthropic(monkeypatch, captured: dict):
 
 
 # ── model-capability gating ───────────────────────────────────────────────────
+
 
 def test_supports_effort():
     assert llm_client._supports_effort("claude-sonnet-4-6")
@@ -47,6 +47,7 @@ def test_supports_disabled_thinking():
 
 # ── prompt caching (always applied) ───────────────────────────────────────────
 
+
 def test_system_prompt_is_cache_wrapped(monkeypatch):
     captured: dict = {}
     _fake_anthropic(monkeypatch, captured)
@@ -59,6 +60,7 @@ def test_system_prompt_is_cache_wrapped(monkeypatch):
 
 
 # ── effort / thinking gating in the actual call ───────────────────────────────
+
 
 def test_sonnet46_gets_effort_and_disabled_thinking(monkeypatch):
     captured: dict = {}
@@ -93,8 +95,12 @@ def test_call_llm_threads_effort_through(monkeypatch):
     captured: dict = {}
     _fake_anthropic(monkeypatch, captured)
     result = llm_client.call_llm(
-        "sys", "usr", provider="anthropic", model="claude-sonnet-4-6",
-        api_key="key", effort="medium",
+        "sys",
+        "usr",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        api_key="key",
+        effort="medium",
     )
     assert result == {"ok": 1}
     assert captured["output_config"] == {"effort": "medium"}

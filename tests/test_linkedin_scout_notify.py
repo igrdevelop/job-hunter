@@ -12,12 +12,12 @@ from linkedin_scout.seen_store import SeenStore, dedup_key
 
 
 def _candidate(**overrides) -> ScoutCandidate:
-    defaults = dict(
-        keyword="angular hiring",
-        author="Deloitte Poland",
-        body="We're hiring an Angular Developer. Fully remote across Poland.",
-        scouted_at="2026-07-07T12:00:00+00:00",
-    )
+    defaults = {
+        "keyword": "angular hiring",
+        "author": "Deloitte Poland",
+        "body": "We're hiring an Angular Developer. Fully remote across Poland.",
+        "scouted_at": "2026-07-07T12:00:00+00:00",
+    }
     defaults.update(overrides)
     return ScoutCandidate(**defaults)
 
@@ -39,9 +39,7 @@ def test_format_message_omits_profile_link_when_absent():
 
 
 def test_format_message_includes_profile_link_when_present():
-    text = format_message(
-        _candidate(author_profile_url="https://www.linkedin.com/in/janedoe")
-    )
+    text = format_message(_candidate(author_profile_url="https://www.linkedin.com/in/janedoe"))
     assert "https://www.linkedin.com/in/janedoe" in text
 
 

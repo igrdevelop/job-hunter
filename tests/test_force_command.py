@@ -13,6 +13,7 @@ def run(coro):
 # tracker.delete_all_by_url
 # ---------------------------------------------------------------------------
 
+
 def test_delete_all_by_url_removes_all_statuses(tracker_db):
     """delete_all_by_url should delete FAIL, SKIP, MANUAL, and success rows."""
     from hunter.tracker import delete_all_by_url, normalize_url
@@ -28,9 +29,12 @@ def test_delete_all_by_url_removes_all_statuses(tracker_db):
             "INSERT INTO applications "
             "(id, date, company, title, stack, ats_status, url, url_norm, folder, drive_url) "
             "VALUES ('aaa11111', '2026-05-10', 'AcmeCorp', 'Dev', 'Angular', '95', ?, ?, ?, ?)",
-            (url1, norm1,
-             "Applications/2026-05-10/AcmeCorp",
-             "https://drive.google.com/drive/folders/FOLDER1"),
+            (
+                url1,
+                norm1,
+                "Applications/2026-05-10/AcmeCorp",
+                "https://drive.google.com/drive/folders/FOLDER1",
+            ),
         )
         conn.execute(
             "INSERT INTO applications "
@@ -53,9 +57,7 @@ def test_delete_all_by_url_removes_all_statuses(tracker_db):
 
     # Only OtherCo row should remain
     with get_db(tracker_db) as conn:
-        rows = conn.execute(
-            "SELECT company FROM applications ORDER BY rowid"
-        ).fetchall()
+        rows = conn.execute("SELECT company FROM applications ORDER BY rowid").fetchall()
     assert [r["company"] for r in rows] == ["OtherCo"]
 
 
@@ -86,17 +88,24 @@ def test_delete_all_by_url_unknown_url(tracker_db):
 # tracker_cache.invalidate_url
 # ---------------------------------------------------------------------------
 
+
 def test_cache_invalidate_url_removes_from_all_indexes():
     from hunter.tracker_cache import TrackerCache
 
     async def _run():
         c = TrackerCache()
         row = {
-            "ID": "abc123", "URL": "https://example.com/job/1",
-            "Company": "AcmeCorp", "Job Title": "Dev",
-            "ATS %": "95", "Sent": "", "Stack": "Angular",
-            "Folder": "Applications/AcmeCorp", "Re-application": "",
-            "To Learn": "", "Drive URL": "",
+            "ID": "abc123",
+            "URL": "https://example.com/job/1",
+            "Company": "AcmeCorp",
+            "Job Title": "Dev",
+            "ATS %": "95",
+            "Sent": "",
+            "Stack": "Angular",
+            "Folder": "Applications/AcmeCorp",
+            "Re-application": "",
+            "To Learn": "",
+            "Drive URL": "",
         }
         await c.add(row)
         assert await c.is_known_url("https://example.com/job/1")
@@ -121,14 +130,17 @@ def test_cache_invalidate_url_noop_unknown():
 # gdrive_client.folder_id_from_url
 # ---------------------------------------------------------------------------
 
+
 def test_folder_id_from_url_valid():
     from hunter.gdrive_client import folder_id_from_url
+
     url = "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
     assert folder_id_from_url(url) == "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
 
 
 def test_folder_id_from_url_invalid():
     from hunter.gdrive_client import folder_id_from_url
+
     assert folder_id_from_url("https://google.com") is None
     assert folder_id_from_url("") is None
     assert folder_id_from_url(None) is None
@@ -137,6 +149,7 @@ def test_folder_id_from_url_invalid():
 # ---------------------------------------------------------------------------
 # _force_waiting state in telegram_bot
 # ---------------------------------------------------------------------------
+
 
 def _make_update(text: str, chat_id: int = 12345):
     update = MagicMock()
@@ -209,6 +222,7 @@ def test_cmd_url_no_force_waiting_normal_flow():
 # _force_cleanup
 # ---------------------------------------------------------------------------
 
+
 def test_force_cleanup_deletes_server_folder(tmp_path):
     """_force_cleanup removes server folder when it exists."""
     import hunter.telegram_bot as bot
@@ -243,7 +257,11 @@ def test_force_cleanup_no_existing_entry():
             with patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock):
                 summary = await bot._force_cleanup("https://new-vacancy.com/job/99", update)
 
-        assert "no existing" in summary.lower() or "0 row" in summary.lower() or "not found" in summary.lower()
+        assert (
+            "no existing" in summary.lower()
+            or "0 row" in summary.lower()
+            or "not found" in summary.lower()
+        )
 
     run(_run())
 
@@ -251,6 +269,7 @@ def test_force_cleanup_no_existing_entry():
 # ---------------------------------------------------------------------------
 # gsheets_client — delete_sheet_row / get_tab_sheet_id
 # ---------------------------------------------------------------------------
+
 
 def _make_sheets_service(tab_sheet_id=999):
     """Build a minimal mock Sheets service for delete tests."""
@@ -269,6 +288,7 @@ def _make_sheets_service(tab_sheet_id=999):
 
 def test_get_tab_sheet_id_found():
     from hunter.gsheets_client import get_tab_sheet_id
+
     svc = _make_sheets_service(tab_sheet_id=42)
     result = get_tab_sheet_id(svc, "spreadsheet-id-123")
     assert result == 42
@@ -276,6 +296,7 @@ def test_get_tab_sheet_id_found():
 
 def test_get_tab_sheet_id_not_found():
     from hunter.gsheets_client import get_tab_sheet_id
+
     svc = MagicMock()
     svc.spreadsheets().get().execute.return_value = {
         "sheets": [{"properties": {"title": "OtherTab", "sheetId": 0}}]
@@ -287,6 +308,7 @@ def test_get_tab_sheet_id_not_found():
 def test_delete_sheet_row_calls_batch_update():
     """delete_sheet_row issues a deleteDimension batchUpdate with correct 0-based index."""
     from hunter.gsheets_client import delete_sheet_row
+
     svc = _make_sheets_service(tab_sheet_id=7)
 
     delete_sheet_row(svc, "sheet-id", row_idx=5)
@@ -296,7 +318,7 @@ def test_delete_sheet_row_calls_batch_update():
     body = call_kwargs[1]["body"] if call_kwargs[1] else call_kwargs[0][1]
     req = body["requests"][0]["deleteDimension"]["range"]
     assert req["sheetId"] == 7
-    assert req["startIndex"] == 4   # row_idx=5 → 0-based 4
+    assert req["startIndex"] == 4  # row_idx=5 → 0-based 4
     assert req["endIndex"] == 5
     assert req["dimension"] == "ROWS"
 
@@ -305,17 +327,20 @@ def test_delete_sheet_row_calls_batch_update():
 # gsheets_sync — delete_row_by_url
 # ---------------------------------------------------------------------------
 
+
 def test_delete_row_by_url_success():
     """delete_row_by_url returns True and calls delete_sheet_row when URL is in DB."""
     import hunter.gsheets_sync as gsync
 
     async def _run():
-        with patch.object(gsync, "_ready", return_value=True), \
-             patch.object(gsync, "_get_service", return_value=MagicMock()), \
-             patch.object(gsync, "_sheet_id", return_value="sheet-id-abc"), \
-             patch.object(gsync, "lookup_url", return_value=[{"id": "abc123"}]), \
-             patch.object(gsync, "get_sheets_row", return_value=5), \
-             patch("hunter.gsheets_client.delete_sheet_row") as mock_del:
+        with (
+            patch.object(gsync, "_ready", return_value=True),
+            patch.object(gsync, "_get_service", return_value=MagicMock()),
+            patch.object(gsync, "_sheet_id", return_value="sheet-id-abc"),
+            patch.object(gsync, "lookup_url", return_value=[{"id": "abc123"}]),
+            patch.object(gsync, "get_sheets_row", return_value=5),
+            patch("hunter.gsheets_client.delete_sheet_row") as mock_del,
+        ):
             result = await gsync.delete_row_by_url("https://example.com/job/1")
 
         assert result is True
@@ -332,8 +357,10 @@ def test_delete_row_by_url_not_in_db():
     import hunter.gsheets_sync as gsync
 
     async def _run():
-        with patch.object(gsync, "_ready", return_value=True), \
-             patch.object(gsync, "lookup_url", return_value=[]):
+        with (
+            patch.object(gsync, "_ready", return_value=True),
+            patch.object(gsync, "lookup_url", return_value=[]),
+        ):
             result = await gsync.delete_row_by_url("https://notfound.com/job/1")
         assert result is False
 
@@ -345,9 +372,11 @@ def test_delete_row_by_url_no_sheet_index():
     import hunter.gsheets_sync as gsync
 
     async def _run():
-        with patch.object(gsync, "_ready", return_value=True), \
-             patch.object(gsync, "lookup_url", return_value=[{"id": "xyz999"}]), \
-             patch.object(gsync, "get_sheets_row", return_value=None):
+        with (
+            patch.object(gsync, "_ready", return_value=True),
+            patch.object(gsync, "lookup_url", return_value=[{"id": "xyz999"}]),
+            patch.object(gsync, "get_sheets_row", return_value=None),
+        ):
             result = await gsync.delete_row_by_url("https://example.com/job/no-index")
         assert result is False
 
@@ -362,10 +391,13 @@ def test_force_cleanup_calls_sheets_delete():
         tracker_result = {"deleted": 1, "folder": None, "drive_url": None}
         update = _make_update("dummy")
 
-        with patch("hunter.tracker.delete_all_by_url", return_value=tracker_result), \
-             patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock), \
-             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=True) as mock_sheets:
-
+        with (
+            patch("hunter.tracker.delete_all_by_url", return_value=tracker_result),
+            patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock),
+            patch(
+                "hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=True
+            ) as mock_sheets,
+        ):
             summary = await bot._force_cleanup("https://example.com/job/1", update)
 
         mock_sheets.assert_called_once_with("https://example.com/job/1")
@@ -387,10 +419,13 @@ def test_force_cleanup_sheets_delete_always_called():
         tracker_result = {"deleted": 0, "folder": None, "drive_url": None}
         update = _make_update("dummy")
 
-        with patch("hunter.tracker.delete_all_by_url", return_value=tracker_result), \
-             patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock), \
-             patch("hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=False) as mock_sheets:
-
+        with (
+            patch("hunter.tracker.delete_all_by_url", return_value=tracker_result),
+            patch("hunter.tracker_cache.cache.invalidate_url", new_callable=AsyncMock),
+            patch(
+                "hunter.gsheets_sync.delete_row_by_url", new_callable=AsyncMock, return_value=False
+            ) as mock_sheets,
+        ):
             await bot._force_cleanup("https://new-vacancy.com/job/99", update)
 
         mock_sheets.assert_called_once_with("https://new-vacancy.com/job/99")

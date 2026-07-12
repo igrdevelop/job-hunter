@@ -48,9 +48,9 @@ HEADERS = {
 JSON_HEADERS = {**HEADERS, "Accept": "application/json, text/plain, */*"}
 
 TIMEOUT = 20
-PER_PAGE = 100                      # items per API page
-MAX_PAGES = JUSTJOIN_MAX_PAGES      # configurable via JUSTJOIN_MAX_PAGES env var (default 3)
-PAGE_DELAY = 0.3                    # seconds between pages
+PER_PAGE = 100  # items per API page
+MAX_PAGES = JUSTJOIN_MAX_PAGES  # configurable via JUSTJOIN_MAX_PAGES env var (default 3)
+PAGE_DELAY = 0.3  # seconds between pages
 
 WORKPLACE_TYPES = ["remote", "hybrid", "office"]
 
@@ -66,9 +66,7 @@ def _extract_detail_slug(url: str) -> str:
 def _strip_html(html: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", html)
     text = re.sub(r"<li[^>]*>", "- ", text)
-    text = re.sub(
-        r"</?(p|div|h[1-6]|ul|ol|tr|td|th|table|section)[^>]*>", "\n", text
-    )
+    text = re.sub(r"</?(p|div|h[1-6]|ul|ol|tr|td|th|table|section)[^>]*>", "\n", text)
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"&amp;", "&", text)
     text = re.sub(r"&lt;", "<", text)
@@ -88,9 +86,7 @@ class JustJoinSource(BaseSource):
     def fetch_text(self, url: str) -> str:
         """Fetch a single JustJoin offer via the candidate API and format as plain text."""
         slug = _extract_detail_slug(url)
-        resp = requests.get(
-            f"{LISTING_API}/{slug}", headers=JSON_HEADERS, timeout=TIMEOUT
-        )
+        resp = requests.get(f"{LISTING_API}/{slug}", headers=JSON_HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
 
@@ -103,9 +99,7 @@ class JustJoinSource(BaseSource):
 
         city = data.get("city", "")
         workplace = data.get("workplaceType", "")
-        parts.append(
-            f"Location: {city} ({workplace})" if city else f"Location: {workplace}"
-        )
+        parts.append(f"Location: {city} ({workplace})" if city else f"Location: {workplace}")
 
         experience = data.get("experienceLevel", "")
         if experience:
@@ -113,9 +107,7 @@ class JustJoinSource(BaseSource):
 
         skills = data.get("skills", [])
         if skills:
-            skill_names = [
-                f"{s.get('name', '')} ({s.get('level', '')})" for s in skills
-            ]
+            skill_names = [f"{s.get('name', '')} ({s.get('level', '')})" for s in skills]
             parts.append(f"Required Skills: {', '.join(skill_names)}")
 
         emp_types = data.get("employmentTypes", [])

@@ -19,19 +19,18 @@ def funnel_db(tracker_db, monkeypatch):
     return tracker_db
 
 
-def _insert(db, *, url="https://x.com/j", ats="", sent="", answer="",
-            confirmation="", d=None):
+def _insert(db, *, url="https://x.com/j", ats="", sent="", answer="", confirmation="", d=None):
     d = d if d is not None else date.today().isoformat()
     with get_db(db) as conn:
         conn.execute(
             "INSERT INTO applications (id, date, company, title, ats_status, url, "
             "url_norm, sent, confirmation, answer) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (uuid.uuid4().hex[:8], d, "Co", "Dev", ats, url, url, sent,
-             confirmation, answer),
+            (uuid.uuid4().hex[:8], d, "Co", "Dev", ats, url, url, sent, confirmation, answer),
         )
 
 
 # ── source attribution ────────────────────────────────────────────────────────
+
 
 def test_source_for_url_matches_known_board():
     # justjoin.it is a registered source — matches_url should attribute it.
@@ -54,6 +53,7 @@ def test_registered_domain():
 
 
 # ── classification helpers ────────────────────────────────────────────────────
+
 
 def test_is_generated():
     assert funnel._is_generated("85%")
@@ -82,13 +82,15 @@ def test_is_confirmed_and_answered():
 
 # ── compute_funnel ────────────────────────────────────────────────────────────
 
+
 def test_overall_counts(funnel_db):
-    _insert(funnel_db, ats="90%", sent="2026-06-10", answer="Interview",
-            confirmation="2026-06-11")                                     # gen+sent+conf+ans
+    _insert(
+        funnel_db, ats="90%", sent="2026-06-10", answer="Interview", confirmation="2026-06-11"
+    )  # gen+sent+conf+ans
     _insert(funnel_db, ats="80%", sent="2026-06-09", confirmation="2026-06-10")  # gen+sent+conf
-    _insert(funnel_db, ats="75%")                                          # gen only
-    _insert(funnel_db, ats="SKIP")                                         # tracked only
-    _insert(funnel_db, ats="EXPIRED", sent="EXPIRED")                      # tracked only
+    _insert(funnel_db, ats="75%")  # gen only
+    _insert(funnel_db, ats="SKIP")  # tracked only
+    _insert(funnel_db, ats="EXPIRED", sent="EXPIRED")  # tracked only
 
     rep = funnel.compute_funnel()
     o = rep.overall
@@ -149,10 +151,13 @@ def test_empty_db(funnel_db):
 
 # ── command report builder ────────────────────────────────────────────────────
 
+
 def test_cmd_build_report(funnel_db):
     from hunter.commands import funnel as funnel_cmd
-    _insert(funnel_db, url="https://justjoin.it/o/a", ats="90%", sent="2026-06-10",
-            answer="Interview")
+
+    _insert(
+        funnel_db, url="https://justjoin.it/o/a", ats="90%", sent="2026-06-10", answer="Interview"
+    )
     text = funnel_cmd._build_report(None)
     assert "Application funnel" in text
     assert "Tracked:" in text
@@ -161,6 +166,7 @@ def test_cmd_build_report(funnel_db):
 
 def test_cmd_parse_days():
     from hunter.commands import funnel as funnel_cmd
+
     assert funnel_cmd._parse_days(["30"]) == 30
     assert funnel_cmd._parse_days([]) is None
     assert funnel_cmd._parse_days(["abc"]) is None

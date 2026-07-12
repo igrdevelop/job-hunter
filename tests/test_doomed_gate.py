@@ -11,6 +11,7 @@ recoverable from this dev machine — see file headers), fairmarkit_job_posting.
 is the exact real LinkedIn dump that surfaced the "Similar jobs" contamination
 bug during M4 calibration.
 """
+
 from pathlib import Path
 
 import pytest
@@ -35,14 +36,16 @@ def _rules(findings: list[GateFinding]) -> set[str]:
 
 # ── GateFinding dataclass ──────────────────────────────────────────────────
 
+
 def test_gate_finding_is_frozen_dataclass() -> None:
     f = GateFinding(rule="x", severity="hard", evidence="y")
     assert f.rule == "x" and f.severity == "hard" and f.evidence == "y"
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         f.rule = "z"  # type: ignore[misc]
 
 
 # ── Real-world fixture cases (docs/DOOMED_GATE_PLAN.md acceptance criteria) ──
+
 
 def test_bigbearai_caught_by_foreign_onsite_hard_rule() -> None:
     text = _read("bigbearai_job_posting.txt")
@@ -67,12 +70,15 @@ def test_fairmarkit_clean_despite_linkedin_similar_jobs_contamination() -> None:
     described Warsaw-office EU role with no hybrid/onsite language of its own)."""
     text = _read("fairmarkit_job_posting.txt")
     findings = assess_job_text(
-        text, title="Senior Frontend Engineer (Design Systems)", company="Fairmarkit",
+        text,
+        title="Senior Frontend Engineer (Design Systems)",
+        company="Fairmarkit",
     )
     assert findings == []
 
 
 # ── HARD rule (a): foreign on-site/hybrid ───────────────────────────────────
+
 
 def test_foreign_onsite_hybrid_hard() -> None:
     text = "We need an on-site engineer in our Berlin office 3 days a week."
@@ -140,13 +146,17 @@ def test_foreign_onsite_hybrid_not_vetoed_by_unrelated_perks_word_elsewhere() ->
 
 # ── HARD rule (b): work authorization ───────────────────────────────────────
 
-@pytest.mark.parametrize("text", [
-    "Must be a US citizen to apply for this role.",
-    "This position requires an active security clearance required for federal work.",
-    "Candidates must have H1B sponsorship experience or existing H-1B status.",
-    "We only offer W2 employment status; C2C is not accepted.",
-    "No visa sponsorship is available for this role.",
-])
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Must be a US citizen to apply for this role.",
+        "This position requires an active security clearance required for federal work.",
+        "Candidates must have H1B sponsorship experience or existing H-1B status.",
+        "We only offer W2 employment status; C2C is not accepted.",
+        "No visa sponsorship is available for this role.",
+    ],
+)
 def test_work_authorization_hard(text: str) -> None:
     findings = assess_job_text(text)
     assert "unsupported_work_authorization" in _rules(findings)
@@ -160,11 +170,15 @@ def test_work_authorization_not_triggered_by_clean_eu_posting() -> None:
 
 # ── HARD rule (c): unsupported required language ────────────────────────────
 
-@pytest.mark.parametrize("text", [
-    "Fluent in French is required for this role.",
-    "You are a native French speaker with strong communication skills.",
-    "Dutch speaking candidates only, C1 Dutch required.",
-])
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fluent in French is required for this role.",
+        "You are a native French speaker with strong communication skills.",
+        "Dutch speaking candidates only, C1 Dutch required.",
+    ],
+)
 def test_unsupported_language_hard(text: str) -> None:
     findings = assess_job_text(text)
     assert "unsupported_language_required" in _rules(findings)
@@ -211,18 +225,24 @@ def test_german_still_hard_when_actually_required_near_nice_to_have_section() ->
 
 # ── SOFT rule: primary-stack mismatch ───────────────────────────────────────
 
+
 def test_stack_mismatch_soft_when_only_vue() -> None:
     text = "We use Vue 3, Nuxt and TypeScript across our frontend stack."
     findings = assess_job_text(text)
     assert "stack_mismatch_non_candidate_framework" in _rules(findings)
-    assert all(f.severity == "soft" for f in findings if f.rule == "stack_mismatch_non_candidate_framework")
+    assert all(
+        f.severity == "soft" for f in findings if f.rule == "stack_mismatch_non_candidate_framework"
+    )
 
 
-@pytest.mark.parametrize("text", [
-    "We use Vue or Angular depending on the squad.",
-    "Experience with React or Vue is required.",
-    "Our stack includes Svelte, but React experience is also welcome.",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We use Vue or Angular depending on the squad.",
+        "Experience with React or Vue is required.",
+        "Our stack includes Svelte, but React experience is also welcome.",
+    ],
+)
 def test_stack_mismatch_not_triggered_when_candidate_framework_present(text: str) -> None:
     findings = assess_job_text(text)
     assert "stack_mismatch_non_candidate_framework" not in _rules(findings)
@@ -236,6 +256,7 @@ def test_stack_mismatch_not_triggered_without_other_framework() -> None:
 
 # ── Reused _MANUAL_SCREEN_CHECKS — HARD tier (no real false positives in M4) ─
 
+
 def test_ai_training_mill_hard() -> None:
     findings = assess_job_text("Clean Angular Developer role.", company="Micro1 Inc")
     assert "is_ai_training_or_mill" in _rules(findings)
@@ -247,6 +268,7 @@ def test_ai_training_mill_hard() -> None:
 # enrichment skipped → company empty) — exactly how QuikHireStaffing/HireFeed
 # reached generation on 2026-07-06. The mill's name / apply link is in the
 # posting text itself.
+
 
 def test_mill_name_in_body_hard_even_without_company() -> None:
     text = (
@@ -275,8 +297,7 @@ def test_mill_body_no_false_positive_on_similar_words() -> None:
     # "micro1" must not fire on "micro-frontends" / "microservices"; "mercor"
     # must not fire inside a longer word.
     text = (
-        "Angular role: micro-frontends, microservices, and Micro100 tooling "
-        "at Mercorp Solutions."
+        "Angular role: micro-frontends, microservices, and Micro100 tooling at Mercorp Solutions."
     )
     findings = assess_job_text(text)
     assert "ai_mill_body" not in _rules(findings)
@@ -284,6 +305,7 @@ def test_mill_body_no_false_positive_on_similar_words() -> None:
 
 def test_mill_body_respects_exclude_ai_training_flag(monkeypatch) -> None:
     from hunter import filters as filters_mod
+
     patched = dict(filters_mod.FILTER)
     patched["exclude_ai_training"] = False
     monkeypatch.setattr(filters_mod, "FILTER", patched)
@@ -303,6 +325,7 @@ def test_unacceptable_contract_hard() -> None:
 # Owner decision 2026-07-12 (talanto.work links surfaced via the Telegram
 # channels source): unclear whether a Russia-based employer can legally/
 # practically pay a Poland-based candidate — skip regardless of remote status.
+
 
 def test_russia_remote_tag_hard() -> None:
     text = "Middle JavaScript Developer\nFull time · Middle · Remote · Russia\ncrm, SQL, JavaScript"
@@ -377,6 +400,7 @@ def test_relocation_required_hard() -> None:
 
 # ── Reused _MANUAL_SCREEN_CHECKS — SOFT tier (downgraded per M4 calibration) ─
 
+
 def test_body_disqualifier_soft_not_hard() -> None:
     """M4 calibration found real SENT rows with a body_exclude_patterns hit that
     was a minor "nice to have" mention (NASK_2: WordPress buried in a dozen
@@ -406,6 +430,7 @@ def test_wroclaw_role_not_flagged_by_onsite_check() -> None:
 
 # ── screen_job_text() backward-compat contract (paste path, warn-but-allow) ──
 
+
 def test_screen_job_text_returns_first_finding_evidence() -> None:
     text = "Must be a US citizen to apply. This is a part-time role."
     result = screen_job_text(text)
@@ -425,8 +450,11 @@ def test_screen_job_text_ignores_unused_location_kw() -> None:
 
 # ── Recommendation-tail / SEO-footer contamination strip ────────────────────
 
+
 def test_strip_recommendation_tail_linkedin() -> None:
-    text = "Real job content here.\nSimilar jobs\nUnrelated Senior Developer — Other Co, hybrid Warsaw"
+    text = (
+        "Real job content here.\nSimilar jobs\nUnrelated Senior Developer — Other Co, hybrid Warsaw"
+    )
     stripped = _strip_recommendation_tail(text)
     assert "Unrelated Senior Developer" not in stripped
     assert "Real job content here." in stripped
@@ -469,6 +497,7 @@ def test_has_body_disqualifier_not_triggered_by_stripped_footer() -> None:
 
 # ── Robustness ───────────────────────────────────────────────────────────────
 
+
 def test_assess_job_text_empty_input_returns_no_findings() -> None:
     assert assess_job_text("") == []
     assert assess_job_text(None) == []  # type: ignore[arg-type]
@@ -482,6 +511,7 @@ def test_assess_job_text_never_raises_on_garbage_input() -> None:
 # ── Title-based checks (docs/DOOMED_GATE_PASTE_PLAN.md) ─────────────────────
 # Reused from listing-level filters, but now also applied on the manual-paste
 # path via a best-effort title guess when no explicit title is known.
+
 
 def test_title_exclude_pattern_hard_with_explicit_title() -> None:
     """Real calibration case: Santander '.NET Developer (Angular)' - no
@@ -523,7 +553,9 @@ def test_off_domain_title_soft_with_guessed_title() -> None:
 
 
 def test_off_domain_title_not_triggered_for_frontend_title() -> None:
-    text = "Skip to main content\nSenior Angular Developer\nSome Company\n\nAngular, RxJS, TypeScript."
+    text = (
+        "Skip to main content\nSenior Angular Developer\nSome Company\n\nAngular, RxJS, TypeScript."
+    )
     findings = assess_job_text(text)
     assert "off_domain_title" not in _rules(findings)
 
@@ -539,6 +571,7 @@ def test_title_based_checks_do_not_override_a_known_title() -> None:
 
 def test_guess_title_from_text_skips_boilerplate_lines() -> None:
     from hunter.filters import _guess_title_from_text
+
     text = "Skip to main content\nSign in\n\nAngular Developer\nComarch Warsaw, Poland"
     assert _guess_title_from_text(text) == "Angular Developer"
 
@@ -549,6 +582,7 @@ def test_guess_title_ignores_chat_intro_line() -> None:
     the gate's 'title' and produced a garbage off_domain_title warning quoting
     the chat line as if it were the job title."""
     from hunter.filters import _guess_title_from_text
+
     text = (
         "Да, тут можно ознакомиться с компанией - plavno.io\n"
         "What you'll build\n"
@@ -579,6 +613,7 @@ def test_guess_title_skips_stack_line_that_reads_like_prose() -> None:
     """A body line naming the stack but punctuated like a sentence is prose,
     not a title — it must not become the guessed title."""
     from hunter.filters import _guess_title_from_text
+
     text = "Senior Angular/TypeScript experience; deep understanding of reactivity.\n"
     assert _guess_title_from_text(text) == ""
 
@@ -586,6 +621,7 @@ def test_guess_title_skips_stack_line_that_reads_like_prose() -> None:
 def test_guess_title_requires_role_or_stack_signal() -> None:
     """Section headers and slogans without a role noun never qualify."""
     from hunter.filters import _guess_title_from_text
+
     text = "What you'll build\nYour role\nInterview\nGreat team culture"
     assert _guess_title_from_text(text) == ""
 
@@ -594,6 +630,7 @@ def test_guess_title_scan_is_capped_to_the_top_of_the_text() -> None:
     """A role noun buried deep in the body (past the candidate-line cap) must
     not be mistaken for the title."""
     from hunter.filters import _guess_title_from_text
+
     filler = "\n".join(f"Some plain line {i}" for i in range(12))
     text = filler + "\nAngular Developer"
     assert _guess_title_from_text(text) == ""

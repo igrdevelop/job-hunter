@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Upload all tracker.xlsx application folders to Google Drive (runs in background)."""
     from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+
     if not GDRIVE_ENABLED:
         await update.message.reply_text(
             "⚠️ GDRIVE_ENABLED=false — Google Drive is not enabled.",
@@ -33,6 +34,7 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
 
         try:
             from hunter import gdrive_sync
+
             result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
         except Exception as e:
             await update.message.reply_text(

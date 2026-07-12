@@ -1,4 +1,5 @@
 """Tests for tracker.get_url_status_flags."""
+
 from hunter import tracker
 
 
@@ -6,6 +7,7 @@ def _add_row_direct(tracker_db, *, url: str, ats: str, sent: str = "") -> None:
     """Insert a minimal row directly into the SQLite DB for test setup."""
     from hunter.db import get_db
     import uuid
+
     with get_db(tracker_db) as conn:
         conn.execute(
             """

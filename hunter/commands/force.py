@@ -33,6 +33,7 @@ async def _force_cleanup(url: str, update: Update) -> str:
     # delete from the DB first the lookup returns nothing and Sheets is never cleaned.
     try:
         from hunter import gsheets_sync
+
         sheets_deleted = await gsheets_sync.delete_row_by_url(url)
         if sheets_deleted:
             lines.append("🗑 Sheets: old row deleted")
@@ -79,6 +80,7 @@ async def _force_cleanup(url: str, update: Update) -> str:
     if drive_url and drive_url not in ("-", "—"):
         try:
             from hunter import gdrive_sync
+
             deleted = await gdrive_sync.delete_application_folder(drive_url)
             if deleted:
                 lines.append("🗑 Drive: folder deleted")

@@ -24,11 +24,25 @@ TIMEOUT = 25
 MAX_TEXT_LEN = 15_000
 
 _TRACKING_PARAMS = {
-    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
-    "fbclid", "gclid", "campaignid", "adgroupid",
-    "ref", "refId", "trackingId", "trk",
-    "sendid", "send_date", "sug",
-    "originToLandingJobPostings", "origin",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "utm_id",
+    "fbclid",
+    "gclid",
+    "campaignid",
+    "adgroupid",
+    "ref",
+    "refId",
+    "trackingId",
+    "trk",
+    "sendid",
+    "send_date",
+    "sug",
+    "originToLandingJobPostings",
+    "origin",
 }
 
 

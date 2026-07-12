@@ -13,7 +13,7 @@ EXPIRED_PATTERNS: tuple[re.Pattern, ...] = tuple(
         r"\bposition\s+(?:has\s+been\s+)?filled\b",
         r"\bapplication\s+(?:period\s+)?(?:has\s+)?closed\b",
         r"\bno\s+longer\s+accepting\s+applications\b",
-        r"\bno\s+longer\s+accepting\b",                 # shorter LinkedIn variant
+        r"\bno\s+longer\s+accepting\b",  # shorter LinkedIn variant
         r"\bapplications?\s+(?:are\s+)?(?:now\s+)?closed\b",
         r"\bthis\s+(?:job\s+)?(?:listing|role|position)\s+(?:is\s+)?(?:no\s+longer\s+)?(?:active|available)\b",
         # Polish — generic expiry
@@ -52,11 +52,11 @@ HTML_EXPIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "pracuj.pl": (
         'data-apply-type="ArchivedApplyPanel"',
         'data-test="section-archived"',
-        "Pracodawca zakończy",          # prefix — avoids diacritic encoding edge cases
+        "Pracodawca zakończy",  # prefix — avoids diacritic encoding edge cases
         "zakończył zbieranie zgłosze",
         "oferta wygasła",
-        '"isActive":false',             # __NEXT_DATA__ JSON field — most reliable
-        '"isActive": false',            # space variant
+        '"isActive":false',  # __NEXT_DATA__ JSON field — most reliable
+        '"isActive": false',  # space variant
     ),
     "linkedin.com": (
         "No longer accepting applications",
@@ -102,10 +102,7 @@ def is_job_expired(text: str) -> bool:
     """Return True if the extracted job text contains expiry indicators."""
     if not text:
         return False
-    for pattern in EXPIRED_PATTERNS:
-        if pattern.search(text):
-            return True
-    return False
+    return any(pattern.search(text) for pattern in EXPIRED_PATTERNS)
 
 
 def is_expired_by_html(html: str, domain: str) -> bool:

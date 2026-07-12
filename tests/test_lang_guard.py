@@ -13,6 +13,7 @@ from hunter import lang_guard as lg
 # detect_posting_language
 # ---------------------------------------------------------------------------
 
+
 def test_detect_language_english_posting():
     txt = (
         "We are looking for a Senior Frontend Developer with strong Angular and "
@@ -65,14 +66,13 @@ def test_detect_language_short_text_defaults_en():
 # Polish contamination in English fields — strong signals
 # ---------------------------------------------------------------------------
 
+
 def test_diacritic_word_is_strong():
     assert lg.polish_fragments("10+ years of experience (7+ lat doświadczenia)", soft=False)
 
 
 def test_bilingual_gloss_is_strong():
-    frags = lg.polish_fragments(
-        "responsywne interfejsy (responsive interfaces)", soft=False
-    )
+    frags = lg.polish_fragments("responsywne interfejsy (responsive interfaces)", soft=False)
     assert frags
     assert any("responsywne" in f.lower() for f in frags)
 
@@ -152,6 +152,7 @@ def test_city_among_real_contamination_still_flags_the_polish():
 # English prose in Polish fields
 # ---------------------------------------------------------------------------
 
+
 def test_english_prose_in_polish_field_detected():
     txt = "Senior Frontend Developer with 10 years of experience building teams"
     assert len(lg.english_prose_fragments(txt)) >= 3
@@ -169,6 +170,7 @@ def test_polish_field_with_anglicisms_ok():
 # ---------------------------------------------------------------------------
 # scan_content
 # ---------------------------------------------------------------------------
+
 
 def _contaminated_content():
     return {

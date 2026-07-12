@@ -52,6 +52,7 @@ class BaseSource(ABC):
         Raises on network errors or empty content (caller decides recovery).
         """
         from hunter.sources.html_fallback import fetch_html
+
         return fetch_html(url)
 
     def __repr__(self) -> str:

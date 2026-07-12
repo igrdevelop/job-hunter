@@ -40,18 +40,21 @@ TIMEOUT = 25
 _scraper = cloudscraper.create_scraper()
 # theprotocol.it rejects old browser UAs with an "unsupportedBrowser" page.
 # Override to a modern Chrome UA while keeping cloudscraper's Cloudflare bypass.
-_scraper.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-})
+_scraper.headers.update(
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+)
 
 
 def _playwright_available() -> bool:
     try:
         import playwright  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -89,7 +92,7 @@ def _format_job_posting_ld(jp: dict) -> str:
     elif isinstance(loc, list):
         cities: list[str] = []
         for l in loc:
-            addr = (l.get("address") or {})
+            addr = l.get("address") or {}
             c = addr.get("addressLocality", "")
             if c:
                 cities.append(c)
@@ -184,7 +187,7 @@ def _try_next_data_offer(html: str) -> str:
     attr = offer.get("attributes") or {}
     parts: list[str] = []
 
-    title = (attr.get("title") or {})
+    title = attr.get("title") or {}
     title = title.get("value") if isinstance(title, dict) else title
     if title:
         parts.append(f"Job Title: {title}")
@@ -225,7 +228,8 @@ def _try_next_data_offer(html: str) -> str:
 def _try_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     for raw in matches:
         try:
@@ -286,9 +290,7 @@ def _try_bs4_detail(html: str) -> str:
     if og_desc and og_desc.get("content"):
         parts.append(f"Summary: {og_desc['content']}")
 
-    for tag in soup.find_all(
-        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
-    ):
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
 
     main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
@@ -317,6 +319,7 @@ class TheProtocolSource(BaseSource):
     def fetch_text(self, url: str) -> str:
         """Fetch a theprotocol.it offer via cloudscraper; JSON-LD → BS4 → fallback."""
         from hunter.sources.html_fallback import fetch_html
+
         try:
             resp = _scraper.get(url, timeout=TIMEOUT)
             resp.raise_for_status()
@@ -382,6 +385,7 @@ class TheProtocolSource(BaseSource):
 
     def _fetch_listing_playwright(self, url: str) -> list[dict]:
         from hunter.playwright_helper import chromium_page
+
         try:
             with chromium_page(url) as page:
                 html = page.content()
@@ -420,10 +424,7 @@ class TheProtocolSource(BaseSource):
             logger.debug(f"[theprotocol] BeautifulSoup gave {len(jobs)} items from {url}")
             return jobs
 
-        logger.warning(
-            f"[theprotocol] 0 jobs from {url} "
-            f"(SPA/empty? HTML length={len(resp.text)})"
-        )
+        logger.warning(f"[theprotocol] 0 jobs from {url} (SPA/empty? HTML length={len(resp.text)})")
         return []
 
     # -- __NEXT_DATA__ parsing -------------------------------------------------
@@ -431,7 +432,8 @@ class TheProtocolSource(BaseSource):
     def _extract_next_data(self, html: str) -> list[dict]:
         m = re.search(
             r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
-            html, re.S,
+            html,
+            re.S,
         )
         if not m:
             return []
@@ -523,8 +525,15 @@ class TheProtocolSource(BaseSource):
         company = ""
         for line in lines:
             skip_prefixes = (
-                "quick apply", "start asap", "new", "remote", "zdalna",
-                "hybrydowa", "stacjonarna", "hybrid", "full office",
+                "quick apply",
+                "start asap",
+                "new",
+                "remote",
+                "zdalna",
+                "hybrydowa",
+                "stacjonarna",
+                "hybrid",
+                "full office",
             )
             if line.lower().startswith(skip_prefixes):
                 continue
@@ -547,7 +556,8 @@ class TheProtocolSource(BaseSource):
         city_match = re.search(
             r"(Wrocław|Warszawa|Kraków|Gdańsk|Poznań|Łódź|Katowice|"
             r"Szczecin|Lublin|Bydgoszcz|Białystok|Toruń|Rzeszów|Kielce|Olsztyn)",
-            link_text, re.I,
+            link_text,
+            re.I,
         )
         if city_match:
             location = city_match.group(1)
@@ -595,9 +605,7 @@ class TheProtocolSource(BaseSource):
 
     def _parse(self, raw: dict) -> Optional[Job]:
         # Support current API format, legacy __NEXT_DATA__ field names, and BS4 fallback
-        title = (
-            raw.get("title") or raw.get("jobTitle") or raw.get("name") or ""
-        ).strip()
+        title = (raw.get("title") or raw.get("jobTitle") or raw.get("name") or "").strip()
         if not title:
             return None
 

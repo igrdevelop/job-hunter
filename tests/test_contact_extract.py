@@ -5,6 +5,7 @@ from hunter.contact_extract import Contact, extract_contacts
 
 # ── Labeled names (PL + EN) ──────────────────────────────────────────────────
 
+
 def test_labeled_kontakt_polish() -> None:
     text = "Opis stanowiska...\nKontakt: Anna Kowalska\nAplikuj przez formularz."
     contacts = extract_contacts(text)
@@ -34,6 +35,7 @@ def test_label_followed_by_non_name_is_ignored() -> None:
 
 # ── Signature blocks ──────────────────────────────────────────────────────────
 
+
 def test_signature_name_over_recruiter_role_line() -> None:
     text = "Wyślij CV!\n\nAnna Wiśniewska\nSenior IT Recruiter\nAntal Sp. z o.o."
     contacts = extract_contacts(text)
@@ -52,6 +54,7 @@ def test_name_over_unrelated_line_is_not_a_signature() -> None:
 
 
 # ── Emails ────────────────────────────────────────────────────────────────────
+
 
 def test_bare_recruiting_email_becomes_contact() -> None:
     contacts = extract_contacts("Wyślij CV na rekrutacja@agencja.pl do 30.06.")
@@ -87,6 +90,7 @@ def test_unrelated_email_stays_separate_contact() -> None:
 
 # ── Phones ────────────────────────────────────────────────────────────────────
 
+
 def test_plus48_phone_attaches_to_first_contact() -> None:
     text = "Kontakt: Anna Kowalska, tel. +48 601 234 567"
     contacts = extract_contacts(text)
@@ -104,6 +108,7 @@ def test_bare_phone_without_contact_is_not_a_contact() -> None:
 
 
 # ── General ───────────────────────────────────────────────────────────────────
+
 
 def test_empty_text() -> None:
     assert extract_contacts("") == []

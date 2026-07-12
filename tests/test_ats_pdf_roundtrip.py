@@ -126,7 +126,9 @@ def test_nbsp_patch_replaces_internal_space_in_skills() -> None:
     # The original casing is preserved; only the space character changed.
     assert "Performance" + NBSP + "Optimization" in content["resume_en"]["skills"]["methodologies"]
     # Bullet also patched, case-insensitively.
-    assert "performance" + NBSP + "optimization" in content["resume_en"]["experience"][0]["bullets"][0]
+    assert (
+        "performance" + NBSP + "optimization" in content["resume_en"]["experience"][0]["bullets"][0]
+    )
 
 
 def test_nbsp_patch_skips_single_word_keywords() -> None:
@@ -170,8 +172,10 @@ def test_run_pdf_roundtrip_stores_content_payload(tmp_path: Path) -> None:
 
 # ── Final independent LLM verdict (PDF) ───────────────────────────────────────
 
+
 def _verdict_env(monkeypatch, *, enabled: bool = True, key: str = "test-key") -> None:
     from hunter import config
+
     monkeypatch.setattr(config, "ATS_VERDICT_ENABLED", enabled, raising=False)
     monkeypatch.setattr(config, "JUDGE_API_KEY", key)
     monkeypatch.setattr(config, "JUDGE_PROVIDER", "anthropic")
@@ -180,6 +184,7 @@ def _verdict_env(monkeypatch, *, enabled: bool = True, key: str = "test-key") ->
 
 def test_run_llm_verdict_disabled_returns_none(tmp_path: Path, monkeypatch) -> None:
     from hunter.ats_pdf_roundtrip import run_llm_verdict
+
     _verdict_env(monkeypatch, enabled=False)
     (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
     assert run_llm_verdict(tmp_path, job_text="need Angular") is None
@@ -187,6 +192,7 @@ def test_run_llm_verdict_disabled_returns_none(tmp_path: Path, monkeypatch) -> N
 
 def test_run_llm_verdict_no_key_returns_none(tmp_path: Path, monkeypatch) -> None:
     from hunter.ats_pdf_roundtrip import run_llm_verdict
+
     _verdict_env(monkeypatch, key="")
     (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
     assert run_llm_verdict(tmp_path, job_text="need Angular") is None
@@ -194,6 +200,7 @@ def test_run_llm_verdict_no_key_returns_none(tmp_path: Path, monkeypatch) -> Non
 
 def test_run_llm_verdict_no_pdf_returns_none(tmp_path: Path, monkeypatch) -> None:
     from hunter.ats_pdf_roundtrip import run_llm_verdict
+
     _verdict_env(monkeypatch)
     assert run_llm_verdict(tmp_path, job_text="need Angular") is None
 
@@ -201,6 +208,7 @@ def test_run_llm_verdict_no_pdf_returns_none(tmp_path: Path, monkeypatch) -> Non
 def test_run_llm_verdict_happy_path(tmp_path: Path, monkeypatch) -> None:
     """One LLM call over the extracted PDF text → dict with score + pdf_file."""
     from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
+
     _verdict_env(monkeypatch)
     (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
     llm_json = {
@@ -209,8 +217,10 @@ def test_run_llm_verdict_happy_path(tmp_path: Path, monkeypatch) -> None:
         "recommendations": ["Add GraphQL"],
         "gap_report": "Minor gaps.",
     }
-    with patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular TypeScript"), \
-         patch("llm_client.call_llm", return_value=llm_json) as llm_mock:
+    with (
+        patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular TypeScript"),
+        patch("llm_client.call_llm", return_value=llm_json) as llm_mock,
+    ):
         verdict = run_llm_verdict(tmp_path, job_text="need Angular + GraphQL")
     assert verdict is not None
     assert verdict["score"] == 91.0
@@ -227,15 +237,19 @@ def test_run_llm_verdict_happy_path(tmp_path: Path, monkeypatch) -> None:
 
 def test_run_llm_verdict_llm_failure_returns_none(tmp_path: Path, monkeypatch) -> None:
     from hunter.ats_pdf_roundtrip import run_llm_verdict
+
     _verdict_env(monkeypatch)
     (tmp_path / "Ihar_Petrasheuski_CV_EN.pdf").write_bytes(b"%PDF-1.4\n")
-    with patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular"), \
-         patch("llm_client.call_llm", side_effect=RuntimeError("boom")):
+    with (
+        patch("hunter.ats_pdf_roundtrip.extract_pdf_text", return_value="Angular"),
+        patch("llm_client.call_llm", side_effect=RuntimeError("boom")),
+    ):
         assert run_llm_verdict(tmp_path, job_text="need Angular") is None
 
 
 def test_llm_verdict_requires_inputs() -> None:
     from hunter import ats_checker
+
     assert ats_checker.llm_verdict("", "resume", api_key="k") is None
     assert ats_checker.llm_verdict("job", "", api_key="k") is None
     assert ats_checker.llm_verdict("job", "resume", api_key="") is None
@@ -243,8 +257,10 @@ def test_llm_verdict_requires_inputs() -> None:
 
 # ── format_verdict / format_gap_report: the owner sees WHY, not just the % ───
 
+
 def test_format_verdict_includes_gap_report_escaped() -> None:
     from hunter.ats_pdf_roundtrip import format_verdict
+
     v = {"score": 94.0, "gap_report": "Only negligible gaps: <minor> & style."}
     out = format_verdict(v)
     assert "94" in out
@@ -255,12 +271,14 @@ def test_format_verdict_includes_gap_report_escaped() -> None:
 
 def test_format_verdict_without_gap_is_single_line() -> None:
     from hunter.ats_pdf_roundtrip import format_verdict
+
     assert "\n" not in format_verdict({"score": 91.0})
     assert "\n" not in format_verdict({"score": 91.0, "gap_report": "   "})
 
 
 def test_format_gap_report_truncates_long_text() -> None:
     from hunter.ats_pdf_roundtrip import format_gap_report
+
     out = format_gap_report({"gap_report": "x" * 1000})
     assert len(out) < 400
     assert out.endswith("…</i>")
@@ -268,5 +286,6 @@ def test_format_gap_report_truncates_long_text() -> None:
 
 def test_format_gap_report_empty_for_missing_gap() -> None:
     from hunter.ats_pdf_roundtrip import format_gap_report
+
     assert format_gap_report({}) == ""
     assert format_gap_report({"gap_report": None}) == ""

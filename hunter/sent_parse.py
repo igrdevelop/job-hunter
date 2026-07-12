@@ -20,15 +20,34 @@ _DEFAULT_YEAR = date.today().year
 
 # Substrings (lowercased) that mark a row as "expired / no longer available".
 _EXPIRED_MARKERS = (
-    "expired", "выгасла", "wygas", "no longer accepting", "inactive",
-    "zakończył", "nie jest już dostęp", "nie została odnaleziona",
-    "didn't find", "couldn't find", "bad gateway", "not there",
+    "expired",
+    "выгасла",
+    "wygas",
+    "no longer accepting",
+    "inactive",
+    "zakończył",
+    "nie jest już dostęp",
+    "nie została odnaleziona",
+    "didn't find",
+    "couldn't find",
+    "bad gateway",
+    "not there",
 )
 
 # Three-letter English month names → number, for "Applied on May 16, 2026".
 _EN_MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 
 

@@ -26,7 +26,11 @@ from hunter.lang_guard import (
 
 
 def test_cyrillic_fragments_extracts_ru_tokens():
-    assert cyrillic_fragments("Ищем Angular-разработчика, удалёнка") == ["Ищем", "разработчика", "удалёнка"]
+    assert cyrillic_fragments("Ищем Angular-разработчика, удалёнка") == [
+        "Ищем",
+        "разработчика",
+        "удалёнка",
+    ]
 
 
 def test_cyrillic_fragments_empty_on_clean_english():
@@ -98,10 +102,20 @@ _CLEAN_EN_RESUME = {
         "languages": "English (Fluent), Polish (B2)",
     },
     "experience": [
-        {"company": c, "stack_line": "Stack: Angular, TypeScript",
-         "bullets": ["Built scalable applications for in-house projects"]}
-        for c in ("Alten Poland", "Fairmarkit", "Venture Labs", "SII",
-                  "Altoros", "SolbegSoft", "Staronka")
+        {
+            "company": c,
+            "stack_line": "Stack: Angular, TypeScript",
+            "bullets": ["Built scalable applications for in-house projects"],
+        }
+        for c in (
+            "Alten Poland",
+            "Fairmarkit",
+            "Venture Labs",
+            "SII",
+            "Altoros",
+            "SolbegSoft",
+            "Staronka",
+        )
     ],
 }
 
@@ -112,10 +126,20 @@ _CLEAN_PL_RESUME = {
         "languages": "Angielski (Płynny), Polski (B2)",
     },
     "experience": [
-        {"company": c, "stack_line": "Stack: Angular, TypeScript",
-         "bullets": ["Zbudowałem skalowalne aplikacje na projekty wewnętrzne"]}
-        for c in ("Alten Poland", "Fairmarkit", "Venture Labs", "SII",
-                  "Altoros", "SolbegSoft", "Staronka")
+        {
+            "company": c,
+            "stack_line": "Stack: Angular, TypeScript",
+            "bullets": ["Zbudowałem skalowalne aplikacje na projekty wewnętrzne"],
+        }
+        for c in (
+            "Alten Poland",
+            "Fairmarkit",
+            "Venture Labs",
+            "SII",
+            "Altoros",
+            "SolbegSoft",
+            "Staronka",
+        )
     ],
 }
 

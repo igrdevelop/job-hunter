@@ -134,9 +134,8 @@ class HimalayasSource(BaseSource):
                     f"[Himalayas] q={q!r} page={page} -> +{len(batch)} raw "
                     f"(unique total {len(jobs)})"
                 )
-                if total_count is not None:
-                    if page * PAGE_SIZE >= total_count:
-                        break
+                if total_count is not None and page * PAGE_SIZE >= total_count:
+                    break
                 if len(batch) < PAGE_SIZE:
                     break
                 page += 1
@@ -243,8 +242,10 @@ def _format_salary(raw: dict) -> Optional[str]:
         hi_i = 0
     if lo_i <= 0 and hi_i <= 0:
         return None
+
     def fmt(n: int) -> str:
         return f"{n:,}".replace(",", " ")
+
     if lo_i and hi_i:
         return f"{fmt(lo_i)}–{fmt(hi_i)} {cur}/yr"
     if lo_i:

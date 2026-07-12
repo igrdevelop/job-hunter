@@ -54,9 +54,7 @@ def test_override_throttles_one_host_harder():
     fetch_fn = _make_fetch(active, peak)
 
     async def run():
-        limiter = DomainLimiter(
-            domain_limit=5, domain_delay=0.0, overrides={"pracuj.pl": (1, 0.0)}
-        )
+        limiter = DomainLimiter(domain_limit=5, domain_delay=0.0, overrides={"pracuj.pl": (1, 0.0)})
         global_sem = asyncio.Semaphore(50)
         urls = [f"https://pracuj.pl/job/{i}" for i in range(6)] + [
             f"https://justjoin.it/job/{i}" for i in range(6)
@@ -77,9 +75,7 @@ def test_per_domain_delay_serializes_requests():
         limiter = DomainLimiter(domain_limit=1, domain_delay=delay)
         global_sem = asyncio.Semaphore(50)
         urls = [f"https://pracuj.pl/job/{i}" for i in range(3)]
-        await asyncio.gather(
-            *[limiter.fetch(u, global_sem, lambda u: "ok") for u in urls]
-        )
+        await asyncio.gather(*[limiter.fetch(u, global_sem, lambda u: "ok") for u in urls])
 
     start = time.monotonic()
     asyncio.run(run())
@@ -108,8 +104,6 @@ def test_fetch_returns_fetch_fn_result():
     async def run():
         limiter = DomainLimiter(domain_limit=2, domain_delay=0.0)
         global_sem = asyncio.Semaphore(2)
-        return await limiter.fetch(
-            "https://justjoin.it/job/1", global_sem, lambda u: f"R:{u}"
-        )
+        return await limiter.fetch("https://justjoin.it/job/1", global_sem, lambda u: f"R:{u}")
 
     assert asyncio.run(run()) == "R:https://justjoin.it/job/1"

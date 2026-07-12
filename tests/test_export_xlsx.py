@@ -15,8 +15,16 @@ from hunter.db import get_db
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _insert(tracker_db, *, company: str, title: str, ats: str = "85%",
-            url: str = "", date: str = "2026-05-27") -> str:
+
+def _insert(
+    tracker_db,
+    *,
+    company: str,
+    title: str,
+    ats: str = "85%",
+    url: str = "",
+    date: str = "2026-05-27",
+) -> str:
     row_id = uuid.uuid4().hex[:8]
     if not url:
         url = f"https://example.com/{row_id}"
@@ -40,6 +48,7 @@ def run(coro):
 # ---------------------------------------------------------------------------
 # export_tracker_xlsx
 # ---------------------------------------------------------------------------
+
 
 def test_export_creates_file(tmp_path, tracker_db):
     _insert(tracker_db, company="Acme", title="Angular Dev")
@@ -67,15 +76,23 @@ def test_export_header_row(tmp_path, tracker_db):
 
 
 def test_export_data_row_values(tmp_path, tracker_db):
-    row_id = _insert(tracker_db, company="NASK", title="Senior Frontend Developer",
-                     ats="91%", url="https://nask.pl/job/1", date="2026-05-21")
+    row_id = _insert(
+        tracker_db,
+        company="NASK",
+        title="Senior Frontend Developer",
+        ats="91%",
+        url="https://nask.pl/job/1",
+        date="2026-05-21",
+    )
     out = tmp_path / "export.xlsx"
     export_tracker_xlsx(out)
     wb = openpyxl.load_workbook(out, read_only=True, data_only=True)
     ws = wb.active
     # Row 1 = headers, Row 2 = first data row
-    row2 = {ws.cell(row=1, column=c).value: ws.cell(row=2, column=c).value
-            for c in range(1, len(TRACKER_HEADERS) + 1)}
+    row2 = {
+        ws.cell(row=1, column=c).value: ws.cell(row=2, column=c).value
+        for c in range(1, len(TRACKER_HEADERS) + 1)
+    }
     assert row2["Company"] == "NASK"
     assert row2["Job Title"] == "Senior Frontend Developer"
     assert row2["ATS %"] == "91%"
@@ -109,6 +126,7 @@ def test_export_creates_parent_dirs(tmp_path, tracker_db):
 # cmd_export — Telegram handler
 # ---------------------------------------------------------------------------
 
+
 def test_cmd_export_sends_document(tracker_db):
     _insert(tracker_db, company="Acme", title="Dev")
     _insert(tracker_db, company="Beta", title="Dev")
@@ -121,6 +139,7 @@ def test_cmd_export_sends_document(tracker_db):
 
     async def _run():
         from hunter.commands.export import cmd_export
+
         await cmd_export(update, context)
 
     run(_run())
@@ -146,6 +165,7 @@ def test_cmd_export_handles_error(tracker_db):
     async def _run():
         with patch("hunter.commands.export._do_export", side_effect=RuntimeError("disk full")):
             from hunter.commands.export import cmd_export
+
             await cmd_export(update, context)
 
     run(_run())

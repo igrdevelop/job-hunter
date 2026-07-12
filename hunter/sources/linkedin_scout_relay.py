@@ -111,7 +111,9 @@ def append_to_queue(record: dict) -> None:
         tmp_path = QUEUE_PATH.with_suffix(QUEUE_PATH.suffix + ".tmp")
         tmp_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp_path, QUEUE_PATH)
-    logger.info("[linkedin_scout_relay] appended 1 candidate via /scoutfound (queue now %d)", len(existing))
+    logger.info(
+        "[linkedin_scout_relay] appended 1 candidate via /scoutfound (queue now %d)", len(existing)
+    )
 
 
 class LinkedInScoutRelaySource(BaseSource):
@@ -149,7 +151,9 @@ class LinkedInScoutRelaySource(BaseSource):
     def _record_to_job(rec: dict) -> Job:
         author = rec.get("author", "") or "Unknown"
         body = rec.get("body", "") or ""
-        key = hashlib.md5(f"{author}{body[:200]}".encode("utf-8")).hexdigest()[:16]
+        key = hashlib.md5(
+            f"{author}{body[:200]}".encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:16]
         snippet = " ".join(body.strip().split())[:70]
         return Job(
             title=f"[LI post] {snippet}",

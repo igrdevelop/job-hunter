@@ -15,18 +15,31 @@ def _report(violations):
     return {"violations": violations}
 
 
-def _v(field="resume_en.summary", quote="Fortune 500 clients", reason="Fabricated client scale", severity="fabrication"):
+def _v(
+    field="resume_en.summary",
+    quote="Fortune 500 clients",
+    reason="Fabricated client scale",
+    severity="fabrication",
+):
     return {"field": field, "quote": quote, "reason": reason, "severity": severity}
 
 
 def test_normalize_field_collapses_array_indices():
-    assert judge_stats.normalize_field("resume_en.experience[2].bullets[1]") == "resume_en.experience[].bullets[]"
-    assert judge_stats.normalize_field("resume_en.experience[5].bullets[0]") == "resume_en.experience[].bullets[]"
+    assert (
+        judge_stats.normalize_field("resume_en.experience[2].bullets[1]")
+        == "resume_en.experience[].bullets[]"
+    )
+    assert (
+        judge_stats.normalize_field("resume_en.experience[5].bullets[0]")
+        == "resume_en.experience[].bullets[]"
+    )
     assert judge_stats.normalize_field("cover_letter_en") == "cover_letter_en"
 
 
 def test_normalize_reason_lowercases_and_collapses_whitespace():
-    assert judge_stats.normalize_reason("  Fabricated   Client Scale  ") == "fabricated client scale"
+    assert (
+        judge_stats.normalize_reason("  Fabricated   Client Scale  ") == "fabricated client scale"
+    )
 
 
 def test_find_judge_reports_missing_root(tmp_path):

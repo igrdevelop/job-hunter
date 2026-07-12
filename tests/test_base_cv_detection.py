@@ -9,8 +9,8 @@ from hunter.apply_api import _detect_stack_hint, _load_base_cv
 # _detect_stack_hint
 # ---------------------------------------------------------------------------
 
-class TestDetectStackHint:
 
+class TestDetectStackHint:
     # AI track
     def test_ai_llm_keyword(self):
         assert _detect_stack_hint("We need an LLM integration expert") == "ai"
@@ -29,7 +29,9 @@ class TestDetectStackHint:
 
     # Fullstack Angular + NestJS
     def test_nestjs_alone_routes_to_angular_nest(self):
-        assert _detect_stack_hint("NestJS backend with Angular frontend") == "fullstack_angular_nest"
+        assert (
+            _detect_stack_hint("NestJS backend with Angular frontend") == "fullstack_angular_nest"
+        )
 
     def test_nestjs_with_angular_routes_to_angular_nest(self):
         assert _detect_stack_hint("We use Angular and NestJS") == "fullstack_angular_nest"
@@ -49,7 +51,10 @@ class TestDetectStackHint:
 
     def test_nestjs_with_both_react_and_angular_routes_to_angular_nest(self):
         # Angular present → angular_nest wins
-        assert _detect_stack_hint("Angular or React frontend, NestJS backend") == "fullstack_angular_nest"
+        assert (
+            _detect_stack_hint("Angular or React frontend, NestJS backend")
+            == "fullstack_angular_nest"
+        )
 
     # Angular track
     def test_angular_only(self):
@@ -67,7 +72,9 @@ class TestDetectStackHint:
 
     # JavaScript fallback
     def test_javascript_fallback(self):
-        assert _detect_stack_hint("Frontend developer with JavaScript and TypeScript") == "javascript"
+        assert (
+            _detect_stack_hint("Frontend developer with JavaScript and TypeScript") == "javascript"
+        )
 
     def test_empty_text_fallback(self):
         assert _detect_stack_hint("") == "javascript"
@@ -87,8 +94,8 @@ class TestDetectStackHint:
 # _load_base_cv
 # ---------------------------------------------------------------------------
 
-class TestLoadBaseCv:
 
+class TestLoadBaseCv:
     def test_returns_empty_for_unknown_stack(self):
         assert _load_base_cv("python") == ""
 
@@ -126,14 +133,18 @@ class TestLoadBaseCv:
     def test_loads_fullstack_angular_nest(self, tmp_path):
         fake_content = "# Base CV Angular+Nest\n..."
         with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
-            (tmp_path / "base_cv_fullstack_angular_nest.md").write_text(fake_content, encoding="utf-8")
+            (tmp_path / "base_cv_fullstack_angular_nest.md").write_text(
+                fake_content, encoding="utf-8"
+            )
             result = _load_base_cv("fullstack_angular_nest")
         assert result == fake_content
 
     def test_loads_fullstack_react_next(self, tmp_path):
         fake_content = "# Base CV React+Next\n..."
         with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
-            (tmp_path / "base_cv_fullstack_react_next.md").write_text(fake_content, encoding="utf-8")
+            (tmp_path / "base_cv_fullstack_react_next.md").write_text(
+                fake_content, encoding="utf-8"
+            )
             result = _load_base_cv("fullstack_react_next")
         assert result == fake_content
 

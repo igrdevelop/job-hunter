@@ -67,10 +67,10 @@ _CONFIRMATION_SENDERS = [
     "greenhouse.io",
     "lever.co",
     # Confirmed real-world job board / tracking platforms
-    "aplikacje.pracuj.pl",      # Pracuj.pl status notifications
-    "thesmartjobs.com",         # SmartJobs Smart Tracker
-    "mailing.theprotocol.it",   # theprotocol.it confirmation
-    "recruitify.ai",            # Recruitify ATS
+    "aplikacje.pracuj.pl",  # Pracuj.pl status notifications
+    "thesmartjobs.com",  # SmartJobs Smart Tracker
+    "mailing.theprotocol.it",  # theprotocol.it confirmation
+    "recruitify.ai",  # Recruitify ATS
     # Speculative (may send per-apply confirmations)
     "linkedin.com",
     "pracuj.pl",
@@ -103,8 +103,8 @@ _CONFIRMATION_SUBJECTS = [
     "application received",
     # Confirmed real-world patterns
     "pracodawca udziela bezpośrednich informacji",  # Pracuj.pl status
-    "potwierdzenie zgłoszenia",                     # theprotocol.it
-    "smart tracker",                                # SmartJobs
+    "potwierdzenie zgłoszenia",  # theprotocol.it
+    "smart tracker",  # SmartJobs
     # Speculative fallbacks
     "application was sent",
     "application sent",
@@ -114,24 +114,26 @@ _CONFIRMATION_SUBJECTS = [
 
 # ── Data types ────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ConfirmationEmail:
-    company: str    # extracted company name; may be "" if parsing failed
-    title: str      # extracted job title; may be ""
-    date: str       # "YYYY-MM-DD" (UTC)
-    subject: str    # raw email subject
-    platform: str   # "erecruiter" | "smartrecruiters" | "direct" | "unknown"
+    company: str  # extracted company name; may be "" if parsing failed
+    title: str  # extracted job title; may be ""
+    date: str  # "YYYY-MM-DD" (UTC)
+    subject: str  # raw email subject
+    platform: str  # "erecruiter" | "smartrecruiters" | "direct" | "unknown"
 
 
 @dataclass
 class MatchResult:
     email: ConfirmationEmail
-    match_type: str                       # "exact" | "fuzzy" | "ambiguous" | "no_match"
+    match_type: str  # "exact" | "fuzzy" | "ambiguous" | "no_match"
     candidates: list[dict] = field(default_factory=list)
-    row_id: str | None = None             # set for exact/fuzzy matches (8-char hex ID)
+    row_id: str | None = None  # set for exact/fuzzy matches (8-char hex ID)
 
 
 # ── Per-platform parsers ──────────────────────────────────────────────────────
+
 
 def _parse_erecruiter(subject: str, body_text: str) -> tuple[str, str]:
     """eRecruiter ATS (mail@stage.erecruiter.pl).
@@ -141,7 +143,8 @@ def _parse_erecruiter(subject: str, body_text: str) -> tuple[str, str]:
     # Company before the dash, title after "stanowisko"
     m = re.search(
         r"^(.+?)\s*[-–]\s*Dzi[eę]kujemy za z[lł]o[zż]enie aplikacji na stanowisko\s+(.+)",
-        subject, re.IGNORECASE,
+        subject,
+        re.IGNORECASE,
     )
     if m:
         return m.group(1).strip(), m.group(2).strip()
@@ -149,8 +152,11 @@ def _parse_erecruiter(subject: str, body_text: str) -> tuple[str, str]:
     # Body fallback: "złożenie aplikacji na stanowisko {Title}"
     title = ""
     if body_text:
-        bm = re.search(r"z[lł]o[zż]enie aplikacji na stanowisko\s+(.+?)(?:\s+i\s+czas|\.|$)",
-                       body_text, re.IGNORECASE)
+        bm = re.search(
+            r"z[lł]o[zż]enie aplikacji na stanowisko\s+(.+?)(?:\s+i\s+czas|\.|$)",
+            body_text,
+            re.IGNORECASE,
+        )
         if bm:
             title = bm.group(1).strip()
     return "", title
@@ -165,8 +171,7 @@ def _parse_smartrecruiters(subject: str, body_text: str, from_header: str) -> tu
     """
     # Company from subject: "Thank you for applying to {Company}"
     company = ""
-    m = re.search(r"(?:thank you for applying|thanks for applying) to (.+)",
-                  subject, re.IGNORECASE)
+    m = re.search(r"(?:thank you for applying|thanks for applying) to (.+)", subject, re.IGNORECASE)
     if m:
         company = m.group(1).strip()
 
@@ -179,8 +184,11 @@ def _parse_smartrecruiters(subject: str, body_text: str, from_header: str) -> tu
     # Title from body: "application for the position of {Title}"
     title = ""
     if body_text:
-        bm = re.search(r"(?:application for the position of|position of)\s+(.+?)(?:[.\n]|$)",
-                       body_text, re.IGNORECASE)
+        bm = re.search(
+            r"(?:application for the position of|position of)\s+(.+?)(?:[.\n]|$)",
+            body_text,
+            re.IGNORECASE,
+        )
         if bm:
             title = bm.group(1).strip()
 
@@ -210,7 +218,8 @@ def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, 
         if not title:
             bm = re.search(
                 r"(?:position of|position:)\s+(.+?)(?:\s+(?:is|are|was|will|has|have)\b|[.,\n]|$)",
-                body_text, re.IGNORECASE,
+                body_text,
+                re.IGNORECASE,
             )
             if bm:
                 title = bm.group(1).strip()
@@ -221,8 +230,16 @@ def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, 
     if dm:
         raw = dm.group(1).strip()
         # Skip generic sender names
-        if raw.lower() not in ("notification", "noreply", "no-reply", "recruiter",
-                               "hr", "recruitment", "careers", "talent"):
+        if raw.lower() not in (
+            "notification",
+            "noreply",
+            "no-reply",
+            "recruiter",
+            "hr",
+            "recruitment",
+            "careers",
+            "talent",
+        ):
             company = raw
 
     # Company from domain as last resort: "recruitment@sigma-software.com" → "Sigma Software"
@@ -236,6 +253,7 @@ def _parse_direct(subject: str, body_text: str, from_header: str) -> tuple[str, 
 
 
 # ── Confirmed new-platform parsers ───────────────────────────────────────────
+
 
 def _parse_pracuj_status(subject: str, body_text: str) -> tuple[str, str]:
     """Pracuj.pl status notifications (noreply@aplikacje.pracuj.pl).
@@ -268,7 +286,8 @@ def _parse_smartjobs(subject: str, body_text: str) -> tuple[str, str]:
     if body_text:
         m = re.search(
             r"(?:aplikacj[ię] na stanowisko|stanowisko)\s+(.+?)\s+w firmie\s+(.+?)(?:\.|$|\n)",
-            body_text, re.IGNORECASE,
+            body_text,
+            re.IGNORECASE,
         )
         if m:
             return m.group(2).strip(), m.group(1).strip()
@@ -288,7 +307,8 @@ def _parse_theprotocol(subject: str, body_text: str) -> tuple[str, str]:
     """
     m = re.search(
         r"Potwierdzenie zgłoszenia\s*[-–]\s*(.+?):\s+(.+)",
-        subject, re.IGNORECASE,
+        subject,
+        re.IGNORECASE,
     )
     if m:
         return m.group(1).strip(), m.group(2).strip()
@@ -312,6 +332,7 @@ def _parse_recruitify(subject: str, body_text: str) -> tuple[str, str]:
 
 # ── Speculative job-board parsers (kept for future coverage) ──────────────────
 
+
 def _parse_linkedin(subject: str, body_text: str) -> tuple[str, str]:
     # "You applied to Senior Angular Developer at Acme Corp"
     m = re.search(r"you applied to (.+?) at (.+)", subject, re.IGNORECASE)
@@ -332,14 +353,17 @@ def _parse_pracuj(subject: str, body_text: str) -> tuple[str, str]:
     if body_text:
         title_m = re.search(r"stanowisko[:\s]+(.+)", body_text, re.IGNORECASE)
         company_m = re.search(r"(?:firma|pracodawca)[:\s]+(.+)", body_text, re.IGNORECASE)
-        return (company_m.group(1).strip() if company_m else ""), \
-               (title_m.group(1).strip() if title_m else "")
+        return (company_m.group(1).strip() if company_m else ""), (
+            title_m.group(1).strip() if title_m else ""
+        )
     return "", ""
 
 
 def _parse_nofluffjobs(subject: str, body_text: str) -> tuple[str, str]:
     # "Application sent to Acme Corp - Senior Angular Developer"
-    m = re.search(r"(?:application sent|aplikacja wysłana) to (.+?) [-–] (.+)", subject, re.IGNORECASE)
+    m = re.search(
+        r"(?:application sent|aplikacja wysłana) to (.+?) [-–] (.+)", subject, re.IGNORECASE
+    )
     if m:
         return m.group(1).strip(), m.group(2).strip()
     m = re.search(r"(?:application sent|aplikacja wysłana) to (.+)", subject, re.IGNORECASE)
@@ -357,6 +381,7 @@ def _parse_justjoin(subject: str, body_text: str) -> tuple[str, str]:
 
 
 # ── Gmail helpers ─────────────────────────────────────────────────────────────
+
 
 def _extract_body_text(payload: dict) -> str:
     """Recursively extract the first text/plain part from a MIME tree."""
@@ -443,6 +468,7 @@ def _parse_message(msg: dict) -> ConfirmationEmail | None:
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
+
 def fetch_confirmation_emails(service, lookback_days: int = 7) -> list[ConfirmationEmail]:
     """Query Gmail for confirmation emails and return parsed results.
 
@@ -450,20 +476,13 @@ def fetch_confirmation_emails(service, lookback_days: int = 7) -> list[Confirmat
     ATS-platform emails and direct company confirmation emails.
     May return items where company/title are empty (parsing failed).
     """
-    after_ts = int(
-        (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
-    )
+    after_ts = int((datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp())
     sender_filter = " OR ".join(f"from:{d}" for d in _CONFIRMATION_SENDERS)
     subject_filter = " OR ".join(f'subject:"{kw}"' for kw in _SUBJECT_QUERY_KEYWORDS)
     query = f"({sender_filter} OR {subject_filter}) after:{after_ts}"
 
     try:
-        results = (
-            service.users()
-            .messages()
-            .list(userId="me", q=query, maxResults=200)
-            .execute()
-        )
+        results = service.users().messages().list(userId="me", q=query, maxResults=200).execute()
     except Exception as exc:
         logger.error(f"[email_response] Gmail list error: {exc}")
         return []
@@ -475,10 +494,7 @@ def fetch_confirmation_emails(service, lookback_days: int = 7) -> list[Confirmat
     for stub in stubs:
         try:
             msg = (
-                service.users()
-                .messages()
-                .get(userId="me", id=stub["id"], format="full")
-                .execute()
+                service.users().messages().get(userId="me", id=stub["id"], format="full").execute()
             )
         except Exception as exc:
             logger.debug(f"[email_response] fetch error for {stub['id']}: {exc}")
@@ -492,6 +508,7 @@ def fetch_confirmation_emails(service, lookback_days: int = 7) -> list[Confirmat
 
 
 # ── Matching ──────────────────────────────────────────────────────────────────
+
 
 def match_email(email: ConfirmationEmail) -> MatchResult:
     """Match one ConfirmationEmail against tracker rows.
@@ -516,8 +533,10 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
     if not email.title:
         if len(candidates) == 1:
             return MatchResult(
-                email=email, match_type="fuzzy",
-                candidates=candidates, row_id=candidates[0]["id"],
+                email=email,
+                match_type="fuzzy",
+                candidates=candidates,
+                row_id=candidates[0]["id"],
             )
         return MatchResult(email=email, match_type="ambiguous", candidates=candidates)
 
@@ -527,12 +546,15 @@ def match_email(email: ConfirmationEmail) -> MatchResult:
 
     match_type = "exact" if top["title_score"] == 1.0 else "fuzzy"
     return MatchResult(
-        email=email, match_type=match_type,
-        candidates=candidates, row_id=top["id"],
+        email=email,
+        match_type=match_type,
+        candidates=candidates,
+        row_id=top["id"],
     )
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
+
 
 def run_confirmation_check(lookback_days: int | None = None) -> list[MatchResult]:
     """Fetch confirmation emails, match against tracker, write CONFIRMED for clear matches.

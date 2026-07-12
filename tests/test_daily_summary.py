@@ -17,12 +17,14 @@ from hunter.db import get_db
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def run(coro):
     return asyncio.run(coro)
 
 
-def _insert(tracker_db, *, date: str, company: str, title: str,
-            ats: str = "85%", url: str = "") -> None:
+def _insert(
+    tracker_db, *, date: str, company: str, title: str, ats: str = "85%", url: str = ""
+) -> None:
     if not url:
         url = f"https://example.com/{uuid.uuid4().hex[:6]}"
     norm = tracker.normalize_url(url)
@@ -40,6 +42,7 @@ def _insert(tracker_db, *, date: str, company: str, title: str,
 # ---------------------------------------------------------------------------
 # get_applications_on_date
 # ---------------------------------------------------------------------------
+
 
 def test_get_applications_returns_matching_rows(tracker_db):
     _insert(tracker_db, date="2026-05-21", company="NASK", title="Frontend Dev")
@@ -62,9 +65,14 @@ def test_get_applications_empty_when_no_tracker(tracker_db):
 
 
 def test_get_applications_result_fields(tracker_db):
-    _insert(tracker_db, date="2026-05-21", company="NASK",
-            title="Senior Frontend Developer", ats="91%",
-            url="https://nask.pl/job/1")
+    _insert(
+        tracker_db,
+        date="2026-05-21",
+        company="NASK",
+        title="Senior Frontend Developer",
+        ats="91%",
+        url="https://nask.pl/job/1",
+    )
     result = tracker.get_applications_on_date("2026-05-21")
     assert len(result) == 1
     r = result[0]
@@ -93,6 +101,7 @@ def test_get_applications_skips_rows_without_company(tracker_db):
 # ---------------------------------------------------------------------------
 # _format_daily_summary
 # ---------------------------------------------------------------------------
+
 
 def test_format_daily_summary_empty():
     msg = _format_daily_summary([], "2026-05-21")
@@ -133,6 +142,7 @@ def test_format_daily_summary_skips_dash_ats():
 # _scheduled_daily_summary — notification logic
 # ---------------------------------------------------------------------------
 
+
 def test_scheduled_daily_summary_sends_when_apps_found():
     context = MagicMock()
     context.bot = AsyncMock()
@@ -144,6 +154,7 @@ def test_scheduled_daily_summary_sends_when_apps_found():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=apps)):
             from hunter.telegram_bot import _scheduled_daily_summary
+
             await _scheduled_daily_summary(context)
 
     run(_run())
@@ -159,6 +170,7 @@ def test_scheduled_daily_summary_silent_when_no_apps():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=[])):
             from hunter.telegram_bot import _scheduled_daily_summary
+
             await _scheduled_daily_summary(context)
 
     run(_run())
@@ -172,6 +184,7 @@ def test_scheduled_daily_summary_silent_on_error():
     async def _run():
         with patch("asyncio.to_thread", side_effect=Exception("disk error")):
             from hunter.telegram_bot import _scheduled_daily_summary
+
             await _scheduled_daily_summary(context)
 
     run(_run())
@@ -181,6 +194,7 @@ def test_scheduled_daily_summary_silent_on_error():
 # ---------------------------------------------------------------------------
 # cmd_check_responses — days parameter
 # ---------------------------------------------------------------------------
+
 
 def test_cmd_check_responses_default_days():
     update = MagicMock()
@@ -192,6 +206,7 @@ def test_cmd_check_responses_default_days():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=[])):
             from hunter.telegram_bot import cmd_check_responses
+
             await cmd_check_responses(update, context)
 
     run(_run())
@@ -209,6 +224,7 @@ def test_cmd_check_responses_custom_days():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock(return_value=[])):
             from hunter.telegram_bot import cmd_check_responses
+
             await cmd_check_responses(update, context)
 
     run(_run())
@@ -225,6 +241,7 @@ def test_cmd_check_responses_invalid_days_arg():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock()) as mock_thread:
             from hunter.telegram_bot import cmd_check_responses
+
             await cmd_check_responses(update, context)
             mock_thread.assert_not_called()
 
@@ -242,6 +259,7 @@ def test_cmd_check_responses_zero_days_invalid():
     async def _run():
         with patch("asyncio.to_thread", new=AsyncMock()) as mock_thread:
             from hunter.telegram_bot import cmd_check_responses
+
             await cmd_check_responses(update, context)
             mock_thread.assert_not_called()
 

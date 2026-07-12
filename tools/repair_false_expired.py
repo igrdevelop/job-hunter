@@ -117,9 +117,11 @@ def main() -> int:
     }
 
     rows = _scope_rows(args.since, id_set)
-    print(f"Scope: {len(rows)} EXPIRED row(s)"
-          + (f" since {args.since}" if args.since else "")
-          + (f", ids={len(id_set)}" if id_set else ""))
+    print(
+        f"Scope: {len(rows)} EXPIRED row(s)"
+        + (f" since {args.since}" if args.since else "")
+        + (f", ids={len(id_set)}" if id_set else "")
+    )
 
     cleared = kept = undetermined = 0
     for r in rows:
@@ -142,11 +144,15 @@ def main() -> int:
         print(f"  [+]  {verb} {rid}  {comp} - {title[:50]}  ({reason}; {loc})")
 
     mode = "APPLIED" if args.apply else "DRY-RUN (no changes)"
-    print(f"\n{mode}: live->cleared={cleared}, still-expired->kept={kept}, "
-          f"undetermined->kept={undetermined}")
+    print(
+        f"\n{mode}: live->cleared={cleared}, still-expired->kept={kept}, "
+        f"undetermined->kept={undetermined}"
+    )
     if args.apply and cleared:
-        print("Note: restart the container or wait for the next pull so the "
-              "in-memory cache (/unsent, /status) reflects the change.")
+        print(
+            "Note: restart the container or wait for the next pull so the "
+            "in-memory cache (/unsent, /status) reflects the change."
+        )
     return 0
 
 

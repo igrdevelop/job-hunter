@@ -112,7 +112,9 @@ def format_top(buckets: dict[tuple[str, str, str], ClassStats], top: int) -> str
     return "\n".join(lines) if lines else "(no violations found)"
 
 
-def suggest_rule_candidates(buckets: dict[tuple[str, str, str], ClassStats], min_count: int = 2) -> str:
+def suggest_rule_candidates(
+    buckets: dict[tuple[str, str, str], ClassStats], min_count: int = 2
+) -> str:
     """One draft RED LINE line per frequent class — owner decides what (if
     anything) to actually add to generation_rules.md."""
     frequent = sorted(
@@ -126,7 +128,7 @@ def suggest_rule_candidates(buckets: dict[tuple[str, str, str], ClassStats], min
         severity, field_class, reason_class = s.key
         lines.append(
             f"- [{severity}, seen {s.count}x in {field_class}] RED LINE candidate: "
-            f"never write claims matching \"{reason_class}\" — see e.g. {s.examples[:1]!r}"
+            f'never write claims matching "{reason_class}" — see e.g. {s.examples[:1]!r}'
         )
     return "\n".join(lines)
 

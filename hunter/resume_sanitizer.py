@@ -63,16 +63,37 @@ def _coerce_str(val: Any) -> str:
         return ", ".join(str(v) for v in val if v)
     return str(val) if val is not None else ""
 
+
 # ---------------------------------------------------------------------------
 # Month name → number map (handles EN and PL month names)
 # ---------------------------------------------------------------------------
 _MONTH_MAP: dict[str, int] = {
     # English
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
     # Polish (March "mar" already covered by the English row above)
-    "sty": 1, "lut": 2, "kwi": 4, "maj": 5, "cze": 6,
-    "lip": 7, "sie": 8, "wrz": 9, "paź": 10, "paz": 10, "lis": 11, "gru": 12,
+    "sty": 1,
+    "lut": 2,
+    "kwi": 4,
+    "maj": 5,
+    "cze": 6,
+    "lip": 7,
+    "sie": 8,
+    "wrz": 9,
+    "paź": 10,
+    "paz": 10,
+    "lis": 11,
+    "gru": 12,
 }
 
 
@@ -133,6 +154,7 @@ def _overlap(a: tuple[int, int], b: tuple[int, int]) -> int:
 # Profile parsing (cached — reads file once per process)
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=1)
 def _load_profile_roles() -> list[dict[str, Any]]:
     """Parse ## Work Experience from candidate_profile.md → list of role dicts."""
@@ -161,13 +183,15 @@ def _load_profile_roles() -> list[dict[str, Any]]:
         period = m.group("period").strip()
         subtitle = m.group("subtitle").strip()
         parsed = _parse_period(period)
-        roles.append({
-            "company": company,
-            "period": period,
-            "subtitle": subtitle,
-            "title": m.group("title").strip(),
-            "parsed": parsed,  # (start_yyyymm, end_yyyymm) or None
-        })
+        roles.append(
+            {
+                "company": company,
+                "period": period,
+                "subtitle": subtitle,
+                "title": m.group("title").strip(),
+                "parsed": parsed,  # (start_yyyymm, end_yyyymm) or None
+            }
+        )
 
     return roles
 
@@ -215,7 +239,11 @@ def _is_real_company(company: str) -> bool:
         real_base = _base_name(real)
         if c == real or c in real or real in c:
             return True
-        if c_base and real_base and (c_base == real_base or c_base in real_base or real_base in c_base):
+        if (
+            c_base
+            and real_base
+            and (c_base == real_base or c_base in real_base or real_base in c_base)
+        ):
             return True
     return False
 
@@ -250,7 +278,7 @@ def _best_match_role(fake_period: str, used_indices: set[int]) -> dict[str, Any]
             return {"idx": best_idx, **roles[best_idx]}
 
     # Positional fallback: first unused role in profile order
-    for i, role in enumerate(roles):
+    for i, _role in enumerate(roles):
         if i not in used_indices:
             return {"idx": i, **roles[i]}
 
@@ -260,6 +288,7 @@ def _best_match_role(fake_period: str, used_indices: set[int]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str, Any], list[str]]:
     """Sanitize one resume dict (resume_en or resume_pl).
@@ -291,16 +320,17 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
     edu_val = (resume.get("education") or "").strip()
     if edu_val.startswith("{") and ("degree" in edu_val or "school" in edu_val):
         resume["education"] = edu_en
-        fixes.append(f"[{lang}] education was dict-as-string (hallucinated) → replaced with profile education")
+        fixes.append(
+            f"[{lang}] education was dict-as-string (hallucinated) → replaced with profile education"
+        )
     elif not edu_val:
         if edu_en:
             resume["education"] = edu_en
             fixes.append(f"[{lang}] education filled from profile")
 
-    if not (resume.get("courses") or "").strip():
-        if courses_en:
-            resume["courses"] = courses_en
-            fixes.append(f"[{lang}] courses filled from profile")
+    if not (resume.get("courses") or "").strip() and courses_en:
+        resume["courses"] = courses_en
+        fixes.append(f"[{lang}] courses filled from profile")
 
     # -- 1b. Collapse duplicate Angular version entries in skills.frontend --
     # The LLM/ATS rewrite sometimes lists two version forms ("Angular (2-22)" +
@@ -309,6 +339,7 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
     skills = resume.get("skills")
     if isinstance(skills, dict) and isinstance(skills.get("frontend"), str):
         from hunter.content_qa import CANONICAL_ANGULAR_SKILL, is_angular_version_entry
+
         items = [i.strip() for i in skills["frontend"].split(",") if i.strip()]
         version_idx = [n for n, it in enumerate(items) if is_angular_version_entry(it)]
         if len(version_idx) > 1:
@@ -335,7 +366,10 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         if _is_real_company(company):
             roles = _load_profile_roles()
             for i, role in enumerate(roles):
-                if role["company"].lower() in company.lower() or company.lower() in role["company"].lower():
+                if (
+                    role["company"].lower() in company.lower()
+                    or company.lower() in role["company"].lower()
+                ):
                     used_indices.add(i)
                     break
 
@@ -347,13 +381,17 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
             # Title enforcement: restore profile title if LLM renamed it
             if lang == "EN":
                 for role in roles:
-                    if (role["company"].lower() in company.lower()
-                            or company.lower() in role["company"].lower()):
+                    if (
+                        role["company"].lower() in company.lower()
+                        or company.lower() in role["company"].lower()
+                    ):
                         profile_title = role["title"]
                         entry_title = (entry.get("title") or "").strip()
+
                         # Normalise for comparison: lowercase, strip (Angular)/(React) suffix
                         def _norm(t: str) -> str:
                             return re.sub(r"\s*\([^)]+\)", "", t).lower().strip()
+
                         if _norm(entry_title) != _norm(profile_title):
                             fixes.append(
                                 f"[EN] title '{entry_title}' for '{company}' → '{profile_title}' (verbatim from profile)"
@@ -366,7 +404,9 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
         match = _best_match_role(fake_period, used_indices)
 
         if match is None:
-            fixes.append(f"[{lang}] WARNING: could not find match for fake company '{company}' — left as-is")
+            fixes.append(
+                f"[{lang}] WARNING: could not find match for fake company '{company}' — left as-is"
+            )
             continue
 
         used_indices.add(match["idx"])
@@ -404,13 +444,13 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
                 )
 
         for entry in experience:
-            for bullet in (entry.get("bullets") or []):
+            for bullet in entry.get("bullets") or []:
                 cleaned_bullet = _IT_TERMS_STRIP_RE.sub("", bullet)
                 if _PL_IN_EN_RESUME_RE.search(cleaned_bullet):
                     m = _PL_IN_EN_RESUME_RE.search(cleaned_bullet)
                     fixes.append(
                         f"[EN] WARNING: Polish in bullet "
-                        f"({entry.get('company','')}): '{m.group()[:40]}'"
+                        f"({entry.get('company', '')}): '{m.group()[:40]}'"
                     )
                     break  # one warning per role is enough
 

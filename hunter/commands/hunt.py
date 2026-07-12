@@ -51,8 +51,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if unknown:
         avail = ", ".join(sorted(valid_names))
         await update.message.reply_text(
-            f"❌ Unknown source(s): <b>{', '.join(unknown)}</b>\n\n"
-            f"Available: <code>{avail}</code>",
+            f"❌ Unknown source(s): <b>{', '.join(unknown)}</b>\n\nAvailable: <code>{avail}</code>",
             parse_mode=ParseMode.HTML,
         )
         return

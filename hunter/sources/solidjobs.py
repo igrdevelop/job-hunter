@@ -85,7 +85,7 @@ def _format_job_posting_ld(jp: dict) -> str:
     elif isinstance(loc, list):
         cities: list[str] = []
         for l in loc:
-            addr = (l.get("address") or {})
+            addr = l.get("address") or {}
             c = addr.get("addressLocality", "")
             if c:
                 cities.append(c)
@@ -128,7 +128,8 @@ def _format_job_posting_ld(jp: dict) -> str:
 def _try_json_ld(html: str) -> str:
     matches = re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.S,
+        html,
+        re.S,
     )
     for raw in matches:
         try:
@@ -163,9 +164,7 @@ def _try_bs4(html: str) -> str:
     if og_desc and og_desc.get("content"):
         parts.append(f"Summary: {og_desc['content']}")
 
-    for tag in soup.find_all(
-        ["script", "style", "nav", "footer", "header", "noscript", "svg"]
-    ):
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
         tag.decompose()
 
     main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"})
@@ -255,7 +254,7 @@ class SolidJobsSource(BaseSource):
     @staticmethod
     def _parse_rss_xml(xml_text: str) -> list[dict]:
         try:
-            root = ElementTree.fromstring(xml_text)
+            root = ElementTree.fromstring(xml_text)  # noqa: S314 — board's own RSS; no defusedxml dep
         except ElementTree.ParseError as e:
             logger.error(f"[solidjobs] RSS parse error: {e}")
             return []
@@ -320,16 +319,18 @@ class SolidJobsSource(BaseSource):
             elif work_mode == "hybrid" and location:
                 location = f"{location} (Hybrid)"
 
-            results.append({
-                "title": title,
-                "company": company,
-                "location": location or "Unknown",
-                "salary": salary,
-                "work_mode": work_mode,
-                "categories": categories,
-                "url": link,
-                "_text": f"{title} {company} {location} {' '.join(categories)}",
-            })
+            results.append(
+                {
+                    "title": title,
+                    "company": company,
+                    "location": location or "Unknown",
+                    "salary": salary,
+                    "work_mode": work_mode,
+                    "categories": categories,
+                    "url": link,
+                    "_text": f"{title} {company} {location} {' '.join(categories)}",
+                }
+            )
 
         return results
 

@@ -24,8 +24,13 @@ EN_POSTING = (
 ) * 5
 
 
-def _make_folder(tmp_path: Path, *, job_text: str = EN_POSTING,
-                 primary_lang: str = "EN", with_content: bool = True) -> Path:
+def _make_folder(
+    tmp_path: Path,
+    *,
+    job_text: str = EN_POSTING,
+    primary_lang: str = "EN",
+    with_content: bool = True,
+) -> Path:
     folder = tmp_path / "2026-07-10" / "Acme"
     folder.mkdir(parents=True)
     (folder / "job_posting.txt").write_text(job_text, encoding="utf-8")
@@ -48,24 +53,29 @@ def _make_folder(tmp_path: Path, *, job_text: str = EN_POSTING,
 
 def _llm_ok(**messages):
     """Patch the drafting LLM call with a canned response."""
-    resp = {"message": messages.get("message", "Short hook message."),
-            "message_en": messages.get("message_en")}
+    resp = {
+        "message": messages.get("message", "Short hook message."),
+        "message_en": messages.get("message_en"),
+    }
     return patch("llm_client.call_llm", return_value=resp)
 
 
 # ── Happy path ────────────────────────────────────────────────────────────────
 
+
 def test_writes_outreach_md_with_contact_and_message(tmp_path) -> None:
     folder = _make_folder(tmp_path, job_text=PL_POSTING, primary_lang="PL")
-    with _llm_ok(message="Cześć, aplikowałem na rolę Angular.",
-                 message_en="Hi, I applied for the Angular role."):
+    with _llm_ok(
+        message="Cześć, aplikowałem na rolę Angular.",
+        message_en="Hi, I applied for the Angular role.",
+    ):
         out = run_outreach(folder, "https://nofluffjobs.com/job/x")
     assert out == folder / OUTREACH_FILENAME
     text = out.read_text(encoding="utf-8")
     assert "Anna Kowalska" in text
     assert "anna.kowalska@antal.pl" in text
     assert "Cześć, aplikowałem" in text
-    assert "Hi, I applied" in text            # EN version for a PL posting
+    assert "Hi, I applied" in text  # EN version for a PL posting
     assert "https://nofluffjobs.com/job/x" in text
     assert "never sends" in text
 
@@ -114,6 +124,7 @@ def test_no_contact_still_writes_message_with_hint(tmp_path) -> None:
 
 # ── Degradation ───────────────────────────────────────────────────────────────
 
+
 def test_llm_failure_still_writes_contact_block(tmp_path) -> None:
     folder = _make_folder(tmp_path, job_text=PL_POSTING, primary_lang="PL")
     with patch("llm_client.call_llm", side_effect=RuntimeError("api down")):
@@ -153,6 +164,7 @@ def test_disabled_via_config(tmp_path, monkeypatch) -> None:
 
 # ── Message hygiene ───────────────────────────────────────────────────────────
 
+
 def test_clean_trims_overlong_message_at_word_boundary() -> None:
     msg = _clean("word " * 100)
     assert len(msg) <= MESSAGE_CHAR_LIMIT
@@ -167,9 +179,11 @@ def test_clean_collapses_whitespace_and_non_string() -> None:
 
 # ── Wiring (source inspection, repo convention) ───────────────────────────────
 
+
 def _source_of(module: str) -> str:
     import importlib
     import inspect
+
     return inspect.getsource(importlib.import_module(module))
 
 

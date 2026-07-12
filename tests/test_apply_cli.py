@@ -18,13 +18,16 @@ from hunter.apply_shared import ApplyError
 
 # ── Import sanity ─────────────────────────────────────────────────────────────
 
+
 def test_main_cli_is_importable() -> None:
     from hunter.apply_cli import main_cli
+
     assert callable(main_cli)
 
 
 def test_apply_cli_exports_expected_symbols() -> None:
     import hunter.apply_cli as m
+
     assert callable(m._get_existing_folders)
     assert callable(m._find_new_folder)
     assert callable(m._is_cli_available)
@@ -32,6 +35,7 @@ def test_apply_cli_exports_expected_symbols() -> None:
 
 
 # ── _get_existing_folders ─────────────────────────────────────────────────────
+
 
 def test_get_existing_folders_empty_dir(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_cli.APPLICATIONS_DIR", tmp_path)
@@ -79,6 +83,7 @@ def test_get_existing_folders_mixed(tmp_path, monkeypatch) -> None:
 
 # ── _find_new_folder ──────────────────────────────────────────────────────────
 
+
 def test_find_new_folder_detects_new_dir(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_cli.APPLICATIONS_DIR", tmp_path)
     before: set[str] = set()
@@ -99,6 +104,7 @@ def test_find_new_folder_returns_none_on_timeout(tmp_path, monkeypatch) -> None:
 def test_find_new_folder_ignores_known_folders(tmp_path, monkeypatch) -> None:
     import os
     import time as _time
+
     monkeypatch.setattr("hunter.apply_cli.APPLICATIONS_DIR", tmp_path)
     old_folder = tmp_path / "OldCompany"
     old_folder.mkdir()
@@ -113,9 +119,11 @@ def test_find_new_folder_ignores_known_folders(tmp_path, monkeypatch) -> None:
 
 # ── _is_cli_available ─────────────────────────────────────────────────────────
 
+
 def test_is_cli_available_when_claude_not_found(monkeypatch) -> None:
     def _raise(*a, **kw):
         raise FileNotFoundError("claude not found")
+
     monkeypatch.setattr(subprocess, "run", _raise)
     assert _is_cli_available() is False
 
@@ -150,11 +158,13 @@ def test_is_cli_available_when_ok(monkeypatch) -> None:
 def test_is_cli_available_on_timeout(monkeypatch) -> None:
     def _raise(*a, **kw):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=15)
+
     monkeypatch.setattr(subprocess, "run", _raise)
     assert _is_cli_available() is False
 
 
 # ── main_cli — dedup short-circuit ────────────────────────────────────────────
+
 
 def test_main_cli_skips_when_already_processed(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
@@ -164,7 +174,10 @@ def test_main_cli_skips_when_already_processed(monkeypatch, capsys) -> None:
     with patch("hunter.apply_cli.notify") as mock_notify:
         main_cli("https://example.com/job/1")
     mock_notify.assert_called_once()
-    assert "tracker" in mock_notify.call_args[0][0].lower() or "skipped" in mock_notify.call_args[0][0].lower()
+    assert (
+        "tracker" in mock_notify.call_args[0][0].lower()
+        or "skipped" in mock_notify.call_args[0][0].lower()
+    )
 
 
 def test_main_cli_skip_dedup_bypasses_tracker(monkeypatch) -> None:
@@ -190,6 +203,7 @@ def test_main_cli_skip_dedup_bypasses_tracker(monkeypatch) -> None:
 
 # ── main_cli — CLI failure raises ApplyError ──────────────────────────────────
 
+
 def test_main_cli_raises_apply_error_on_nonzero_exit(monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_cli._already_processed", lambda *a, **kw: False)
     monkeypatch.setattr("hunter.apply_cli._get_existing_folders", lambda: set())
@@ -210,7 +224,9 @@ def test_main_cli_raises_apply_error_on_nonzero_exit(monkeypatch) -> None:
 
 # ── apply_agent re-exports main_cli and _is_cli_available ────────────────────
 
+
 def test_apply_agent_reexports_cli_functions() -> None:
     import apply_agent
+
     assert callable(apply_agent.main_cli)
     assert callable(apply_agent._is_cli_available)
