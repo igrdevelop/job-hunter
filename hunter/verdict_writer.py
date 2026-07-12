@@ -86,9 +86,8 @@ def mirror_verdict_cell_sync(
         # No sheets_row yet (A–K append hasn't happened) or no verdict
         # (feature disabled / no judge key / PDF unreadable). Nothing to write.
         return True
-    if not _header_written.get(sheet_id):
-        if write_verdict_header_sync(service, sheet_id, tab):
-            _header_written[sheet_id] = True
+    if not _header_written.get(sheet_id) and write_verdict_header_sync(service, sheet_id, tab):
+        _header_written[sheet_id] = True
     cell = f"'{tab}'!{VERDICT_COL_LETTER}{sheet_row}"
     try:
         service.spreadsheets().values().update(

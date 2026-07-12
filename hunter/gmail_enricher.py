@@ -200,7 +200,7 @@ def enrich_jobs(jobs: list[Job]) -> list[Job]:
 
     enriched = asyncio.run(_enrich_jobs_async(jobs))
 
-    ok = sum(1 for orig, res in zip(jobs, enriched) if res is not orig)
+    ok = sum(1 for orig, res in zip(jobs, enriched, strict=False) if res is not orig)
     logger.info(
         "[gmail_enricher] done: %d/%d enriched, %d kept as stub",
         ok,

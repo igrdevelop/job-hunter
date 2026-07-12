@@ -46,10 +46,7 @@ def main() -> None:
         sys.exit(1)
     content = json.loads(content_path.read_text(encoding="utf-8"))
 
-    if len(sys.argv) >= 3:
-        job_path = Path(sys.argv[2])
-    else:
-        job_path = content_path.parent / "job_posting.txt"
+    job_path = Path(sys.argv[2]) if len(sys.argv) >= 3 else content_path.parent / "job_posting.txt"
     job_text = job_path.read_text(encoding="utf-8") if job_path.exists() else ""
     print(f"[preview-judge] content: {content_path}")
     print(

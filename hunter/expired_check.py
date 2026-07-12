@@ -102,10 +102,7 @@ def is_job_expired(text: str) -> bool:
     """Return True if the extracted job text contains expiry indicators."""
     if not text:
         return False
-    for pattern in EXPIRED_PATTERNS:
-        if pattern.search(text):
-            return True
-    return False
+    return any(pattern.search(text) for pattern in EXPIRED_PATTERNS)
 
 
 def is_expired_by_html(html: str, domain: str) -> bool:

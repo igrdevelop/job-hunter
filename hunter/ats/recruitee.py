@@ -74,9 +74,13 @@ def parse_recruitee_job(raw: dict, slug: str, company_name: str) -> Optional[Job
     loc = (raw.get("location") or "").strip()
     if not loc:
         loc = (raw.get("country_code") or "").strip() or "Remote"
-    if raw.get("remote_recruitment") is True and loc and "remote" not in loc.lower():
-        if "(Remote)" not in loc:
-            loc = f"{loc} (Remote)"
+    if (
+        raw.get("remote_recruitment") is True
+        and loc
+        and "remote" not in loc.lower()
+        and "(Remote)" not in loc
+    ):
+        loc = f"{loc} (Remote)"
 
     return Job(
         title=title,

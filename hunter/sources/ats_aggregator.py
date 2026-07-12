@@ -61,9 +61,7 @@ class AtsAggregatorSource(BaseSource):
             return True
         if host.endswith(".recruitee.com"):
             return True
-        if "jobs.ashbyhq.com" in host:
-            return True
-        return False
+        return "jobs.ashbyhq.com" in host
 
     def fetch_text(self, url: str) -> str:
         """Workable goes through its public JSON API; others use html_fallback.

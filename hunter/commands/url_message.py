@@ -112,16 +112,15 @@ def _write_paste_temp_file(text: str) -> Optional[str]:
     import tempfile
 
     try:
-        tmp = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
             suffix=".txt",
             prefix="li_scout_paste_",
             delete=False,
-        )
-        with tmp as fh:
+        ) as fh:
             fh.write(text)
-        return tmp.name
+        return fh.name
     except OSError as e:
         logger.exception("[Apply] failed to write linkedin_scout paste temp file: %s", e)
         return None

@@ -215,9 +215,8 @@ def _format_next_data_offer(offer: dict) -> str:
             parts.append(f"Location: {', '.join(cities)}")
 
     work_modes = offer.get("workModes") or offer.get("workSchedules") or []
-    if work_modes:
-        if isinstance(work_modes, list):
-            parts.append(f"Work mode: {', '.join(str(w) for w in work_modes)}")
+    if work_modes and isinstance(work_modes, list):
+        parts.append(f"Work mode: {', '.join(str(w) for w in work_modes)}")
 
     salary = offer.get("salary") or offer.get("salaryDisplayText") or ""
     if isinstance(salary, dict):
@@ -531,11 +530,13 @@ class PracujSource(BaseSource):
                 continue
             for key in ("groupedOffers", "offers", "results", "items"):
                 items = qdata.get(key)
-                if isinstance(items, list) and items:
-                    if isinstance(items[0], dict) and any(
-                        k in items[0] for k in ("jobTitle", "title", "companyName", "offerUrl")
-                    ):
-                        all_offers.extend(items)
+                if (
+                    isinstance(items, list)
+                    and items
+                    and isinstance(items[0], dict)
+                    and any(k in items[0] for k in ("jobTitle", "title", "companyName", "offerUrl"))
+                ):
+                    all_offers.extend(items)
         return all_offers
 
     @staticmethod

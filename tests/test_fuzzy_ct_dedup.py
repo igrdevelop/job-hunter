@@ -15,9 +15,8 @@ def _make_cache(*rows: tuple[str, str, str]) -> TrackerCache:
     cache = TrackerCache()
     cache._loaded = True
     for row_id, company, title in rows:
-        row = {
-            k: ""
-            for k in [
+        row = dict.fromkeys(
+            [
                 "Date",
                 "Company",
                 "Job Title",
@@ -32,8 +31,9 @@ def _make_cache(*rows: tuple[str, str, str]) -> TrackerCache:
                 "Drive URL",
                 "Confirmation",
                 "Answer",
-            ]
-        }
+            ],
+            "",
+        )
         row["ID"] = row_id
         row["Company"] = company
         row["Job Title"] = title

@@ -247,7 +247,8 @@ def _db_row_to_tracker_dict(row) -> dict:
         "Drive URL": str(row["drive_url"] or ""),
         "Confirmation": str(row["confirmation"] or ""),
         "Answer": str(row["answer"] or ""),
-        "Cost $": _format_cost(row["cost_usd"] if "cost_usd" in row.keys() else None),
+        # sqlite3.Row's `in` checks VALUES, not column names — must use .keys().
+        "Cost $": _format_cost(row["cost_usd"] if "cost_usd" in row.keys() else None),  # noqa: SIM118
     }
 
 

@@ -191,7 +191,8 @@ def _dedup_url_norm(conn: sqlite3.Connection) -> int:
         ids_to_delete = [r["id"] for r in rows_sorted[1:]]
         if ids_to_delete:
             conn.execute(
-                f"DELETE FROM applications WHERE id IN ({','.join('?' * len(ids_to_delete))})",
+                # f-string only expands the placeholder count; values are bound.
+                f"DELETE FROM applications WHERE id IN ({','.join('?' * len(ids_to_delete))})",  # noqa: S608
                 ids_to_delete,
             )
             deleted += len(ids_to_delete)
@@ -288,7 +289,7 @@ def migrate_from_excel(
         # Pad row to max column we care about
         padded = list(row) + [""] * max(0, COL_ANSWER - len(row))
 
-        def cell(idx: int) -> str:  # 1-based column index
+        def cell(idx: int, padded: list = padded) -> str:  # 1-based column index
             v = padded[idx - 1]
             return str(v).strip() if v is not None else ""
 

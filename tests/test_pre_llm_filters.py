@@ -110,15 +110,15 @@ from hunter.filters import (
 
 
 def _make_job(**kwargs) -> Job:
-    defaults = dict(
-        title="Senior Angular Developer",
-        company="Acme",
-        location="remote",
-        salary=None,
-        url="https://example.com/job/1",
-        source="test",
-        raw={},
-    )
+    defaults = {
+        "title": "Senior Angular Developer",
+        "company": "Acme",
+        "location": "remote",
+        "salary": None,
+        "url": "https://example.com/job/1",
+        "source": "test",
+        "raw": {},
+    }
     defaults.update(kwargs)
     return Job(**defaults)
 

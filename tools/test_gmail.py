@@ -87,7 +87,7 @@ def main():
         print("  2. Email domains don't match — try --debug to see actual From: addresses")
         print("  3. URL pattern in parser doesn't match — share an email example")
         print("\nAll senders found:")
-        for sender, subject in all_senders:
+        for sender, _subject in all_senders:
             print(f"  {sender}")
 
 

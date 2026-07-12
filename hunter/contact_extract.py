@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 # ── Building blocks ───────────────────────────────────────────────────────────
 
 # One capitalized name token, Polish diacritics included ("Łukasz", "Zofia").
-_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż'’\-]+"
+_NAME_TOKEN = r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż'’\-]+"  # noqa: S105 — regex fragment, not a credential
 # "Anna Kowalska" / "Anna Maria Kowalska-Nowak". Horizontal whitespace ONLY —
 # \s+ would swallow the newline and capture the next line's first word.
 _FULL_NAME = rf"{_NAME_TOKEN}(?:[ \t]+{_NAME_TOKEN}){{1,2}}"

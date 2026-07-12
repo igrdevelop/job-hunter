@@ -278,7 +278,7 @@ def _best_match_role(fake_period: str, used_indices: set[int]) -> dict[str, Any]
             return {"idx": best_idx, **roles[best_idx]}
 
     # Positional fallback: first unused role in profile order
-    for i, role in enumerate(roles):
+    for i, _role in enumerate(roles):
         if i not in used_indices:
             return {"idx": i, **roles[i]}
 
@@ -328,10 +328,9 @@ def sanitize_resume(resume: dict[str, Any], lang: str = "EN") -> tuple[dict[str,
             resume["education"] = edu_en
             fixes.append(f"[{lang}] education filled from profile")
 
-    if not (resume.get("courses") or "").strip():
-        if courses_en:
-            resume["courses"] = courses_en
-            fixes.append(f"[{lang}] courses filled from profile")
+    if not (resume.get("courses") or "").strip() and courses_en:
+        resume["courses"] = courses_en
+        fixes.append(f"[{lang}] courses filled from profile")
 
     # -- 1b. Collapse duplicate Angular version entries in skills.frontend --
     # The LLM/ATS rewrite sometimes lists two version forms ("Angular (2-22)" +

@@ -28,7 +28,7 @@ def run(coro):
 
 
 def make_row(**kwargs) -> dict:
-    base = {h: "" for h in TRACKER_HEADERS}
+    base = dict.fromkeys(TRACKER_HEADERS, "")
     base.update(kwargs)
     return base
 

@@ -85,9 +85,8 @@ def mirror_cost_cell_sync(
         return True
     # First write in this process for this sheet: also ensure the header is
     # set. Idempotent — overwriting "Cost $" with "Cost $" is harmless.
-    if not _header_written.get(sheet_id):
-        if write_cost_header_sync(service, sheet_id, tab):
-            _header_written[sheet_id] = True
+    if not _header_written.get(sheet_id) and write_cost_header_sync(service, sheet_id, tab):
+        _header_written[sheet_id] = True
     cell = f"'{tab}'!{COST_COL_LETTER}{sheet_row}"
     try:
         service.spreadsheets().values().update(

@@ -18,13 +18,13 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "scout_payload_v1.json"
 
 
 def _candidate(**overrides) -> ScoutCandidate:
-    defaults = dict(
-        keyword="angular hiring",
-        author="Deloitte Poland",
-        body="We're hiring an Angular Developer. Fully remote.",
-        scouted_at="2026-07-08T12:00:00+00:00",
-        permalink="https://www.linkedin.com/feed/update/urn:li:share:1/",
-    )
+    defaults = {
+        "keyword": "angular hiring",
+        "author": "Deloitte Poland",
+        "body": "We're hiring an Angular Developer. Fully remote.",
+        "scouted_at": "2026-07-08T12:00:00+00:00",
+        "permalink": "https://www.linkedin.com/feed/update/urn:li:share:1/",
+    }
     defaults.update(overrides)
     return ScoutCandidate(**defaults)
 

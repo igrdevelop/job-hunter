@@ -151,7 +151,9 @@ class LinkedInScoutRelaySource(BaseSource):
     def _record_to_job(rec: dict) -> Job:
         author = rec.get("author", "") or "Unknown"
         body = rec.get("body", "") or ""
-        key = hashlib.md5(f"{author}{body[:200]}".encode("utf-8")).hexdigest()[:16]
+        key = hashlib.md5(
+            f"{author}{body[:200]}".encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:16]
         snippet = " ".join(body.strip().split())[:70]
         return Job(
             title=f"[LI post] {snippet}",

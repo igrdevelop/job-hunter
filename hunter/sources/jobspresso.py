@@ -94,7 +94,7 @@ def _local(tag: str) -> str:
 
 def parse_jobspresso_rss_xml(xml_text: str) -> list[dict]:
     try:
-        root = ElementTree.fromstring(xml_text)
+        root = ElementTree.fromstring(xml_text)  # noqa: S314 — board's own RSS; no defusedxml dep
     except ElementTree.ParseError as e:
         logger.error(f"[jobspresso] RSS parse error: {e}")
         return []

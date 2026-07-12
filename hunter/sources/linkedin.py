@@ -165,9 +165,9 @@ class LinkedInSource(BaseSource):
 
             try:
                 page.goto(url, timeout=_DETAIL_TIMEOUT_MS, wait_until="domcontentloaded")
-            except PWTimeout:
+            except PWTimeout as e:
                 browser.close()
-                raise RuntimeError(f"LinkedIn page timed out: {url}")
+                raise RuntimeError(f"LinkedIn page timed out: {url}") from e
 
             current = page.url
             if "linkedin.com/login" in current or "linkedin.com/checkpoint" in current:

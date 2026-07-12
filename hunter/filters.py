@@ -707,15 +707,12 @@ def _matches_location(job: Job) -> bool:
     if has_allowed:
         return True
 
-    # Location field is empty/blank and title has no anti-city → we have no
-    # geo information at all.  Treat as unknown: let it through rather than
-    # silently dropping a potentially remote offer.
-    if not loc.strip():
-        return True
-
-    # Non-empty location that matched neither the whitelist nor anti-cities
-    # (e.g. "Berlin", "Poland") → reject (strict whitelist).
-    return False
+    # Empty/blank location with no anti-city in the title → no geo information
+    # at all; treat as unknown and let it through rather than silently dropping
+    # a potentially remote offer.  Non-empty location that matched neither the
+    # whitelist nor anti-cities (e.g. "Berlin", "Poland") → reject (strict
+    # whitelist).
+    return not loc.strip()
 
 
 # Reason keys emitted by classify_job() / apply_filters_with_stats(). Kept here so
@@ -818,7 +815,7 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
                         relocation
     """
     result = []
-    reasons: dict[str, int] = {key: 0 for key in FILTER_REASONS}
+    reasons: dict[str, int] = dict.fromkeys(FILTER_REASONS, 0)
 
     for job in jobs:
         reason = classify_job(job)

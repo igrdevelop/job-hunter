@@ -247,16 +247,15 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
 
     # Generic paste: write text to a temp file and pass it to apply_agent.
     try:
-        tmp = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
             suffix=".txt",
             prefix="tg_paste_",
             delete=False,
-        )
-        with tmp as fh:
+        ) as fh:
             fh.write(text)
-        paste_path = tmp.name
+        paste_path = fh.name
     except Exception as e:
         logger.exception("[paste handler] failed to write temp file")
         await update.message.reply_text(

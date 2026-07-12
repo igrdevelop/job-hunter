@@ -67,7 +67,7 @@ def main() -> None:
         groups[nu].append(r)
 
     to_delete: list[int] = []
-    for nu, rows in groups.items():
+    for rows in groups.values():
         if len(rows) <= 1:
             continue
         best = max(rows, key=lambda rn: _row_score(ws, rn))

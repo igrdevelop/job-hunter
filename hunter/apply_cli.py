@@ -116,9 +116,7 @@ def _is_cli_available() -> bool:
         if r.returncode != 0:
             return False
         output = (r.stdout + r.stderr).lower()
-        if "not logged in" in output or "unauthorized" in output:
-            return False
-        return True
+        return not ("not logged in" in output or "unauthorized" in output)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
 
@@ -280,7 +278,7 @@ def main_cli(
             else:
                 notify(f"⏱ <b>apply_agent timeout (10 min)</b>\nURL: {url}")
                 print("\n[apply_agent] Timeout — no folder created.")
-                raise ApplyError("CLI timeout — no folder created")
+                raise ApplyError("CLI timeout — no folder created") from None
 
         if result.returncode == 0:
             break

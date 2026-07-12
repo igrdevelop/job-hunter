@@ -240,8 +240,8 @@ def _call_anthropic(
 ) -> str:
     try:
         import anthropic
-    except ImportError:
-        raise LLMError("Package 'anthropic' not installed. Run: pip install anthropic")
+    except ImportError as e:
+        raise LLMError("Package 'anthropic' not installed. Run: pip install anthropic") from e
 
     try:
         client = anthropic.Anthropic(api_key=key)
@@ -276,8 +276,8 @@ def _call_anthropic(
 def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) -> str:
     try:
         import openai
-    except ImportError:
-        raise LLMError("Package 'openai' not installed. Run: pip install openai")
+    except ImportError as e:
+        raise LLMError("Package 'openai' not installed. Run: pip install openai") from e
 
     try:
         client = openai.OpenAI(api_key=key)
@@ -334,8 +334,8 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
     """
     try:
         import openai
-    except ImportError:
-        raise LLMError("Package 'openai' not installed. Run: pip install openai")
+    except ImportError as e:
+        raise LLMError("Package 'openai' not installed. Run: pip install openai") from e
 
     try:
         # R1 reasoning models can take several minutes per call. Set an explicit

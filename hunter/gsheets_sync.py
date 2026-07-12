@@ -367,10 +367,9 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
         db_sent = db_row.get("Sent", "").strip()
         sheet_sent = sheet_row.get("Sent", "").strip()
 
-        if db_sent != sheet_sent:
-            if not (db_sent == "EXPIRED" and not sheet_sent):
-                updated["Sent"] = sheet_sent
-                changed = True
+        if db_sent != sheet_sent and not (db_sent == "EXPIRED" and not sheet_sent):
+            updated["Sent"] = sheet_sent
+            changed = True
 
         for field in ("To Learn", "Re-application"):
             sv = sheet_row.get(field, "").strip()
@@ -745,7 +744,7 @@ async def push_missing_rows() -> dict:
     # 3. Append missing rows in one batch
     try:
         indices = await asyncio.to_thread(append_rows, _get_service(), _sheet_id(), missing)
-        for row_dict, sheet_row in zip(missing, indices):
+        for row_dict, sheet_row in zip(missing, indices, strict=False):
             row_id = row_dict.get("ID", "").strip()
             if row_id and sheet_row > 0:
                 set_sheets_row(row_id, sheet_row)

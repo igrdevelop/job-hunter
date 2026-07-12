@@ -224,7 +224,7 @@ def test_mirror_expired_batch_calls_cell_update_for_each():
         run(gsheets_sync.mirror_expired_batch({"id1", "id2"}))
 
     assert len(calls) == 2
-    for row_id, col, val in calls:
+    for _row_id, col, val in calls:
         assert col == "Sent"
         assert val == "EXPIRED"
 

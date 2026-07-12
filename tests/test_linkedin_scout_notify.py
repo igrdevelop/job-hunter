@@ -12,12 +12,12 @@ from linkedin_scout.seen_store import SeenStore, dedup_key
 
 
 def _candidate(**overrides) -> ScoutCandidate:
-    defaults = dict(
-        keyword="angular hiring",
-        author="Deloitte Poland",
-        body="We're hiring an Angular Developer. Fully remote across Poland.",
-        scouted_at="2026-07-07T12:00:00+00:00",
-    )
+    defaults = {
+        "keyword": "angular hiring",
+        "author": "Deloitte Poland",
+        "body": "We're hiring an Angular Developer. Fully remote across Poland.",
+        "scouted_at": "2026-07-07T12:00:00+00:00",
+    }
     defaults.update(overrides)
     return ScoutCandidate(**defaults)
 

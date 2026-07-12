@@ -134,9 +134,8 @@ class HimalayasSource(BaseSource):
                     f"[Himalayas] q={q!r} page={page} -> +{len(batch)} raw "
                     f"(unique total {len(jobs)})"
                 )
-                if total_count is not None:
-                    if page * PAGE_SIZE >= total_count:
-                        break
+                if total_count is not None and page * PAGE_SIZE >= total_count:
+                    break
                 if len(batch) < PAGE_SIZE:
                     break
                 page += 1

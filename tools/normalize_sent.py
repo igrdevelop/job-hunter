@@ -61,7 +61,7 @@ def main() -> int:
     # Show a small sample so the user can eyeball the parse.
     print("\nSample (Sent → Applied Date):")
     shown = 0
-    for (_idx, row), cell in zip(rows, grid):
+    for (_idx, row), cell in zip(rows, grid, strict=False):
         sent = (row.get("Sent", "") or "").strip()
         if sent and shown < 15:
             print(f"  {sent[:40]:<40} → {cell[0] or '(none)'}")

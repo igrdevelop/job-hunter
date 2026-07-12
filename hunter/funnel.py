@@ -174,10 +174,9 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
 
     for r in rows:
         d = (r["date"] or "").strip()
-        if cutoff is not None:
-            # Keep only rows on/after cutoff with a comparable ISO date.
-            if not re.match(r"^\d{4}-\d{2}-\d{2}", d) or d < cutoff:
-                continue
+        # Keep only rows on/after cutoff with a comparable ISO date.
+        if cutoff is not None and (not re.match(r"^\d{4}-\d{2}-\d{2}", d) or d < cutoff):
+            continue
 
         generated = _is_generated(r["ats_status"])
         sent = _is_sent(r["sent"])

@@ -53,7 +53,7 @@ async def cmd_debug_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         def _url_matches(row_url: str) -> bool:
             if offer_id and offer_id in row_url:
                 return True
-            return row_url == clean or row_url == url
+            return row_url in (clean, url)
 
         rows = await asyncio.to_thread(iter_unsent_rows)
         matching = [r for r in rows if _url_matches(r.get("url", ""))]

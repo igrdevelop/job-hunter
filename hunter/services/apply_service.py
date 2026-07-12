@@ -69,16 +69,15 @@ async def run_apply_agent_subprocess(
     paste_path: Optional[Path] = None
     if paste_text:
         try:
-            tmp = tempfile.NamedTemporaryFile(
+            with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
                 suffix=".txt",
                 prefix="auto_apply_paste_",
                 delete=False,
-            )
-            with tmp as fh:
+            ) as fh:
                 fh.write(paste_text)
-            paste_path = Path(tmp.name)
+            paste_path = Path(fh.name)
         except OSError as e:
             logger.error(f"[auto-apply] failed to write paste temp file for {job.url}: {e}")
             return "fail"

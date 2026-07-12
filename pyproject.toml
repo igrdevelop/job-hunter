@@ -51,13 +51,24 @@ line-length = 100
 # Gate covers the whole repo: hunter/ + entry scripts + tests/ + tools/.
 
 [tool.ruff.lint]
-# Default rule set (pyflakes F + a focused pycodestyle E subset) plus warnings.
-# Kept conservative on purpose so the gate stays green on a large existing
-# codebase; expand selectively over time.
-select = ["E4", "E7", "E9", "F", "W"]
+# Base: pyflakes F + focused pycodestyle E subset + warnings.
+# Expanded 2026-07-12: B (bugbear — real bug patterns), C4 (comprehensions),
+# SIM (simplifications), S (flake8-bandit security).
+select = ["E4", "E7", "E9", "F", "W", "B", "C4", "SIM", "S"]
 # E402: many modules import after a sys.path tweak or behind a runtime guard.
 # E741: a few short loop vars (l/I/O) that are clear enough in context.
-ignore = ["E402", "E741"]
+# S110/S112 + SIM105: try/except-pass/continue is this codebase's deliberate
+#   best-effort contract (Sheets/Drive/Telegram/shadow must never break an apply).
+# S311: random is used for scraper jitter/skip-chance, never cryptography.
+# S603/S607: subprocess runs fixed argv lists (apply_agent, LibreOffice, git) —
+#   no shell=True anywhere; these rules flag every subprocess call as "audit me".
+ignore = ["E402", "E741", "S110", "S112", "SIM105", "S311", "S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: pytest asserts. SIM117: nested `with patch(...)` stacks are the local
+# test idiom. S608: f-string SQL over hardcoded test fixtures, no user input.
+# S108: literal "/tmp/..." strings used as fake folder values in fixtures.
+"tests/*" = ["S101", "SIM117", "S608", "S108"]
 
 [tool.mypy]
 python_version = "3.11"

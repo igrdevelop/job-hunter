@@ -119,11 +119,10 @@ def is_transient_fetch_error(exc: Exception, url: str = "") -> bool:
     msg = str(exc).lower()
     host = (urlparse(url).hostname or "").lower() if url else ""
     on_antibot = any(h in host for h in _ANTIBOT_HOSTS) or any(h in msg for h in _ANTIBOT_HOSTS)
-    if on_antibot and (
-        "403" in msg or "forbidden" in msg or "cloudscraper" in msg or "cloudflare" in msg
-    ):
-        return True
-    return False
+    return bool(
+        on_antibot
+        and ("403" in msg or "forbidden" in msg or "cloudscraper" in msg or "cloudflare" in msg)
+    )
 
 
 # Shown after React-only auto-skip.

@@ -40,7 +40,7 @@ def _rules(findings: list[GateFinding]) -> set[str]:
 def test_gate_finding_is_frozen_dataclass() -> None:
     f = GateFinding(rule="x", severity="hard", evidence="y")
     assert f.rule == "x" and f.severity == "hard" and f.evidence == "y"
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         f.rule = "z"  # type: ignore[misc]
 
 

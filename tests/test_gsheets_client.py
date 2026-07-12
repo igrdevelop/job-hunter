@@ -281,7 +281,7 @@ class TestUpdateCell:
 
     def test_all_columns_have_correct_letter(self):
         """Verify every column maps to the expected letter."""
-        expected = dict(zip(COLUMNS, "ABCDEFGHIJK"))
+        expected = dict(zip(COLUMNS, "ABCDEFGHIJK", strict=True))
         svc = mock_service()
         svc.spreadsheets().values().update().execute.return_value = {}
         for col, expected_letter in expected.items():

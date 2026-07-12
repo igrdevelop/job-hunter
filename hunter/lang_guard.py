@@ -431,9 +431,7 @@ def _is_tech(tok: str) -> bool:
         return True
     if len(n) <= 2:
         return True
-    if tok.isupper():
-        return True
-    return False
+    return bool(tok.isupper())
 
 
 def _looks_polish_word(tok: str, *, soft: bool) -> bool:

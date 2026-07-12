@@ -19,7 +19,7 @@ class Job:
 
     def job_id(self) -> str:
         """Short hash of URL — used as callback_data key in Telegram (max 64 bytes)."""
-        return hashlib.md5(self.url.encode()).hexdigest()[:10]
+        return hashlib.md5(self.url.encode(), usedforsecurity=False).hexdigest()[:10]
 
     def telegram_text(self) -> str:
         """One-card message text for Telegram notification."""
