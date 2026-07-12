@@ -13,15 +13,18 @@ if TYPE_CHECKING:
 from hunter.config import (
     SCHEDULE_TIMES,
     SCHEDULE_SOURCE_OFFSET_MIN,
+    RETRY_FAILED_TIMES,
     TRACKER_BACKUP_ENABLED,
     TRACKER_BACKUP_TIME,
     EXPIRED_CHECK_TIME,
     GSHEETS_ENABLED,
     GSHEETS_REFRESH_INTERVAL_MIN,
+    GDRIVE_UPLOAD_MISSING_INTERVAL_MIN,
     EMAIL_RESPONSE_CHECK_TIME,
 )
 
 from hunter.schedules.hunt import scheduled_hunt
+from hunter.schedules.retry_failed import scheduled_retry_failed
 from hunter.schedules.check_expired import scheduled_check_expired
 from hunter.schedules.tracker_backup import scheduled_tracker_backup
 from hunter.schedules.gdrive import scheduled_gdrive_upload_missing, scheduled_gdrive_upload_logs
@@ -36,6 +39,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "register",
     "scheduled_hunt",
+    "scheduled_retry_failed",
     "scheduled_check_expired",
     "scheduled_tracker_backup",
     "scheduled_gdrive_upload_missing",
@@ -78,6 +82,22 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
                 fire_min,
                 TIMEZONE,
             )
+
+    # ── Retry FAILed rows on its own slots (was: after every AUTO_APPLY hunt) ──
+    for retry_time in RETRY_FAILED_TIMES:
+        try:
+            rh, rm = map(int, retry_time.strip().split(":"))
+            rh %= 24
+            rm %= 60
+        except (ValueError, AttributeError):
+            logger.warning("[Schedule] Invalid RETRY_FAILED_TIMES entry %r — skipped", retry_time)
+            continue
+        app.job_queue.run_daily(
+            callback=scheduled_retry_failed,
+            time=dt_time(rh, rm, tzinfo=tz),
+            name=f"retry_failed_{rh:02d}{rm:02d}",
+        )
+        logger.info("[Schedule] retry_failed at %02d:%02d %s", rh, rm, TIMEZONE)
 
     # ── Twice-daily pending report ────────────────────────────────────────────
     for report_hour in (9, 21):
@@ -137,14 +157,14 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     )
     logger.info("[Schedule] gsheets_resync every 5 min")
 
-    # ── Drive upload every 3 h ────────────────────────────────────────────────
+    # ── Drive upload backfill (safety net behind the instant post-apply upload) ──
     app.job_queue.run_repeating(
         callback=scheduled_gdrive_upload_missing,
-        interval=3 * 3600,
+        interval=max(60, GDRIVE_UPLOAD_MISSING_INTERVAL_MIN * 60),
         first=300,
         name="gdrive_upload_missing",
     )
-    logger.info("[Schedule] gdrive_upload_missing every 3 h")
+    logger.info("[Schedule] gdrive_upload_missing every %d min", GDRIVE_UPLOAD_MISSING_INTERVAL_MIN)
 
     # ── Daily email confirmation check ────────────────────────────────────────
     try:

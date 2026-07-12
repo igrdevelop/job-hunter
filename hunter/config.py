@@ -205,6 +205,18 @@ SCHEDULE_TIMES = ["08:00", "13:00", "19:00"]
 SCHEDULE_SOURCE_OFFSET_MIN: int = int(os.getenv("SCHEDULE_SOURCE_OFFSET_MIN", "40"))
 TIMEZONE = "Europe/Warsaw"
 
+# When to retry FAILed tracker rows (comma-separated HH:MM, same timezone).
+# Used to run after EVERY per-source hunt (72×/day) — that kept _hunt_lock busy
+# past the 40-min slot spacing. Minutes :45 never collide with the hunt grid,
+# which only fires at :00/:20/:40 (base minute 00 + multiples of 40).
+RETRY_FAILED_TIMES: list[str] = [
+    t.strip() for t in os.getenv("RETRY_FAILED_TIMES", "07:45,18:45").split(",") if t.strip()
+]
+
+# How often the Drive backfill job re-checks for application folders that never
+# got their immediate post-apply upload (idempotent; was hardcoded to 3 h).
+GDRIVE_UPLOAD_MISSING_INTERVAL_MIN: int = int(os.getenv("GDRIVE_UPLOAD_MISSING_INTERVAL_MIN", "30"))
+
 # ── Job filters ───────────────────────────────────────────────────────────────
 # Moved to hunter/filter_config.py (2026-07-12, pure organizational split —
 # it was ~210 lines of regex/policy, a third of this file). Re-imported here

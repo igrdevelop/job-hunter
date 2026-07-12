@@ -25,8 +25,7 @@ def _wire(monkeypatch, jobs, outcomes):
     monkeypatch.setattr(main, "remove_failed", lambda url: None)
     monkeypatch.setattr(main, "APPLY_DELAY_SEC", 0)
     monkeypatch.setattr(main, "send_text", AsyncMock())
-    monkeypatch.setattr(main, "_sync_to_sheets", AsyncMock())
-    monkeypatch.setattr(main, "_upload_to_drive", AsyncMock())
+    monkeypatch.setattr(main, "_deliver_now", AsyncMock())
     apply_mock = AsyncMock(side_effect=outcomes)
     monkeypatch.setattr(main, "_run_apply_agent", apply_mock)
     return apply_mock

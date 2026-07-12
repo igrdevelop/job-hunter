@@ -99,8 +99,7 @@ def test_retry_rate_limited_does_not_increment_fail_count(monkeypatch):
     monkeypatch.setattr(main, "remove_failed", lambda url: None)
     monkeypatch.setattr(main, "APPLY_DELAY_SEC", 0)
     monkeypatch.setattr(main, "send_text", AsyncMock())
-    monkeypatch.setattr(main, "_sync_to_sheets", AsyncMock())
-    monkeypatch.setattr(main, "_upload_to_drive", AsyncMock())
+    monkeypatch.setattr(main, "_deliver_now", AsyncMock())
     monkeypatch.setattr(
         main, "_run_apply_agent", AsyncMock(side_effect=["rate_limited", "rate_limited"])
     )
@@ -122,8 +121,7 @@ def test_retry_real_fail_still_increments(monkeypatch):
     monkeypatch.setattr(main, "remove_failed", lambda url: None)
     monkeypatch.setattr(main, "APPLY_DELAY_SEC", 0)
     monkeypatch.setattr(main, "send_text", AsyncMock())
-    monkeypatch.setattr(main, "_sync_to_sheets", AsyncMock())
-    monkeypatch.setattr(main, "_upload_to_drive", AsyncMock())
+    monkeypatch.setattr(main, "_deliver_now", AsyncMock())
     monkeypatch.setattr(main, "_run_apply_agent", AsyncMock(side_effect=["fail"]))
 
     asyncio.run(main._retry_failed(context=None))

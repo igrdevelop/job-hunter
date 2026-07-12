@@ -62,7 +62,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🔍 Running hunt: <b>{label}</b>",
             parse_mode=ParseMode.HTML,
         )
-        await run_hunt(context, source_names=source_names)
+        await run_hunt(context, source_names=source_names, notify_queued=True)
     else:
         await update.message.reply_text("🔍 Running hunt (all sources)...")
-        await run_hunt(context)
+        await run_hunt(context, notify_queued=True)
