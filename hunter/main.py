@@ -58,20 +58,60 @@ _CONSECUTIVE_FAIL_LIMIT = 3
 async def run_hunt(
     context: ContextTypes.DEFAULT_TYPE,
     source_names: list[str] | None = None,
+    *,
+    notify_queued: bool = False,
 ) -> None:
     """Entry point for scheduled and manual hunts.
+
+    Serialized through _hunt_lock. A hunt that fires while another is running
+    WAITS for its turn instead of being skipped (waiters are FIFO) — a queued
+    per-source fetch is seconds of work once the lock frees, and skipping used
+    to silently lose slots for hours (exact-minute collisions between the
+    13:00/19:00 cycles + long auto-apply batches; see
+    docs/HUNT_QUEUE_AND_DELIVERY_PLAN.md).
 
     Args:
         source_names: if given, only run sources whose .name is in this list.
                       None (default) runs all registered sources.
+        notify_queued: send a one-line "queued" Telegram reply when the lock is
+                      busy. True only for the manual /hunt command (a human is
+                      waiting for feedback); scheduled hunts queue silently —
+                      their hunt report arrives when they actually run.
     """
     if _hunt_lock.locked():
-        logger.info("[Hunt] Skipped — previous hunt/auto-apply still running")
-        await send_text(context, "⏭ Hunt skipped — auto-apply still processing.")
-        return
+        label = ", ".join(source_names) if source_names else "all"
+        logger.info("[Hunt] Busy — queued behind the running hunt (sources=%s)", label)
+        if notify_queued:
+            await send_text(
+                context,
+                "⏳ Hunt queued — will start when the current hunt/auto-apply finishes.",
+            )
 
     async with _hunt_lock:
         await _run_hunt_impl(context, source_names=source_names)
+
+
+async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scheduled retry of FAILed tracker rows (hunter/schedules/retry_failed.py).
+
+    Runs the same _retry_failed loop that used to piggyback on every AUTO_APPLY
+    hunt, but on its own RETRY_FAILED_TIMES slots. Serialized with hunts via
+    _hunt_lock (waits, never skips). No-op when AUTO_APPLY is off — retries run
+    the apply pipeline, which manual mode leaves to the owner's buttons.
+    """
+    if not AUTO_APPLY:
+        return
+    if _hunt_lock.locked():
+        logger.info("[Retry] Busy — queued behind the running hunt")
+    async with _hunt_lock:
+        auth_error = await asyncio.to_thread(_check_apply_ready)
+        if auth_error:
+            await send_text(
+                context,
+                f"🔐 <b>Retry skipped — apply not ready</b>\n<pre>{auth_error[:300]}</pre>",
+            )
+            return
+        await _retry_failed(context)
 
 
 def _check_apply_ready() -> str | None:
@@ -321,9 +361,11 @@ async def _run_hunt_impl(
                 f"⚠️ Capped to {MAX_JOBS_PER_RUN} (skipped {skipped_count})",
             )
         await _auto_apply_all(context, capped)
-
-        # Retry previously failed jobs
-        await _retry_failed(context)
+        # NOTE: _retry_failed intentionally NOT called here anymore — retrying
+        # the global FAIL list after every per-source hunt (72 slots/day) was
+        # the main reason hunts held _hunt_lock past the 40-min slot spacing.
+        # Retries run on their own schedule now: run_retry_failed() below,
+        # registered at RETRY_FAILED_TIMES (hunter/schedules/retry_failed.py).
     else:
         await send_job_cards(context, auto_eligible_jobs)
 
@@ -358,36 +400,11 @@ def _record_source_health(
 # ── Auto-apply pipeline ──────────────────────────────────────────────────────
 
 
-async def _sync_to_sheets(url: str) -> None:
-    """Mirror a just-applied row to Google Sheets (best-effort)."""
-    try:
-        from hunter.tracker_cache import cache
-        from hunter import gsheets_sync
+async def _deliver_now(url: str) -> None:
+    """Instant Sheets mirror + Drive upload after a successful apply (best-effort)."""
+    from hunter.delivery import deliver_apply_now
 
-        await cache.load_from_db()
-        row = await cache.get_row_by_url(url)
-        if row:
-            await gsheets_sync.mirror_new_row(row)
-    except Exception as _e:
-        logger.warning("[auto_apply] gsheets mirror failed for %s: %s", url, _e)
-
-
-async def _upload_to_drive(url: str) -> None:
-    """Upload application folder to Google Drive immediately after apply (best-effort)."""
-    try:
-        from hunter.config import GDRIVE_ENABLED
-
-        if not GDRIVE_ENABLED:
-            return
-        from hunter.tracker import get_folder_by_url
-        from hunter.config import PROJECT_DIR
-        from hunter import gdrive_sync
-
-        folder_str = await asyncio.to_thread(get_folder_by_url, url)
-        if folder_str:
-            await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
-    except Exception as _e:
-        logger.warning("[auto_apply] gdrive upload failed for %s: %s", url, _e)
+    await deliver_apply_now(url)
 
 
 async def _upload_log_to_drive() -> None:
@@ -429,8 +446,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
         if outcome == "ok":
             ok += 1
             consecutive_fails = 0
-            await _sync_to_sheets(job.url)
-            await _upload_to_drive(job.url)
+            await _deliver_now(job.url)
             done_text = f"✅ [{i}/{total}] Done: {job.company} — {job.title}"
             if permalink:
                 done_text += f"\n🔗 Post: {permalink}"
@@ -509,8 +525,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             ok += 1
             consecutive_fails = 0
             await asyncio.to_thread(remove_failed, job.url)
-            await _sync_to_sheets(job.url)
-            await _upload_to_drive(job.url)
+            await _deliver_now(job.url)
             await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
         elif outcome == "manual":
             manual += 1

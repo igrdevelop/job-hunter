@@ -35,8 +35,7 @@ def test_auto_apply_all_shows_permalink_when_present():
     with (
         patch.object(main, "send_text", fake_send_text),
         patch.object(main, "_run_apply_agent", AsyncMock(return_value="ok")),
-        patch.object(main, "_sync_to_sheets", AsyncMock()),
-        patch.object(main, "_upload_to_drive", AsyncMock()),
+        patch.object(main, "_deliver_now", AsyncMock()),
     ):
         asyncio.run(main._auto_apply_all(None, [job]))
 
@@ -54,8 +53,7 @@ def test_auto_apply_all_omits_permalink_line_when_absent():
     with (
         patch.object(main, "send_text", fake_send_text),
         patch.object(main, "_run_apply_agent", AsyncMock(return_value="ok")),
-        patch.object(main, "_sync_to_sheets", AsyncMock()),
-        patch.object(main, "_upload_to_drive", AsyncMock()),
+        patch.object(main, "_deliver_now", AsyncMock()),
     ):
         asyncio.run(main._auto_apply_all(None, [job]))
 

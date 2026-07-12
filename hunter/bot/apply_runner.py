@@ -62,36 +62,14 @@ async def _run_apply_agent(
             await _tg_notify(f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}")
         else:
             logger.info("[apply_agent] done (%s) for %s", outcome, label)
-            if url:
-                try:
-                    from hunter.tracker_cache import cache
+            # Instant Sheets mirror + Drive upload. deliver_apply_now also
+            # covers the paste-without-URL case (url="") via its backfill
+            # fallback — those rows used to wait for the periodic jobs.
+            from hunter.delivery import deliver_apply_now
 
-                    await cache.load_from_db()
-                    row = await cache.get_row_by_url(url)
-                    if row:
-                        from hunter import gsheets_sync
-
-                        await gsheets_sync.mirror_new_row(row)
-                except Exception as _e:
-                    logger.warning("[apply_agent] gsheets mirror failed: %s", _e)
-            # Upload application folder to Google Drive (best-effort)
-            try:
-                from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
-
-                if GDRIVE_ENABLED:
-                    from hunter.tracker import get_folder_by_url
-
-                    folder_str = await asyncio.to_thread(get_folder_by_url, url)
-                    if folder_str:
-                        from hunter import gdrive_sync
-
-                        drive_url = await gdrive_sync.upload_application_folder(
-                            PROJECT_DIR / folder_str, job_url=url
-                        )
-                        if drive_url:
-                            await _tg_notify(f'📁 <a href="{drive_url}">Open folder on Drive</a>')
-            except Exception as _e:
-                logger.warning("[apply_agent] gdrive upload failed: %s", _e)
+            drive_url = await deliver_apply_now(url or None)
+            if drive_url:
+                await _tg_notify(f'📁 <a href="{drive_url}">Open folder on Drive</a>')
     except Exception as e:
         logger.error("[apply_agent] exception: %s", e)
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
@@ -139,6 +117,11 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
         if proc.returncode == 0:
             ok += 1
             logger.info("[linkedin_batch] OK job %s", jid)
+            # This path had no immediate Sheets/Drive hooks at all — rows used
+            # to appear only via the periodic backfills.
+            from hunter.delivery import deliver_apply_now
+
+            await deliver_apply_now(url)
         else:
             failed += 1
             logger.error(

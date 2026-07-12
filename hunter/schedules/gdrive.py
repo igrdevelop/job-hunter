@@ -8,7 +8,11 @@ logger = logging.getLogger(__name__)
 
 
 async def scheduled_gdrive_upload_missing(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Every-3-hour job: upload application folders missing from Google Drive (no-op if disabled)."""
+    """Periodic backfill: upload application folders missing from Google Drive.
+
+    Safety net behind the instant post-apply upload (hunter/delivery.py) —
+    interval set by GDRIVE_UPLOAD_MISSING_INTERVAL_MIN. No-op if disabled.
+    """
     from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
 
     if not GDRIVE_ENABLED:
