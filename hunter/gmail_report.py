@@ -28,6 +28,7 @@ _REASON_LABELS: dict[str, str] = {
     "exclude_pattern": "стоп-стек",
     "react_no_angular": "React без Angular",
     "location": "локация",
+    "russia": "работа в РФ",
     "german": "нужен немецкий",
     "contract": "контракт/part-time",
     "relocation": "релокация",

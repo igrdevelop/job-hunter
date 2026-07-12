@@ -18,10 +18,5 @@
     "channel": "Remoteit",
     "kind": "board",
     "note": "RU remote experiment — prune if 0 after 2-3 weeks"
-  },
-  {
-    "channel": "it_vakansii_jobs",
-    "kind": "board",
-    "note": "RU general experiment — prune if 0"
   }
 ]

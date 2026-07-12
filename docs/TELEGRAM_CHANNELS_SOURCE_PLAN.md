@@ -317,7 +317,14 @@ Follow the `ats_companies.json` precedent (JSON, not YAML — no new dependency)
 | `rabotafrontend` | board | frontend-specific, RU-language |
 | `IT_job_Poland` | board | PL-market mixed bag, occasional FE |
 | `Remoteit` | board | RU remote experiment — prune if 0 after 2-3 weeks |
-| `it_vakansii_jobs` | board | RU general experiment — prune if 0 |
+
+**Pruned 2026-07-12:** `it_vakansii_jobs` removed from `telegram_channels.json`.
+Its one M4 pass was already flagged as a clickbait channel-index false
+positive (§9); the owner then independently flagged `max.ru/it_vakansii_jobs`
+(the same digest post, cross-posted to a MAX messenger mini-app) as noise
+while reporting the Russia-market issue below — two independent signals
+against a channel with 1/20 real yield on its only run, enough to prune
+without waiting the full 2-3 weeks.
 
 Judge by `/funnel` + `/health` after 2-3 weeks; prune freely. Follow-up worth more
 than more RU channels: find 3-5 additional Polish/EU tech channels (absent from
@@ -422,7 +429,43 @@ external links both fetch correctly per the dispatcher tests in M2; nothing
 about the fetch/generation path is blocked, this is purely a missing-
 credentials gap in this sandboxed dev worktree.
 
-No changes to `telegram_channels.json` — all 5 starter channels kept as-is;
-`IT_job_Poland`/`Remoteit`/`it_vakansii_jobs` remain owner-pruning candidates
-per §6's existing guidance, to be judged by `/funnel` + `/health` over
-2-3 weeks of real running, not a single dev-machine snapshot.
+No changes to `telegram_channels.json` at M4 time — all 5 starter channels
+kept as-is; `IT_job_Poland`/`Remoteit`/`it_vakansii_jobs` remain owner-pruning
+candidates per §6's existing guidance, to be judged by `/funnel` + `/health`
+over 2-3 weeks of real running, not a single dev-machine snapshot.
+(`it_vakansii_jobs` was pruned two days later after an owner report — see §10.)
+
+## 10. Post-ship owner report (2026-07-12): Russia-market roles
+
+Real-world use surfaced two `rabotafrontend`-sourced talanto.work postings
+tagged `Remote · Russia` (and a third, `Middle · Remote` with no country tag
+but body text `"по ТК РФ"` — Russian Labor Code registration) reaching the
+owner, plus a `max.ru/it_vakansii_jobs` link confirming the §9 false-positive
+finding. Owner decision: skip Russia-tied roles outright, remote or not — it's
+unclear a Russia-based employer can legally/practically pay a Poland-based
+candidate (banking/sanctions).
+
+This is a general doomed-gate fix (`hunter.filters._assess_russia_market`,
+new HARD rule), not specific to the Telegram channels source — it runs on the
+full fetched job text from ANY source, same layer as the existing
+work-authorization/mill-name HARD rules. Patterns require the location tag to
+sit directly next to `Remote`/`Location`/`Локация`, or the `"ТК РФ"`
+outstaff-registration phrase — never a bare `"Russia"` mention, which would
+false-positive on site-wide region pickers.
+
+**Bonus fix found during verification:** talanto.work renders a sitewide
+sidebar (`"By Region: Jobs in Europe / USA / Canada / Russia / By Format: ...
+Hybrid Jobs / Office Jobs"`) on every job page — `"Hybrid"`/`"Office"` sitting
+near `"USA"`/`"Canada"` within the existing `foreign_onsite_hybrid` rule's
+120-char window was falsely HARD-blocking genuinely fully-remote talanto
+postings. Added `"by region"` to the existing recommendation-tail strip
+(same mechanism as the LinkedIn "Similar jobs" / theprotocol footer noise
+already documented above `_RECOMMENDATION_TAIL_RE`).
+
+`it_vakansii_jobs` pruned from `telegram_channels.json` (see §6) — the
+`max.ru` link the owner flagged is the same false-positive digest post from
+§9's single M4 run.
+
+6 new tests in `tests/test_doomed_gate.py` (Russia-tag/Локация-РФ/ТК-РФ
+positives, a bare-mention negative, the talanto-sidebar foreign_onsite
+regression). Full suite green; ruff/compileall clean.

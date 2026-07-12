@@ -299,6 +299,66 @@ def test_unacceptable_contract_hard() -> None:
     assert all(f.severity == "hard" for f in findings if f.rule == "is_unacceptable_contract")
 
 
+# ── russia_remote_market: Russia-tied role, even a remote one ────────────────
+# Owner decision 2026-07-12 (talanto.work links surfaced via the Telegram
+# channels source): unclear whether a Russia-based employer can legally/
+# practically pay a Poland-based candidate — skip regardless of remote status.
+
+def test_russia_remote_tag_hard() -> None:
+    text = "Middle JavaScript Developer\nFull time · Middle · Remote · Russia\ncrm, SQL, JavaScript"
+    findings = assess_job_text(text)
+    matches = [f for f in findings if f.rule == "russia_remote_market"]
+    assert matches and all(f.severity == "hard" for f in matches)
+    assert "russia" in matches[0].evidence.lower()
+
+
+def test_lokatsiya_rf_hard() -> None:
+    text = "Middle+ JavaScript разработчик.\nЛокация: РФ.\nФормат: удаленно."
+    findings = assess_job_text(text)
+    assert "russia_remote_market" in _rules(findings)
+
+
+def test_tk_rf_outstaff_phrasing_hard() -> None:
+    """Real talanto.work (Extyl) case: the tag line only says 'Middle ·
+    Remote' with no country, but the body reads 'Оформление в штат компании
+    Extyl по ТК РФ' (employment registration per the Russian Labor Code)."""
+    text = (
+        "Разработчик Angular / Проектная работа / АУТСТАФФ\n"
+        "Middle · Remote\n"
+        "Оформление в штат компании Extyl по ТК РФ на полную ставку."
+    )
+    findings = assess_job_text(text)
+    assert "russia_remote_market" in _rules(findings)
+
+
+def test_russia_market_no_false_positive_on_bare_mention() -> None:
+    """A bare 'Russia' occurrence that isn't the job's own location TAG must
+    not fire — e.g. an employer merely listing Russia among several offices,
+    while THIS role reports to the Wrocław team."""
+    text = (
+        "Senior Frontend Developer (Angular), fully remote within the EU.\n"
+        "Our company has offices across Europe, including Poland, Germany, "
+        "and Russia, but this role reports to the Wrocław team."
+    )
+    findings = assess_job_text(text)
+    assert "russia_remote_market" not in _rules(findings)
+
+
+def test_talanto_sidebar_no_longer_false_positives_foreign_onsite() -> None:
+    """Real bug found alongside the Russia rule: talanto.work's own sidebar
+    ('Hybrid Jobs'/'Office Jobs' sitting near 'USA'/'Canada' within the
+    on-site-signal window) tripped foreign_onsite_hybrid on a genuinely
+    fully-remote posting. The sidebar is now stripped as a recommendation
+    tail before body-level checks run."""
+    text = (
+        "Senior Frontend Developer (Angular), fully remote worldwide.\n"
+        "By Region\nJobs in Europe\nJobs in USA\nJobs in Canada\nJobs in Russia\n"
+        "By Format\nRemote Jobs\nRelocation to USA\nHybrid Jobs\nOffice Jobs"
+    )
+    findings = assess_job_text(text)
+    assert "foreign_onsite_hybrid" not in _rules(findings)
+
+
 def test_unwanted_fullstack_hard() -> None:
     findings = assess_job_text(
         "Backend work in Java and Spring Boot, frontend in Angular.",

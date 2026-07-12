@@ -632,6 +632,24 @@ def _is_ai_training_or_mill(job: Job) -> bool:
     return any(c in company for c in FILTER.get("exclude_companies", []))
 
 
+# Owner decision 2026-07-12: skip Russia-tied roles outright, even remote ones
+# — unclear whether a Russia-based employer can legally/practically pay a
+# Poland-based candidate (banking/sanctions). Listing-level companion to the
+# doomed gate's _assess_russia_market (hunter.filters.assess_job_text, fires
+# on the fetched full body text): this one is cheap — title+location only,
+# before any fetch — and catches sources whose location field itself
+# literally names the country (worldwide-remote boards sometimes do).
+_RUSSIA_MARKET_LOCATION_TOKENS = (
+    "russia", "russian federation", "рф", "россия", "российская федерация",
+)
+
+
+def _is_russia_market(job: Job) -> bool:
+    """True → skip (title/location ties the role to Russia, even if remote)."""
+    blob = f"{job.location or ''} {job.title or ''}".lower()
+    return any(tok in blob for tok in _RUSSIA_MARKET_LOCATION_TOKENS)
+
+
 def _matches_location(job: Job) -> bool:
     """Check if job location matches allowed locations.
 
@@ -687,6 +705,7 @@ FILTER_REASONS: tuple[str, ...] = (
     "exclude_pattern",
     "react_no_angular",
     "location",
+    "russia",
     "german",
     "contract",
     "relocation",
@@ -732,6 +751,8 @@ def classify_job(job: Job) -> str | None:
         return "react_no_angular"
     if _has_body_disqualifier(job):
         return "exclude_pattern"
+    if _is_russia_market(job):
+        return "russia"
     # Location: a non-whitelisted location is rejected UNLESS it's an acceptable
     # ~1-day/week Warsaw/Kraków hybrid. The body on-site/city gate (which already
     # honours the same weekly exception) catches far cities hidden in the text.
@@ -771,7 +792,8 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
       - relocation required  (_requires_relocation — explicit relocation demand)
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
-                        react_no_angular, location, german, contract, relocation
+                        react_no_angular, location, russia, german, contract,
+                        relocation
     """
     result = []
     reasons: dict[str, int] = {key: 0 for key in FILTER_REASONS}
@@ -1053,6 +1075,48 @@ def _assess_mill_body(blob: str) -> "GateFinding | None":
     return None
 
 
+# Russia-tied roles, even remote ones — owner decision 2026-07-12 after two
+# talanto.work "Remote · Russia" postings reached generation via the Telegram
+# channels source (rabotafrontend): it's unclear whether a Russia-based
+# employer can legally/practically pay a Poland-based candidate (banking/
+# sanctions), so these are skipped outright regardless of remote status.
+# Deliberately requires the location TAG to sit right next to "Remote"/
+# "Location"/"Локация" rather than matching a bare "Russia" mention — real
+# talanto.work pages render a sitewide sidebar ("By Region: Jobs in Europe /
+# USA / Canada / Russia") that would false-positive on every single posting
+# on the site if "russia" alone were enough.
+_RUSSIA_MARKET_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bremote\s*[·•\-–—:]\s*russia\b",
+        r"\bremote\s*[·•\-–—:]\s*russian\s+federation\b",
+        r"\blocation\s*:?\s*russia\b",
+        r"\blocation\s*:?\s*russian\s+federation\b",
+        r"\bлокация\s*:?\s*рф\b",
+        r"\bлокация\s*:?\s*росси(?:я|йская\s+федерация)\b",
+        # "по ТК РФ" (per the Russian Labor Code) — a common outstaff/agency
+        # phrasing (real example: talanto.work Extyl posting, tag says only
+        # "Middle · Remote" with no country, but the description reads
+        # "Оформление в штат компании ... по ТК РФ") — near-zero false-positive
+        # risk, this abbreviation has no other meaning in a job posting.
+        r"\bтк\s+рф\b",
+    )
+)
+
+
+def _assess_russia_market(blob: str) -> "GateFinding | None":
+    """HARD — the posting's own location tag ties the role to Russia."""
+    for p in _RUSSIA_MARKET_RES:
+        m = p.search(blob)
+        if m:
+            return GateFinding(
+                rule="russia_remote_market",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    return None
+
+
 # Full-page dumps append unrelated recommendation/navigation blocks that don't
 # describe THIS job at all — real examples from calibration (docs/DOOMED_GATE_
 # PLAN.md M4):
@@ -1066,13 +1130,19 @@ def _assess_mill_body(blob: str) -> "GateFinding | None":
 #     disqualifier and on-site-city checks on real SENT jobs (NASK, ProcomSystem,
 #     B2BNet, Devapo, EdgeOneSolutions, ConsdataSA, IdeoSpZoO, GetItTogether…).
 #   - pracuj.pl appends a "Sprawdź podobne oferty" (check similar offers) block.
+#   - talanto.work renders a sitewide faceted-search sidebar starting "By
+#     Region: Jobs in Europe / USA / Canada / Russia / By Format: Remote
+#     Jobs / ... / Hybrid Jobs / Office Jobs" on EVERY job page — "Hybrid"/
+#     "Office" sitting near "USA"/"Canada" within the on-site-signal window
+#     falsely tripped _assess_foreign_onsite on a genuinely fully-remote
+#     posting (real example: talanto.work/jobs/3d657ccb-...).
 # Cut the text at the first such marker before any body-level check runs.
 _RECOMMENDATION_TAIL_RE = re.compile(
     # No trailing \b: "praca w miastach:" ends in ':' (non-word), so a \b right
     # after it never matches (': ' and ':\n' are both non-word→non-word — the
     # same class of bug as the historical `\bc#\b` miss on "C#", see CLAUDE.md).
     r"\n\s*(?:similar jobs\b|people also viewed\b|show more jobs like this\b"
-    r"|praca w miastach:|sprawdź podobne oferty\b)",
+    r"|praca w miastach:|sprawdź podobne oferty\b|by region\b)",
     re.IGNORECASE,
 )
 
@@ -1247,7 +1317,12 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
     except Exception:  # noqa: BLE001
         pass
 
-    for assess_blob in (_assess_work_authorization, _assess_mill_body, _assess_stack_mismatch):
+    for assess_blob in (
+        _assess_work_authorization,
+        _assess_mill_body,
+        _assess_russia_market,
+        _assess_stack_mismatch,
+    ):
         try:
             finding = assess_blob(blob)
             if finding:
