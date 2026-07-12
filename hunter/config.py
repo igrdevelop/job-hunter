@@ -278,6 +278,16 @@ REMOTEOK_ENABLED: bool = os.getenv("REMOTEOK_ENABLED", "true").lower() in ("true
 # ── Himalayas source config ───────────────────────────────────────────────────
 HIMALAYAS_ENABLED: bool = os.getenv("HIMALAYAS_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# ── FindMyRemote source config ────────────────────────────────────────────────
+# Public JSON API (findmyremote.ai/api/jobs); ~21 freshest per query, no auth.
+# Also owns detail-page fetch for findmyremote.ai links relayed by the
+# findmyremote_frontend Telegram channel (HTML pages are RSC shells / 404).
+FINDMYREMOTE_ENABLED: bool = os.getenv("FINDMYREMOTE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # ── 4dayweek.io source config ───────────────────────────────────────────────
 FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in (
     "true",
