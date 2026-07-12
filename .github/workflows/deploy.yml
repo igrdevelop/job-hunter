@@ -24,6 +24,8 @@ jobs:
         run: pip install ruff==0.15.16
       - name: Ruff lint
         run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
 
   test:
     runs-on: ubuntu-latest
@@ -36,6 +38,34 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         run: pytest tests/ -q
+
+  # Informational only — deploy does NOT depend on it. Skips itself cleanly
+  # until the repo is connected on sonarcloud.io and SONAR_TOKEN is added to
+  # the repo secrets (free for public repos).
+  sonarcloud:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Check SONAR_TOKEN present
+        id: sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "SONAR_TOKEN not set — skipping SonarCloud scan"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.sonar.outputs.enabled == 'true'
+        with:
+          fetch-depth: 0  # full history for accurate new-code detection
+      - name: SonarCloud scan
+        if: steps.sonar.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build-and-deploy:
     needs: [lint, test]
