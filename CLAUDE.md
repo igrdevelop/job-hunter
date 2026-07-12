@@ -8,7 +8,7 @@ Read it fully before making changes. Update it when you learn something new.
 ## What This Project Is
 
 **Job Hunter Bot** — an autonomous system that:
-1. Scrapes 21 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
+1. Scrapes 24 Polish/European/global IT job boards for Senior Frontend (Angular) vacancies
 2. Filters by location, seniority, stack, language requirements
 3. Deduplicates against tracker.xlsx (URL + company+title)
 4. Sends new jobs to Telegram for review (Apply/Skip buttons)
@@ -48,7 +48,7 @@ hunter/main.py              Core hunt loop:
          +------------------+--------------------+
          v                  v                    v
 hunter/sources/        hunter/tracker.py     apply_agent.py (thin CLI entry)
-  21 sources             tracker.db r/w         |
+  24 sources             tracker.db r/w         |
   (see list below)       dedup logic         apply_api / apply_cli -> run pipeline
                          SKIP/FAIL/MANUAL      apply_shared.py       (shared helpers)
                          add_applied()         sources.fetch_job_text() -> job text
@@ -85,7 +85,8 @@ Job Boards --scrape--> list[Job] --filter--> list[Job] --dedup--> list[Job] (new
 
 Base times: 08:00, 13:00, 19:00 (Europe/Warsaw).
 Each source offset by `SCHEDULE_SOURCE_OFFSET_MIN` (default 40 min).
-With 21 sources, a full cycle spans ~12 hours from the base time.
+With 24 sources, a full cycle spans ~15h20m from the base time, so the
+13:00 and 19:00 cycles run well into the night and overlap each other.
 
 ---
 
