@@ -632,6 +632,24 @@ def _is_ai_training_or_mill(job: Job) -> bool:
     return any(c in company for c in FILTER.get("exclude_companies", []))
 
 
+# Owner decision 2026-07-12: skip Russia-tied roles outright, even remote ones
+# — unclear whether a Russia-based employer can legally/practically pay a
+# Poland-based candidate (banking/sanctions). Listing-level companion to the
+# doomed gate's _assess_russia_market (hunter.filters.assess_job_text, fires
+# on the fetched full body text): this one is cheap — title+location only,
+# before any fetch — and catches sources whose location field itself
+# literally names the country (worldwide-remote boards sometimes do).
+_RUSSIA_MARKET_LOCATION_TOKENS = (
+    "russia", "russian federation", "рф", "россия", "российская федерация",
+)
+
+
+def _is_russia_market(job: Job) -> bool:
+    """True → skip (title/location ties the role to Russia, even if remote)."""
+    blob = f"{job.location or ''} {job.title or ''}".lower()
+    return any(tok in blob for tok in _RUSSIA_MARKET_LOCATION_TOKENS)
+
+
 def _matches_location(job: Job) -> bool:
     """Check if job location matches allowed locations.
 
@@ -687,6 +705,7 @@ FILTER_REASONS: tuple[str, ...] = (
     "exclude_pattern",
     "react_no_angular",
     "location",
+    "russia",
     "german",
     "contract",
     "relocation",
@@ -732,6 +751,8 @@ def classify_job(job: Job) -> str | None:
         return "react_no_angular"
     if _has_body_disqualifier(job):
         return "exclude_pattern"
+    if _is_russia_market(job):
+        return "russia"
     # Location: a non-whitelisted location is rejected UNLESS it's an acceptable
     # ~1-day/week Warsaw/Kraków hybrid. The body on-site/city gate (which already
     # honours the same weekly exception) catches far cities hidden in the text.
@@ -771,7 +792,8 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
       - relocation required  (_requires_relocation — explicit relocation demand)
 
     reason_counts keys: title_kw, require_angular, level, exclude_pattern,
-                        react_no_angular, location, german, contract, relocation
+                        react_no_angular, location, russia, german, contract,
+                        relocation
     """
     result = []
     reasons: dict[str, int] = {key: 0 for key in FILTER_REASONS}

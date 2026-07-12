@@ -47,6 +47,22 @@ def test_location_reject():
     assert classify_job(_job("Angular Developer", location="Berlin")) == "location"
 
 
+def test_russia_location_rejected_even_when_remote():
+    # Owner decision 2026-07-12: skip Russia-tied roles outright, even
+    # remote ones — checked before the generic location whitelist, so it
+    # fires with its own "russia" reason rather than "location".
+    assert classify_job(_job("Angular Developer", location="Remote · Russia")) == "russia"
+
+
+def test_russia_title_rejected_even_with_remote_location():
+    assert classify_job(_job("Angular Developer — Russia", location="Remote")) == "russia"
+
+
+def test_russia_cyrillic_location_rejected():
+    assert classify_job(_job("Angular Developer", location="Удалённо, РФ")) == "russia"
+    assert classify_job(_job("Angular Developer", location="Россия")) == "russia"
+
+
 def test_reason_in_vocabulary():
     r = classify_job(_job("Plumber"))
     assert r in FILTER_REASONS
