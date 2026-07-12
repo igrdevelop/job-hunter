@@ -11,6 +11,7 @@ Terms: credit Himalayas when presenting results (see API terms).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -49,9 +50,54 @@ class HimalayasSource(BaseSource):
         host = (urlparse(url).hostname or "").lower()
         return "himalayas.app" in host
 
-    # fetch_text uses BaseSource default — Himalayas had no dedicated entry in
-    # the legacy job_fetch dispatcher, so its URLs were routed through the
-    # generic HTML fallback. We preserve that behaviour explicitly.
+    def fetch_text(self, url: str) -> str:
+        """Re-query the search API by company slug and return the stored description.
+
+        Every Himalayas job's ``applicationLink`` points back at a himalayas.app
+        page (there is no external-ATS variant observed) and that page 403s to a
+        plain ``requests.get`` — live-verified as a genuine Cloudflare Turnstile
+        challenge (``Cf-Mitigated: challenge``), not just a header/UA check — so
+        the generic HTML fallback this source used to rely on failed on 100% of
+        Himalayas jobs. The public search API has no per-job GET endpoint, but it
+        already carries the full ``description`` in every hit, so we recover the
+        text without ever hitting the blocked HTML page: first a cheap
+        ``?company=<slug>`` lookup (works for the common case — most companies
+        have only a handful of postings, so the target is on page 1), and if
+        that misses (a staffing agency with hundreds of listings can bury it
+        past page 1) a second ``?company=<slug>&q=<title words>`` retry — the
+        free-text query re-ranks by relevance to the job's own title, which
+        reliably surfaces it (live-verified against a 359-listing company).
+        """
+        slug = _company_slug_from_url(url)
+        if slug:
+            try:
+                desc = self._fetch_description(slug, url)
+                if desc:
+                    return desc
+                q = _title_query_from_url(url)
+                if q:
+                    desc = self._fetch_description(slug, url, q=q)
+                    if desc:
+                        return desc
+            except Exception as e:
+                logger.warning(f"[Himalayas] company lookup failed ({e}), using html_fallback")
+        from hunter.sources.html_fallback import fetch_html
+
+        return fetch_html(url)
+
+    def _fetch_description(self, company_slug: str, url: str, q: Optional[str] = None) -> str:
+        params: dict[str, str] = {"company": company_slug}
+        if q:
+            params["q"] = q
+        resp = requests.get(API_SEARCH_URL, params=params, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        for raw in data.get("jobs", []):
+            if not isinstance(raw, dict):
+                continue
+            if (raw.get("applicationLink") or "").strip() == url:
+                return strip_html(raw.get("description"), 20000)
+        return ""
 
     def search(self) -> list[Job]:
         seen_urls: set[str] = set()
@@ -139,6 +185,33 @@ class HimalayasSource(BaseSource):
             source=self.name,
             raw=raw,
         )
+
+
+def _company_slug_from_url(url: str) -> str:
+    """Extract the company slug from a himalayas.app job URL.
+
+    URL shape: https://himalayas.app/companies/{company-slug}/jobs/{job-slug}
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "companies":
+        return parts[1]
+    return ""
+
+
+def _title_query_from_url(url: str) -> str:
+    """Best-effort free-text query from the job-slug part of a himalayas.app URL.
+
+    Strips Himalayas' trailing numeric dedup suffix (e.g. ``-4409560950``) and
+    turns hyphens into spaces, so the result reads like the job title and can
+    be passed as the search API's ``q`` param to re-rank a large company's
+    listings by relevance to this specific posting.
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(parts) < 3 or parts[0] != "companies" or parts[2] != "jobs" or len(parts) < 4:
+        return ""
+    slug = parts[3]
+    slug = re.sub(r"-\d{6,}$", "", slug)
+    return slug.replace("-", " ").strip()
 
 
 def _format_location(raw: dict) -> str:
