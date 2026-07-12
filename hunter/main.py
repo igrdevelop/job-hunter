@@ -423,7 +423,10 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             consecutive_fails = 0
             await _sync_to_sheets(job.url)
             await _upload_to_drive(job.url)
-            await send_text(context, f"✅ [{i}/{total}] Done: {job.company} — {job.title}")
+            done_text = f"✅ [{i}/{total}] Done: {job.company} — {job.title}"
+            if permalink:
+                done_text += f"\n🔗 Post: {permalink}"
+            await send_text(context, done_text)
         elif outcome == "manual":
             manual_n += 1
             consecutive_fails = 0

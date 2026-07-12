@@ -59,6 +59,11 @@ async def run_apply_agent_subprocess(
     fetchable URL), it's written to a temp file and passed via --paste-file
     instead of relying on apply_agent.py to fetch job.url (which would raise
     for a synthetic URL). job.url is still passed alongside for tracker dedup.
+
+    If `job.raw["permalink"]` is set (a real, clickable link to the original
+    post — see hunter/sources/linkedin_scout_relay.py), it's passed via
+    --permalink so it lands in content.json/outreach.md as the actual link
+    to go apply/message on (job.url stays the opaque dedup key).
     """
     paste_text = (job.raw or {}).get("post_text")
     paste_path: Optional[Path] = None
@@ -88,6 +93,9 @@ async def run_apply_agent_subprocess(
     if job.title or job.company:
         safe_title = (job.title or "Unknown").replace("\r\n", " ").replace("\n", " ").strip()[:500]
         cmd.extend(["--company", job.company or "Unknown", "--title", safe_title])
+    permalink = (job.raw or {}).get("permalink")
+    if permalink:
+        cmd.extend(["--permalink", str(permalink)])
 
     try:
         try:
@@ -144,11 +152,16 @@ async def run_apply_agent_for_url(
     python_executable: str,
     force: bool = False,
     paste_file: Optional[str] = None,
+    permalink: Optional[str] = None,
 ) -> ApplyResult:
     """URL-based variant of run_apply_agent_subprocess for manual Telegram triggers.
 
     Unlike the Job-based variant, accepts a plain URL and optional flags for
     force-apply and paste-file flow (no Job object required).
+
+    `permalink`, when given, is the real clickable link behind a synthetic
+    `url` (e.g. a captured LinkedIn Scout post permalink) — see
+    run_apply_agent_subprocess's matching docstring note.
 
     Returns (outcome, error_detail):
       outcome    — "ok" | "fail" | "manual"
@@ -162,6 +175,8 @@ async def run_apply_agent_for_url(
         cmd.append("--force")
     if paste_file:
         cmd.extend(["--paste-file", paste_file])
+    if permalink:
+        cmd.extend(["--permalink", permalink])
     # Signal apply_agent.py to send an early Telegram notification confirming start
     cmd.append("--notify-start")
 

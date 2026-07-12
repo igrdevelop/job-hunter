@@ -105,6 +105,7 @@ def main_api(
     full_mode: bool = False,
     jobleads_company: str = "",
     jobleads_title: str = "",
+    permalink: str = "",
 ) -> Path | None:
     """API pipeline: fetch job text → LLM → content.json → generate_docs.
 
@@ -119,6 +120,12 @@ def main_api(
     full_mode:         When True, generate full file set (DOCX + PDF, PL CV, About_Me).
     jobleads_company:  Company hint from hunt listing (used in MANUAL fallback).
     jobleads_title:    Title hint from hunt listing (used in MANUAL fallback).
+    permalink:         Real, clickable source URL (e.g. a LinkedIn Scout post
+                        permalink) when `url` itself is a synthetic dedup key
+                        that can't be opened/applied through directly. Stored
+                        on content.json as `source_permalink` so outreach.md
+                        and the tracker-lookup notification can surface the
+                        link the owner actually needs to go apply/message on.
     """
     url_display = url if url and url != PASTE_NO_URL_PLACEHOLDER else "(pasted text, no URL)"
     print(f"\n[apply_agent] API mode | URL: {url_display}\n")
@@ -159,6 +166,7 @@ def main_api(
             full_mode=full_mode,
             jobleads_company=jobleads_company,
             jobleads_title=jobleads_title,
+            permalink=permalink,
             _usage_log=_usage_log,
         )
     finally:
@@ -173,6 +181,7 @@ def _run_main_api(
     full_mode: bool,
     jobleads_company: str,
     jobleads_title: str,
+    permalink: str = "",
     _usage_log: list,
 ) -> Path | None:
     """Inner body of main_api, split out so push_usage_log() / pop_usage_log()
@@ -615,6 +624,13 @@ def _run_main_api(
 
     content["output_folder"] = str(output_folder).replace("\\", "/")
     content["apply_url"] = "" if url == PASTE_NO_URL_PLACEHOLDER else url
+    # Real, clickable link to actually go apply/message on (e.g. a captured
+    # LinkedIn Scout post permalink) — distinct from `apply_url` above, which
+    # stays the synthetic tracker dedup key for scout jobs and must never be
+    # replaced by a real URL (tracker.add_applied dedups on it). Read by
+    # outreach.py to show the owner where to go, not just what was generated.
+    if permalink:
+        content["source_permalink"] = permalink
     # Deterministic posting language drives which CV is delivered as primary
     # (PL posting → also render the Polish CV in short mode; see generate_docs).
     content["primary_lang"] = posting_lang
@@ -651,6 +667,8 @@ def _run_main_api(
             if url and url != PASTE_NO_URL_PLACEHOLDER
             else "URL: (none — pasted by user)\n\n"
         )
+        if permalink:
+            url_line += f"Post: {permalink}\n\n"
         job_posting_path.write_text(url_line + job_text, encoding="utf-8")
         print(f"[apply_agent] Saved job posting -> {job_posting_path.name}")
     except Exception as e:
@@ -929,12 +947,18 @@ def _run_main_api(
                 "(often <code>tracker.xlsx</code> locked, timeout, or PDF step). "
                 "Files listed above are on disk; fix and re-run that script if needed."
             )
+        # The synthetic dedup URL (e.g. a scout-relay row) isn't something the
+        # owner can actually open — surface the real permalink here again (it
+        # only flashed once, pre-generation, in the hunt loop's ping) so it's
+        # not lost by the time there's actually something to apply/message.
+        permalink_line = f"🔗 Post: {permalink}\n" if permalink else ""
         notify(
             f"✅ <b>Docs ready!</b>\n\n"
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"{ats_line}{pdf_summary} | Stack: {content.get('stack', '?')}\n"
             f"{gap_line}"
+            f"{permalink_line}"
             f"Via: API ({_llm_prof.model}){cost_line}\n"
             f"Review and send when ready."
             f"{issues_note}"

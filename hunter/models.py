@@ -30,5 +30,11 @@ class Job:
         if self.salary:
             lines.append(f"💰 {self.salary}")
         lines.append(f"🔗 {self.url}")
+        # A synthetic dedup-key url (e.g. linkedin_scout_relay) isn't openable
+        # — surface the real, clickable post permalink when one was captured,
+        # so a manual-mode Apply card actually has a link the owner can use.
+        permalink = (self.raw or {}).get("permalink")
+        if permalink:
+            lines.append(f"🔗 Post: {permalink}")
         lines.append(f"<i>Source: {self.source}</i>")
         return "\n".join(lines)

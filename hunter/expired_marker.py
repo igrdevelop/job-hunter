@@ -172,6 +172,18 @@ async def run_check(
         nonlocal done, expired_count
 
         url = item["url"]
+
+        # LinkedIn Scout relay rows carry a synthetic dedup-key URL with no
+        # fetchable posting behind it (hunter.sources.linkedin_scout_relay's
+        # fetch_text always raises by design) — skip outright instead of
+        # burning a request that's guaranteed to error.
+        from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
+        if SCOUT_POSTS_URL_MARKER in url or _LEGACY_SCOUT_POSTS_URL_MARKER in url:
+            done += 1
+            if progress_cb and done % PROGRESS_EVERY == 0:
+                await progress_cb(f"⏳ {done}/{total} checked — expired: {expired_count}")
+            return {**item, "status": "skipped", "reason": "scout-no-fetchable-url"}
+
         dom = domain_of(url)
 
         # Fast path: lightweight raw-HTML check for Pracuj / LinkedIn.

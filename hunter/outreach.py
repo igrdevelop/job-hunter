@@ -193,8 +193,12 @@ def _render(
         "",
         f"**Role:** {title}",
     ]
-    if url and not url.startswith("paste://"):
-        lines.append(f"**Posting:** {url}")
+    # source_permalink (e.g. a captured LinkedIn Scout post permalink) is the
+    # real, clickable link when `url` itself is only a synthetic dedup key —
+    # prefer it so the owner has something to actually open and apply/message on.
+    display_url = content.get("source_permalink") or url
+    if display_url and not display_url.startswith("paste://"):
+        lines.append(f"**Posting:** {display_url}")
     lines.append("")
 
     lines.append("## Contact")

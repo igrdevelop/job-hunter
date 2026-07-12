@@ -336,6 +336,61 @@ def test_run_apply_agent_subprocess_paste_file_contains_post_text(monkeypatch) -
     assert written_paths == ["We're hiring an Angular Developer, remote."]
 
 
+def test_run_apply_agent_subprocess_passes_permalink_when_present(monkeypatch) -> None:
+    captured_cmds = []
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_cmds.append(args)
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    job = Job(
+        title="", company="Deloitte", location="", salary=None,
+        url="https://linkedin-scout.internal/posts/pabc", source="linkedin_scout_relay",
+        raw={
+            "post_text": "We're hiring an Angular Developer.",
+            "permalink": "https://www.linkedin.com/posts/someone_activity-123",
+        },
+    )
+    asyncio.run(
+        run_apply_agent_subprocess(
+            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+        )
+    )
+
+    cmd = captured_cmds[0]
+    assert "--permalink" in cmd
+    assert cmd[cmd.index("--permalink") + 1] == "https://www.linkedin.com/posts/someone_activity-123"
+
+
+def test_run_apply_agent_subprocess_omits_permalink_when_absent(monkeypatch) -> None:
+    captured_cmds = []
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_cmds.append(args)
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    job = _job_with_paste_text(
+        "https://linkedin-scout.internal/posts/pnolink", "We're hiring an Angular Developer."
+    )
+    asyncio.run(
+        run_apply_agent_subprocess(
+            job, timeout_sec=1, apply_agent_path=Path("apply_agent.py"), python_executable="python",
+        )
+    )
+
+    assert "--permalink" not in captured_cmds[0]
+
+
 def test_run_apply_agent_subprocess_no_paste_file_for_normal_job(monkeypatch) -> None:
     captured_cmds = []
 
