@@ -8,6 +8,7 @@ from hunter.sources.himalayas import (
     _format_location,
     _format_salary,
     _prefilter_context,
+    _title_query_from_url,
 )
 
 
@@ -158,6 +159,54 @@ def test_fetch_text_falls_back_when_no_application_link_match() -> None:
         text = src.fetch_text(url)
     assert text == "fallback"
     m_fb.assert_called_once()
+
+
+def test_fetch_text_retries_with_title_query_when_company_page_1_misses() -> None:
+    """A big agency's company-only page 1 doesn't have the target job, but
+    the q= retry (relevance-ranked by title) does — live-verified against a
+    real 359-listing company on himalayas.app."""
+    src = HimalayasSource()
+    url = "https://himalayas.app/companies/bigagency/jobs/front-end-developer-4409560950"
+    miss_response = {"jobs": [_sample_job_dict(applicationLink="https://himalayas.app/other")]}
+    hit_response = {
+        "jobs": [
+            _sample_job_dict(applicationLink=url, description="<p>Found via q</p>"),
+        ]
+    }
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    calls: list[dict] = []
+
+    def _fake_get(_api_url, params, headers, timeout):
+        calls.append(params)
+        return _Resp(hit_response if "q" in params else miss_response)
+
+    with patch("hunter.sources.himalayas.requests.get", side_effect=_fake_get):
+        text = src.fetch_text(url)
+    assert text == "Found via q"
+    assert len(calls) == 2
+    assert "q" not in calls[0]
+    assert calls[1]["q"] == "front end developer"
+
+
+def test_title_query_from_url() -> None:
+    url = "https://himalayas.app/companies/thehivecareers/jobs/front-end-developer-4409560950"
+    assert _title_query_from_url(url) == "front end developer"
+
+    no_id_url = "https://himalayas.app/companies/about-source/jobs/lead-frontend-dev"
+    assert _title_query_from_url(no_id_url) == "lead frontend dev"
+
+    assert _title_query_from_url("https://himalayas.app/companies/x/") == ""
+    assert _title_query_from_url("https://example.com/other/path") == ""
 
 
 def test_fetch_text_falls_back_when_no_company_slug_in_url() -> None:

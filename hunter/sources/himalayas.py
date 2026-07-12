@@ -11,6 +11,7 @@ Terms: credit Himalayas when presenting results (see API terms).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -54,13 +55,18 @@ class HimalayasSource(BaseSource):
 
         Every Himalayas job's ``applicationLink`` points back at a himalayas.app
         page (there is no external-ATS variant observed) and that page 403s to a
-        plain ``requests.get`` (Cloudflare) — the generic HTML fallback this
-        source used to rely on therefore failed on 100% of Himalayas jobs. The
-        public search API has no per-job GET endpoint, but it already carries
-        the full ``description`` in every hit and supports ``?company=<slug>``
-        filtering, so re-querying by the company slug parsed out of the URL and
-        matching on ``applicationLink`` recovers the text without ever hitting
-        the blocked HTML page.
+        plain ``requests.get`` — live-verified as a genuine Cloudflare Turnstile
+        challenge (``Cf-Mitigated: challenge``), not just a header/UA check — so
+        the generic HTML fallback this source used to rely on failed on 100% of
+        Himalayas jobs. The public search API has no per-job GET endpoint, but it
+        already carries the full ``description`` in every hit, so we recover the
+        text without ever hitting the blocked HTML page: first a cheap
+        ``?company=<slug>`` lookup (works for the common case — most companies
+        have only a handful of postings, so the target is on page 1), and if
+        that misses (a staffing agency with hundreds of listings can bury it
+        past page 1) a second ``?company=<slug>&q=<title words>`` retry — the
+        free-text query re-ranks by relevance to the job's own title, which
+        reliably surfaces it (live-verified against a 359-listing company).
         """
         slug = _company_slug_from_url(url)
         if slug:
@@ -68,14 +74,21 @@ class HimalayasSource(BaseSource):
                 desc = self._fetch_description(slug, url)
                 if desc:
                     return desc
+                q = _title_query_from_url(url)
+                if q:
+                    desc = self._fetch_description(slug, url, q=q)
+                    if desc:
+                        return desc
             except Exception as e:
                 logger.warning(f"[Himalayas] company lookup failed ({e}), using html_fallback")
         from hunter.sources.html_fallback import fetch_html
 
         return fetch_html(url)
 
-    def _fetch_description(self, company_slug: str, url: str) -> str:
-        params = {"company": company_slug}
+    def _fetch_description(self, company_slug: str, url: str, q: Optional[str] = None) -> str:
+        params: dict[str, str] = {"company": company_slug}
+        if q:
+            params["q"] = q
         resp = requests.get(API_SEARCH_URL, params=params, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
@@ -183,6 +196,22 @@ def _company_slug_from_url(url: str) -> str:
     if len(parts) >= 2 and parts[0] == "companies":
         return parts[1]
     return ""
+
+
+def _title_query_from_url(url: str) -> str:
+    """Best-effort free-text query from the job-slug part of a himalayas.app URL.
+
+    Strips Himalayas' trailing numeric dedup suffix (e.g. ``-4409560950``) and
+    turns hyphens into spaces, so the result reads like the job title and can
+    be passed as the search API's ``q`` param to re-rank a large company's
+    listings by relevance to this specific posting.
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(parts) < 3 or parts[0] != "companies" or parts[2] != "jobs" or len(parts) < 4:
+        return ""
+    slug = parts[3]
+    slug = re.sub(r"-\d{6,}$", "", slug)
+    return slug.replace("-", " ").strip()
 
 
 def _format_location(raw: dict) -> str:
