@@ -87,8 +87,9 @@ async def _handle_apply(query, job: Job, job_id: str, context: ContextTypes.DEFA
                 "❌ Failed to save the scouted post text to a temp file — apply aborted.",
             )
             return
+        permalink = (job.raw or {}).get("permalink")
         logger.info(f"[Apply] Launching apply_agent (paste mode, linkedin_scout) for: {job.url}")
-        asyncio.create_task(_run_apply_agent(job.url, paste_file=paste_path))
+        asyncio.create_task(_run_apply_agent(job.url, paste_file=paste_path, permalink=permalink))
         return
 
     logger.info(f"[Apply] Launching apply_agent for: {job.url}")

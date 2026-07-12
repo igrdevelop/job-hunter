@@ -30,11 +30,14 @@ async def _run_apply_agent(
     url: str,
     force: bool = False,
     paste_file: Optional[str] = None,
+    permalink: Optional[str] = None,
 ) -> None:
     """Run apply_agent.py via apply_service, don't block the event loop.
 
     If ``paste_file`` is set, URL may be empty — apply_agent will use the
-    pasted text instead of fetching the URL.
+    pasted text instead of fetching the URL. ``permalink``, when given, is
+    the real clickable link behind a synthetic ``url`` (e.g. a captured
+    LinkedIn Scout post permalink).
     """
     from hunter.services.apply_service import run_apply_agent_for_url
 
@@ -49,6 +52,7 @@ async def _run_apply_agent(
             python_executable=sys.executable,
             force=force,
             paste_file=paste_file,
+            permalink=permalink,
         )
         if outcome == "fail":
             logger.error("[apply_agent] failed for %s", label)

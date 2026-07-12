@@ -29,7 +29,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
 from hunter.models import Job
-from hunter.validation import SCOUT_POSTS_URL_MARKER
+from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
 
 # ── Module-level DB path — override in tests via monkeypatch ──────────────────
 DB_PATH: Path = TRACKER_DB_PATH
@@ -436,6 +436,7 @@ def get_failed_jobs() -> list[Job]:
         if r["url"]
         and r["url"] != _PASTE_NO_URL
         and SCOUT_POSTS_URL_MARKER not in r["url"]
+        and _LEGACY_SCOUT_POSTS_URL_MARKER not in r["url"]
         and (r["fail_count"] or 0) < MAX_FAIL_RETRIES
     ]
 

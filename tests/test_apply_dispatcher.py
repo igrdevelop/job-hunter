@@ -75,7 +75,7 @@ def test_main_paste_text_with_cli_uses_cli(monkeypatch) -> None:
     """When paste_text is provided and CLI is available, main() tries CLI first."""
     cli_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
         cli_calls.append((url, paste_text))
 
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
@@ -95,7 +95,7 @@ def test_main_paste_text_without_cli_uses_api(monkeypatch) -> None:
     api_calls = []
 
     def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
-                      jobleads_company="", jobleads_title=""):
+                      jobleads_company="", jobleads_title="", permalink=""):
         api_calls.append((url, paste_text))
 
     monkeypatch.setattr("apply_agent.main_api", fake_main_api)
@@ -125,7 +125,7 @@ def test_main_force_cli_calls_main_cli_directly(monkeypatch) -> None:
     """--cli flag must send directly to main_cli without checking CLI availability."""
     cli_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
         cli_calls.append(url)
 
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
@@ -144,7 +144,7 @@ def test_main_no_cli_calls_main_api(monkeypatch) -> None:
     api_calls = []
 
     def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
-                      jobleads_company="", jobleads_title=""):
+                      jobleads_company="", jobleads_title="", permalink=""):
         api_calls.append(url)
 
     def fake_is_cli_available():
@@ -180,11 +180,11 @@ def test_main_cli_failure_falls_back_to_api(monkeypatch) -> None:
     from hunter.apply_shared import ApplyError
     api_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text=""):
+    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
         raise ApplyError("CLI failed")
 
     def fake_main_api(url, paste_text="", *, skip_dedup=False, full_mode=False,
-                      jobleads_company="", jobleads_title=""):
+                      jobleads_company="", jobleads_title="", permalink=""):
         api_calls.append(url)
 
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
@@ -211,10 +211,11 @@ def test_parse_apply_cli_argv_stays_in_apply_agent() -> None:
 
 def test_parse_apply_cli_argv_force_and_full() -> None:
     from apply_agent import parse_apply_cli_argv
-    url, force_cli, force, full, co, ti, paste_file, notify_start = parse_apply_cli_argv(
+    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(
         ["apply_agent.py", "https://example.com/j/1", "--force", "--full"]
     )
     assert url == "https://example.com/j/1"
     assert force is True
     assert full is True
     assert force_cli is False
+    assert permalink == ""
