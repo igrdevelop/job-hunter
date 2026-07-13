@@ -174,6 +174,108 @@ def test_upload_returns_none_on_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# _call_with_reauth — stale-cached-service recovery (Nexters 2026-07-13)
+# ---------------------------------------------------------------------------
+
+
+def test_call_with_reauth_retries_once_on_oauth_error(monkeypatch):
+    from hunter import gdrive_sync
+
+    calls = {"op": 0, "invalidate": 0}
+
+    async def op():
+        calls["op"] += 1
+        if calls["op"] == 1:
+            raise RuntimeError("invalid_grant: Token has been expired or revoked")
+        return "recovered"
+
+    monkeypatch.setattr(
+        gdrive_sync,
+        "_invalidate_service",
+        lambda: calls.__setitem__("invalidate", calls["invalidate"] + 1),
+    )
+    assert run(gdrive_sync._call_with_reauth(op)) == "recovered"
+    assert calls["op"] == 2  # failed once, retried once
+    assert calls["invalidate"] == 1  # cache dropped before the retry
+
+
+def test_call_with_reauth_does_not_retry_non_oauth_error(monkeypatch):
+    import pytest
+
+    from hunter import gdrive_sync
+
+    calls = {"op": 0, "invalidate": 0}
+
+    async def op():
+        calls["op"] += 1
+        raise RuntimeError("HTTP 500 transient server error")
+
+    monkeypatch.setattr(
+        gdrive_sync,
+        "_invalidate_service",
+        lambda: calls.__setitem__("invalidate", calls["invalidate"] + 1),
+    )
+    with pytest.raises(RuntimeError):
+        run(gdrive_sync._call_with_reauth(op))
+    assert calls["op"] == 1  # a real transient error is not retried here
+    assert calls["invalidate"] == 0
+
+
+def test_call_with_reauth_reraises_when_retry_also_fails(monkeypatch):
+    import pytest
+
+    from hunter import gdrive_sync
+
+    calls = {"op": 0}
+
+    async def op():
+        calls["op"] += 1
+        raise RuntimeError("invalid_grant")  # on-disk token itself revoked
+
+    monkeypatch.setattr(gdrive_sync, "_invalidate_service", lambda: None)
+    with pytest.raises(RuntimeError):
+        run(gdrive_sync._call_with_reauth(op))
+    assert calls["op"] == 2  # tried, rebuilt, tried again, then gave up
+
+
+def test_upload_recovers_from_stale_service_via_rebuild(tmp_path):
+    """The exact Nexters-on-2026-07-13 failure mode: the long-lived bot's cached
+    Drive service has stale creds (OAuth refresh fails) — the first upload call
+    errors, the service is rebuilt from disk, and the retry succeeds."""
+    folder = tmp_path / "2026-07-13" / "Nexters"
+    folder.mkdir(parents=True)
+    (folder / "CV_EN.pdf").write_bytes(b"cv")
+
+    goc_calls = {"n": 0}
+
+    def goc(svc, name, parent):
+        goc_calls["n"] += 1
+        if goc_calls["n"] == 1:  # first (root) call fails as if creds are stale
+            raise RuntimeError("invalid_grant: Token has been expired or revoked")
+        return f"{name}_id"
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", ""),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_NAME", "Job Hunter"),
+        patch("hunter.gdrive_sync._get_service", side_effect=lambda: MagicMock()),
+        patch("hunter.gdrive_client.get_or_create_folder", side_effect=goc),
+        patch("hunter.gdrive_client.upload_folder", return_value="company_id"),
+        patch(
+            "hunter.gdrive_client.folder_url",
+            return_value="https://drive.google.com/drive/folders/company_id",
+        ),
+    ):
+        from hunter import gdrive_sync
+
+        result = run(gdrive_sync.upload_application_folder(folder))
+
+    assert result == "https://drive.google.com/drive/folders/company_id"
+    # 1 failed root call, then root + date on the retry after rebuild.
+    assert goc_calls["n"] == 3
+
+
+# ---------------------------------------------------------------------------
 # upload_log_file — per-day files (YYYY-MM-DD.log)
 # ---------------------------------------------------------------------------
 

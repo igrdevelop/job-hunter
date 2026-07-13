@@ -62,6 +62,42 @@ def _ready() -> bool:
     return bool(GDRIVE_ENABLED and _get_service() is not None)
 
 
+def _invalidate_service() -> None:
+    """Drop the cached Drive service so the next call rebuilds it from disk."""
+    global _service
+    _service = None
+
+
+async def _call_with_reauth(op):
+    """Await ``op()``; on an OAuth/refresh error, rebuild the Drive service from
+    the current token file and retry ONCE.
+
+    The bot is a single long-lived process that builds one Drive service and
+    caches it for its whole lifetime. When Google rotates/expires the refresh
+    token mid-run — e.g. a detached dual-apply *shadow* process refreshed and
+    persisted a new token to ``gsheets_token.json`` — the bot's in-memory
+    credentials go stale and every upload silently fails, while fresh
+    short-lived processes (the shadow) and the separately-cached Sheets service
+    keep working. Rebuilding from disk picks up the freshest persisted token and
+    lets the bot recover WITHOUT a restart (before this, the stale service also
+    poisoned the 30-min backfill, so a missed folder stayed missing forever —
+    e.g. the Nexters primary CV that never reached Drive on 2026-07-13).
+
+    If the on-disk token is itself revoked, the retry re-raises and the existing
+    ``oauth_alert`` boundary in ``build_service`` fires the re-auth alert.
+    """
+    from hunter.oauth_alert import is_oauth_error
+
+    try:
+        return await op()
+    except Exception as e:  # noqa: BLE001 — classify, rebuild, retry once
+        if not is_oauth_error(e):
+            raise
+        log.warning("gdrive_sync: OAuth error (%s) — rebuilding service, retrying once", e)
+        _invalidate_service()
+        return await op()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -110,7 +146,7 @@ async def upload_application_folder(
         return None
 
     try:
-        url = await _do_upload(folder_path)
+        url = await _call_with_reauth(lambda: _do_upload(folder_path))
         log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
         if job_url:
             from hunter.tracker import set_drive_url
@@ -138,9 +174,9 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
     if not shadow_subfolder.exists() or not shadow_subfolder.is_dir():
         return None
 
-    try:
-        from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+    from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
 
+    async def _do() -> str:
         svc = _get_service()
         date_name = primary_folder.parent.name
 
@@ -155,7 +191,10 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
             get_or_create_folder, svc, primary_folder.name, date_id
         )
         shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
-        url = folder_url(shadow_id)
+        return folder_url(shadow_id)
+
+    try:
+        url = await _call_with_reauth(_do)
         log.info("gdrive_sync: uploaded shadow %s → %s", shadow_subfolder, url)
         return url
     except Exception as e:
@@ -365,19 +404,21 @@ async def upload_missing_folders(
             "shadow_errors": shadow_errors,
         }
 
-    svc = _get_service()
     errors: list[str] = []
     uploaded = 0
 
-    # Resolve root folder once — avoids a redundant API call per row.
-    try:
+    # Resolve root folder once — avoids a redundant API call per row. Re-fetch
+    # the service inside the op so a rebuild on OAuth failure takes effect.
+    async def _resolve_root() -> str:
         if GDRIVE_ROOT_FOLDER_ID:
-            root_id = GDRIVE_ROOT_FOLDER_ID
-        else:
-            root_id = await asyncio.wait_for(
-                asyncio.to_thread(get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None),
-                timeout=30,
-            )
+            return GDRIVE_ROOT_FOLDER_ID
+        return await asyncio.wait_for(
+            asyncio.to_thread(get_or_create_folder, _get_service(), GDRIVE_ROOT_FOLDER_NAME, None),
+            timeout=30,
+        )
+
+    try:
+        root_id = await _call_with_reauth(_resolve_root)
     except Exception as e:
         return {
             "uploaded": 0,
@@ -393,17 +434,22 @@ async def upload_missing_folders(
     for i, (company, job_url, folder_path) in enumerate(to_upload, 1):
         if progress_cb and i % 5 == 0:
             await progress_cb(f"⏳ {i}/{total} uploaded…")
-        try:
-            date_name = folder_path.parent.name
+
+        async def _upload_row(fp: Path = folder_path) -> str:
+            # _get_service() re-fetched here so a reauth rebuild is picked up.
+            svc = _get_service()
             date_id = await asyncio.wait_for(
-                asyncio.to_thread(get_or_create_folder, svc, date_name, root_id),
+                asyncio.to_thread(get_or_create_folder, svc, fp.parent.name, root_id),
                 timeout=30,
             )
             company_id = await asyncio.wait_for(
-                asyncio.to_thread(upload_folder, svc, folder_path, date_id),
+                asyncio.to_thread(upload_folder, svc, fp, date_id),
                 timeout=_UPLOAD_TIMEOUT,
             )
-            drive_url = folder_url(company_id)
+            return folder_url(company_id)
+
+        try:
+            drive_url = await _call_with_reauth(_upload_row)
             log.info("gdrive_sync: uploaded %s → %s", folder_path.name, drive_url)
             uploaded += 1
             if job_url:
