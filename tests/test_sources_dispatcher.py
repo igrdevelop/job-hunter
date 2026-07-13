@@ -27,6 +27,7 @@ def test_fetch_roster_includes_all_detail_sources() -> None:
         "remoteok",
         "himalayas",
         "findmyremote",
+        "thesmartjobs",
         "fourdayweek",
         "weworkremotely",
         "remoteleaf",
@@ -46,7 +47,7 @@ def test_fetch_roster_is_independent_of_enabled_flags() -> None:
     """
     roster = _fetch_roster()
     # Construct call should not throw even if every *_ENABLED flag is False.
-    assert len(roster) == 24
+    assert len(roster) == 25
 
 
 def test_fetch_job_text_routes_to_matching_source() -> None:

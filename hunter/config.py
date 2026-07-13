@@ -300,6 +300,16 @@ FINDMYREMOTE_ENABLED: bool = os.getenv("FINDMYREMOTE_ENABLED", "true").lower() i
     "yes",
 )
 
+# ── Smart Jobs (thesmartjobs.com) source config ──────────────────────────────
+# Polish IT job board on the Traffit ATS. Public JSON API (thesmartjobs.com/
+# api/jobs/search), no auth/Cloudflare; also owns detail-page fetch for
+# thesmartjobs.com links (deleted postings 404 -> clean EXPIRED skip).
+THESMARTJOBS_ENABLED: bool = os.getenv("THESMARTJOBS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # ── 4dayweek.io source config ───────────────────────────────────────────────
 FOURDAYWEEK_ENABLED: bool = os.getenv("FOURDAYWEEK_ENABLED", "true").lower() in (
     "true",
