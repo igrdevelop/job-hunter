@@ -64,16 +64,22 @@ class AtsAggregatorSource(BaseSource):
         return "jobs.ashbyhq.com" in host
 
     def fetch_text(self, url: str) -> str:
-        """Workable goes through its public JSON API; others use html_fallback.
+        """Workable + Lever go through their public JSON APIs; others use html_fallback.
 
         Mirrors the legacy job_fetch dispatch — every ATS wrapper except
-        Workable was a trivial fetch_html() call.
+        Workable was a trivial fetch_html() call. Lever is now special-cased
+        too: its public posting API distinguishes a deleted posting (HTTP 404 /
+        {"ok": false}) from a transient error, so a stale link becomes a clean
+        $0 EXPIRED skip instead of a FAIL (fetch_html raises on the 404 page
+        before the pipeline's expiry check ever runs).
         """
         from hunter.sources.html_fallback import fetch_html
 
         host = (urlparse(url).hostname or "").lower()
         if "apply.workable.com" in host:
             return _fetch_workable_text(url)
+        if "jobs.lever.co" in host:
+            return _fetch_lever_text(url)
         return fetch_html(url)
 
     def search(self) -> list[Job]:
@@ -305,6 +311,123 @@ def _fetch_workable_text(url: str) -> str:
         return fetch_html(url)
 
     text = _fetch_workable_json_job(slug, shortcode, referer=url)
+    if text and len(text) >= 100:
+        return text
+    return fetch_html(url)
+
+
+# ── Lever detail-page fetch (public posting API) ──────────────────────────────
+
+_LEVER_API_TEMPLATE = "https://api.lever.co/v0/postings/{slug}/{posting_id}"
+# Matches EXPIRED_PATTERNS in hunter/expired_check.py — a deleted Lever posting
+# becomes a clean $0 EXPIRED skip in the apply pipeline's Step 3 instead of a
+# FAIL row (same synthetic-marker trick as hunter/sources/findmyremote.py).
+_LEVER_EXPIRED_TEXT = "This job posting has expired."
+
+
+def _lever_headers() -> dict[str, str]:
+    return {**_workable_html_headers(), "Accept": "application/json"}
+
+
+def _parse_lever_path(path: str) -> tuple[str | None, str | None]:
+    """Return (site_slug, posting_id) from a jobs.lever.co URL path.
+
+    Shape: /{site}/{posting-id}[/apply] → (site, posting-id).
+    """
+    parts = [p for p in unquote(path or "").split("/") if p]
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return None, None
+
+
+def _lever_dict_to_text(data: dict) -> str:
+    """Render a single Lever posting dict into plain posting text.
+
+    Prefers Lever's own ``*Plain`` fields; falls back to stripping the HTML
+    variant. ``lists`` holds the bulleted requirement/responsibility sections.
+    """
+    lines: list[str] = []
+    title = (data.get("text") or "").strip()
+    if title:
+        lines.append(f"Title: {title}")
+
+    cats = data.get("categories") if isinstance(data.get("categories"), dict) else {}
+    loc_bits = [cats.get("location"), data.get("country"), data.get("workplaceType")]
+    loc_s = ", ".join(str(x).strip() for x in loc_bits if x and str(x).strip())
+    if loc_s:
+        lines.append(f"Location: {loc_s}")
+    if (cats.get("commitment") or "").strip():
+        lines.append(f"Type: {cats['commitment'].strip()}")
+
+    intro = (data.get("descriptionPlain") or "").strip() or _workable_html_to_text(
+        str(data.get("description") or "")
+    )
+    if intro:
+        lines.append("")
+        lines.append(intro)
+
+    for section in data.get("lists") or []:
+        if not isinstance(section, dict):
+            continue
+        header = (section.get("text") or "").strip()
+        content = _workable_html_to_text(str(section.get("content") or ""))
+        if not header and not content:
+            continue
+        lines.append("")
+        if header:
+            lines.append(f"{header}:")
+        if content:
+            lines.append(content)
+
+    closing = (data.get("additionalPlain") or "").strip() or _workable_html_to_text(
+        str(data.get("additional") or "")
+    )
+    if closing:
+        lines.append("")
+        lines.append(closing)
+
+    return "\n".join(lines).strip()
+
+
+def _fetch_lever_text(url: str) -> str:
+    """Public Lever job URL → plaintext via the posting API (or html_fallback).
+
+    A deleted posting returns a synthetic expired marker (HTTP 404 or a
+    ``{"ok": false}`` JSON body) so the caller records EXPIRED, not FAIL.
+    Any other failure falls back to the generic HTML fetch.
+    """
+    from hunter.sources.html_fallback import fetch_html
+
+    slug, posting_id = _parse_lever_path(urlparse(url).path)
+    if not slug or not posting_id:
+        return fetch_html(url)
+
+    api = _LEVER_API_TEMPLATE.format(slug=slug, posting_id=posting_id)
+    try:
+        resp = requests.get(
+            api, params={"mode": "json"}, headers=_lever_headers(), timeout=_WORKABLE_TIMEOUT
+        )
+    except Exception as e:
+        logger.warning(f"[ats:lever] API fetch failed for {url}: {e}")
+        return fetch_html(url)
+
+    if resp.status_code == 404:
+        logger.info(f"[ats:lever] posting deleted (404): {url}")
+        return _LEVER_EXPIRED_TEXT
+    try:
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"[ats:lever] API parse failed for {url}: {e}")
+        return fetch_html(url)
+
+    if isinstance(data, dict) and data.get("ok") is False:
+        logger.info(f"[ats:lever] posting not found: {url} ({data.get('error')!r})")
+        return _LEVER_EXPIRED_TEXT
+    if not isinstance(data, dict):
+        return fetch_html(url)
+
+    text = _lever_dict_to_text(data)
     if text and len(text) >= 100:
         return text
     return fetch_html(url)

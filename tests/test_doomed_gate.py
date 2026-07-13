@@ -254,6 +254,55 @@ def test_stack_mismatch_not_triggered_without_other_framework() -> None:
     assert "stack_mismatch_non_candidate_framework" not in _rules(findings)
 
 
+# ── SOFT rule: game-engine-first role (2026-07-12 Nexters case) ──────────────
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Real 2026-07-12 case: game-engine stack, "Frontend Developer" title.
+        "Senior Frontend Developer. Experience with game engines such as "
+        "Cocos, Phaser, Babylon, Pixi, and familiarity with the Spine SDK.",
+        "We build in TypeScript, C#, or Haxe on PixiJS.",
+        "Unity 3D engineer for our casual games studio.",
+        "Gameplay engineer working in Unreal Engine and Godot.",
+    ],
+)
+def test_stack_mismatch_game_engine_soft(text: str) -> None:
+    findings = assess_job_text(text)
+    assert "stack_mismatch_game_engine" in _rules(findings)
+    assert all(f.severity == "soft" for f in findings if f.rule == "stack_mismatch_game_engine")
+    # Must never HARD-block a game-dev role — it's a warn, not a skip.
+    assert not any(f.severity == "hard" for f in findings)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We build browser games in Angular with a Pixi.js rendering layer.",
+        "React front-end with a Phaser mini-game embedded on the landing page.",
+    ],
+)
+def test_stack_mismatch_game_engine_not_triggered_when_candidate_framework_present(
+    text: str,
+) -> None:
+    findings = assess_job_text(text)
+    assert "stack_mismatch_game_engine" not in _rules(findings)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Bare English words that must NOT be read as game engines.
+        "A strong spine of automated tests keeps our releases safe.",
+        "The team works in unity toward a shared roadmap.",
+    ],
+)
+def test_stack_mismatch_game_engine_no_english_word_false_positive(text: str) -> None:
+    findings = assess_job_text(text)
+    assert "stack_mismatch_game_engine" not in _rules(findings)
+
+
 # ── Reused _MANUAL_SCREEN_CHECKS — HARD tier (no real false positives in M4) ─
 
 

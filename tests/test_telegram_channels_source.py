@@ -249,6 +249,17 @@ def test_guess_company_falls_back_to_channel_name():
     assert guess_company("no at-pattern here at all", "somechannel") == "@somechannel"
 
 
+def test_guess_company_ignores_at_inside_url():
+    # Real 2026-07-12 bug: a teletype.in URL path (@courierus/7ZGWxSxMZZ7)
+    # became the tracker Company. The `@` sits after `/`, not whitespace.
+    text = "Senior Frontend Developer\nhttps://teletype.in/@courierus/7ZGWxSxMZZ7\nREMOTE"
+    assert guess_company(text, "rabotafrontend") == "@rabotafrontend"
+
+
+def test_guess_company_still_matches_real_at_mention():
+    assert guess_company("Team Lead Frontend (Pixi.js) @ Nexters \nPosted", "chan") == "Nexters"
+
+
 def test_guess_location_remote_ru_token():
     assert guess_location("Формат: удаленно") == "Remote"
 
