@@ -1055,21 +1055,54 @@ def _assess_unsupported_language(job: Job) -> "GateFinding | None":
 _OTHER_FRAMEWORK_RE = re.compile(
     r"\b(?:vue(?:\.?js)?|sveltekit|svelte|ember(?:\.?js)?)\b", re.IGNORECASE
 )
+# SOFT — game-engine-first role (Pixi/Cocos/Phaser/Babylon/Haxe/Unity/…). These
+# postings often carry "Frontend Developer" + "TypeScript" (so the title/level
+# filters pass) but want a game-rendering stack the candidate doesn't have —
+# real case 2026-07-12: a Nexters "Hero Wars" role reached generation at 82%
+# because the old Vue/Svelte-only rule couldn't see the mismatch. Tokens are
+# specific enough to avoid English-word false positives (no bare "spine"/
+# "unity"); still SOFT (warn only), so an occasional miss just adds a warning.
+_GAME_ENGINE_RE = re.compile(
+    r"\b(?:"
+    r"pixi(?:\.?js)?|"
+    r"cocos(?:2d)?(?:\s*creator)?|cocoscreator|"
+    r"phaser|"
+    r"babylon(?:\.?js)?|"
+    r"haxe|"
+    r"spine\s+sdk|"
+    r"godot|"
+    r"gamemaker|"
+    r"unreal(?:\s+engine)?|"
+    r"unity\s*(?:3d|engine)"
+    r")\b",
+    re.IGNORECASE,
+)
 _CANDIDATE_FRAMEWORK_RE = re.compile(r"\b(?:angular|react(?:\.?js)?)\b", re.IGNORECASE)
 
 
 def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
-    """SOFT — primary stack isn't Angular/React (Vue/Svelte/Ember-first role)."""
-    other = _OTHER_FRAMEWORK_RE.search(blob)
-    if not other:
-        return None
+    """SOFT — primary stack isn't Angular/React.
+
+    Two shapes, same guard (only when neither Angular nor React appears): a
+    Vue/Svelte/Ember-first web role, or a game-engine-first role.
+    """
     if _CANDIDATE_FRAMEWORK_RE.search(blob):
         return None
-    return GateFinding(
-        rule="stack_mismatch_non_candidate_framework",
-        severity="soft",
-        evidence=_context_snippet(blob, other.start(), other.end()),
-    )
+    other = _OTHER_FRAMEWORK_RE.search(blob)
+    if other:
+        return GateFinding(
+            rule="stack_mismatch_non_candidate_framework",
+            severity="soft",
+            evidence=_context_snippet(blob, other.start(), other.end()),
+        )
+    engine = _GAME_ENGINE_RE.search(blob)
+    if engine:
+        return GateFinding(
+            rule="stack_mismatch_game_engine",
+            severity="soft",
+            evidence=_context_snippet(blob, engine.start(), engine.end()),
+        )
+    return None
 
 
 def _assess_mill_body(blob: str) -> "GateFinding | None":

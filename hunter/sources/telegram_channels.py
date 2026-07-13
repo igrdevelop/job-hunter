@@ -229,7 +229,12 @@ def synthesize_title(text: str, matched_kw: str | None = None) -> str:
     return first_line or "Telegram post"
 
 
-_COMPANY_AT_RE = re.compile(r"@\s*([A-Za-z0-9][^\n@]{1,60}?)(?=\s{2,}|\n|$)")
+# The `@` must sit at line/text start or after whitespace — NOT mid-token, so a
+# URL path like `teletype.in/@courierus/7ZGWxSxMZZ7` (the `@` follows `/`) is not
+# mistaken for a " @ Company" mention (real bug 2026-07-12: the URL path became
+# the tracker Company). The captured name also excludes `/` so it can never
+# swallow a URL path segment.
+_COMPANY_AT_RE = re.compile(r"(?:^|(?<=\s))@\s*([A-Za-z0-9][^\n@/]{1,60}?)(?=\s{2,}|\n|$)")
 
 
 def guess_company(text: str, channel: str) -> str:
