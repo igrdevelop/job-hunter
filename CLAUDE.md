@@ -294,6 +294,10 @@ prompts/                        See prompts/README.md. System files are tracked;
   examples/                     Cover letter examples, About Me texts [GITIGNORED]
   candidate/                    Private interview notes (not read by code) [GITIGNORED]
 
+docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
+                            per-workstream details in docs/quality/01..09-*.md (deps lockfile,
+                            best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
+                            public-repo prep, candidate.yaml multi-user, CANDIDATE_TRACKS/React)
 tests/                      37+ test files, ~3200 lines (pytest)
 tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
