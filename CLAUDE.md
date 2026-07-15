@@ -1043,6 +1043,13 @@ second `html.unescape()` pass.
   `hunter/` + entry scripts + `tests/` + `tools/`. Rule set: F/E/W + B (bugbear)
   + C4 + SIM + S (bandit); deliberate ignores are documented inline in
   `pyproject.toml` — don't silence a new finding without a rationale comment
+- `mypy hunter/ llm_client.py generate_docs.py apply_agent.py` runs in CI
+  (`typecheck` job) but is `continue-on-error: true` — informational only,
+  does not block deploy yet. Baseline as of 2026-07-15: 223 errors in 54
+  files (mostly PTB `Message | None`/`JobQueue | None` unchecked attribute
+  access — real but pre-existing). Don't let a new change grow that number;
+  fixing it down to zero (and flipping the gate to blocking) is tracked in
+  docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not done in this pass
 - SonarCloud scan runs as an informational CI job (`sonar-project.properties`);
   it skips itself until `SONAR_TOKEN` is added to the repo secrets and never
   blocks deploy
@@ -1078,7 +1085,7 @@ second `html.unescape()` pass.
 
 ### Code Quality
 
-5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` config exists in `pyproject.toml` but nothing runs it yet — no CI job, no pre-commit hook.
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, `continue-on-error: true` — 223-error baseline, informational only until driven to zero; see docs/quality/06-static-gates-mypy-sonar.md).
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 

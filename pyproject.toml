@@ -41,7 +41,7 @@ browser = ["playwright"]
 # /scoutfound via the owner's own Telegram user session (MTProto), since a
 # bot's own Bot-API messages never come back to it as an incoming update.
 scout = ["telethon"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "mypy"]
 
 [project.scripts]
 hunter = "hunter.__main__:main"

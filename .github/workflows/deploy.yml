@@ -39,6 +39,24 @@ jobs:
       - name: Run tests
         run: pytest tests/ -q
 
+  # Informational only (continue-on-error) — deploy does NOT depend on it yet.
+  # Baseline as of 2026-07-15 (quality-06, docs/quality/06-static-gates-mypy-sonar.md
+  # Этап 0): 223 errors in 54 files across `hunter/ llm_client.py generate_docs.py
+  # apply_agent.py`. Becomes a blocking gate once that baseline is driven to zero
+  # (Этап 1-2 of the plan — not done here).
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.lock
+      - name: mypy
+        continue-on-error: true
+        run: mypy hunter/ llm_client.py generate_docs.py apply_agent.py
+
   # Informational only — deploy does NOT depend on it. Skips itself cleanly
   # until the repo is connected on sonarcloud.io and SONAR_TOKEN is added to
   # the repo secrets (free for public repos).
