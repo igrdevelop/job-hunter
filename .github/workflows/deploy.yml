@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.lock
       - name: Run tests
         run: pytest tests/ -q
 
@@ -101,6 +101,7 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/master/docker-compose.yml -o docker-compose.yml
             touch gsheets_state.json
             echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            export IMAGE_TAG=${{ github.sha }}
             docker compose pull
             docker compose up -d
             docker image prune -f

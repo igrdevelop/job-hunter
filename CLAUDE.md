@@ -336,6 +336,17 @@ linkedin_scout/             STANDALONE — not imported by hunter/, not in Docke
 
 telegram_channels.json      Owner-curated channel list for hunter/sources/telegram_channels.py
                             (tracked — see docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md)
+pyproject.toml               SINGLE source of truth for dependencies (`[project.dependencies]`
+                            + `browser`/`scout`/`dev` extras) and tool config (ruff, mypy,
+                            pytest). Build backend `setuptools.build_meta` (was the
+                            nonexistent `setuptools.backends.legacy:build` — silently worked
+                            only because build isolation pulls a fresh setuptools).
+requirements.lock            GENERATED (`uv pip compile pyproject.toml --all-extras
+                            --python-platform linux --python-version 3.11 -o
+                            requirements.lock`) — never hand-edit. Docker and the CI test-job
+                            both install from this file, not from pyproject.toml directly, so
+                            prod and CI always run the exact same transitive versions. Replaces
+                            the old hand-maintained, mostly-unpinned `requirements.txt`.
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -1035,6 +1046,14 @@ second `html.unescape()` pass.
 - SonarCloud scan runs as an informational CI job (`sonar-project.properties`);
   it skips itself until `SONAR_TOKEN` is added to the repo secrets and never
   blocks deploy
+- **New dependency → edit `pyproject.toml` only, then regenerate the lock:**
+  `uv pip compile pyproject.toml --all-extras --python-platform linux
+  --python-version 3.11 -o requirements.lock` (fallback: pip-tools
+  `pip-compile`). Never hand-edit `requirements.lock` or add a package to it
+  directly — Docker and CI both install from the lock, so an un-regenerated
+  lock means prod silently keeps running the old version. `--python-platform
+  linux` matters: compiling on Windows pulls in Windows-only transitive deps
+  (e.g. `colorama`) that don't belong in the Linux deploy image.
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
 - Candidate profile single source of truth: `prompts/candidate_profile.md`
@@ -1055,11 +1074,11 @@ second `html.unescape()` pass.
 
 ### Infrastructure
 
-4. ~~**Playwright not installed in Docker — Inhire source always returns [].**~~ ✅ Resolved: `playwright` is active in `requirements.txt` and the `Dockerfile` runs `playwright install chromium --with-deps` (adds ~500MB to image, ~seconds/page at runtime). Inhire is live (verified 2026-06-08: 25 jobs incl. Angular roles). **Ops note:** Inhire only works in prod once the deploy image is rebuilt with the current Dockerfile. Playwright does NOT unblock Wellfound — real headless Chromium still gets HTTP 403 (anti-bot needs a logged-in session + stealth; see `docs/new-sources/QUEUE-3-hard.md`).
+4. ~~**Playwright not installed in Docker — Inhire source always returns [].**~~ ✅ Resolved: `playwright` is in the `browser` extra of `pyproject.toml` (pulled into `requirements.lock` via `--all-extras`) and the `Dockerfile` runs `playwright install chromium --with-deps` (adds ~500MB to image, ~seconds/page at runtime). Inhire is live (verified 2026-06-08: 25 jobs incl. Angular roles). **Ops note:** Inhire only works in prod once the deploy image is rebuilt with the current Dockerfile. Playwright does NOT unblock Wellfound — real headless Chromium still gets HTTP 403 (anti-bot needs a logged-in session + stealth; see `docs/new-sources/QUEUE-3-hard.md`).
 
 ### Code Quality
 
-5. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` config exists in `pyproject.toml` but nothing runs it yet — no CI job, no pre-commit hook.
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 

@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   job-hunter:
-    image: ghcr.io/igrdevelop/job-hunter:latest
+    image: ghcr.io/igrdevelop/job-hunter:${IMAGE_TAG:-latest}
     container_name: job-hunter
     restart: always
     env_file:

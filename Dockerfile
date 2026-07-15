@@ -7,12 +7,12 @@ RUN apt-get update && apt-get install -y \
     libreoffice \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.lock
 RUN playwright install chromium --with-deps
 
-# No pip install needed — WORKDIR /app is on sys.path, python -m hunter works directly.
 COPY . .
+RUN pip install --no-cache-dir -e . --no-deps
 
 RUN mkdir -p Applications backups
 
