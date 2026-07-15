@@ -315,7 +315,36 @@ docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priori
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
                             best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
                             public-repo prep, candidate.yaml multi-user, CANDIDATE_TRACKS/React)
-tests/                      37+ test files, ~3200 lines (pytest)
+tests/                      38+ test files, ~3400 lines (pytest); `pytest tests/ --cov=hunter
+                            --cov-report=xml --cov-report=term` for a coverage table (no
+                            --cov-fail-under gate yet — docs/quality/04-coverage-and-golden-
+                            e2e.md Part A, map the blind spots for a few weeks first)
+tests/conftest.py           Shared fixtures: `tracker_db` (isolated tmp tracker.db),
+                            `fake_llm` (routes llm_client.call_llm by prompt shape to
+                            configurable generation/judge/verdict/outreach responses — a
+                            lazy `from llm_client import call_llm` inside each caller means
+                            ONE patch of `llm_client.call_llm` intercepts every call site in
+                            the pipeline, however deep). Primary consumer:
+                            test_golden_apply_e2e.py; reusable by any test that needs a real
+                            pipeline without a real LLM.
+tests/test_golden_apply_e2e.py  Golden E2E test (docs/quality/04): runs
+                            hunter.apply_api.main_api() for REAL, mocking only the external
+                            boundaries (LLM via fake_llm, network via fetch_job_text, the
+                            generate_docs.py subprocess via a fake that reuses its real
+                            filename helper + real tracker-write call, Telegram via list-
+                            collecting stubs). Catches the "stages work individually but the
+                            wiring breaks" bug class — verified against 3 hand-mutations
+                            (comment out the verdict tracker stamp, force --no-tracker onto
+                            the primary Step 7 call, disable the verdict entirely) that each
+                            make the test fail as expected. 7 scenarios: happy EN (URL +
+                            paste-mode variants), expired (no LLM call), doomed-gate HARD (no
+                            LLM call), 3 mutation-catch regression guards. Surfaced a real
+                            pre-existing bug in hunter/outreach.py (see below) — NOT fixed
+                            here (out of scope), the test documents the actual behavior with
+                            an explanatory comment instead of asserting a false pass.
+tests/fixtures/golden/      Fixture LLM responses (generation/judge/verdict) + one EN job
+                            posting for the golden E2E test, loaded by name — not real
+                            LLM output, hand-written to exercise the pipeline's happy path.
 tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
@@ -1112,6 +1141,8 @@ second `html.unescape()` pass.
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
 7. ~~**tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call.~~ ✅ Resolved by the Phase 5 SQLite migration (2026-05-27): tracker.py no longer imports openpyxl at all — every read/write goes through `hunter.db.get_db()` (SQLite, WAL). No per-call workbook re-parse remains. (tracker.py is still ~1050 lines, but that's surface area, not the Excel-reparse cost the issue described.)
+
+8. **`hunter/outreach.py::_candidate_summary` silently never writes outreach.md.** Discovered 2026-07-15 building `tests/test_golden_apply_e2e.py` (docs/quality/04): it does `(resume.get("skills") or [])[:10]` assuming `resume_en.skills` is a list, but the real schema is a dict everywhere else (`generate_docs.build_resume`, `claim_judge.iter_judged_fields`) — slicing a dict raises `TypeError: unhashable type: 'slice'`, caught by `run_outreach`'s best-effort wrapper, so every normal apply silently skips outreach.md. Not fixed here (out of scope for the quality-roadmap batch); a follow-up task was spawned.
 
 ---
 

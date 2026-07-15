@@ -27,6 +27,10 @@ dist/
 build/
 .eggs/
 
+# pytest-cov output (docs/quality/04-coverage-and-golden-e2e.md)
+.coverage
+coverage.xml
+
 # IDE
 .vscode/
 .idea/

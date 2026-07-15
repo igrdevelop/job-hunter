@@ -1,0 +1,30 @@
+Job Title: Senior Frontend Developer (Angular)
+Company: Nordic Frontend Labs
+Location: Remote (EU)
+Employment: B2B / Contract
+
+--- Job Description ---
+We are looking for a Senior Frontend Developer with strong Angular experience
+to join our fully remote, EU-based product team. You will build and maintain
+customer-facing dashboards used by thousands of businesses across Europe.
+
+Responsibilities:
+- Develop and maintain Angular 17+ applications using RxJS and Signals
+- Own the component library and design system used across our products
+- Write unit and integration tests (Jest, Cypress)
+- Collaborate with backend engineers on REST API integration
+- Participate in code review and mentor mid-level engineers
+
+Requirements:
+- 5+ years of professional Angular development experience
+- Strong TypeScript, RxJS, and Signals knowledge
+- Experience with unit testing (Jest) and CI/CD pipelines
+- Fluent English (written and spoken)
+- Fully remote, EU time zone overlap required
+
+Nice to have:
+- Experience with NX monorepos
+- Familiarity with performance optimization and accessibility (WCAG)
+
+We offer a fully remote position, flexible hours, and a collaborative,
+English-speaking engineering culture.

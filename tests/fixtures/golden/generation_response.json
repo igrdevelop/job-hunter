@@ -1,0 +1,122 @@
+{
+  "company_name": "Nordic Frontend Labs",
+  "job_title": "Senior Frontend Developer (Angular)",
+  "stack": "Angular",
+  "lang": "EN",
+  "ats_score": "92",
+  "to_learn": "",
+  "resume_en": {
+    "summary": "Senior Frontend Developer with 10+ years of experience building Angular applications with RxJS and Signals. Proven track record delivering customer-facing dashboards, component libraries, and design systems for remote, EU-based product teams. Strong TypeScript, performance optimization, and unit testing (Jest) background, fluent English.",
+    "skills": {
+      "frontend": "Angular 17+, TypeScript, RxJS, Signals, NX monorepo",
+      "tools": "Jest, Cypress, Git, CI/CD pipelines",
+      "methodologies": "Agile, code review, mentoring, performance optimization, accessibility (WCAG)",
+      "languages": "English (Fluent), Polish (Native)"
+    },
+    "experience": [
+      {
+        "title": "Senior Frontend Developer (Angular)",
+        "company": "TechCorp Alpha",
+        "period": "Jan 2024 - Present",
+        "subtitle": "Customer dashboards | Remote (EU)",
+        "bullets": [
+          "Built and maintained Angular 17+ dashboards with RxJS and Signals for thousands of EU business customers.",
+          "Owned the shared component library and design system across three product teams."
+        ],
+        "stack_line": "Stack: Angular 17, TypeScript, RxJS, Signals, Jest"
+      },
+      {
+        "title": "Senior Frontend Developer",
+        "company": "TechCorp Beta",
+        "period": "Mar 2022 - Dec 2023",
+        "subtitle": "Enterprise SaaS platform | Remote",
+        "bullets": [
+          "Led migration of a legacy AngularJS app to Angular with full Jest test coverage.",
+          "Integrated REST APIs and improved page performance via lazy loading and change detection tuning."
+        ],
+        "stack_line": "Stack: Angular, TypeScript, RxJS, Jest, Cypress"
+      },
+      {
+        "title": "Frontend Developer (Angular)",
+        "company": "TechCorp Gamma",
+        "period": "Jun 2020 - Feb 2022",
+        "subtitle": "Internal tooling | Wrocław, Poland",
+        "bullets": [
+          "Developed internal Angular tooling used by 200+ employees.",
+          "Mentored two mid-level engineers on Angular and RxJS best practices."
+        ],
+        "stack_line": "Stack: Angular, TypeScript, RxJS"
+      },
+      {
+        "title": "Frontend Developer",
+        "company": "TechCorp Delta",
+        "period": "Sep 2018 - May 2020",
+        "subtitle": "E-commerce platform",
+        "bullets": [
+          "Built reusable Angular components for a high-traffic e-commerce platform.",
+          "Wrote unit and integration tests with Jest and Cypress."
+        ],
+        "stack_line": "Stack: Angular, TypeScript, Jest"
+      },
+      {
+        "title": "Frontend Developer",
+        "company": "TechCorp Epsilon",
+        "period": "Jan 2017 - Aug 2018",
+        "subtitle": "Fintech dashboard",
+        "bullets": [
+          "Implemented Angular data-visualisation dashboards for a fintech client."
+        ],
+        "stack_line": "Stack: AngularJS, Angular, TypeScript"
+      },
+      {
+        "title": "Junior Frontend Developer",
+        "company": "TechCorp Zeta",
+        "period": "Jul 2015 - Dec 2016",
+        "subtitle": "Web applications",
+        "bullets": [
+          "Developed and maintained web applications using AngularJS and JavaScript."
+        ],
+        "stack_line": "Stack: AngularJS, JavaScript"
+      },
+      {
+        "title": "Junior Developer",
+        "company": "TechCorp Eta",
+        "period": "Sep 2013 - Jun 2015",
+        "subtitle": "Web development",
+        "bullets": [
+          "Built and styled web pages with JavaScript, HTML, and CSS."
+        ],
+        "stack_line": "Stack: JavaScript, HTML, CSS"
+      }
+    ],
+    "education": "Technical University - Bachelor, Computer Science",
+    "courses": "Angular Advanced Course, RxJS Deep Dive"
+  },
+  "resume_pl": {
+    "summary": "Starszy programista Frontend z ponad 10-letnim doświadczeniem w budowaniu aplikacji Angular z wykorzystaniem RxJS i Signals. Doświadczenie w pracy zdalnej z zespołami produktowymi w Unii Europejskiej.",
+    "skills": {
+      "frontend": "Angular 17+, TypeScript, RxJS, Signals, NX monorepo",
+      "tools": "Jest, Cypress, Git, CI/CD",
+      "methodologies": "Agile, code review, mentoring",
+      "languages": "Angielski (biegły), Polski (ojczysty)"
+    },
+    "experience": [
+      {
+        "title": "Starszy Programista Frontend (Angular)",
+        "company": "TechCorp Alpha",
+        "period": "Sty 2024 - obecnie",
+        "subtitle": "Panele klienckie | Zdalnie (UE)",
+        "bullets": [
+          "Zbudował i utrzymywał panele Angular 17+ z RxJS i Signals dla tysięcy klientów biznesowych w UE."
+        ],
+        "stack_line": "Stack: Angular 17, TypeScript, RxJS, Signals, Jest"
+      }
+    ],
+    "education": "Politechnika - Licencjat, Informatyka",
+    "courses": "Kurs zaawansowany Angular"
+  },
+  "cover_letter_en": "Dear Hiring Team,\n\nI am writing to apply for the Senior Frontend Developer (Angular) position at Nordic Frontend Labs. Over the past 10 years I have built Angular applications with RxJS and Signals, most recently owning a shared component library used across three product teams.\n\nI would welcome the opportunity to bring this experience to your remote, EU-based team.\n\nBest regards,\nIhar Petrasheuski",
+  "cover_letter_pl": "Szanowni Państwo,\n\nZ przyjemnością aplikuję na stanowisko Starszego Programisty Frontend (Angular) w Nordic Frontend Labs. Przez ostatnie 10 lat budowałem aplikacje Angular z wykorzystaniem RxJS i Signals.\n\nZ poważaniem,\nIhar Petrasheuski",
+  "about_me_en": "Senior Frontend Developer with 10+ years of Angular experience, specializing in RxJS, Signals, and component library design for remote EU product teams.",
+  "about_me_pl": "Starszy programista Frontend z ponad 10-letnim doświadczeniem w Angular, specjalizujący się w RxJS i Signals dla zdalnych zespołów produktowych w UE."
+}

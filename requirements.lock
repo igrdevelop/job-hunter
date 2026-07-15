@@ -30,6 +30,8 @@ charset-normalizer==3.4.9
     # via requests
 cloudscraper==1.2.71
     # via job-hunter (pyproject.toml)
+coverage==7.15.1
+    # via pytest-cov
 distro==1.9.0
     # via
     #   anthropic
@@ -112,7 +114,9 @@ pathspec==1.1.1
 playwright==1.61.0
     # via job-hunter (pyproject.toml)
 pluggy==1.6.0
-    # via pytest
+    # via
+    #   pytest
+    #   pytest-cov
 proto-plus==1.28.1
     # via google-api-core
 protobuf==7.35.1
@@ -145,6 +149,10 @@ pyparsing==3.3.2
 pypdf==6.14.2
     # via job-hunter (pyproject.toml)
 pytest==9.1.1
+    # via
+    #   job-hunter (pyproject.toml)
+    #   pytest-cov
+pytest-cov==7.1.0
     # via job-hunter (pyproject.toml)
 python-docx==1.2.0
     # via job-hunter (pyproject.toml)
@@ -185,6 +193,8 @@ telethon==1.44.0
     # via job-hunter (pyproject.toml)
 threadpoolctl==3.6.0
     # via scikit-learn
+tomli==2.4.1
+    # via coverage
 tqdm==4.68.4
     # via openai
 typing-extensions==4.16.0

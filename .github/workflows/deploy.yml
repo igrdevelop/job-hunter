@@ -37,7 +37,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.lock
       - name: Run tests
-        run: pytest tests/ -q
+        # No --cov-fail-under yet (docs/quality/04-coverage-and-golden-e2e.md
+        # Part A): map the blind spots for a few weeks before gating on them.
+        run: pytest tests/ -q --cov=hunter --cov-report=xml --cov-report=term
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7
 
   # Informational only (continue-on-error) — deploy does NOT depend on it yet.
   # Baseline as of 2026-07-15 (quality-06, docs/quality/06-static-gates-mypy-sonar.md
@@ -61,6 +69,7 @@ jobs:
   # until the repo is connected on sonarcloud.io and SONAR_TOKEN is added to
   # the repo secrets (free for public repos).
   sonarcloud:
+    needs: [test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     steps:
@@ -79,6 +88,11 @@ jobs:
         if: steps.sonar.outputs.enabled == 'true'
         with:
           fetch-depth: 0  # full history for accurate new-code detection
+      - name: Download coverage report
+        if: steps.sonar.outputs.enabled == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
       - name: SonarCloud scan
         if: steps.sonar.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-scan-action@v5
