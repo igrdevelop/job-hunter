@@ -195,6 +195,23 @@ hunter/
                             after each source.search() in the hunt loop, health_report() for /health,
                             newly_broken() alerts once when a previously-working source goes dry for
                             SOURCE_HEALTH_ALERT_STREAK consecutive runs (broken selector vs quiet day)
+  best_effort.py            Generalizes source_health/oauth_alert's shape to every other
+                            best-effort subsystem (docs/quality/03-best-effort-degradation-
+                            alerts.md): `with best_effort("subsystem.name"):` swallows the
+                            exception (existing contract unchanged) but counts CONSECUTIVE
+                            failures per subsystem in SQLite (`subsystem_health` table,
+                            hunter/db.py — survives the apply-subprocess boundary, same reason
+                            source_health's counters do). At `threshold` (default 3) fires one
+                            Telegram alert with a 6h cooldown; a success after an alert sends one
+                            recovery message. Wrapped around the existing try/except in:
+                            gdrive_sync (upload_application_folder/upload_shadow_folder/
+                            upload_missing_folders — the 2026-07-13 stale-token incident this
+                            closes), gsheets_sync (mirror_new_row/resync_dirty), delivery.py
+                            (both targeted stages), outreach.py, dual_apply.py (shadow),
+                            cost_writer.py, verdict_writer.py. Existing try/except are NOT
+                            removed — the wrapper goes around them; a block that already
+                            returns None/False on error re-raises from its except clause so the
+                            failure still reaches best_effort() for counting
   gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
   gsheets_client.py         Low-level Sheets API v4 wrapper
   gdrive_sync.py            High-level Drive upload (upload_application_folder)
@@ -1066,6 +1083,11 @@ second `html.unescape()` pass.
 - Candidate profile single source of truth: `prompts/candidate_profile.md`
 - LibreOffice path: `C:/Program Files/LibreOffice/program/soffice.exe` (in `generate_docs.py`)
 - When changing tracker schema, bot behavior, or adding files — update CLAUDE.md in the same commit
+- New best-effort code (a subsystem that must swallow its own errors — Sheets/
+  Drive/Telegram/shadow/writer style) wraps its existing try/except in
+  `with hunter.best_effort.best_effort("subsystem.name"):` rather than a bare
+  swallow, so silent degradation still surfaces as one alert at a threshold
+  instead of going unnoticed for hours (see hunter/best_effort.py)
 
 ---
 

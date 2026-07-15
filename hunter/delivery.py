@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from hunter.best_effort import best_effort
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,22 +51,29 @@ async def deliver_apply_now(url: str | None) -> str | None:
 
 async def _mirror_row_targeted(url: str) -> bool:
     """Append this URL's tracker row to Sheets. True if the row was found."""
-    try:
-        from hunter.tracker_cache import cache
-        from hunter import gsheets_sync
+    from hunter.tracker_cache import cache
 
+    try:
         await cache.load_from_db()
         row = await cache.get_row_by_url(url)
-        if not row:
-            logger.warning("[delivery] no tracker row found for %s — falling back", url)
-            return False
-        await gsheets_sync.mirror_new_row(row)
-        return True
     except Exception as e:
-        logger.warning("[delivery] gsheets mirror failed for %s: %s", url, e)
-        # mirror_new_row failing leaves the row sheets_dirty — the resync job
-        # picks it up; don't double-append via push_missing in the same breath.
+        logger.warning("[delivery] tracker cache lookup failed for %s: %s", url, e)
         return True
+    if not row:
+        logger.warning("[delivery] no tracker row found for %s — falling back", url)
+        return False
+
+    with best_effort("delivery.mirror_row_targeted"):
+        try:
+            from hunter import gsheets_sync
+
+            await gsheets_sync.mirror_new_row(row)
+        except Exception as e:
+            logger.warning("[delivery] gsheets mirror failed for %s: %s", url, e)
+            raise
+    # mirror_new_row failing leaves the row sheets_dirty — the resync job
+    # picks it up; don't double-append via push_missing in the same breath.
+    return True
 
 
 async def _push_missing_rows() -> None:
@@ -82,22 +91,34 @@ async def _push_missing_rows() -> None:
 
 async def _upload_folder_targeted(url: str) -> str | None:
     """Upload this URL's application folder to Drive. Returns the Drive URL."""
-    try:
-        from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
+    from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
 
-        if not GDRIVE_ENABLED:
-            return None
+    if not GDRIVE_ENABLED:
+        return None
+
+    try:
         from hunter.tracker import get_folder_by_url
-        from hunter import gdrive_sync
 
         folder_str = await asyncio.to_thread(get_folder_by_url, url)
-        if not folder_str:
-            logger.warning("[delivery] no folder recorded for %s — falling back", url)
-            return None
-        return await gdrive_sync.upload_application_folder(PROJECT_DIR / folder_str, job_url=url)
     except Exception as e:
-        logger.warning("[delivery] gdrive upload failed for %s: %s", url, e)
+        logger.warning("[delivery] folder lookup failed for %s: %s", url, e)
         return None
+    if not folder_str:
+        logger.warning("[delivery] no folder recorded for %s — falling back", url)
+        return None
+
+    drive_url: str | None = None
+    with best_effort("delivery.upload_folder_targeted"):
+        try:
+            from hunter import gdrive_sync
+
+            drive_url = await gdrive_sync.upload_application_folder(
+                PROJECT_DIR / folder_str, job_url=url
+            )
+        except Exception as e:
+            logger.warning("[delivery] gdrive upload failed for %s: %s", url, e)
+            raise
+    return drive_url
 
 
 async def _upload_missing_folders() -> None:

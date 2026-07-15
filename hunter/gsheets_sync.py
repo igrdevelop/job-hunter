@@ -22,6 +22,7 @@ import json
 import logging
 from typing import Any
 
+from hunter.best_effort import best_effort
 from hunter.config import (
     GSHEETS_ENABLED,
     GSHEETS_TRACKER_ID,
@@ -151,15 +152,20 @@ async def mirror_new_row(row: dict) -> None:
     from hunter.gsheets_client import append_rows
     from hunter.verdict_writer import mirror_verdict_cell_sync
 
-    try:
-        indices = await asyncio.to_thread(append_rows, _get_service(), _sheet_id(), [row])
-        if indices:
-            set_sheets_row(row_id, indices[0])
-        mark_sheets_clean(row_id)
-        log.debug("gsheets mirror_new_row: %s → row %s", row_id, indices[0] if indices else "?")
-    except Exception as e:
-        log.error("gsheets mirror_new_row failed for %s: %s", row_id, e)
-        mark_sheets_dirty(row_id)
+    ok = True
+    with best_effort("gsheets.mirror_new_row"):
+        try:
+            indices = await asyncio.to_thread(append_rows, _get_service(), _sheet_id(), [row])
+            if indices:
+                set_sheets_row(row_id, indices[0])
+            mark_sheets_clean(row_id)
+            log.debug("gsheets mirror_new_row: %s → row %s", row_id, indices[0] if indices else "?")
+        except Exception as e:
+            log.error("gsheets mirror_new_row failed for %s: %s", row_id, e)
+            mark_sheets_dirty(row_id)
+            ok = False
+            raise
+    if not ok:
         return
 
     # Mirror cost into column M. Best-effort: a Sheets hiccup here doesn't
@@ -246,20 +252,22 @@ async def resync_dirty() -> int:
     sheet_id = _sheet_id()
 
     for row_id, row, sheet_row in dirty:
-        try:
-            if sheet_row is None:
-                # Row was never pushed — append it
-                indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
-                if indices:
-                    set_sheets_row(row_id, indices[0])
-            else:
-                # Row exists in Sheets — overwrite it
-                await asyncio.to_thread(update_row, svc, sheet_id, sheet_row, row)
-            mark_sheets_clean(row_id)
-            synced += 1
-            log.debug("gsheets resync_dirty: synced %s", row_id)
-        except Exception as e:
-            log.warning("gsheets resync_dirty: failed for %s: %s", row_id, e)
+        with best_effort("gsheets.resync_dirty"):
+            try:
+                if sheet_row is None:
+                    # Row was never pushed — append it
+                    indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
+                    if indices:
+                        set_sheets_row(row_id, indices[0])
+                else:
+                    # Row exists in Sheets — overwrite it
+                    await asyncio.to_thread(update_row, svc, sheet_id, sheet_row, row)
+                mark_sheets_clean(row_id)
+                synced += 1
+                log.debug("gsheets resync_dirty: synced %s", row_id)
+            except Exception as e:
+                log.warning("gsheets resync_dirty: failed for %s: %s", row_id, e)
+                raise
 
     log.info("gsheets resync_dirty: %d/%d rows synced", synced, len(dirty))
     return synced

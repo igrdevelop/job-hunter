@@ -22,6 +22,7 @@ from datetime import date as _date
 from pathlib import Path
 from typing import Any
 
+from hunter.best_effort import best_effort
 from hunter.config import (
     GDRIVE_ENABLED,
     GDRIVE_ROOT_FOLDER_ID,
@@ -145,17 +146,20 @@ async def upload_application_folder(
         log.warning("gdrive_sync: folder not found: %s", folder_path)
         return None
 
-    try:
-        url = await _call_with_reauth(lambda: _do_upload(folder_path))
-        log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
-        if job_url:
-            from hunter.tracker import set_drive_url
+    url: str | None = None
+    with best_effort("gdrive.upload_application_folder"):
+        try:
+            url = await _call_with_reauth(lambda: _do_upload(folder_path))
+            log.info("gdrive_sync: uploaded %s → %s", folder_path.name, url)
+            if job_url:
+                from hunter.tracker import set_drive_url
 
-            await asyncio.to_thread(set_drive_url, job_url, url)
-        return url
-    except Exception as e:
-        log.warning("gdrive_sync: upload failed for %s: %s", folder_path, e)
-        return None
+                await asyncio.to_thread(set_drive_url, job_url, url)
+        except Exception as e:
+            log.warning("gdrive_sync: upload failed for %s: %s", folder_path, e)
+            url = None
+            raise
+    return url
 
 
 async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> str | None:
@@ -193,13 +197,16 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
         shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
         return folder_url(shadow_id)
 
-    try:
-        url = await _call_with_reauth(_do)
-        log.info("gdrive_sync: uploaded shadow %s → %s", shadow_subfolder, url)
-        return url
-    except Exception as e:
-        log.warning("gdrive_sync: shadow upload failed for %s: %s", shadow_subfolder, e)
-        return None
+    url: str | None = None
+    with best_effort("gdrive.upload_shadow_folder"):
+        try:
+            url = await _call_with_reauth(_do)
+            log.info("gdrive_sync: uploaded shadow %s → %s", shadow_subfolder, url)
+        except Exception as e:
+            log.warning("gdrive_sync: shadow upload failed for %s: %s", shadow_subfolder, e)
+            url = None
+            raise
+    return url
 
 
 async def delete_application_folder(drive_url: str) -> bool:
@@ -417,14 +424,20 @@ async def upload_missing_folders(
             timeout=30,
         )
 
-    try:
-        root_id = await _call_with_reauth(_resolve_root)
-    except Exception as e:
+    root_id = None
+    root_error: str | None = None
+    with best_effort("gdrive.upload_missing_folders"):
+        try:
+            root_id = await _call_with_reauth(_resolve_root)
+        except Exception as e:
+            root_error = str(e)
+            raise
+    if root_id is None:
         return {
             "uploaded": 0,
             "already_uploaded": already_uploaded,
             "skipped_missing": skipped_missing,
-            "errors": [f"root folder: {e}"],
+            "errors": [f"root folder: {root_error}"],
             "shadow_uploaded": shadow_uploaded,
             "shadow_errors": shadow_errors,
         }
@@ -448,19 +461,22 @@ async def upload_missing_folders(
             )
             return folder_url(company_id)
 
-        try:
-            drive_url = await _call_with_reauth(_upload_row)
-            log.info("gdrive_sync: uploaded %s → %s", folder_path.name, drive_url)
-            uploaded += 1
-            if job_url:
-                await asyncio.to_thread(set_drive_url, job_url, drive_url)
-        except asyncio.TimeoutError:
-            msg = f"{company}: timeout after {_UPLOAD_TIMEOUT}s"
-            errors.append(msg)
-            log.warning("gdrive_sync: %s", msg)
-        except Exception as e:
-            errors.append(f"{company}: {e}")
-            log.warning("gdrive_sync: upload failed for %s: %s", company, e)
+        with best_effort("gdrive.upload_missing_folders"):
+            try:
+                drive_url = await _call_with_reauth(_upload_row)
+                log.info("gdrive_sync: uploaded %s → %s", folder_path.name, drive_url)
+                uploaded += 1
+                if job_url:
+                    await asyncio.to_thread(set_drive_url, job_url, drive_url)
+            except asyncio.TimeoutError:
+                msg = f"{company}: timeout after {_UPLOAD_TIMEOUT}s"
+                errors.append(msg)
+                log.warning("gdrive_sync: %s", msg)
+                raise
+            except Exception as e:
+                errors.append(f"{company}: {e}")
+                log.warning("gdrive_sync: upload failed for %s: %s", company, e)
+                raise
 
     return {
         "uploaded": uploaded,

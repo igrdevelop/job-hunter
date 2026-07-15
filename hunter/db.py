@@ -9,6 +9,7 @@ Public interface
   init_db(path)              Create tables + auto-migrate from tracker.xlsx
   get_db(path)               Context manager → sqlite3.Connection
   migrate_from_excel(xlsx, db)  One-time import of existing tracker.xlsx rows
+  ensure_subsystem_health_table(conn)  Idempotent CREATE for hunter.best_effort
 
 Column mapping (mirrors tracker.xlsx schema exactly):
   id           — 8-char hex UUID  (PRIMARY KEY)
@@ -78,6 +79,34 @@ CREATE INDEX IF NOT EXISTS idx_ats
 CREATE INDEX IF NOT EXISTS idx_company
     ON applications(company);
 """
+
+# Backs hunter.best_effort — consecutive-failure counters for best-effort
+# subsystems (Sheets mirror, Drive upload, delivery, outreach, dual-shadow,
+# cost/verdict writers). One row per subsystem name; `consecutive_failures`
+# resets to 0 on the next success. Separate table (not columns on
+# `applications`) because this tracks *subsystem* health, not per-row state.
+_SUBSYSTEM_HEALTH_DDL = """
+CREATE TABLE IF NOT EXISTS subsystem_health (
+    subsystem             TEXT    PRIMARY KEY,
+    consecutive_failures  INTEGER NOT NULL DEFAULT 0,
+    last_error            TEXT    NOT NULL DEFAULT '',
+    last_alert_at          TEXT
+);
+"""
+
+
+def ensure_subsystem_health_table(conn: sqlite3.Connection) -> None:
+    """Idempotent CREATE for the `subsystem_health` table.
+
+    Called from init_db() at bot startup, and defensively by
+    hunter.best_effort itself on every read/write — the apply pipeline runs
+    as a subprocess against an already-initialised tracker.db in production,
+    but tests and standalone scripts may open a bare temp DB that never went
+    through init_db() (mirrors hunter.source_health's own lazy-ensure
+    pattern for source_runs).
+    """
+    conn.executescript(_SUBSYSTEM_HEALTH_DDL)
+
 
 # ── Connection factory ────────────────────────────────────────────────────────
 
@@ -229,6 +258,7 @@ def init_db(
     with get_db(path) as conn:
         conn.executescript(_DDL)
         _ensure_columns(conn)
+        ensure_subsystem_health_table(conn)
         # Deduplicate existing rows before applying any unique constraints
         n_dedup = _dedup_url_norm(conn)
         if n_dedup:

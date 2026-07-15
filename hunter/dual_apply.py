@@ -36,6 +36,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from hunter.best_effort import best_effort
 from hunter.config import GENERATE_DOCS_PATH, PROJECT_DIR
 from hunter.services.apply_service import build_generate_docs_cmd
 
@@ -132,11 +133,15 @@ def run_shadow(primary_folder: Path | str, *, full_mode: bool = False) -> Path |
     print(f"[dual] Shadow run: {shadow.name} ({shadow.model}) -> {sub}")
 
     set_override(shadow)
+    result: Path | None = None
     try:
-        return _generate_shadow(sub, job_text, primary_folder, full_mode=full_mode)
-    except Exception as e:
-        print(f"[dual] shadow generation failed (continuing): {e}")
-        return None
+        with best_effort("dual_apply.shadow"):
+            try:
+                result = _generate_shadow(sub, job_text, primary_folder, full_mode=full_mode)
+            except Exception as e:
+                print(f"[dual] shadow generation failed (continuing): {e}")
+                raise
+        return result
     finally:
         set_override(None)
 

@@ -38,6 +38,13 @@ def test_init_db_creates_applications_table(db_path: Path) -> None:
     assert "applications" in tables
 
 
+def test_init_db_creates_subsystem_health_table(db_path: Path) -> None:
+    """Backs hunter.best_effort — see tests/test_best_effort.py for behavior."""
+    with get_db(db_path) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "subsystem_health" in tables
+
+
 def test_init_db_has_all_columns(db_path: Path) -> None:
     expected = {
         "id",
