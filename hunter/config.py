@@ -223,6 +223,69 @@ GDRIVE_UPLOAD_MISSING_INTERVAL_MIN: int = int(os.getenv("GDRIVE_UPLOAD_MISSING_I
 # so every existing `from hunter.config import FILTER` keeps working.
 from hunter.filter_config import FILTER  # noqa: E402,F401
 
+
+# ── Candidate tracks (docs/quality/09-multi-track-react.md) ───────────────────
+# Which stacks the candidate is actively applying for. Default is exactly
+# today's behavior (Angular-only — React-only vacancies are filtered out at
+# three levels: listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5
+# post-generation check). Adding "react" turns those three filters into
+# no-ops for React-only postings without deleting them — they keep working as
+# classifiers/statistics, and `--force` still bypasses them either way.
+def _parse_tracks(value: str) -> frozenset[str]:
+    """Parse a comma-separated track list; blank/empty always falls back to
+    angular-only. Pure function (no env/DB access) so it's directly testable
+    without reloading hunter.config (which dozens of other modules import)."""
+    parsed = frozenset(t.strip().lower() for t in value.split(",") if t.strip())
+    return parsed or frozenset({"angular"})
+
+
+TRACKS: frozenset[str] = _parse_tracks(os.getenv("CANDIDATE_TRACKS", "angular"))
+
+_TRACKS_DB_KEY = "tracks_enabled"
+
+
+def active_tracks() -> frozenset[str]:
+    """Active candidate tracks: a DB-persisted `/tracks` choice wins over the
+    CANDIDATE_TRACKS env var (same DB-key-wins-over-env pattern as
+    hunter.llm_profiles's dual_shadow_profile), so switching tracks via
+    Telegram takes effect without a bot restart.
+    """
+    import sqlite3
+
+    try:
+        with sqlite3.connect(TRACKER_DB_PATH) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            row = conn.execute(
+                "SELECT value FROM config WHERE key = ?", (_TRACKS_DB_KEY,)
+            ).fetchone()
+        if row and row[0].strip():
+            parsed = frozenset(t.strip().lower() for t in row[0].split(",") if t.strip())
+            if parsed:
+                return parsed
+    except Exception:  # noqa: BLE001 — best-effort, env default always available
+        pass
+    return TRACKS
+
+
+def set_active_tracks(tracks: frozenset[str] | set[str]) -> None:
+    """Persist a `/tracks` choice to the DB (wins over CANDIDATE_TRACKS until
+    the row is cleared or the value is set back to the env default)."""
+    import sqlite3
+
+    value = ",".join(sorted(t.strip().lower() for t in tracks if t.strip()))
+    with sqlite3.connect(TRACKER_DB_PATH) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (_TRACKS_DB_KEY, value),
+        )
+
+
 # ── JustJoin.it source config ────────────────────────────────────────────────
 JUSTJOIN_ENABLED: bool = os.getenv("JUSTJOIN_ENABLED", "true").lower() in ("true", "1", "yes")
 # Pages per workplaceType (remote/hybrid/office). 1 page = 100 items.

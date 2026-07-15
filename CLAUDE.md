@@ -31,7 +31,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
                               /sync_sent /process_manual /check_expired /funnel /health
-                              /gsheets_status /gsheets_resync /llm /dual
+                              /gsheets_status /gsheets_resync /llm /dual /tracks
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
                             LinkedIn batch processing.
@@ -157,7 +157,11 @@ hunter/
                             behavior change; see hunter/filters.py for where each
                             key is consumed.
   models.py                 Job dataclass
-  filters.py                Central filter: keywords, level, location, patterns, React-only, German
+  filters.py                Central filter: keywords, level, location, patterns, React-only, German.
+                            React-only exclusion (`_is_react_only_title`/`_is_react_without_angular`)
+                            is gated by `_react_track_active()` (CANDIDATE_TRACKS/`/tracks` —
+                            docs/quality/09-multi-track-react.md): a no-op when the react track
+                            is active, unchanged (today's behavior) otherwise
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
   telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
   tracker.py                tracker.db (SQLite) CRUD: dedup, skip, fail, applied, manual (~1250 lines)
@@ -255,6 +259,9 @@ hunter/
     health.py               /health — per-source scraper yield report (source_health)
     llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
     dual.py                 /dual [on|off|shadow <name>] — toggle dual-apply A/B comparison + switch shadow profile (hunter.dual_apply)
+    tracks.py               /tracks [angular|react|both] — show/switch active candidate tracks
+                            (docs/quality/09-multi-track-react.md); DB key `tracks_enabled`
+                            wins over `CANDIDATE_TRACKS` env, same pattern as `/dual`
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   delivery.py               deliver_apply_now(url?) — instant Sheets mirror + Drive upload
                             after EVERY successful apply (auto/manual/paste/LinkedIn batch);
@@ -414,6 +421,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_DEFAULT_PROFILE` | — | Pin a named profile as default (e.g. `deepseek-r1`). Overrides `LLM_PROVIDER+LLM_MODEL`. Persisted per-vacancy selection via `/llm <name>` wins over this. |
 | `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` wins over this env fallback — set it at runtime via `/dual shadow <name>` in Telegram (e.g. `/dual shadow deepseek-v4-pro`). Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
+| `CANDIDATE_TRACKS` | `angular` | Which stacks the candidate is applying for (docs/quality/09-multi-track-react.md). Default is today's behavior unchanged — React-only vacancies are filtered at three points (listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5 post-generation check). Set `angular,react` to also apply to React-only roles (uses `prompts/base_cv_react.md`, already-existing infra). Runtime override without a bot restart: `/tracks angular\|react\|both` (DB key `tracks_enabled` wins over this env var, same DB-wins-over-env pattern as `DUAL_SHADOW_PROFILE`). `hunter.config.active_tracks()` is the read helper. |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (for `sonnet` profile + judge) |
 | `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`, `deepseek-v4-pro`, `glm-5.2`) |

@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 
 from hunter.models import Job
-from hunter.config import FILTER
+from hunter.config import FILTER, active_tracks
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 
@@ -185,6 +185,18 @@ def _is_unwanted_fullstack(job: Job) -> bool:
     return any(re.search(p, haystack, re.IGNORECASE) for p in stacks)
 
 
+def _react_track_active() -> bool:
+    """True when the candidate is also applying for React roles
+    (docs/quality/09-multi-track-react.md, CANDIDATE_TRACKS / `/tracks`).
+
+    Gates the React-only exclusion filters below to no-ops without deleting
+    them — they keep working as classifiers/statistics, `--force` still
+    bypasses either way, and the default track set (angular-only) makes this
+    return False, so default behavior is unchanged bit-for-bit.
+    """
+    return "react" in active_tracks()
+
+
 def _is_react_only_title(title: str) -> bool:
     """Return True when the job title signals React-only with no Angular involvement.
 
@@ -195,6 +207,8 @@ def _is_react_only_title(title: str) -> bool:
     Only triggers when 'angular' is absent from the title.
     """
     if not FILTER.get("exclude_react_without_angular", False):
+        return False
+    if _react_track_active():
         return False
     t = title.lower()
     if "angular" in t:
@@ -217,6 +231,8 @@ def _is_react_only_title(title: str) -> bool:
 def _is_react_without_angular(job: Job) -> bool:
     """Skip React-only jobs: check title AND raw skills/tech data from API."""
     if not FILTER.get("exclude_react_without_angular", False):
+        return False
+    if _react_track_active():
         return False
 
     title = job.title.lower()
