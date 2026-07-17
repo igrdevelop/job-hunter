@@ -7,13 +7,18 @@ post-apply delivery hook, the 30-min upload-missing backfill, each detached
 dual-apply shadow process) each created their own "2026-07-06", and later
 uploads landed in whichever copy the query happened to return first — so the
 day's files ended up scattered across "2026-07-06", "2026-07-06 (1)", … as
-Drive for Desktop mirrors them.
+Drive for Desktop mirrors them. The same race also duplicated the root-level
+"Logs" folder (gdrive_sync.upload_log_file resolves it through the same
+get_or_create path), scattering the daily .log files across "Logs",
+"Logs (1)", … — on Drive itself every copy is literally named "Logs".
 
 hunter/gdrive_client.py now prevents *new* duplicates and always converges on
 the oldest copy; this tool merges the *historical* ones already on Drive.
 
 What it does, per parent (the root, then each date folder):
-  - groups non-trashed child folders by name,
+  - groups non-trashed child folders by name — at the root level this covers
+    the date folders and the "Logs" folder alike, since grouping is purely
+    by name,
   - keeps the OLDEST of each group (the same one the bot now picks),
   - moves the other copies' children into the keeper — a child whose name
     already exists in the keeper is left in place and reported as a conflict
@@ -148,7 +153,8 @@ def main() -> int:
         for k, v in stats.items():
             totals[k] += v
 
-    # Level 1: duplicate date folders under the root.
+    # Level 1: duplicate folders directly under the root — the date folders
+    # and the "Logs" folder (upload_log_file's target) alike.
     date_dupes = _duplicate_groups(svc, root_id)
     for name, group in date_dupes:
         _accumulate(_merge_group(svc, name, group, apply=args.apply, indent=""))

@@ -375,7 +375,13 @@ tools/dedup_drive_folders.py Merge duplicate Drive folders ("2026-07-06" x5, fil
                             keeps the OLDEST copy of each name (the one the bot now picks), moves the
                             others' children in, trashes the emptied dupe. Same-named children are
                             reported as conflicts and left in place — never silently overwritten.
-                            Dry-run by default (--apply to merge); trash only, never a hard delete
+                            The root-level pass groups purely by name, so it merges the duplicated
+                            "Logs" folders (upload_log_file's target; Drive-for-Desktop renders the
+                            same-named siblings as "Logs (1)"…) the same way — a day's log present
+                            in two copies is a reported conflict, never a guess about which is
+                            complete. Dry-run by default (--apply to merge); trash only, never a
+                            hard delete. Tested against an in-memory fake Drive in
+                            tests/test_dedup_drive_folders.py
 tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
 tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
 tools/screen_calibrate.py   Doomed-gate calibration (docs/DOOMED_GATE_PLAN.md M4): runs
