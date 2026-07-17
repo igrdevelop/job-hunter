@@ -38,13 +38,13 @@ Assert contract (what must survive any future refactor of the pipeline):
   - negative paths (expired, doomed-gate HARD) short-circuit BEFORE any LLM
     call and write the expected tracker status without generating documents
 
-NOT asserted: outreach.md. This test run surfaced a real, pre-existing bug —
-hunter.outreach._candidate_summary assumes resume_en.skills is a list, but it
-is a dict everywhere else in the codebase (generate_docs.build_resume,
-claim_judge.iter_judged_fields), so it raises and outreach.md silently never
-gets written (swallowed by run_outreach's best-effort contract). Fixing
-outreach.py is out of scope for docs/quality/04 — flagged separately; see the
-comment at the assertion site in test_golden_happy_path_en.
+This run originally surfaced a real, pre-existing bug: hunter.outreach.
+_candidate_summary assumed resume_en.skills was a list, but it is a dict
+everywhere else in the codebase (generate_docs.build_resume,
+claim_judge.iter_judged_fields), so it raised and outreach.md silently never
+got written (swallowed by run_outreach's best-effort contract). Fixed in
+hunter/outreach.py (see tests/test_outreach.py for the regression coverage);
+test_golden_happy_path_en now asserts outreach.md IS written.
 """
 
 from __future__ import annotations
@@ -279,16 +279,7 @@ def test_golden_happy_path_en(
     # ── files on disk ────────────────────────────────────────────────────
     assert (output_folder / "job_posting.txt").is_file()
     assert (output_folder / "content.json").is_file()
-    # NOT asserting outreach.md here: this run surfaced a real, pre-existing
-    # bug (out of scope for this commit, flagged separately) —
-    # hunter.outreach._candidate_summary does `resume["skills"][:10]`
-    # assuming a list, but resume_en.skills is a dict everywhere else in the
-    # codebase (generate_docs.build_resume, claim_judge.iter_judged_fields),
-    # so it raises `unhashable type: 'slice'` and outreach.md silently never
-    # gets written. run_outreach's best-effort contract swallows it (verified
-    # here: the apply itself still succeeds), so this assertion documents
-    # rather than hides the gap.
-    assert not (output_folder / "outreach.md").exists()
+    assert (output_folder / "outreach.md").is_file()
     en_cv_pdfs = list(output_folder.glob("*CV*EN*.pdf"))
     assert en_cv_pdfs, "expected an EN CV PDF in the output folder"
 
