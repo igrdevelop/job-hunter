@@ -31,7 +31,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
                               /sync_sent /process_manual /check_expired /funnel /health
-                              /gsheets_status /gsheets_resync /llm /dual /tracks
+                              /gsheets_status /gsheets_resync /llm /dual /tracks /retry_reset
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
                             LinkedIn batch processing.
@@ -268,6 +268,10 @@ hunter/
     check_responses.py      /check_responses
     normalize.py            /normalize — rebuild Sheets column L (Applied Date) from Sent
     funnel.py               /funnel [days] — application funnel report (hunter.funnel)
+    retry_reset.py          /retry_reset [all|URL] — report/revive FAIL rows that hit
+                            MAX_FAIL_RETRIES and were dropped from the retry loop forever
+                            (tracker.get_gave_up_failed/reset_fail_counts; report-first —
+                            no-arg form never mutates. docs/LLM_OUTAGE_RESILIENCE_PLAN.md M3)
     health.py               /health — per-source scraper yield report (source_health)
     llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
     dual.py                 /dual [on|off|shadow <name>] — toggle dual-apply A/B comparison + switch shadow profile (hunter.dual_apply)

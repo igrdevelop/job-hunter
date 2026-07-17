@@ -186,7 +186,7 @@ alert repeat all day.
   `oauth_alert`'s cooldown-deduplicated shape.
 - `/status` shows the pause when armed.
 
-### M3 — Revive rows that already gave up
+### M3 — Revive rows that already gave up ✅ DONE (2026-07-17)
 
 The rows already at `fail_count >= 3` are invisible to `get_failed_jobs` forever, and the
 owner's sheet already contains some. M1 stops the bleeding; it does not heal what is
