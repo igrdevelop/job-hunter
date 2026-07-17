@@ -79,6 +79,37 @@ lines. Three plausible causes with different fixes:
 Record the finding here before writing code. If the FAILs are *not* billing, M1 still
 stands on its own merits but the priority order may change.
 
+**FINDING (2026-07-17, from the Drive log mirror `G:\My Drive\Job Hunter\Logs*`,
+retention 2026-05-28 → 2026-07-17):**
+
+- **Zero LLM errors of any kind in every retained log.** `grep "credit balance|LLM
+  ERROR"` across all ~50 log files matches nothing. A billing outage has never actually
+  happened (within retention) — the FAIL rows are **not** billing.
+- The actual FAIL causes, by volume:
+  1. **findmyremote.ai link-rot 404s** (bulk of the recent rows): stale
+     `findmyremote.ai/companies/{c}/jobs/{slug}` permalinks relayed by the
+     `findmyremote_frontend` Telegram channel 404 once the job is deleted →
+     `FETCH ERROR: 404 Client Error` → FAIL. The root cause was already fixed
+     2026-07-12 (findmyremote fetch now goes through the JSON API and returns a clean
+     EXPIRED marker), **but** the rows created 2026-07-11 burned `fail_count` to 3 in the
+     07-12 01:08 / 02:20 retry slots — the log shows the "Giving up … after 3 failures"
+     lines — *before* the fixed code could reach them. They are now permanently dead
+     (§1 step 5), even though a single retry through today's code would resolve them as
+     $0 EXPIRED.
+  2. **LinkedIn fetches with `LINKEDIN_STORAGE_STATE` unset** — known, documented ops
+     item (CLAUDE.md calls it "the single biggest source of FAIL rows"). Config, not code.
+  3. Occasional **too-little-text** fetches (e.g. Ashby JS shell, 79 chars).
+- **Priority change:** M3 (`/retry_reset`) is promoted — it is the fix for the "куча
+  FAIL" the owner actually sees: reviving the dead rows lets the next retry slot turn
+  the 404-rotten ones into clean EXPIRED via the already-fixed fetch path. M1/M2 remain
+  valid as *proactive* hardening (the failure mode is real, just hasn't fired yet), and
+  M1 is still a prerequisite for M4, which the owner explicitly requested (question 3).
+  New order: **M3 → M1 → M2 → M4**.
+- Side observation, out of scope for this branch: the Drive `Logs` folder itself is
+  duplicated (`Logs`, `Logs (1)` … `Logs (7)`) — the same same-named-siblings race fixed
+  for date folders in PR #163, but `upload_log_file`'s "Logs" folder predates the fix and
+  `tools/dedup_drive_folders.py` only walks date folders. Flagged as a separate task.
+
 ### M1 — Classify LLM outages as a distinct, non-escalating outcome
 
 The core fix. New error class → new exit code → new outcome → no permanent damage.
@@ -204,3 +235,4 @@ stand alone and already answer *"будут ли они обработаны п�
 | 2026-07-17 | An outage leaves **no tracker row** for a new job (re-fetched next hunt) and leaves an existing FAIL row's count untouched. |
 | 2026-07-17 | The outage pause is time-boxed (`LLM_OUTAGE_PAUSE_MIN`, default 60), not sticky — a top-up must heal the bot without owner action. |
 | 2026-07-17 | CLI-subscription fallback is opt-in (`LLM_OUTAGE_FALLBACK_CLI=false`) and ships last; it needs an ops decision about a personal token on the server. |
+| 2026-07-17 | M0 verdict: no billing outage has ever occurred (log retention 05-28→07-17); the visible FAIL rows are findmyremote link-rot (dead at fail_count=3, root cause already fixed 07-12) + LinkedIn no-session. Milestone order changed to **M3 → M1 → M2 → M4**. |
