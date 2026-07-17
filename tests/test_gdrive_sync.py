@@ -6,6 +6,7 @@ Uses synchronous asyncio.run() wrappers (no pytest-asyncio dependency).
 """
 
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -564,3 +565,62 @@ def test_upload_shadow_subfolders_records_failure(tmp_path):
     assert uploaded == 0
     assert len(errors) == 1
     assert "gpt-4o" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# _resolve_folder — serialized folder resolution
+# ---------------------------------------------------------------------------
+# The duplicate-date-folder bug: several coroutines (post-apply delivery, the
+# periodic upload-missing backfill) resolve the same date folder at once, each
+# runs list-then-create against a Drive that allows same-named siblings, and
+# each creates its own "2026-07-06".
+
+
+def _reset_folder_lock():
+    from hunter import gdrive_sync
+
+    gdrive_sync._FOLDER_LOCK = None
+
+
+def test_resolve_folder_serializes_concurrent_callers():
+    _reset_folder_lock()
+    from hunter import gdrive_sync
+
+    inflight = 0
+    max_inflight = 0
+
+    def fake_goc(svc, name, parent_id):
+        # Runs in a worker thread; the lock must keep these from overlapping.
+        nonlocal inflight, max_inflight
+        inflight += 1
+        max_inflight = max(max_inflight, inflight)
+        time.sleep(0.02)
+        inflight -= 1
+        return "date_id"
+
+    async def scenario():
+        return await asyncio.gather(
+            *[gdrive_sync._resolve_folder(MagicMock(), "2026-07-06", "root") for _ in range(4)]
+        )
+
+    with patch("hunter.gdrive_client.get_or_create_folder", side_effect=fake_goc):
+        results = run(scenario())
+
+    assert results == ["date_id"] * 4
+    assert max_inflight == 1, "concurrent list-then-create is what duplicates the date folder"
+
+    _reset_folder_lock()
+
+
+def test_resolve_folder_passes_through_args():
+    _reset_folder_lock()
+    from hunter import gdrive_sync
+
+    with patch("hunter.gdrive_client.get_or_create_folder", return_value="fid") as mock_goc:
+        svc = MagicMock()
+        result = run(gdrive_sync._resolve_folder(svc, "2026-07-06", "root"))
+
+    assert result == "fid"
+    mock_goc.assert_called_once_with(svc, "2026-07-06", "root")
+
+    _reset_folder_lock()

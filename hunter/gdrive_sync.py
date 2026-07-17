@@ -69,6 +69,43 @@ def _invalidate_service() -> None:
     _service = None
 
 
+# ---------------------------------------------------------------------------
+# Folder resolution (serialized)
+# ---------------------------------------------------------------------------
+
+_FOLDER_LOCK: asyncio.Lock | None = None
+
+
+def _folder_lock() -> asyncio.Lock:
+    # Created lazily: at import time there is no running loop to bind to.
+    global _FOLDER_LOCK
+    if _FOLDER_LOCK is None:
+        _FOLDER_LOCK = asyncio.Lock()
+    return _FOLDER_LOCK
+
+
+async def _resolve_folder(svc: Any, name: str, parent_id: str | None) -> str:
+    """get_or_create_folder, serialized against this process's other callers.
+
+    Several coroutines resolve the same date folder concurrently — the
+    post-apply delivery hook and the periodic upload-missing backfill overlap
+    routinely, and both run in this one event loop. Interleaved, their
+    list-then-create each create their own copy of e.g. ``2026-07-06``, which
+    Drive happily accepts. Serializing means the second caller's list runs after
+    the first's create and therefore FINDS it.
+
+    Deliberately not memoized: an id cached for the process lifetime goes stale
+    the moment a folder is moved or trashed by hand, and would then silently
+    absorb uploads into the trash. Re-listing costs one cheap API call.
+    gdrive_client still guards the cross-*process* race (detached shadow runs),
+    which no in-process lock can see.
+    """
+    from hunter.gdrive_client import get_or_create_folder
+
+    async with _folder_lock():
+        return await asyncio.to_thread(get_or_create_folder, svc, name, parent_id)
+
+
 async def _call_with_reauth(op):
     """Await ``op()``; on an OAuth/refresh error, rebuild the Drive service from
     the current token file and retry ONCE.
@@ -106,7 +143,7 @@ async def _call_with_reauth(op):
 
 async def _do_upload(folder_path: Path) -> str:
     """Core upload logic — raises on error. Called by both public functions."""
-    from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+    from hunter.gdrive_client import upload_folder, folder_url
 
     svc = _get_service()
     date_name = folder_path.parent.name
@@ -114,9 +151,9 @@ async def _do_upload(folder_path: Path) -> str:
     if GDRIVE_ROOT_FOLDER_ID:
         root_id = GDRIVE_ROOT_FOLDER_ID
     else:
-        root_id = await asyncio.to_thread(get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None)
+        root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
-    date_id = await asyncio.to_thread(get_or_create_folder, svc, date_name, root_id)
+    date_id = await _resolve_folder(svc, date_name, root_id)
     company_id = await asyncio.to_thread(upload_folder, svc, folder_path, date_id)
     return folder_url(company_id)
 
@@ -178,7 +215,7 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
     if not shadow_subfolder.exists() or not shadow_subfolder.is_dir():
         return None
 
-    from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+    from hunter.gdrive_client import upload_folder, folder_url
 
     async def _do() -> str:
         svc = _get_service()
@@ -187,13 +224,9 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
         if GDRIVE_ROOT_FOLDER_ID:
             root_id = GDRIVE_ROOT_FOLDER_ID
         else:
-            root_id = await asyncio.to_thread(
-                get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
-            )
-        date_id = await asyncio.to_thread(get_or_create_folder, svc, date_name, root_id)
-        company_id = await asyncio.to_thread(
-            get_or_create_folder, svc, primary_folder.name, date_id
-        )
+            root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
+        date_id = await _resolve_folder(svc, date_name, root_id)
+        company_id = await _resolve_folder(svc, primary_folder.name, date_id)
         shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
         return folder_url(shadow_id)
 
@@ -302,18 +335,16 @@ async def upload_log_file(
     try:
         dated_file.write_text("".join(today_lines), encoding="utf-8")
 
-        from hunter.gdrive_client import get_or_create_folder, upload_file
+        from hunter.gdrive_client import upload_file
 
         svc = _get_service()
 
         if GDRIVE_ROOT_FOLDER_ID:
             root_id = GDRIVE_ROOT_FOLDER_ID
         else:
-            root_id = await asyncio.to_thread(
-                get_or_create_folder, svc, GDRIVE_ROOT_FOLDER_NAME, None
-            )
+            root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
-        logs_folder_id = await asyncio.to_thread(get_or_create_folder, svc, "Logs", root_id)
+        logs_folder_id = await _resolve_folder(svc, "Logs", root_id)
         file_id = await asyncio.to_thread(upload_file, svc, dated_file, logs_folder_id)
         url = f"https://drive.google.com/file/d/{file_id}/view"
         log.info(
@@ -365,7 +396,7 @@ async def upload_missing_folders(
             "shadow_errors": [],
         }
 
-    from hunter.gdrive_client import get_or_create_folder, upload_folder, folder_url
+    from hunter.gdrive_client import upload_folder, folder_url
     from hunter.tracker import read_all_tracker_rows, set_drive_url
 
     rows = await asyncio.to_thread(read_all_tracker_rows)
@@ -420,7 +451,7 @@ async def upload_missing_folders(
         if GDRIVE_ROOT_FOLDER_ID:
             return GDRIVE_ROOT_FOLDER_ID
         return await asyncio.wait_for(
-            asyncio.to_thread(get_or_create_folder, _get_service(), GDRIVE_ROOT_FOLDER_NAME, None),
+            _resolve_folder(_get_service(), GDRIVE_ROOT_FOLDER_NAME, None),
             timeout=30,
         )
 
@@ -452,7 +483,7 @@ async def upload_missing_folders(
             # _get_service() re-fetched here so a reauth rebuild is picked up.
             svc = _get_service()
             date_id = await asyncio.wait_for(
-                asyncio.to_thread(get_or_create_folder, svc, fp.parent.name, root_id),
+                _resolve_folder(svc, fp.parent.name, root_id),
                 timeout=30,
             )
             company_id = await asyncio.wait_for(
