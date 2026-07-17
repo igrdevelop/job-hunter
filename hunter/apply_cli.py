@@ -340,8 +340,15 @@ def main_cli(
             try:
                 _cli_content = json.loads(content_json_path.read_text(encoding="utf-8"))
 
+                from hunter.filters import _react_track_active
+
                 _cli_stack = (_cli_content.get("stack") or "").lower()
-                if "react" in _cli_stack and "angular" not in _cli_stack and not skip_dedup:
+                if (
+                    "react" in _cli_stack
+                    and "angular" not in _cli_stack
+                    and not skip_dedup
+                    and not _react_track_active()
+                ):
                     notify(
                         f"⏭ <b>Skipped — React-only stack</b>\n"
                         f"🔗 {url}\n"

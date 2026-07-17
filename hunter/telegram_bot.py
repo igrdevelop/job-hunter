@@ -94,6 +94,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_health": ("hunter.commands.health", "cmd_health"),
     "cmd_llm": ("hunter.commands.llm", "cmd_llm"),
     "cmd_dual": ("hunter.commands.dual", "cmd_dual"),
+    "cmd_tracks": ("hunter.commands.tracks", "cmd_tracks"),
     "cmd_url": ("hunter.commands.url_message", "cmd_url"),
     "button_callback": ("hunter.commands.url_message", "button_callback"),
     "_handle_apply": ("hunter.commands.url_message", "_handle_apply"),
@@ -163,6 +164,7 @@ async def _post_init(app: Application) -> None:
             BotCommand("health", "Per-source scraper yield report"),
             BotCommand("llm", "Show/switch active LLM profile [name]"),
             BotCommand("dual", "Toggle dual-apply A/B comparison [on|off]"),
+            BotCommand("tracks", "Show/switch active candidate tracks [angular|react|both]"),
         ]
     )
 
@@ -267,6 +269,7 @@ def build_application() -> Application:
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
     from hunter.commands.dual import cmd_dual
+    from hunter.commands.tracks import cmd_tracks
     from hunter.commands.scoutfound import cmd_scoutfound
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
@@ -296,6 +299,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("llm", cmd_llm))
     app.add_handler(CommandHandler("dual", cmd_dual))
+    app.add_handler(CommandHandler("tracks", cmd_tracks))
     app.add_handler(CommandHandler("scoutfound", cmd_scoutfound))
 
     # Button callbacks

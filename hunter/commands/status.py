@@ -41,6 +41,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception:
         pass
 
+    try:
+        from hunter.config import active_tracks
+
+        lines.append(f"🧭 Tracks: <b>{', '.join(sorted(active_tracks()))}</b>")
+    except Exception:
+        pass
+
     if _active_apply_urls:
         now = datetime.now(timezone.utc)
         lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")

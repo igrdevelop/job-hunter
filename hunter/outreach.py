@@ -25,6 +25,7 @@ import json
 import re
 from pathlib import Path
 
+from hunter.best_effort import best_effort
 from hunter.config import (
     JUDGE_API_KEY,
     JUDGE_MODEL,
@@ -61,11 +62,14 @@ JOB POSTING (excerpt):
 
 def run_outreach(folder: Path, url: str = "") -> Path | None:
     """Write outreach.md into the application folder. Never raises."""
-    try:
-        return _run_outreach(Path(folder), url)
-    except Exception as e:  # noqa: BLE001 — best-effort, never fail an apply
-        print(f"[outreach] failed (continuing): {e}")
-        return None
+    result: Path | None = None
+    with best_effort("outreach.run_outreach"):
+        try:
+            result = _run_outreach(Path(folder), url)
+        except Exception as e:  # noqa: BLE001 — best-effort, never fail an apply
+            print(f"[outreach] failed (continuing): {e}")
+            raise
+    return result
 
 
 def _run_outreach(folder: Path, url: str) -> Path | None:

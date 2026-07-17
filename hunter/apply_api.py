@@ -269,8 +269,11 @@ def _run_main_api(
         return
 
     # Step 1.5c — Pre-LLM React-only text check (saves LLM call for obvious React jobs)
-    # Skip only when skip_dedup is False (force mode bypasses all stack filters).
-    if not skip_dedup and is_react_only_job_text(job_text):
+    # Skip only when skip_dedup is False (force mode bypasses all stack filters)
+    # and the react track isn't active (docs/quality/09-multi-track-react.md).
+    from hunter.filters import _react_track_active
+
+    if not skip_dedup and not _react_track_active() and is_react_only_job_text(job_text):
         notify(
             f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
@@ -514,9 +517,9 @@ def _run_main_api(
             except Exception as _boost_err:
                 print(f"[apply_agent] ATS boost failed (using first pass): {_boost_err}")
 
-    # Step 4.5 — Skip React-only jobs
+    # Step 4.5 — Skip React-only jobs (unless the react track is active)
     stack = (content.get("stack") or "").lower()
-    if "react" in stack and "angular" not in stack and not skip_dedup:
+    if "react" in stack and "angular" not in stack and not skip_dedup and not _react_track_active():
         notify(
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"

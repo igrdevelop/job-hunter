@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hunter.best_effort import best_effort
 from hunter.config import TRACKER_DB_PATH
 from hunter.db import get_db
 
@@ -89,17 +90,20 @@ def mirror_verdict_cell_sync(
     if not _header_written.get(sheet_id) and write_verdict_header_sync(service, sheet_id, tab):
         _header_written[sheet_id] = True
     cell = f"'{tab}'!{VERDICT_COL_LETTER}{sheet_row}"
-    try:
-        service.spreadsheets().values().update(
-            spreadsheetId=sheet_id,
-            range=cell,
-            valueInputOption="RAW",
-            body={"values": [[_format_verdict(verdict)]]},
-        ).execute()
-        return True
-    except Exception as e:
-        log.error("verdict_writer: failed to write N%s for %s: %s", sheet_row, row_id, e)
-        return False
+    ok = True
+    with best_effort("verdict_writer.mirror_verdict_cell"):
+        try:
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range=cell,
+                valueInputOption="RAW",
+                body={"values": [[_format_verdict(verdict)]]},
+            ).execute()
+        except Exception as e:
+            log.error("verdict_writer: failed to write N%s for %s: %s", sheet_row, row_id, e)
+            ok = False
+            raise
+    return ok
 
 
 def write_verdict_header_sync(

@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hunter.best_effort import best_effort
 from hunter.config import TRACKER_DB_PATH
 from hunter.db import get_db
 from hunter.tracker import _format_cost
@@ -88,17 +89,20 @@ def mirror_cost_cell_sync(
     if not _header_written.get(sheet_id) and write_cost_header_sync(service, sheet_id, tab):
         _header_written[sheet_id] = True
     cell = f"'{tab}'!{COST_COL_LETTER}{sheet_row}"
-    try:
-        service.spreadsheets().values().update(
-            spreadsheetId=sheet_id,
-            range=cell,
-            valueInputOption="RAW",
-            body={"values": [[_format_cost(cost_usd)]]},
-        ).execute()
-        return True
-    except Exception as e:
-        log.error("cost_writer: failed to write M%s for %s: %s", sheet_row, row_id, e)
-        return False
+    ok = True
+    with best_effort("cost_writer.mirror_cost_cell"):
+        try:
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range=cell,
+                valueInputOption="RAW",
+                body={"values": [[_format_cost(cost_usd)]]},
+            ).execute()
+        except Exception as e:
+            log.error("cost_writer: failed to write M%s for %s: %s", sheet_row, row_id, e)
+            ok = False
+            raise
+    return ok
 
 
 def write_cost_header_sync(

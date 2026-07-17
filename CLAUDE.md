@@ -31,7 +31,7 @@ hunter.py                   Entry point. Validates config, builds Telegram app, 
 hunter/telegram_bot.py      Telegram Application (~1380 lines).
                             Handlers: /start /hunt /force /status /schedule /unsent
                               /sync_sent /process_manual /check_expired /funnel /health
-                              /gsheets_status /gsheets_resync /llm /dual
+                              /gsheets_status /gsheets_resync /llm /dual /tracks
                             URL messages, paste flow, Apply/Skip callbacks.
                             Staggered JobQueue schedule per source.
                             LinkedIn batch processing.
@@ -157,7 +157,11 @@ hunter/
                             behavior change; see hunter/filters.py for where each
                             key is consumed.
   models.py                 Job dataclass
-  filters.py                Central filter: keywords, level, location, patterns, React-only, German
+  filters.py                Central filter: keywords, level, location, patterns, React-only, German.
+                            React-only exclusion (`_is_react_only_title`/`_is_react_without_angular`)
+                            is gated by `_react_track_active()` (CANDIDATE_TRACKS/`/tracks` —
+                            docs/quality/09-multi-track-react.md): a no-op when the react track
+                            is active, unchanged (today's behavior) otherwise
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
   telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
   tracker.py                tracker.db (SQLite) CRUD: dedup, skip, fail, applied, manual (~1250 lines)
@@ -195,6 +199,23 @@ hunter/
                             after each source.search() in the hunt loop, health_report() for /health,
                             newly_broken() alerts once when a previously-working source goes dry for
                             SOURCE_HEALTH_ALERT_STREAK consecutive runs (broken selector vs quiet day)
+  best_effort.py            Generalizes source_health/oauth_alert's shape to every other
+                            best-effort subsystem (docs/quality/03-best-effort-degradation-
+                            alerts.md): `with best_effort("subsystem.name"):` swallows the
+                            exception (existing contract unchanged) but counts CONSECUTIVE
+                            failures per subsystem in SQLite (`subsystem_health` table,
+                            hunter/db.py — survives the apply-subprocess boundary, same reason
+                            source_health's counters do). At `threshold` (default 3) fires one
+                            Telegram alert with a 6h cooldown; a success after an alert sends one
+                            recovery message. Wrapped around the existing try/except in:
+                            gdrive_sync (upload_application_folder/upload_shadow_folder/
+                            upload_missing_folders — the 2026-07-13 stale-token incident this
+                            closes), gsheets_sync (mirror_new_row/resync_dirty), delivery.py
+                            (both targeted stages), outreach.py, dual_apply.py (shadow),
+                            cost_writer.py, verdict_writer.py. Existing try/except are NOT
+                            removed — the wrapper goes around them; a block that already
+                            returns None/False on error re-raises from its except clause so the
+                            failure still reaches best_effort() for counting
   gsheets_sync.py           High-level Sheets mirror (push/pull/resync/bootstrap)
   gsheets_client.py         Low-level Sheets API v4 wrapper
   gdrive_sync.py            High-level Drive upload (upload_application_folder)
@@ -238,6 +259,9 @@ hunter/
     health.py               /health — per-source scraper yield report (source_health)
     llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
     dual.py                 /dual [on|off|shadow <name>] — toggle dual-apply A/B comparison + switch shadow profile (hunter.dual_apply)
+    tracks.py               /tracks [angular|react|both] — show/switch active candidate tracks
+                            (docs/quality/09-multi-track-react.md); DB key `tracks_enabled`
+                            wins over `CANDIDATE_TRACKS` env, same pattern as `/dual`
     url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
   delivery.py               deliver_apply_now(url?) — instant Sheets mirror + Drive upload
                             after EVERY successful apply (auto/manual/paste/LinkedIn batch);
@@ -298,7 +322,36 @@ docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priori
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
                             best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
                             public-repo prep, candidate.yaml multi-user, CANDIDATE_TRACKS/React)
-tests/                      37+ test files, ~3200 lines (pytest)
+tests/                      38+ test files, ~3400 lines (pytest); `pytest tests/ --cov=hunter
+                            --cov-report=xml --cov-report=term` for a coverage table (no
+                            --cov-fail-under gate yet — docs/quality/04-coverage-and-golden-
+                            e2e.md Part A, map the blind spots for a few weeks first)
+tests/conftest.py           Shared fixtures: `tracker_db` (isolated tmp tracker.db),
+                            `fake_llm` (routes llm_client.call_llm by prompt shape to
+                            configurable generation/judge/verdict/outreach responses — a
+                            lazy `from llm_client import call_llm` inside each caller means
+                            ONE patch of `llm_client.call_llm` intercepts every call site in
+                            the pipeline, however deep). Primary consumer:
+                            test_golden_apply_e2e.py; reusable by any test that needs a real
+                            pipeline without a real LLM.
+tests/test_golden_apply_e2e.py  Golden E2E test (docs/quality/04): runs
+                            hunter.apply_api.main_api() for REAL, mocking only the external
+                            boundaries (LLM via fake_llm, network via fetch_job_text, the
+                            generate_docs.py subprocess via a fake that reuses its real
+                            filename helper + real tracker-write call, Telegram via list-
+                            collecting stubs). Catches the "stages work individually but the
+                            wiring breaks" bug class — verified against 3 hand-mutations
+                            (comment out the verdict tracker stamp, force --no-tracker onto
+                            the primary Step 7 call, disable the verdict entirely) that each
+                            make the test fail as expected. 7 scenarios: happy EN (URL +
+                            paste-mode variants), expired (no LLM call), doomed-gate HARD (no
+                            LLM call), 3 mutation-catch regression guards. Surfaced a real
+                            pre-existing bug in hunter/outreach.py (see below) — NOT fixed
+                            here (out of scope), the test documents the actual behavior with
+                            an explanatory comment instead of asserting a false pass.
+tests/fixtures/golden/      Fixture LLM responses (generation/judge/verdict) + one EN job
+                            posting for the golden E2E test, loaded by name — not real
+                            LLM output, hand-written to exercise the pipeline's happy path.
 tests/fixtures/sample_jobs/ Real job postings per track (angular/react/ai/fullstack_*) for preview
 tools/                      Utilities: backup, dedup, gmail auth, gsheets auth, LinkedIn login
 tools/preview_apply.py      Run apply pipeline against sample fixtures via CLI subscription
@@ -336,6 +389,17 @@ linkedin_scout/             STANDALONE — not imported by hunter/, not in Docke
 
 telegram_channels.json      Owner-curated channel list for hunter/sources/telegram_channels.py
                             (tracked — see docs/TELEGRAM_CHANNELS_SOURCE_PLAN.md)
+pyproject.toml               SINGLE source of truth for dependencies (`[project.dependencies]`
+                            + `browser`/`scout`/`dev` extras) and tool config (ruff, mypy,
+                            pytest). Build backend `setuptools.build_meta` (was the
+                            nonexistent `setuptools.backends.legacy:build` — silently worked
+                            only because build isolation pulls a fresh setuptools).
+requirements.lock            GENERATED (`uv pip compile pyproject.toml --all-extras
+                            --python-platform linux --python-version 3.11 -o
+                            requirements.lock`) — never hand-edit. Docker and the CI test-job
+                            both install from this file, not from pyproject.toml directly, so
+                            prod and CI always run the exact same transitive versions. Replaces
+                            the old hand-maintained, mostly-unpinned `requirements.txt`.
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -357,6 +421,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_DEFAULT_PROFILE` | — | Pin a named profile as default (e.g. `deepseek-r1`). Overrides `LLM_PROVIDER+LLM_MODEL`. Persisted per-vacancy selection via `/llm <name>` wins over this. |
 | `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` wins over this env fallback — set it at runtime via `/dual shadow <name>` in Telegram (e.g. `/dual shadow deepseek-v4-pro`). Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
+| `CANDIDATE_TRACKS` | `angular` | Which stacks the candidate is applying for (docs/quality/09-multi-track-react.md). Default is today's behavior unchanged — React-only vacancies are filtered at three points (listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5 post-generation check). Set `angular,react` to also apply to React-only roles (uses `prompts/base_cv_react.md`, already-existing infra). Runtime override without a bot restart: `/tracks angular\|react\|both` (DB key `tracks_enabled` wins over this env var, same DB-wins-over-env pattern as `DUAL_SHADOW_PROFILE`). `hunter.config.active_tracks()` is the read helper. |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (for `sonnet` profile + judge) |
 | `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`, `deepseek-v4-pro`, `glm-5.2`) |
@@ -1032,14 +1097,34 @@ second `html.unescape()` pass.
   `hunter/` + entry scripts + `tests/` + `tools/`. Rule set: F/E/W + B (bugbear)
   + C4 + SIM + S (bandit); deliberate ignores are documented inline in
   `pyproject.toml` — don't silence a new finding without a rationale comment
+- `mypy hunter/ llm_client.py generate_docs.py apply_agent.py` runs in CI
+  (`typecheck` job) but is `continue-on-error: true` — informational only,
+  does not block deploy yet. Baseline as of 2026-07-15: 223 errors in 54
+  files (mostly PTB `Message | None`/`JobQueue | None` unchecked attribute
+  access — real but pre-existing). Don't let a new change grow that number;
+  fixing it down to zero (and flipping the gate to blocking) is tracked in
+  docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not done in this pass
 - SonarCloud scan runs as an informational CI job (`sonar-project.properties`);
   it skips itself until `SONAR_TOKEN` is added to the repo secrets and never
   blocks deploy
+- **New dependency → edit `pyproject.toml` only, then regenerate the lock:**
+  `uv pip compile pyproject.toml --all-extras --python-platform linux
+  --python-version 3.11 -o requirements.lock` (fallback: pip-tools
+  `pip-compile`). Never hand-edit `requirements.lock` or add a package to it
+  directly — Docker and CI both install from the lock, so an un-regenerated
+  lock means prod silently keeps running the old version. `--python-platform
+  linux` matters: compiling on Windows pulls in Windows-only transitive deps
+  (e.g. `colorama`) that don't belong in the Linux deploy image.
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
 - Candidate profile single source of truth: `prompts/candidate_profile.md`
 - LibreOffice path: `C:/Program Files/LibreOffice/program/soffice.exe` (in `generate_docs.py`)
 - When changing tracker schema, bot behavior, or adding files — update CLAUDE.md in the same commit
+- New best-effort code (a subsystem that must swallow its own errors — Sheets/
+  Drive/Telegram/shadow/writer style) wraps its existing try/except in
+  `with hunter.best_effort.best_effort("subsystem.name"):` rather than a bare
+  swallow, so silent degradation still surfaces as one alert at a threshold
+  instead of going unnoticed for hours (see hunter/best_effort.py)
 
 ---
 
@@ -1055,15 +1140,17 @@ second `html.unescape()` pass.
 
 ### Infrastructure
 
-4. ~~**Playwright not installed in Docker — Inhire source always returns [].**~~ ✅ Resolved: `playwright` is active in `requirements.txt` and the `Dockerfile` runs `playwright install chromium --with-deps` (adds ~500MB to image, ~seconds/page at runtime). Inhire is live (verified 2026-06-08: 25 jobs incl. Angular roles). **Ops note:** Inhire only works in prod once the deploy image is rebuilt with the current Dockerfile. Playwright does NOT unblock Wellfound — real headless Chromium still gets HTTP 403 (anti-bot needs a logged-in session + stealth; see `docs/new-sources/QUEUE-3-hard.md`).
+4. ~~**Playwright not installed in Docker — Inhire source always returns [].**~~ ✅ Resolved: `playwright` is in the `browser` extra of `pyproject.toml` (pulled into `requirements.lock` via `--all-extras`) and the `Dockerfile` runs `playwright install chromium --with-deps` (adds ~500MB to image, ~seconds/page at runtime). Inhire is live (verified 2026-06-08: 25 jobs incl. Angular roles). **Ops note:** Inhire only works in prod once the deploy image is rebuilt with the current Dockerfile. Playwright does NOT unblock Wellfound — real headless Chromium still gets HTTP 403 (anti-bot needs a logged-in session + stealth; see `docs/new-sources/QUEUE-3-hard.md`).
 
 ### Code Quality
 
-5. **No pyproject.toml / setup.py.** Project can't be installed as a package. No mypy/pyright config.
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, `continue-on-error: true` — 223-error baseline, informational only until driven to zero; see docs/quality/06-static-gates-mypy-sonar.md).
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
 7. ~~**tracker.py is ~980 lines.** Multiple functions re-open and re-parse the entire Excel file per call.~~ ✅ Resolved by the Phase 5 SQLite migration (2026-05-27): tracker.py no longer imports openpyxl at all — every read/write goes through `hunter.db.get_db()` (SQLite, WAL). No per-call workbook re-parse remains. (tracker.py is still ~1050 lines, but that's surface area, not the Excel-reparse cost the issue described.)
+
+8. **`hunter/outreach.py::_candidate_summary` silently never writes outreach.md.** Discovered 2026-07-15 building `tests/test_golden_apply_e2e.py` (docs/quality/04): it does `(resume.get("skills") or [])[:10]` assuming `resume_en.skills` is a list, but the real schema is a dict everywhere else (`generate_docs.build_resume`, `claim_judge.iter_judged_fields`) — slicing a dict raises `TypeError: unhashable type: 'slice'`, caught by `run_outreach`'s best-effort wrapper, so every normal apply silently skips outreach.md. Not fixed here (out of scope for the quality-roadmap batch); a follow-up task was spawned.
 
 ---
 
