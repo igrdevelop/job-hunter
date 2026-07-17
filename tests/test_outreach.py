@@ -7,6 +7,7 @@ from unittest.mock import patch
 from hunter.outreach import (
     MESSAGE_CHAR_LIMIT,
     OUTREACH_FILENAME,
+    _candidate_summary,
     _clean,
     run_outreach,
 )
@@ -42,7 +43,13 @@ def _make_folder(
             "primary_lang": primary_lang,
             "resume_en": {
                 "summary": "Senior Frontend Developer with 10+ years in Angular.",
-                "skills": ["Angular", "TypeScript", "RxJS"],
+                # real content.json shape (generate_docs.build_resume,
+                # claim_judge.iter_judged_fields): a dict of category -> comma
+                # string, NOT a list — see test_candidate_summary_handles_dict_skills.
+                "skills": {
+                    "frontend": "Angular, TypeScript, RxJS",
+                    "tools": "Jest, Git",
+                },
             },
         }
         (folder / "content.json").write_text(
@@ -160,6 +167,47 @@ def test_disabled_via_config(tmp_path, monkeypatch) -> None:
     folder = _make_folder(tmp_path)
     assert run_outreach(folder, "") is None
     assert not (folder / OUTREACH_FILENAME).exists()
+
+
+# ── Candidate summary (skills shape) ───────────────────────────────────────────
+
+
+def test_candidate_summary_handles_dict_skills() -> None:
+    """Real content.json shape: resume_en.skills is a dict of category ->
+    comma string. Slicing it like a list used to raise
+    `TypeError: unhashable type: 'slice'`, silently swallowed by
+    run_outreach's best-effort wrapper so outreach.md never got written."""
+    content = {
+        "resume_en": {
+            "summary": "Senior Frontend Developer with 10+ years in Angular.",
+            "skills": {
+                "frontend": "Angular, TypeScript, RxJS",
+                "tools": "Jest, Git",
+            },
+        }
+    }
+    summary = _candidate_summary(content)
+    assert "Senior Frontend Developer" in summary
+    assert "Angular" in summary
+    assert "Jest" in summary
+
+
+def test_candidate_summary_handles_list_skills() -> None:
+    """A bare list is accepted defensively too."""
+    content = {
+        "resume_en": {
+            "summary": "Senior Frontend Developer.",
+            "skills": ["Angular", "TypeScript", "RxJS"],
+        }
+    }
+    summary = _candidate_summary(content)
+    assert "Angular" in summary
+
+
+def test_candidate_summary_empty_skills() -> None:
+    content = {"resume_en": {"summary": "Senior Frontend Developer.", "skills": {}}}
+    summary = _candidate_summary(content)
+    assert summary == "Senior Frontend Developer."
 
 
 # ── Message hygiene ───────────────────────────────────────────────────────────

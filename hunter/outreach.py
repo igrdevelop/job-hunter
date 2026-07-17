@@ -117,13 +117,28 @@ def _run_outreach(folder: Path, url: str) -> Path | None:
 # ── Message drafting ──────────────────────────────────────────────────────────
 
 
+def _flatten_skills(skills) -> list[str]:
+    """resume_en.skills is a dict of category -> comma string (generate_docs.py's
+    build_resume, claim_judge.iter_judged_fields) in real content.json — flatten
+    it into individual skill items. A bare list is accepted too (defensive)."""
+    items: list[str] = []
+    if isinstance(skills, dict):
+        for val in skills.values():
+            if isinstance(val, str):
+                items.extend(s.strip() for s in val.split(",") if s.strip())
+            elif isinstance(val, list):
+                items.extend(str(v).strip() for v in val if str(v).strip())
+    elif isinstance(skills, list):
+        items.extend(str(v).strip() for v in skills if str(v).strip())
+    return items
+
+
 def _candidate_summary(content: dict) -> str:
     resume = content.get("resume_en") or {}
+    skill_items = _flatten_skills(resume.get("skills"))
     parts = [
         str(resume.get("summary") or ""),
-        "Key skills: " + ", ".join(map(str, (resume.get("skills") or [])[:10]))
-        if resume.get("skills")
-        else "",
+        "Key skills: " + ", ".join(skill_items[:10]) if skill_items else "",
     ]
     return "\n".join(p for p in parts if p).strip()
 
