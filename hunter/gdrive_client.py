@@ -28,6 +28,10 @@ SCOPES = [
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 
+# Same-named folders to look at when resolving duplicates. Only the oldest is
+# ever used; the rest just need to be visible so they can be reported/merged.
+_DUP_SCAN_PAGE_SIZE = 100
+
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -71,15 +75,12 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def get_or_create_folder(
-    service: Any,
-    name: str,
-    parent_id: str | None = None,
-) -> str:
-    """Find a folder by name (under parent_id if given), create if missing.
+def _list_folders(service: Any, name: str, parent_id: str | None) -> list[dict]:
+    """Return every non-trashed folder called ``name`` under ``parent_id``.
 
-    Returns folder_id.
-    Reuses existing folder to handle re-apply (--force) gracefully.
+    Ordered oldest-first by createdTime so callers can pick a stable winner —
+    Drive allows several folders to share a name in one parent, and its default
+    result order is not guaranteed.
     """
     query_parts = [
         f"name = {_q(name)}",
@@ -91,24 +92,69 @@ def get_or_create_folder(
 
     query = " and ".join(query_parts)
 
-    try:
-        result = (
-            service.files()
-            .list(
-                q=query,
-                spaces="drive",
-                fields="files(id, name)",
-                pageSize=1,
-            )
-            .execute()
+    result = (
+        service.files()
+        .list(
+            q=query,
+            spaces="drive",
+            fields="files(id, name, createdTime)",
+            orderBy="createdTime",
+            pageSize=_DUP_SCAN_PAGE_SIZE,
         )
+        .execute()
+    )
+    return result.get("files", [])
+
+
+def _pick_canonical(files: list[dict], name: str) -> str:
+    """Pick the oldest folder id, warning when duplicates exist.
+
+    Every writer picking the *same* id is what stops files from scattering
+    across duplicates once some already exist.
+    """
+    if len(files) > 1:
+        log.warning(
+            "gdrive: %d duplicate folders named %r — using oldest id=%s "
+            "(run tools/dedup_drive_folders.py to merge)",
+            len(files),
+            name,
+            files[0]["id"],
+        )
+    return files[0]["id"]
+
+
+def get_or_create_folder(
+    service: Any,
+    name: str,
+    parent_id: str | None = None,
+) -> str:
+    """Find a folder by name (under parent_id if given), create if missing.
+
+    Returns folder_id.
+    Reuses existing folder to handle re-apply (--force) gracefully.
+
+    Drive enforces NO unique-name constraint, so a plain list-then-create is a
+    TOCTOU race: two writers that check at the same moment both see nothing and
+    both create, leaving two same-named folders (which Drive for Desktop then
+    mirrors as ``2026-07-06`` / ``2026-07-06 (1)``). The bot has several such
+    writers running concurrently — the post-apply delivery hook, the periodic
+    upload-missing backfill, and each detached dual-apply shadow *process*.
+    Guards, in order:
+
+    1. read: on duplicates, always converge on the OLDEST folder, so uploads
+       stop scattering across whichever copy the query happened to return;
+    2. write: after creating, re-list and yield to an older concurrent winner,
+       trashing our loser copy — this closes the cross-process race an
+       in-process lock cannot.
+    """
+    try:
+        files = _list_folders(service, name, parent_id)
     except HttpError as e:
         log.error("gdrive get_or_create_folder list failed for %r: %s", name, e)
         raise
 
-    files = result.get("files", [])
     if files:
-        folder_id = files[0]["id"]
+        folder_id = _pick_canonical(files, name)
         log.debug("gdrive: reusing folder %r id=%s", name, folder_id)
         return folder_id
 
@@ -128,7 +174,44 @@ def get_or_create_folder(
 
     folder_id = folder["id"]
     log.debug("gdrive: created folder %r id=%s", name, folder_id)
-    return folder_id
+    return _resolve_create_race(service, name, parent_id, folder_id)
+
+
+def _resolve_create_race(
+    service: Any,
+    name: str,
+    parent_id: str | None,
+    created_id: str,
+) -> str:
+    """Re-list after a create; if a concurrent writer won, trash our copy.
+
+    Best-effort: any failure here leaves ``created_id`` in use, which is the
+    pre-existing behaviour — never fail an upload over cleanup.
+    """
+    try:
+        files = _list_folders(service, name, parent_id)
+    except HttpError as e:
+        log.warning("gdrive: duplicate re-check failed for %r: %s", name, e)
+        return created_id
+
+    if len(files) <= 1:
+        return created_id
+
+    winner_id = files[0]["id"]
+    if winner_id == created_id:
+        return created_id
+
+    log.warning(
+        "gdrive: lost create race for %r — using id=%s, trashing our copy id=%s",
+        name,
+        winner_id,
+        created_id,
+    )
+    try:
+        service.files().update(fileId=created_id, body={"trashed": True}).execute()
+    except HttpError as e:
+        log.warning("gdrive: could not trash duplicate %r id=%s: %s", name, created_id, e)
+    return winner_id
 
 
 # ---------------------------------------------------------------------------

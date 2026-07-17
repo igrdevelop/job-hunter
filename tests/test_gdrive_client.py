@@ -89,6 +89,89 @@ class TestGetOrCreateFolder:
         assert create_body["name"] == "NewFolder"
         assert create_body["parents"] == ["parent1"]
 
+    def test_duplicates_resolve_to_oldest(self):
+        # Drive allows same-named siblings. Every writer must converge on ONE
+        # of them, or uploads scatter across the copies.
+        svc = mock_service()
+        svc.files().list.return_value = _files_list_result(
+            [
+                {"id": "oldest", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:00Z"},
+                {"id": "dup1", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:03Z"},
+                {"id": "dup2", "name": "2026-07-06", "createdTime": "2026-07-09T02:00:00Z"},
+            ]
+        )
+
+        result = get_or_create_folder(svc, "2026-07-06", parent_id="root")
+
+        assert result == "oldest"
+        svc.files().create.assert_not_called()
+
+    def test_list_is_ordered_by_created_time(self):
+        svc = mock_service()
+        svc.files().list.return_value = _files_list_result([{"id": "f1", "name": "x"}])
+
+        get_or_create_folder(svc, "x", parent_id="pid")
+
+        kwargs = svc.files().list.call_args.kwargs
+        assert kwargs["orderBy"] == "createdTime"
+        assert "createdTime" in kwargs["fields"]
+        # pageSize=1 would hide duplicates entirely.
+        assert kwargs["pageSize"] > 1
+
+    def test_lost_create_race_yields_to_older_winner(self):
+        # Another process created the same folder between our list and create.
+        svc = mock_service()
+        svc.files().list.side_effect = [
+            _files_list_result([]),  # pre-create check: nothing there
+            _files_list_result(  # post-create re-check: someone beat us
+                [
+                    {"id": "winner", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:00Z"},
+                    {"id": "ours", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:01Z"},
+                ]
+            ),
+        ]
+        svc.files().create.return_value.execute.return_value = {"id": "ours"}
+
+        result = get_or_create_folder(svc, "2026-07-06", parent_id="root")
+
+        assert result == "winner"
+        # Our loser copy is trashed, so no duplicate is left behind.
+        svc.files().update.assert_called_once()
+        assert svc.files().update.call_args.kwargs["fileId"] == "ours"
+        assert svc.files().update.call_args.kwargs["body"] == {"trashed": True}
+
+    def test_won_create_race_keeps_our_folder(self):
+        svc = mock_service()
+        svc.files().list.side_effect = [
+            _files_list_result([]),
+            _files_list_result(
+                [
+                    {"id": "ours", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:00Z"},
+                    {"id": "loser", "name": "2026-07-06", "createdTime": "2026-07-06T01:00:01Z"},
+                ]
+            ),
+        ]
+        svc.files().create.return_value.execute.return_value = {"id": "ours"}
+
+        result = get_or_create_folder(svc, "2026-07-06", parent_id="root")
+
+        assert result == "ours"
+        # The other writer trashes its own copy — we must not touch it.
+        svc.files().update.assert_not_called()
+
+    def test_no_race_skips_cleanup(self):
+        svc = mock_service()
+        svc.files().list.side_effect = [
+            _files_list_result([]),
+            _files_list_result(
+                [{"id": "ours", "name": "x", "createdTime": "2026-07-06T01:00:00Z"}]
+            ),
+        ]
+        svc.files().create.return_value.execute.return_value = {"id": "ours"}
+
+        assert get_or_create_folder(svc, "x", parent_id="root") == "ours"
+        svc.files().update.assert_not_called()
+
     def test_creates_root_folder_no_parent(self):
         svc = mock_service()
         svc.files().list.return_value = _files_list_result([])
