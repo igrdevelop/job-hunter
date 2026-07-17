@@ -144,6 +144,13 @@ llm_client.py               LLM wrapper: Anthropic + OpenAI with retry + JSON pa
                             cache_control=ephemeral, and on effort-capable models (Sonnet 4.6,
                             Opus 4.5+, Fable 5) sets output_config.effort=low + thinking disabled.
                             Both are model-gated so Haiku judge calls never 400.
+                            LLMOutageError (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1): account-
+                            level failures (drained balance 400/quota-429/401/402/403, detected
+                            by is_outage_signature) raise a distinct LLMError subclass, never
+                            retried; apply exits 46 (APPLY_LLM_OUTAGE_EXIT_CODE) → outcome
+                            "llm_outage" → batch loops stop immediately, write NO FAIL row and
+                            never escalate fail_count (a billing outage is global state, not the
+                            vacancy's fault). Dead rows from before: /retry_reset revives them.
 
 hunter/
   config.py                 ALL config: env vars, schedule, paths, source toggles.

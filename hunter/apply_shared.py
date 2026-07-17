@@ -79,6 +79,12 @@ APPLY_MANUAL_EXIT_CODE = 44
 # later WITHOUT escalating the permanent fail counter — the offer is likely fine.
 APPLY_RATE_LIMITED_EXIT_CODE = 45
 
+# Exit code: LLM account-level outage (drained balance / bad key — llm_client.
+# LLMOutageError). Global state, not the vacancy's fault: the caller must stop
+# the batch immediately, write NO tracker row and never escalate fail_count
+# (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1).
+APPLY_LLM_OUTAGE_EXIT_CODE = 46
+
 # Placeholder URL used when user pastes job text into Telegram without any link.
 PASTE_NO_URL_PLACEHOLDER = "paste://no-url"
 

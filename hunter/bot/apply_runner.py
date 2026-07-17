@@ -25,6 +25,11 @@ from hunter.bot.paste import _extract_url
 
 logger = logging.getLogger(__name__)
 
+# Must match apply_shared.APPLY_LLM_OUTAGE_EXIT_CODE (LLM billing/auth outage) —
+# same local-copy pattern as services/apply_service.py, so importing this module
+# doesn't pull in the whole apply_shared import graph.
+_APPLY_LLM_OUTAGE_EXIT_CODE = 46
+
 
 async def _run_apply_agent(
     url: str,
@@ -60,6 +65,16 @@ async def _run_apply_agent(
             # `<` makes Telegram reject the whole failure message (HTML parse).
             err_block = f"\n\n<pre>{html.escape(error_detail[:800])}</pre>" if error_detail else ""
             await _tg_notify(f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}")
+        elif outcome == "llm_outage":
+            # Account-level LLM failure — nothing was generated, so no delivery.
+            # No tracker row was written: re-send the URL once the account is
+            # topped up (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+            logger.error("[apply_agent] LLM outage for %s", label)
+            await _tg_notify(
+                f"💳 <b>LLM outage (billing/auth)</b> — no docs generated.\n"
+                f"🔗 {label}\n"
+                "Check the provider account/key, then send the URL again."
+            )
         else:
             logger.info("[apply_agent] done (%s) for %s", outcome, label)
             # Instant Sheets mirror + Drive upload. deliver_apply_now also
@@ -122,6 +137,19 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
             from hunter.delivery import deliver_apply_now
 
             await deliver_apply_now(url)
+        elif proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
+            # Global account state — no FAIL row, and the rest of the batch
+            # would only hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+            logger.error("[linkedin_batch] LLM outage — stopping batch at job %s", jid)
+            try:
+                await update.message.reply_text(
+                    f"💳 LLM outage (billing/auth) — stopping batch at [{i}/{total}]. "
+                    "Jobs were NOT marked FAIL; re-run once the account is fixed.",
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                pass
+            break
         else:
             failed += 1
             logger.error(

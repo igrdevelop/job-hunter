@@ -105,6 +105,42 @@ class LLMRateLimitError(LLMError):
     """Rate limit or overloaded — retryable."""
 
 
+class LLMOutageError(LLMError):
+    """Account-level failure: drained balance, bad/rotated key, revoked access.
+
+    Not the vacancy's fault and not transient at call scale — retrying the same
+    call is pointless, but the job itself is fine and should be retried once the
+    account recovers. Callers map this to APPLY_LLM_OUTAGE_EXIT_CODE (46) so the
+    hunt loop stops the batch WITHOUT writing FAIL rows or escalating fail_count
+    (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1). Subclass of LLMError so existing
+    `except LLMError` callers keep working unless they opt in.
+    """
+
+
+# Account-level failure signatures (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1).
+# 401/402/403 are always a key/account problem, never a request problem. A 400
+# is normally a request bug (must stay a plain LLMError — misclassifying a code
+# bug as an outage would retry it forever), EXCEPT the billing-shaped messages:
+# Anthropic reports a drained balance as 400 invalid_request_error ("Your credit
+# balance is too low…"). OpenAI reports a drained quota as 429 insufficient_quota
+# ("…check your plan and billing details") — the message check pulls it out of
+# the retry ladder, where it would burn the full ~10-min backoff per vacancy and
+# make the outage slower to detect. OpenRouter uses a plain 402.
+_OUTAGE_ALWAYS_STATUSES = {401, 402, 403}
+_OUTAGE_MSG_RE = re.compile(
+    r"credit balance|insufficient[_ ]quota|billing|spend(?:ing)? limit|payment required",
+    re.IGNORECASE,
+)
+
+
+def is_outage_signature(status_code: int | None, message: str) -> bool:
+    """True if an API error is an account-level outage (billing/auth), shared by
+    all three providers so they classify identically."""
+    if status_code in _OUTAGE_ALWAYS_STATUSES:
+        return True
+    return bool(_OUTAGE_MSG_RE.search(message or ""))
+
+
 def _backoff_seconds(attempt: int) -> float:
     """Exponential backoff with jitter. attempt is 1-based.
 
@@ -266,10 +302,14 @@ def _call_anthropic(
         _record_usage(model, getattr(response, "usage", None))
         return response.content[0].text
     except anthropic.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except anthropic.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"Anthropic outage ({e.status_code}): {e}") from e
         raise LLMError(f"Anthropic API error {e.status_code}: {e}") from e
 
 
@@ -304,10 +344,14 @@ def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) 
             )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except openai.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"OpenAI outage ({e.status_code}): {e}") from e
         raise LLMError(f"OpenAI API error {e.status_code}: {e}") from e
 
 
@@ -373,12 +417,16 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
             )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except openai.APITimeoutError as e:
         raise LLMRateLimitError(f"OpenRouter timeout: {e}") from e
     except openai.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"OpenRouter outage ({e.status_code}): {e}") from e
         raise LLMError(f"OpenRouter API error {e.status_code}: {e}") from e
 
 

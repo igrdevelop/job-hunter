@@ -460,6 +460,22 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
                 "<i>Tracker updated, URL dedup active.</i>",
             )
+        elif outcome == "llm_outage":
+            # Account-level LLM failure (drained balance / bad key) — a GLOBAL
+            # state, not this vacancy's fault. No FAIL row (the job has no
+            # tracker row, so the next hunt re-fetches it — the listing is the
+            # queue), and stop the batch immediately: every further job costs a
+            # real fetch just to hit the same wall (M1,
+            # docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+            remaining = total - i
+            await send_text(
+                context,
+                f"💳 <b>LLM outage (billing/auth)</b> — stopping batch.\n"
+                f"[{i}/{total}] {job.company} — {job.title} left untouched "
+                f"(+{remaining} not attempted; they return on the next hunt).\n"
+                "Check the provider account/key. Vacancies were NOT marked FAIL.",
+            )
+            break
         else:
             failed += 1
             consecutive_fails += 1
@@ -549,6 +565,20 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"⏳ Retry rate-limited (429): {job.company} — {job.title} "
                 "— will retry next cycle.",
             )
+        elif outcome == "llm_outage":
+            # Global account state, not this row's fault: leave fail_count
+            # untouched (the row stays retryable at its current count) and stop
+            # the whole retry pass — every further row would burn a fetch to
+            # hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+            remaining = len(capped) - i
+            logger.error("[retry] LLM outage (billing/auth) — stopping retries")
+            await send_text(
+                context,
+                f"💳 <b>LLM outage (billing/auth)</b> — stopping retries.\n"
+                f"{job.company} — {job.title} left at its current fail count "
+                f"(+{remaining} not attempted). Check the provider account/key.",
+            )
+            break
         else:
             consecutive_fails += 1
             new_count = await asyncio.to_thread(increment_fail_count, job.url)

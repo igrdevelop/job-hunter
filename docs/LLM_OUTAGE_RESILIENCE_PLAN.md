@@ -110,7 +110,20 @@ retention 2026-05-28 → 2026-07-17):**
   for date folders in PR #163, but `upload_log_file`'s "Logs" folder predates the fix and
   `tools/dedup_drive_folders.py` only walks date folders. Flagged as a separate task.
 
-### M1 — Classify LLM outages as a distinct, non-escalating outcome
+### M1 — Classify LLM outages as a distinct, non-escalating outcome ✅ DONE (2026-07-17)
+
+*Implementation notes:* detection is `llm_client.is_outage_signature(status, message)` —
+401/402/403 always; billing-shaped messages (`credit balance` / `insufficient_quota` /
+`billing` / `spend limit` / `payment required`) catch Anthropic's 400 and OpenAI's
+quota-429 (which would otherwise burn the full retry ladder). Wired into all three
+providers' except blocks. The only abort-capable `call_llm` site turned out to be the
+Step 3 generation call in `apply_api.py` — every other site (repair, ATS boost/loop, CL
+review, translate, judge, verdict, refine, outreach) already degrades best-effort and
+was left untouched. Besides the two planned batch loops, `bot/apply_runner.py` needed
+two more branches the plan missed: `_run_apply_agent` (manual/paste path — `llm_outage`
+previously fell into the generic "done" branch and ran delivery) and
+`_run_linkedin_batch` (wrote FAIL rows on any non-zero exit). 19 tests incl. the two
+mutation-verified guards (reverting main.py makes both fail).
 
 The core fix. New error class → new exit code → new outcome → no permanent damage.
 

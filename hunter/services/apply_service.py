@@ -15,8 +15,11 @@ logger = logging.getLogger(__name__)
 _APPLY_MANUAL_EXIT_CODE = 44
 # Must match apply_shared.APPLY_RATE_LIMITED_EXIT_CODE (transient 429 during fetch)
 _APPLY_RATE_LIMITED_EXIT_CODE = 45
+# Must match apply_shared.APPLY_LLM_OUTAGE_EXIT_CODE (LLM billing/auth outage —
+# global state, not the vacancy's fault; the batch loop stops without FAIL rows)
+_APPLY_LLM_OUTAGE_EXIT_CODE = 46
 
-ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited"]
+ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited", "llm_outage"]
 
 # Second element: human-readable error snippet for Telegram (empty string on success).
 ApplyResult = tuple[ApplyOutcome, str]
@@ -130,6 +133,10 @@ async def run_apply_agent_subprocess(
             logger.warning(f"[auto-apply] RATE-LIMITED (429) {job.company} — {job.title}")
             return "rate_limited"
 
+        if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
+            logger.error(f"[auto-apply] LLM OUTAGE (billing/auth) {job.company} — {job.title}")
+            return "llm_outage"
+
         if proc.returncode != 0:
             # Same stdout fallback as run_apply_agent_for_url: apply_agent's
             # error paths print to stdout and exit 1 with an empty stderr.
@@ -169,7 +176,7 @@ async def run_apply_agent_for_url(
     run_apply_agent_subprocess's matching docstring note.
 
     Returns (outcome, error_detail):
-      outcome    — "ok" | "fail" | "manual"
+      outcome    — "ok" | "fail" | "manual" | "llm_outage"
       error_detail — non-empty string on failure (stderr snippet / timeout reason)
     """
     label = url or "(pasted text)"
@@ -209,6 +216,10 @@ async def run_apply_agent_for_url(
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
         return "manual", ""
+
+    if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
+        logger.error(f"[apply_agent] LLM OUTAGE (billing/auth) for {label}")
+        return "llm_outage", "LLM account outage (billing/auth) — no docs generated"
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if proc.returncode != 0:
