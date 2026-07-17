@@ -371,11 +371,14 @@ tools/preview_judge.py      Run the claim-judge (+scrubs) on an existing content
                             regenerating — one Haiku call; mirrors run_judge_stage (JUDGE_MODE env)
 tools/dedup_sheet.py        One-time cleanup of duplicate rows in the Sheets tracker (--apply to delete)
 tools/dedup_drive_folders.py Merge duplicate Drive folders ("2026-07-06" x5, files scattered across
-                            them) left behind by the pre-fix list-then-create race in gdrive_client:
-                            keeps the OLDEST copy of each name (the one the bot now picks), moves the
-                            others' children in, trashes the emptied dupe. Same-named children are
-                            reported as conflicts and left in place — never silently overwritten.
-                            Dry-run by default (--apply to merge); trash only, never a hard delete
+                            them) left behind by the pre-fix list-then-create race in gdrive_client.
+                            RECURSIVE: each dup date folder holds its own copy of the same company
+                            subfolders, so it walks the tree, keeps the OLDEST copy of each name (the
+                            one the bot now picks), and merges every other copy INTO it down to the
+                            files. A same-named FILE is a conflict, left in place (never overwritten);
+                            a folder emptied by the merge is trashed. Loads the whole tree into memory
+                            once and plans against that, so the dry run (default; --apply to merge)
+                            predicts --apply byte-for-byte. Trash only, never a hard delete
 tools/normalize_sent.py     Write clean "Applied Date" into Sheets column L from Sent (--apply to write)
 tools/stats_sheet.py        Read-only stats over the Sheets Sent column (--write-tab for a Stats tab)
 tools/screen_calibrate.py   Doomed-gate calibration (docs/DOOMED_GATE_PLAN.md M4): runs

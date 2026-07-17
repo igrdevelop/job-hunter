@@ -5,22 +5,32 @@ Background: Drive enforces no unique-name constraint, and the bot resolved
 folders with an unsynchronized list-then-create. Concurrent writers (the
 post-apply delivery hook, the 30-min upload-missing backfill, each detached
 dual-apply shadow process) each created their own "2026-07-06", and later
-uploads landed in whichever copy the query happened to return first — so the
-day's files ended up scattered across "2026-07-06", "2026-07-06 (1)", … as
-Drive for Desktop mirrors them.
+uploads landed in whichever copy the query happened to return first — so a
+day's applications ended up split across "2026-07-06", "2026-07-06 (1)", … as
+Drive for Desktop mirrors same-named siblings.
+
+Crucially the split is RECURSIVE: each duplicate date folder holds its own copy
+of the same company subfolders (`2026-07-06/Santander/`, `2026-07-06 (1)/
+Santander/`), and a single company's files can be scattered across those copies.
+So the merge has to recurse — collapse same-named folders at every level and
+only stop at genuine file-vs-file name collisions.
 
 hunter/gdrive_client.py now prevents *new* duplicates and always converges on
 the oldest copy; this tool merges the *historical* ones already on Drive.
 
-What it does, per parent (the root, then each date folder):
-  - groups non-trashed child folders by name,
+What it does, walking the tree from the root:
+  - groups same-named sibling folders under each parent,
   - keeps the OLDEST of each group (the same one the bot now picks),
-  - moves the other copies' children into the keeper — a child whose name
-    already exists in the keeper is left in place and reported as a conflict
-    rather than merged, so nothing is silently overwritten,
-  - trashes the emptied duplicate (recoverable from Drive's trash for 30 days;
-    never a permanent delete),
-  - recurses one level so duplicate company folders inside a date are merged too.
+  - merges every other copy INTO the keeper, recursively: a child folder that
+    exists on both sides is merged into the keeper's copy (down to the files);
+    a child that exists only in the duplicate is moved over wholesale,
+  - a FILE whose name already exists in the keeper is left in place and
+    reported as a conflict — never silently overwritten (which copy is the good
+    one isn't knowable here),
+  - trashes a duplicate folder once it's been fully emptied; a duplicate that
+    still holds an unresolved file conflict is kept for manual review.
+
+Trash only — recoverable from Drive's trash for 30 days, never a hard delete.
 
 Run inside the container (it reuses the bot's gsheets_token.json):
 
@@ -49,11 +59,9 @@ from hunter.config import (
 from hunter.gdrive_client import _FOLDER_MIME, build_service, get_or_create_folder
 
 
-def _list_children(svc, parent_id: str, *, folders_only: bool = False) -> list[dict]:
+def _list_children(svc, parent_id: str) -> list[dict]:
     """Return every non-trashed child of parent_id, oldest first."""
     query = f"'{parent_id}' in parents and trashed = false"
-    if folders_only:
-        query += f" and mimeType = '{_FOLDER_MIME}'"
 
     out: list[dict] = []
     page_token = None
@@ -76,58 +84,123 @@ def _list_children(svc, parent_id: str, *, folders_only: bool = False) -> list[d
             return out
 
 
-def _duplicate_groups(svc, parent_id: str) -> list[tuple[str, list[dict]]]:
-    """Return [(name, [folders oldest-first])] for names appearing more than once."""
-    by_name: dict[str, list[dict]] = defaultdict(list)
-    for f in _list_children(svc, parent_id, folders_only=True):
-        by_name[f["name"]].append(f)
-    return [(name, group) for name, group in sorted(by_name.items()) if len(group) > 1]
+def _is_folder(f: dict) -> bool:
+    return f.get("mimeType") == _FOLDER_MIME
 
 
-def _merge_group(svc, name: str, group: list[dict], *, apply: bool, indent: str) -> dict:
-    """Move every duplicate's children into the oldest copy, then trash it."""
-    keeper, *dupes = group
-    stats = {"merged_folders": 0, "moved_children": 0, "conflicts": 0}
+class Node:
+    """One Drive file/folder, with its (folder) children loaded into memory.
 
-    keeper_children = {c["name"] for c in _list_children(svc, keeper["id"])}
-    print(f"{indent}{name!r}: {len(group)} copies - keeping oldest id={keeper['id']}")
+    The whole tree is read ONCE up front and every merge is planned against
+    these in-memory nodes — so a dry run walks exactly the same code and state
+    as --apply and predicts it precisely (an earlier version re-listed from the
+    API mid-merge, which made dry-run diverge because nothing was actually
+    moved). Real API calls happen only in --apply mode.
+    """
 
-    for dupe in dupes:
-        left_behind = 0
-        for child in _list_children(svc, dupe["id"]):
-            if child["name"] in keeper_children:
-                # Same name on both sides. Which copy is the good one isn't
-                # knowable here, so leave it for the owner to look at.
-                print(f"{indent}  [!] conflict, left in place: {child['name']!r}")
-                stats["conflicts"] += 1
-                left_behind += 1
-                continue
-            print(f"{indent}  [>] move {child['name']!r}")
-            if apply:
-                svc.files().update(
-                    fileId=child["id"],
-                    addParents=keeper["id"],
-                    removeParents=dupe["id"],
-                    fields="id",
-                ).execute()
-            keeper_children.add(child["name"])
-            stats["moved_children"] += 1
+    __slots__ = ("id", "name", "is_folder", "children")
 
-        if left_behind:
-            # Trashing would take the unmerged children along with it.
-            print(f"{indent}  [~] keeping duplicate id={dupe['id']} ({left_behind} conflict(s))")
-            continue
+    def __init__(self, raw: dict):
+        self.id: str = raw["id"]
+        self.name: str = raw["name"]
+        self.is_folder: bool = _is_folder(raw)
+        self.children: list[Node] = []  # populated for folders by _load_tree
 
-        print(f"{indent}  [x] trash duplicate id={dupe['id']}")
-        if apply:
-            svc.files().update(fileId=dupe["id"], body={"trashed": True}).execute()
-        stats["merged_folders"] += 1
 
-    return stats
+def _load_tree(svc, folder_id: str) -> list[Node]:
+    """Recursively read folder_id's subtree into Node objects (oldest-first)."""
+    nodes: list[Node] = []
+    for raw in _list_children(svc, folder_id):
+        node = Node(raw)
+        if node.is_folder:
+            node.children = _load_tree(svc, node.id)
+        nodes.append(node)
+    return nodes
+
+
+def _move(svc, node: Node, from_parent: str, keeper: Node, *, apply: bool) -> None:
+    if apply:
+        svc.files().update(
+            fileId=node.id,
+            addParents=keeper.id,
+            removeParents=from_parent,
+            fields="id",
+        ).execute()
+    keeper.children.append(node)
+
+
+def _trash(svc, node: Node, *, apply: bool) -> None:
+    if apply:
+        svc.files().update(fileId=node.id, body={"trashed": True}).execute()
+
+
+def _merge_into(svc, keeper: Node, dupe: Node, *, apply: bool, indent: str, stats: dict) -> bool:
+    """Merge ``dupe``'s children into ``keeper`` (recursively).
+
+    Returns True if ``dupe`` ends up fully emptied — i.e. safe to trash.
+    """
+    by_name = {c.name: c for c in keeper.children}
+    fully_absorbed = True
+
+    for child in list(dupe.children):
+        match = by_name.get(child.name)
+
+        if match is None:
+            kind = "folder" if child.is_folder else "file"
+            print(f"{indent}[>] move {kind} {child.name!r}")
+            _move(svc, child, dupe.id, keeper, apply=apply)
+            by_name[child.name] = child
+            dupe.children.remove(child)
+            stats["moved"] += 1
+
+        elif child.is_folder and match.is_folder:
+            print(f"{indent}[+] merge {child.name!r}/")
+            if _merge_into(svc, match, child, apply=apply, indent=indent + "    ", stats=stats):
+                print(f"{indent}    [x] trash emptied {child.name!r}")
+                _trash(svc, child, apply=apply)
+                dupe.children.remove(child)
+                stats["trashed"] += 1
+            else:
+                fully_absorbed = False
+
+        else:
+            # file-vs-file (or a type mismatch): which copy is right is not
+            # knowable here, so leave it and keep the parent alive.
+            print(f"{indent}[!] conflict, left in place: {child.name!r}")
+            stats["conflicts"] += 1
+            fully_absorbed = False
+
+    if fully_absorbed:
+        print(f"{indent}[x] trash duplicate id={dupe.id}")
+        _trash(svc, dupe, apply=apply)
+        stats["trashed"] += 1
+    else:
+        print(f"{indent}[~] keeping duplicate id={dupe.id} (unresolved conflicts)")
+
+    return fully_absorbed
+
+
+def _dedup_node(svc, parent: Node, *, apply: bool, indent: str, stats: dict) -> None:
+    """Collapse same-named folder siblings under ``parent``, then recurse into keepers."""
+    by_name: dict[str, list[Node]] = defaultdict(list)
+    for c in parent.children:
+        if c.is_folder:
+            by_name[c.name].append(c)
+
+    for name, group in sorted(by_name.items()):
+        keeper, *dupes = group  # oldest first (tree is loaded createdTime-ordered)
+        for dupe in dupes:
+            if dupe is group[1]:  # print the header once, before the first dupe
+                print(f"{indent}{name!r}: {len(group)} copies - keeping oldest id={keeper.id}")
+            if _merge_into(svc, keeper, dupe, apply=apply, indent=indent + "  ", stats=stats):
+                parent.children.remove(dupe)
+        # Recurse into the keeper only — the duplicates are merged away. Catches
+        # same-named dups nested deeper (e.g. two 'Nexters' inside one date).
+        _dedup_node(svc, keeper, apply=apply, indent=indent + "  ", stats=stats)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    parser = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     parser.add_argument(
         "--apply",
         action="store_true",
@@ -142,32 +215,17 @@ def main() -> int:
     print(f"=== Drive duplicate folder cleanup - {mode} ===")
     print(f"root: {root_id}\n")
 
-    totals = {"merged_folders": 0, "moved_children": 0, "conflicts": 0}
+    root = Node({"id": root_id, "name": "<root>", "mimeType": _FOLDER_MIME})
+    root.children = _load_tree(svc, root_id)
 
-    def _accumulate(stats: dict) -> None:
-        for k, v in stats.items():
-            totals[k] += v
-
-    # Level 1: duplicate date folders under the root.
-    date_dupes = _duplicate_groups(svc, root_id)
-    for name, group in date_dupes:
-        _accumulate(_merge_group(svc, name, group, apply=args.apply, indent=""))
-
-    # Level 2: duplicate company folders inside each (surviving) date folder.
-    # Re-listed after the merge above so the keepers hold the full child set.
-    for date_folder in _list_children(svc, root_id, folders_only=True):
-        company_dupes = _duplicate_groups(svc, date_folder["id"])
-        if not company_dupes:
-            continue
-        print(f"\n{date_folder['name']}/")
-        for name, group in company_dupes:
-            _accumulate(_merge_group(svc, name, group, apply=args.apply, indent="  "))
+    stats = {"moved": 0, "trashed": 0, "conflicts": 0}
+    _dedup_node(svc, root, apply=args.apply, indent="", stats=stats)
 
     print("\n=== Summary ===")
-    print(f"duplicate folders merged : {totals['merged_folders']}")
-    print(f"children moved           : {totals['moved_children']}")
-    print(f"conflicts left in place  : {totals['conflicts']}")
-    if not args.apply and (totals["merged_folders"] or totals["moved_children"]):
+    print(f"items moved              : {stats['moved']}")
+    print(f"duplicate folders trashed: {stats['trashed']}")
+    print(f"file conflicts left      : {stats['conflicts']}")
+    if not args.apply and (stats["moved"] or stats["trashed"]):
         print("\nDry run - nothing was changed. Re-run with --apply to merge.")
     return 0
 
