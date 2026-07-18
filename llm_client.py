@@ -141,6 +141,79 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
     return bool(_OUTAGE_MSG_RE.search(message or ""))
 
 
+# ── CLI (Pro subscription) fallback for account outages ───────────────────────
+# docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4b: when LLM_OUTAGE_FALLBACK_CLI is on,
+# an LLMOutageError from ANY provider retries the same prompt ONCE through
+# `claude -p` (subscription — separate billing pool). Living here, at the one
+# choke point every LLM call goes through, it covers the cheap stages too
+# (claim judge, PDF verdict, refine rewrites, translate, outreach) — the
+# pipeline-level M4 fallback in apply_agent.main() only covered the main
+# generation call; the Haiku-tier calls just went best-effort-skipped when the
+# Anthropic balance was the one that died.
+
+
+def _cli_fallback_enabled() -> bool:
+    """Flag on AND not inside a dual-apply shadow run.
+
+    The shadow forces a specific generator model via llm_profiles.set_override
+    for an A/B comparison — silently serving its calls with the subscription's
+    model would poison the comparison, so the shadow never falls back.
+    """
+    if os.getenv("LLM_OUTAGE_FALLBACK_CLI", "false").lower() not in ("true", "1", "yes"):
+        return False
+    try:
+        from hunter import llm_profiles
+
+        if llm_profiles._override is not None:
+            return False
+    except Exception:  # noqa: BLE001 — llm_client stays importable standalone
+        pass
+    return True
+
+
+def _call_cli_fallback(system_prompt: str, user_message: str) -> dict | None:
+    """One `claude -p` run for an outage-hit prompt. Returns the parsed JSON
+    dict, or None on ANY failure (no CLI, not logged in, timeout, non-JSON) —
+    the caller then re-raises the original LLMOutageError, so a broken fallback
+    can never masquerade as a different error class.
+
+    The prompt goes through STDIN, not argv: judge/verdict prompts carry the
+    full job text + resume JSON, well past the Windows ~32K argv limit. Plain
+    print mode, no --dangerously-skip-permissions — these are pure text-in/
+    text-out calls, no tools involved. No usage is recorded (subscription has
+    no per-token stats), so the tracker Cost $ column simply won't include
+    CLI-served calls.
+    """
+    import subprocess
+
+    prompt = f"{system_prompt}\n\n---\n\n{user_message}"
+    try:
+        result = subprocess.run(
+            ["claude", "-p"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("[LLM] CLI fallback unavailable/failed: %s", e)
+        return None
+    if result.returncode != 0:
+        logger.warning(
+            "[LLM] CLI fallback exited %d: %s",
+            result.returncode,
+            (result.stderr or result.stdout or "")[-300:],
+        )
+        return None
+    try:
+        return _parse_json(result.stdout or "")
+    except LLMError as e:
+        logger.warning("[LLM] CLI fallback returned unparseable output: %s", e)
+        return None
+
+
 def _backoff_seconds(attempt: int) -> float:
     """Exponential backoff with jitter. attempt is 1-based.
 
@@ -221,6 +294,20 @@ def call_llm(
                 time.sleep(wait)
             else:
                 raise LLMError(f"Rate limit after {max_retries} retries: {e}") from e
+
+        except LLMOutageError:
+            # Account dead (billing/auth) — retrying the API is pointless, but
+            # the subscription is a separate billing pool: one `claude -p` shot
+            # when the fallback is enabled (M4b). None → re-raise the ORIGINAL
+            # outage so exit-46 semantics (stop batch, no FAIL row, pause) hold.
+            if _cli_fallback_enabled():
+                parsed = _call_cli_fallback(system_prompt, user_message)
+                if parsed is not None:
+                    logger.warning(
+                        f"[LLM] outage on {active_model} — served via Claude CLI fallback"
+                    )
+                    return parsed
+            raise
 
         except LLMError:
             raise

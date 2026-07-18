@@ -261,6 +261,35 @@ shipped in the same branch:*
    "not logged in".
 5. ⬜ `.env` on the deploy host: `LLM_OUTAGE_FALLBACK_CLI=true`, restart.
 
+### M4b — CLI fallback for the cheap calls too ✅ DONE (2026-07-18, owner request)
+
+Owner: *"думаю, мы можем и дешевые вердиктовые запросы тоже через cli делать, если деньги
+кончились."* The pipeline-level M4 fallback only covered the main generation call; the
+Haiku-tier stages (claim judge, PDF verdict, refine rewrites, translate, outreach) hit
+`ANTHROPIC_API_KEY` directly and just went best-effort-skipped when that balance was the
+one that died — the apply completed, but unjudged and unscored.
+
+Implementation: the fallback moved INTO `llm_client.call_llm` — the one choke point every
+LLM call in the codebase goes through (same lazy-import property the `fake_llm` test
+fixture exploits). On `LLMOutageError` from ANY provider, if `LLM_OUTAGE_FALLBACK_CLI` is
+on: ONE `claude -p` run with the same prompt (via **stdin** — judge/verdict prompts carry
+the full job text + resume JSON, past the Windows ~32K argv limit; plain print mode, no
+`--dangerously-skip-permissions`, these calls use no tools). Any CLI failure (no binary,
+not logged in, timeout, non-JSON output) returns the **original** `LLMOutageError`, so
+exit-46 semantics — stop batch, no FAIL row, arm the pause — are preserved and a broken
+fallback can never masquerade as a plain LLMError/FAIL. The **dual-apply shadow never
+falls back** (`llm_profiles._override` check): silently serving the shadow's calls with
+the subscription's model would poison the A/B comparison.
+
+Consequences, deliberate: (a) with the flag on, the main generation call is also served
+at this level, so `main_api` continues through ALL its stages on the subscription and
+apply_agent.main's pipeline-level fallback becomes the second line (fires only when the
+CLI itself is dead); (b) an outage vacancy now spawns ~10–20 sequential CLI calls —
+noticeably slower, explicitly accepted by the owner ("ночью то я не работаю"; the 900s
+`APPLY_AGENT_TIMEOUT_SEC` still bounds the worst case — a timeout becomes a normal FAIL
+row retried later); (c) CLI-served calls record no token usage, so the tracker Cost $
+column understates outage-window runs (subscription spend is flat anyway).
+
 Owner question 3. Half of this already exists in the opposite direction:
 [`apply_agent.py:82`](../apply_agent.py) tries the **CLI first** when `claude` is on PATH
 and falls back to the API when the CLI fails. In the deploy image `claude` is not
