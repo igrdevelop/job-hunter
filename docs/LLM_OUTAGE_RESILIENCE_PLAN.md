@@ -236,14 +236,30 @@ intent), and an API exit 46 retries the vacancy once through `main_cli`. CLI suc
 normal apply (exit 0, no pause armed); any CLI failure re-reports exit 46 so M1/M2 take
 over. 7 tests.
 
-*Ops half — NOT shipped, needs the owner's sign-off (personal subscription token on the
-deploy host):*
-1. Dockerfile: install node/npm + `@anthropic-ai/claude-code` (image grows accordingly).
-2. One-time on the owner's machine: `claude` login → mount the resulting `~/.claude`
-   credentials dir as a volume into the container (never commit it), like
-   `gsheets_token.json`.
-3. `.env`: `LLM_OUTAGE_FALLBACK_CLI=true`.
-Until all three are done the flag is inert and nothing changes in prod.
+*Ops half — owner approved 2026-07-18 ("да. именно да. надо так сделать"). Repo side
+shipped in the same branch:*
+1. ✅ Dockerfile: `nodejs`/`npm` (Debian bookworm's Node 18 meets the CLI minimum) +
+   `npm install -g @anthropic-ai/claude-code`; `ENV CLAUDE_CONFIG_DIR=/root/.claude` so
+   ALL claude state (global config INCLUDING the OAuth credentials) lives inside the
+   mounted volume — by default the global config sits at `/root/.claude.json` OUTSIDE
+   the mount and the login would die with the container; `ENV IS_SANDBOX=1` because the
+   CLI refuses `--dangerously-skip-permissions` (which `apply_cli.py` passes) as root
+   unless told it's sandboxed — this single-purpose container is exactly that.
+2. ✅ `.dockerignore`: `!.claude/commands/` re-included — the CLI pipeline runs
+   `claude -p "/apply …"` with cwd=/app, and that slash command lives in
+   `.claude/commands/apply.md`, which the blanket `.claude/` exclusion silently kept out
+   of the image (the fallback would have died on "unknown command" even when logged in).
+3. ✅ docker-compose: `./.claude-cli:/root/.claude` volume (host dir deliberately NOT
+   named `.claude` — that's the repo's own slash-commands dir). `.claude-cli/` added to
+   `.gitignore` — it will hold the owner's PERSONAL subscription OAuth token.
+
+*Remaining — owner's hands only (interactive OAuth, can't be done by an agent):*
+4. ⬜ On the deploy host, after the image rebuild:
+   `docker compose exec -it job-hunter claude` → follow the OAuth URL flow (open the
+   printed URL in any browser, paste the code back). The login persists in
+   `./.claude-cli/`. Verify: `docker compose exec job-hunter claude --version` shows no
+   "not logged in".
+5. ⬜ `.env` on the deploy host: `LLM_OUTAGE_FALLBACK_CLI=true`, restart.
 
 Owner question 3. Half of this already exists in the opposite direction:
 [`apply_agent.py:82`](../apply_agent.py) tries the **CLI first** when `claude` is on PATH
