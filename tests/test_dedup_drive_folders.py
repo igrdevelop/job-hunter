@@ -261,3 +261,93 @@ class TestFullSweep:
         run_tool(monkeypatch, drive, "--apply")
 
         capsys.readouterr().out.encode("ascii")  # raises if non-ASCII slipped in
+
+
+# ---------------------------------------------------------------------------
+# The SAME company in several date copies (the real prod scatter)
+# ---------------------------------------------------------------------------
+# TestFullSweep above only has companies that appear in ONE date copy, so a
+# shallow move-and-trash resolves it. The actual mess had the same company
+# (Santander in 4 of 6 "2026-07-06" copies) with its files split across them —
+# that needs the tool to RECURSE into same-named folders and merge their
+# contents, treating only file-vs-file name clashes as conflicts.
+
+
+def _scatter_same_company(drive: "FakeDrive") -> str:
+    """Santander split across three "2026-07-06" copies (+ an empty oldest
+    keeper), a genuine outreach.md file conflict, and a Schaeffler only in the
+    newest copy. Returns the keeper date-folder id."""
+    keeper = drive.add_folder("2026-07-06", "root", created="2026-07-06T00:59:00Z")  # empty, oldest
+    c1 = drive.add_folder("2026-07-06", "root", created="2026-07-06T01:00:00Z")
+    c2 = drive.add_folder("2026-07-06", "root", created="2026-07-06T01:00:02Z")
+    c3 = drive.add_folder("2026-07-06", "root", created="2026-07-13T03:45:00Z")
+
+    s1 = drive.add_folder("Santander", c1, created="2026-07-06T01:10:00Z")
+    drive.add_file("CV_EN_ats88.pdf", s1)
+    s2 = drive.add_folder("Santander", c2, created="2026-07-06T01:10:05Z")
+    drive.add_file("Cover_Letter_EN.pdf", s2)
+    drive.add_file("outreach.md", s2)
+    s3 = drive.add_folder("Santander", c3, created="2026-07-13T03:46:00Z")
+    drive.add_file("outreach.md", s3)  # collides with s2's outreach.md
+
+    sch = drive.add_folder("Schaeffler", c3, created="2026-07-13T03:47:00Z")
+    drive.add_file("CV_EN.pdf", sch)
+    return keeper
+
+
+def _plan_lines(out: str) -> list[str]:
+    """Keep only the merge-action lines, dropping the mode header/summary/note —
+    so a dry-run plan can be compared against an --apply plan."""
+    return [
+        ln
+        for ln in out.splitlines()
+        if any(m in ln for m in ("[>]", "[+]", "[!]", "[~]", "[x]", "copies -"))
+    ]
+
+
+class TestSameCompanyAcrossDateCopies:
+    def test_scattered_company_files_consolidate_into_keeper(self, monkeypatch, drive):
+        keeper = _scatter_same_company(drive)
+
+        run_tool(monkeypatch, drive, "--apply")
+
+        santander = [
+            f
+            for f in drive.store.values()
+            if f["name"] == "Santander" and f["parent"] == keeper and not f["trashed"]
+        ]
+        assert len(santander) == 1
+        # All three scattered files gathered into the keeper's one Santander.
+        assert drive.children(santander[0]["id"]) == [
+            "CV_EN_ats88.pdf",
+            "Cover_Letter_EN.pdf",
+            "outreach.md",
+        ]
+        # Schaeffler (only in the newest copy) moved over wholesale.
+        assert "Schaeffler" in drive.children(keeper)
+
+    def test_file_conflict_across_copies_is_never_overwritten(self, monkeypatch, drive):
+        _scatter_same_company(drive)
+
+        run_tool(monkeypatch, drive, "--apply")
+
+        # BOTH outreach.md files remain non-trashed — the colliding one was left
+        # in place, not clobbered.
+        live = [f for f in drive.store.values() if f["name"] == "outreach.md" and not f["trashed"]]
+        assert len(live) == 2
+
+    def test_dry_run_plan_equals_apply_plan(self, monkeypatch, capsys):
+        # The whole point of loading the tree into memory: a dry run must
+        # predict --apply exactly, or the plan the owner reviews is a lie.
+        d_dry = FakeDrive()
+        _scatter_same_company(d_dry)
+        run_tool(monkeypatch, d_dry)
+        dry_plan = _plan_lines(capsys.readouterr().out)
+
+        d_apply = FakeDrive()
+        _scatter_same_company(d_apply)
+        run_tool(monkeypatch, d_apply, "--apply")
+        apply_plan = _plan_lines(capsys.readouterr().out)
+
+        assert dry_plan == apply_plan
+        assert dry_plan  # non-empty: there really was a plan to compare
