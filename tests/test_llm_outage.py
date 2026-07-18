@@ -23,6 +23,20 @@ from llm_client import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_db(tmp_path, monkeypatch):
+    """Route the config KV table to a tmp DB for EVERY test in this file.
+
+    The batch-loop outage branches arm the M2 pause (hunter.llm_outage) as a
+    side effect — without this, running these tests would write
+    `llm_outage_until` into the REAL repo tracker.db and make unrelated
+    run_hunt tests skip their apply step (observed 2026-07-18: 3 ordering-
+    dependent failures in test_hunt_queue_delivery/test_main_manual_only_
+    partition after this file ran first).
+    """
+    monkeypatch.setattr("hunter.llm_profiles._get_db_path", lambda: tmp_path / "tracker.db")
+
+
 # ── is_outage_signature classification table ──────────────────────────────────
 
 

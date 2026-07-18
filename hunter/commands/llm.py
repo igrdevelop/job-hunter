@@ -2,6 +2,8 @@
 
 /llm                — show current profile + all available options with cost estimates
 /llm <name>         — switch to the named profile (persisted to tracker.db)
+/llm outage         — show the LLM-outage auto-apply pause state (M2)
+/llm outage clear   — lift the pause early (docs/LLM_OUTAGE_RESILIENCE_PLAN.md)
 """
 
 from __future__ import annotations
@@ -67,8 +69,27 @@ def _switch_profile(name: str) -> str:
         return f"❌ {e}\n\nKnown profiles: {known}"
 
 
+def _outage_text(subargs: list[str]) -> str:
+    """/llm outage [clear] — inspect/lift the M2 auto-apply pause."""
+    from hunter import llm_outage
+
+    if subargs and subargs[0].lower() == "clear":
+        if llm_outage.clear_pause():
+            return "▶️ LLM-outage pause lifted — auto-apply resumes on the next slot."
+        return "ℹ️ No active LLM-outage pause."
+
+    left = llm_outage.pause_remaining()
+    if not left:
+        return "✅ No LLM-outage pause active."
+    mins = (left + 59) // 60
+    return (
+        f"⏸ <b>Auto-apply paused</b> (LLM outage) — ~{mins} min left.\n"
+        "<code>/llm outage clear</code> to lift early once the account is fixed."
+    )
+
+
 async def cmd_llm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/llm — show current LLM profile or switch to a named one."""
+    """/llm — show/switch the LLM profile; /llm outage [clear] — the M2 pause."""
     if update.effective_chat.id != TELEGRAM_CHAT_ID:
         return
 
@@ -76,6 +97,8 @@ async def cmd_llm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not args:
         text = await asyncio.to_thread(_build_status_text)
+    elif args[0].strip().lower() == "outage":
+        text = await asyncio.to_thread(_outage_text, args[1:])
     else:
         name = args[0].strip().lower()
         text = await asyncio.to_thread(_switch_profile, name)

@@ -175,7 +175,18 @@ service entry points; `_auto_apply_all` writes no FAIL row and stops at the firs
 `_retry_failed` leaves `fail_count` untouched. The `fail_count`-untouched test is the one
 that must fail if M1 is reverted — verify that by hand-mutating.
 
-### M2 — Pause auto-apply for the duration of the outage
+### M2 — Pause auto-apply for the duration of the outage ✅ DONE (2026-07-18)
+
+*Implementation notes:* new `hunter/llm_outage.py` (arm_pause / pause_remaining /
+clear_pause; DB key `llm_outage_until` via the same `llm_profiles._db_get/_db_set` KV
+helpers — a third copy of the sqlite scaffolding would be worse than the cross-module
+import). One deliberate deviation from the plan sketch: the pause is checked as its own
+step BEFORE `_check_apply_ready`, not inside it — the `_check_apply_ready` failure path
+sends a Telegram message per slot, and the whole point is one alert at arm time with
+silent (log-only) skips afterwards. Armed in both batch loops' outage branches (the arm
+alert carries the until-time + `/llm outage clear` hint). Subcommand went to
+`/llm outage [clear]`; `/status` shows the pause while armed. Hunt slots still run
+fetch/filter/dedup during the pause — skipped jobs return next hunt (no tracker row).
 
 M1 stops one batch. Without M2, the next source slot (~40 min later, 25 sources × 3 base
 cycles/day) starts fetching again and dies on the same wall — the fetch cost and the

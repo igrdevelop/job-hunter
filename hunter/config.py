@@ -217,6 +217,13 @@ RETRY_FAILED_TIMES: list[str] = [
 # got their immediate post-apply upload (idempotent; was hardcoded to 3 h).
 GDRIVE_UPLOAD_MISSING_INTERVAL_MIN: int = int(os.getenv("GDRIVE_UPLOAD_MISSING_INTERVAL_MIN", "30"))
 
+# How long auto-apply pauses after an LLM account outage (drained balance /
+# bad key — llm_client.LLMOutageError → exit 46). Time-boxed, not sticky: after
+# it expires the next slot probes with ONE job/API call; still dead → M1 fires
+# again and re-arms. A top-up heals the bot without owner action. Manual clear:
+# /llm outage clear. See docs/LLM_OUTAGE_RESILIENCE_PLAN.md M2.
+LLM_OUTAGE_PAUSE_MIN: int = int(os.getenv("LLM_OUTAGE_PAUSE_MIN", "60"))
+
 # ── Job filters ───────────────────────────────────────────────────────────────
 # Moved to hunter/filter_config.py (2026-07-12, pure organizational split —
 # it was ~210 lines of regex/policy, a third of this file). Re-imported here

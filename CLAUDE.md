@@ -170,6 +170,15 @@ hunter/
                             docs/quality/09-multi-track-react.md): a no-op when the react track
                             is active, unchanged (today's behavior) otherwise
   main.py                   Hunt loop: fetch -> filter -> dedup -> act
+  llm_outage.py             M2 auto-apply pause after an LLM account outage (docs/
+                            LLM_OUTAGE_RESILIENCE_PLAN.md): arm_pause/pause_remaining/
+                            clear_pause over DB key `llm_outage_until` (config KV table —
+                            survives the apply-subprocess boundary). Armed by main.py's
+                            batch loops on outcome "llm_outage" (exit 46); hunt/retry
+                            slots then skip their apply step SILENTLY (log only — the one
+                            Telegram alert goes out at arm time) until expiry
+                            (LLM_OUTAGE_PAUSE_MIN, default 60 min) or /llm outage clear.
+                            Fetch/filter/dedup still run; skipped jobs return next hunt
   telegram_bot.py           Thin dispatcher shim (~200 lines): imports all handlers, owns _post_init + build_application
   tracker.py                tracker.db (SQLite) CRUD: dedup, skip, fail, applied, manual (~1250 lines)
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
@@ -280,7 +289,8 @@ hunter/
                             (tracker.get_gave_up_failed/reset_fail_counts; report-first —
                             no-arg form never mutates. docs/LLM_OUTAGE_RESILIENCE_PLAN.md M3)
     health.py               /health — per-source scraper yield report (source_health)
-    llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles)
+    llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles);
+                            /llm outage [clear] — show/lift the M2 auto-apply outage pause
     dual.py                 /dual [on|off|shadow <name>] — toggle dual-apply A/B comparison + switch shadow profile (hunter.dual_apply)
     tracks.py               /tracks [angular|react|both] — show/switch active candidate tracks
                             (docs/quality/09-multi-track-react.md); DB key `tracks_enabled`
@@ -487,6 +497,7 @@ Applications/               Generated documents (gitignored)
 | `MAX_JOBS_PER_RUN` | `40` | Cap per hunt cycle (auto-apply only, applied after filter+dedup; raised 20→40 2026-07-10 — a lower value in the prod `.env` overrides this default) |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `RETRY_FAILED_TIMES` | `07:45,18:45` | When to retry FAILed tracker rows (comma-separated HH:MM, Warsaw). Used to run after EVERY per-source AUTO_APPLY hunt (72×/day), which kept `_hunt_lock` busy past the 40-min slot spacing. Minutes :45 never collide with the hunt grid (fires only at :00/:20/:40). |
+| `LLM_OUTAGE_PAUSE_MIN` | `60` | How long auto-apply pauses after an LLM account outage (drained balance / bad key → `llm_client.LLMOutageError` → exit 46 → outcome `llm_outage`). Time-boxed, not sticky: after expiry the next slot probes with ONE job/API call; still dead → re-arms. One Telegram alert at arm time; paused slots skip silently (fetch/filter/dedup still run, jobs return next hunt). `/llm outage [clear]` inspects/lifts; shown in `/status`. See docs/LLM_OUTAGE_RESILIENCE_PLAN.md M2. |
 | `APPLY_AGENT_TIMEOUT_SEC` | `900` | Subprocess timeout (15 min) |
 | `DUAL_SHADOW_TIMEOUT_SEC` | `1800` | Hard wall-clock cap for the detached dual-apply shadow run (its own watchdog; independent of the primary timeout). Raised from 900 when the shadow gained the judge + verdict-refine stages (2026-07-09). |
 | `LINKEDIN_STORAGE_STATE` | — | Path to a Playwright session JSON from `python tools/linkedin_login.py`. **Without it every LinkedIn fetch 429s — the single biggest source of FAIL rows.** Once set, drop `linkedin.com` from `GMAIL_ENRICH_SKIP_HOSTS`. |
