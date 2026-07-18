@@ -224,7 +224,26 @@ already dead.
 - The next `RETRY_FAILED_TIMES` slot then picks them up through the existing loop; no
   change to the retry machinery itself.
 
-### M4 — CLI (Pro subscription) fallback — **opt-in, ship last**
+### M4 — CLI (Pro subscription) fallback — **opt-in, ship last** 🟡 CODE DONE (2026-07-18), OPS PENDING OWNER
+
+*Code half shipped:* `LLM_OUTAGE_FALLBACK_CLI` (default **false** — today's behavior is
+preserved byte-for-byte while off). When on and the CLI is available:
+`apply_agent.main()` skips the "CLI detected → try CLI first" auto-preference (the CLI
+is *reserved* as the fallback so the paid API stays primary — a gap in the original
+plan sketch: with the CLI installed in the image, the old auto-preference would have
+made the subscription primary and the paid API the fallback, the opposite of the
+intent), and an API exit 46 retries the vacancy once through `main_cli`. CLI success =
+normal apply (exit 0, no pause armed); any CLI failure re-reports exit 46 so M1/M2 take
+over. 7 tests.
+
+*Ops half — NOT shipped, needs the owner's sign-off (personal subscription token on the
+deploy host):*
+1. Dockerfile: install node/npm + `@anthropic-ai/claude-code` (image grows accordingly).
+2. One-time on the owner's machine: `claude` login → mount the resulting `~/.claude`
+   credentials dir as a volume into the container (never commit it), like
+   `gsheets_token.json`.
+3. `.env`: `LLM_OUTAGE_FALLBACK_CLI=true`.
+Until all three are done the flag is inert and nothing changes in prod.
 
 Owner question 3. Half of this already exists in the opposite direction:
 [`apply_agent.py:82`](../apply_agent.py) tries the **CLI first** when `claude` is on PATH

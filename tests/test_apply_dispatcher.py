@@ -18,12 +18,15 @@ def test_apply_agent_is_thin() -> None:
     """apply_agent.py must stay a thin shim after the Phase 4 refactor.
 
     Ceiling was 200 pre-`ruff format`; the formatter's line-wrapping style
-    costs ~18 lines with zero added logic, so the guard is 230 now.
+    costs ~18 lines with zero added logic, so the guard became 230. Raised to
+    255 for the M4 outage→CLI fallback (docs/LLM_OUTAGE_RESILIENCE_PLAN.md,
+    2026-07-18): ~25 lines of genuine PIPELINE-CHOICE logic, which is exactly
+    the dispatcher's job — pipeline internals still live in apply_api/apply_cli.
     """
     here = Path(__file__).parent.parent / "apply_agent.py"
     lines = here.read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 230, (
-        f"apply_agent.py has {len(lines)} lines — expected ≤ 230 after Phase 4 split"
+    assert len(lines) <= 255, (
+        f"apply_agent.py has {len(lines)} lines — expected ≤ 255 (thin dispatcher guard)"
     )
 
 

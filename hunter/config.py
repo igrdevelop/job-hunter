@@ -224,6 +224,19 @@ GDRIVE_UPLOAD_MISSING_INTERVAL_MIN: int = int(os.getenv("GDRIVE_UPLOAD_MISSING_I
 # /llm outage clear. See docs/LLM_OUTAGE_RESILIENCE_PLAN.md M2.
 LLM_OUTAGE_PAUSE_MIN: int = int(os.getenv("LLM_OUTAGE_PAUSE_MIN", "60"))
 
+# M4 (docs/LLM_OUTAGE_RESILIENCE_PLAN.md): on an LLM account outage, retry the
+# vacancy ONCE through the Claude CLI (Pro subscription) before giving up.
+# Opt-in and default OFF — it puts the owner's PERSONAL subscription token on
+# the deploy host (mounted ~/.claude volume; see the plan's ops checklist) and
+# needs the CLI in the image. When ON, the CLI is reserved as the fallback:
+# the "CLI detected → try CLI first" auto-preference in apply_agent.main() is
+# skipped, so the paid API stays primary.
+LLM_OUTAGE_FALLBACK_CLI: bool = os.getenv("LLM_OUTAGE_FALLBACK_CLI", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # ── Job filters ───────────────────────────────────────────────────────────────
 # Moved to hunter/filter_config.py (2026-07-12, pure organizational split —
 # it was ~210 lines of regex/policy, a third of this file). Re-imported here

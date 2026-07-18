@@ -35,11 +35,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from hunter.config import APPLY_USE_CLI, LLM_API_KEY
+from hunter.config import APPLY_USE_CLI, LLM_API_KEY, LLM_OUTAGE_FALLBACK_CLI
 
 # ── Re-exports for backward compatibility with tests and external callers ──────
 # These symbols moved to hunter/apply_shared.py in Phase 4 Step 4.1.
 from hunter.apply_shared import (  # noqa: F401
+    APPLY_LLM_OUTAGE_EXIT_CODE,
     APPLY_MANUAL_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     ApplyError,
@@ -79,8 +80,11 @@ def main(
         _maybe_run_shadow(folder, full=full)
         return
 
+    # With the outage fallback armed, the CLI is RESERVED as the fallback:
+    # skip the "CLI detected → try CLI first" auto-preference so the paid API
+    # stays primary (M4, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
     cli_ok = _is_cli_available()
-    if cli_ok:
+    if cli_ok and not (LLM_OUTAGE_FALLBACK_CLI and LLM_API_KEY):
         print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
         try:
             folder = main_cli(
@@ -97,15 +101,36 @@ def main(
                 sys.exit(1)
 
     if LLM_API_KEY:
-        folder = main_api(
-            url or PASTE_NO_URL_PLACEHOLDER,
-            paste_text=paste_text,
-            skip_dedup=force,
-            full_mode=full,
-            jobleads_company=jobleads_company,
-            jobleads_title=jobleads_title,
-            permalink=permalink,
-        )
+        try:
+            folder = main_api(
+                url or PASTE_NO_URL_PLACEHOLDER,
+                paste_text=paste_text,
+                skip_dedup=force,
+                full_mode=full,
+                jobleads_company=jobleads_company,
+                jobleads_title=jobleads_title,
+                permalink=permalink,
+            )
+        except SystemExit as e:
+            if not (e.code == APPLY_LLM_OUTAGE_EXIT_CODE and LLM_OUTAGE_FALLBACK_CLI and cli_ok):
+                raise
+            # M4: the API account is down (billing/auth) but the vacancy is
+            # fine — retry ONCE through the Claude CLI (Pro subscription).
+            # On success this is a normal apply (exit 0, no pause armed); on
+            # any CLI failure fall through to exit 46 so M1/M2 take over.
+            print("[apply_agent] API outage — falling back to Claude CLI (Pro subscription)")
+            notify(f"💳 API outage — retrying via Claude CLI (subscription)\n🔗 {url}")
+            try:
+                folder = main_cli(
+                    url,
+                    skip_dedup=force,
+                    full_mode=full,
+                    paste_text=paste_text,
+                    permalink=permalink,
+                )
+            except (ApplyError, SystemExit) as cli_err:
+                print(f"[apply_agent] CLI fallback failed too ({cli_err}) — reporting outage")
+                sys.exit(APPLY_LLM_OUTAGE_EXIT_CODE)
         _maybe_run_shadow(folder, full=full)
     else:
         print("[apply_agent] ERROR: No Claude CLI login and no LLM_API_KEY set. Cannot proceed.")
