@@ -102,8 +102,34 @@ def _find_new_folder(before: set[str], timeout: int = 300) -> str | None:
 # ── CLI availability check ────────────────────────────────────────────────────
 
 
+def _cli_credentials_present() -> bool:
+    """True if a Claude CLI login exists on disk.
+
+    `claude --version` prints the version whether or not anyone is logged in
+    (live-verified on 2.1.92), so the output grep below can't detect a fresh,
+    never-logged-in install — exactly the state of a just-rebuilt Docker image
+    before the one-time OAuth login (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4
+    step 4). Without this check, the "CLI detected → try CLI first" auto-
+    preference in apply_agent.main() would burn a doomed CLI attempt + a
+    Telegram "CLI failed" notify on EVERY vacancy in that window. The OAuth
+    credentials land in $CLAUDE_CONFIG_DIR/.credentials.json (the Dockerfile
+    pins CLAUDE_CONFIG_DIR into the mounted volume) or ~/.claude/
+    .credentials.json on a default install (live-verified on the owner's
+    Windows machine). macOS keeps them in the Keychain (no file), but this
+    project only runs on Windows (owner desktop) and Linux (deploy image).
+    """
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    candidates = []
+    if cfg:
+        candidates.append(Path(cfg) / ".credentials.json")
+    candidates.append(Path.home() / ".claude" / ".credentials.json")
+    return any(p.is_file() for p in candidates)
+
+
 def _is_cli_available() -> bool:
     """Check if Claude CLI is installed and logged in (Pro subscription)."""
+    if not _cli_credentials_present():
+        return False
     try:
         r = subprocess.run(
             ["claude", "--version"],
