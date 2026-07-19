@@ -1137,6 +1137,10 @@ second `html.unescape()` pass.
 - **Active branch:** `develop` — all changes go here
 - `master` is production-stable (60+ commits behind develop)
 - Always commit on `develop`, never force-push `master`
+- **Commit messages, PR titles and PR descriptions are English-only** (the repo
+  is public). Quoted data may stay in its original language — a Russian regex
+  pattern being added, an owner report being cited, a bot UI string — but the
+  message's own prose must be English.
 
 ---
 
