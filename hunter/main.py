@@ -29,6 +29,7 @@ from hunter.config import (
 )
 from hunter.filters import apply_filters_with_stats, classify_job
 from hunter.gmail_report import build_gmail_report, JobOutcome
+from hunter import llm_outage
 from hunter.models import Job
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
@@ -104,6 +105,16 @@ async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
     if _hunt_lock.locked():
         logger.info("[Retry] Busy — queued behind the running hunt")
     async with _hunt_lock:
+        # M2: skip silently while the outage pause is armed (alert was sent at
+        # arm time). FAIL rows keep their counts and wait for the next slot.
+        pause_left = await asyncio.to_thread(llm_outage.pause_remaining)
+        if pause_left:
+            logger.warning(
+                "[Retry] LLM outage pause active (%dm left) — retry pass skipped",
+                (pause_left + 59) // 60,
+            )
+            return
+
         auth_error = await asyncio.to_thread(_check_apply_ready)
         if auth_error:
             await send_text(
@@ -342,6 +353,21 @@ async def _run_hunt_impl(
         return
 
     if AUTO_APPLY:
+        # M2 (docs/LLM_OUTAGE_RESILIENCE_PLAN.md): while the LLM outage pause
+        # is armed, skip the apply step SILENTLY (log only) — the one alert was
+        # sent when the pause was armed; per-slot messages would repeat all
+        # hour. Fetch/filter/dedup above still ran; the jobs have no tracker
+        # row, so the next hunt after the pause re-fetches them.
+        pause_left = await asyncio.to_thread(llm_outage.pause_remaining)
+        if pause_left:
+            logger.warning(
+                "[Hunt] LLM outage pause active (%dm left) — apply skipped, "
+                "%d new job(s) return on the next hunt",
+                (pause_left + 59) // 60,
+                len(auto_eligible_jobs),
+            )
+            return
+
         auth_error = await asyncio.to_thread(_check_apply_ready)
         if auth_error:
             await send_text(
@@ -460,6 +486,27 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "See message above: fill in <code>job_posting.txt</code> and Apply again with the same URL.\n"
                 "<i>Tracker updated, URL dedup active.</i>",
             )
+        elif outcome == "llm_outage":
+            # Account-level LLM failure (drained balance / bad key) — a GLOBAL
+            # state, not this vacancy's fault. No FAIL row (the job has no
+            # tracker row, so the next hunt re-fetches it — the listing is the
+            # queue), and stop the batch immediately: every further job costs a
+            # real fetch just to hit the same wall (M1,
+            # docs/LLM_OUTAGE_RESILIENCE_PLAN.md). M2: arm the time-boxed pause
+            # so the NEXT source slots skip their apply step too; this is the
+            # ONE alert for the whole pause window.
+            until_ts = await asyncio.to_thread(llm_outage.arm_pause)
+            remaining = total - i
+            await send_text(
+                context,
+                f"💳 <b>LLM outage (billing/auth)</b> — stopping batch.\n"
+                f"[{i}/{total}] {job.company} — {job.title} left untouched "
+                f"(+{remaining} not attempted; they return on the next hunt).\n"
+                f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
+                f"(<code>/llm outage clear</code> to lift early).\n"
+                "Check the provider account/key. Vacancies were NOT marked FAIL.",
+            )
+            break
         else:
             failed += 1
             consecutive_fails += 1
@@ -549,6 +596,25 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"⏳ Retry rate-limited (429): {job.company} — {job.title} "
                 "— will retry next cycle.",
             )
+        elif outcome == "llm_outage":
+            # Global account state, not this row's fault: leave fail_count
+            # untouched (the row stays retryable at its current count) and stop
+            # the whole retry pass — every further row would burn a fetch to
+            # hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+            # M2: arm the pause so upcoming hunt slots skip their apply step.
+            until_ts = await asyncio.to_thread(llm_outage.arm_pause)
+            remaining = len(capped) - i
+            logger.error("[retry] LLM outage (billing/auth) — stopping retries")
+            await send_text(
+                context,
+                f"💳 <b>LLM outage (billing/auth)</b> — stopping retries.\n"
+                f"{job.company} — {job.title} left at its current fail count "
+                f"(+{remaining} not attempted).\n"
+                f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
+                f"(<code>/llm outage clear</code> to lift early).\n"
+                "Check the provider account/key.",
+            )
+            break
         else:
             consecutive_fails += 1
             new_count = await asyncio.to_thread(increment_fail_count, job.url)

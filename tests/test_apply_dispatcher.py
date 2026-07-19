@@ -18,12 +18,15 @@ def test_apply_agent_is_thin() -> None:
     """apply_agent.py must stay a thin shim after the Phase 4 refactor.
 
     Ceiling was 200 pre-`ruff format`; the formatter's line-wrapping style
-    costs ~18 lines with zero added logic, so the guard is 230 now.
+    costs ~18 lines with zero added logic, so the guard became 230. Raised to
+    255 for the M4 outage→CLI fallback (docs/LLM_OUTAGE_RESILIENCE_PLAN.md,
+    2026-07-18): ~25 lines of genuine PIPELINE-CHOICE logic, which is exactly
+    the dispatcher's job — pipeline internals still live in apply_api/apply_cli.
     """
     here = Path(__file__).parent.parent / "apply_agent.py"
     lines = here.read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 230, (
-        f"apply_agent.py has {len(lines)} lines — expected ≤ 230 after Phase 4 split"
+    assert len(lines) <= 255, (
+        f"apply_agent.py has {len(lines)} lines — expected ≤ 255 (thin dispatcher guard)"
     )
 
 
@@ -84,14 +87,28 @@ def test_pipelines_have_no_module_level_globals() -> None:
 # ── main() dispatcher — paste flow ────────────────────────────────────────────
 
 
-def test_main_paste_text_with_cli_uses_cli(monkeypatch) -> None:
-    """When paste_text is provided and CLI is available, main() tries CLI first."""
-    cli_calls = []
+def test_main_paste_text_with_cli_still_uses_api(monkeypatch) -> None:
+    """API key set → API primary, even with a logged-in CLI present.
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
-        cli_calls.append((url, paste_text))
+    (Was `..._uses_cli`: the old "CLI detected → try CLI first" auto-preference
+    was removed 2026-07-18 — the CLI is reserved for the outage fallback.)
+    """
+    api_calls = []
 
-    monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
+    def fake_main_api(
+        url,
+        paste_text="",
+        *,
+        skip_dedup=False,
+        full_mode=False,
+        jobleads_company="",
+        jobleads_title="",
+        permalink="",
+    ):
+        api_calls.append((url, paste_text))
+
+    monkeypatch.setattr("apply_agent.main_api", fake_main_api)
+    monkeypatch.setattr("apply_agent.main_cli", lambda *a, **k: pytest.fail("CLI must not run"))
     monkeypatch.setattr("apply_agent._is_cli_available", lambda: True)
     monkeypatch.setattr("apply_agent.APPLY_USE_CLI", False)
     monkeypatch.setattr("apply_agent.LLM_API_KEY", "test-key")
@@ -100,8 +117,8 @@ def test_main_paste_text_with_cli_uses_cli(monkeypatch) -> None:
 
     apply_agent.main("https://example.com/job/1", paste_text="Job posting text here.")
 
-    assert len(cli_calls) == 1
-    assert cli_calls[0][1] == "Job posting text here."
+    assert len(api_calls) == 1
+    assert api_calls[0][1] == "Job posting text here."
 
 
 def test_main_paste_text_without_cli_uses_api(monkeypatch) -> None:
@@ -134,8 +151,13 @@ def test_main_paste_text_without_cli_uses_api(monkeypatch) -> None:
 
 
 def test_main_paste_without_api_key_exits(monkeypatch) -> None:
-    """main() with paste_text but no API key must sys.exit(1)."""
+    """main() with paste_text, no API key and no CLI login must sys.exit(1).
+
+    _is_cli_available is pinned False: unpatched, this test would take the real
+    CLI path on any dev machine with a logged-in `claude` install.
+    """
     monkeypatch.setattr("apply_agent.LLM_API_KEY", "")
+    monkeypatch.setattr("apply_agent._is_cli_available", lambda: False)
     import apply_agent
 
     with pytest.raises(SystemExit) as exc:

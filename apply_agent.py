@@ -40,6 +40,7 @@ from hunter.config import APPLY_USE_CLI, LLM_API_KEY
 # ── Re-exports for backward compatibility with tests and external callers ──────
 # These symbols moved to hunter/apply_shared.py in Phase 4 Step 4.1.
 from hunter.apply_shared import (  # noqa: F401
+    APPLY_LLM_OUTAGE_EXIT_CODE,
     APPLY_MANUAL_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     ApplyError,
@@ -71,7 +72,18 @@ def main(
     jobleads_title: str = "",
     permalink: str = "",
 ) -> None:
-    """Dispatch to CLI or API pipeline based on availability and flags."""
+    """Dispatch to CLI or API pipeline.
+
+    Priority (owner decision 2026-07-18, no feature flag):
+      1. --cli / APPLY_USE_CLI — explicit CLI-only (unchanged).
+      2. LLM_API_KEY set — the paid API is PRIMARY; an account outage
+         (exit 46) retries the vacancy once through the CLI when a login
+         exists. NOTE: this replaces the old "CLI detected → try CLI first"
+         auto-preference — a machine with both an API key and a CLI login
+         (e.g. the owner's desktop) now pays for bare runs; use --cli or
+         APPLY_USE_CLI=true for subscription-only runs.
+      3. No API key — the CLI is the only path (the original mode).
+    """
     if force_cli or APPLY_USE_CLI:
         folder = main_cli(
             url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
@@ -79,37 +91,54 @@ def main(
         _maybe_run_shadow(folder, full=full)
         return
 
-    cli_ok = _is_cli_available()
-    if cli_ok:
-        print("[apply_agent] Claude CLI detected (Pro subscription) — trying CLI first")
+    if LLM_API_KEY:
+        try:
+            folder = main_api(
+                url or PASTE_NO_URL_PLACEHOLDER,
+                paste_text=paste_text,
+                skip_dedup=force,
+                full_mode=full,
+                jobleads_company=jobleads_company,
+                jobleads_title=jobleads_title,
+                permalink=permalink,
+            )
+        except SystemExit as e:
+            if e.code != APPLY_LLM_OUTAGE_EXIT_CODE or not _is_cli_available():
+                raise
+            # The API account is down (billing/auth) but the vacancy is fine —
+            # retry ONCE through the Claude CLI (Pro subscription). On success
+            # this is a normal apply (exit 0, no pause armed); on any CLI
+            # failure fall through to exit 46 so M1/M2 take over.
+            print("[apply_agent] API outage — falling back to Claude CLI (Pro subscription)")
+            notify(f"💳 API outage — retrying via Claude CLI (subscription)\n🔗 {url}")
+            try:
+                folder = main_cli(
+                    url,
+                    skip_dedup=force,
+                    full_mode=full,
+                    paste_text=paste_text,
+                    permalink=permalink,
+                )
+            except (ApplyError, SystemExit) as cli_err:
+                print(f"[apply_agent] CLI fallback failed too ({cli_err}) — reporting outage")
+                sys.exit(APPLY_LLM_OUTAGE_EXIT_CODE)
+        _maybe_run_shadow(folder, full=full)
+        return
+
+    if _is_cli_available():
+        print("[apply_agent] No LLM_API_KEY — running via Claude CLI (Pro subscription)")
         try:
             folder = main_cli(
                 url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
             )
-            _maybe_run_shadow(folder, full=full)
-            return
         except (ApplyError, SystemExit) as e:
-            if LLM_API_KEY:
-                print(f"[apply_agent] CLI failed ({e}), falling back to API mode")
-                notify(f"🔄 CLI failed — retrying via API\n🔗 {url}")
-            else:
-                print("[apply_agent] CLI failed and no API key available")
-                sys.exit(1)
-
-    if LLM_API_KEY:
-        folder = main_api(
-            url or PASTE_NO_URL_PLACEHOLDER,
-            paste_text=paste_text,
-            skip_dedup=force,
-            full_mode=full,
-            jobleads_company=jobleads_company,
-            jobleads_title=jobleads_title,
-            permalink=permalink,
-        )
+            print(f"[apply_agent] CLI failed and no API key available ({e})")
+            sys.exit(1)
         _maybe_run_shadow(folder, full=full)
-    else:
-        print("[apply_agent] ERROR: No Claude CLI login and no LLM_API_KEY set. Cannot proceed.")
-        sys.exit(1)
+        return
+
+    print("[apply_agent] ERROR: No Claude CLI login and no LLM_API_KEY set. Cannot proceed.")
+    sys.exit(1)
 
 
 def _maybe_run_shadow(folder, full: bool) -> None:

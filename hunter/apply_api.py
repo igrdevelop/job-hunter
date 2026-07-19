@@ -22,6 +22,7 @@ from hunter.config import (
 )
 from hunter.llm_profiles import get_active as _get_llm_profile
 from hunter.apply_shared import (
+    APPLY_LLM_OUTAGE_EXIT_CODE,
     APPLY_RATE_LIMITED_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     PROMPTS_DIR,
@@ -374,7 +375,7 @@ def _run_main_api(
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
     try:
-        from llm_client import call_llm, LLMError
+        from llm_client import call_llm, LLMError, LLMOutageError
 
         url_hint = (
             url
@@ -411,6 +412,14 @@ def _run_main_api(
             model=_llm_prof.model,
             api_key=_llm_prof.api_key,
         )
+    except LLMOutageError as e:
+        # Account-level outage (drained balance / bad key) — a global state,
+        # not this vacancy's fault. Exit 46 so the hunt loop stops the batch
+        # without writing a FAIL row or escalating fail_count; the Telegram
+        # alert is sent once by the batch loop, not per vacancy (M1,
+        # docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+        print(f"[apply_agent] LLM OUTAGE (billing/auth) — vacancy untouched: {e}")
+        sys.exit(APPLY_LLM_OUTAGE_EXIT_CODE)
     except LLMError as e:
         error_type = "rate_limit" if "rate" in str(e).lower() else "llm_error"
         notify(

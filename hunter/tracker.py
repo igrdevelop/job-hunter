@@ -508,6 +508,51 @@ def remove_failed(url: str) -> None:
         conn.execute("DELETE FROM applications WHERE ats_status='FAIL' AND url_norm=?", (norm,))
 
 
+def get_gave_up_failed() -> list[dict]:
+    """FAIL rows whose fail_count reached MAX_FAIL_RETRIES.
+
+    These are permanently invisible to get_failed_jobs() — nothing in the
+    normal flow ever resets the counter, so without /retry_reset they are
+    dead forever (M3, docs/LLM_OUTAGE_RESILIENCE_PLAN.md). Each dict:
+    {company, title, url, fail_count}.
+    """
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT company, title, url, fail_count FROM applications "
+            "WHERE ats_status='FAIL' AND fail_count >= ? ORDER BY id",
+            (MAX_FAIL_RETRIES,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def reset_fail_counts(urls: list[str] | None = None) -> int:
+    """Reset fail_count to 0 on FAIL rows so run_retry_failed picks them up again.
+
+    urls=None resets EVERY FAIL row with a non-zero count (the /retry_reset all
+    path); otherwise only the rows matching the given URLs. Returns the number
+    of rows changed. Deliberately touches fail_count only — the row keeps its
+    FAIL status and re-enters the normal retry loop on the next
+    RETRY_FAILED_TIMES slot, where today's code may well resolve it differently
+    (e.g. a link-rotted posting now comes back as a clean EXPIRED).
+    """
+    with get_db(DB_PATH) as conn:
+        if urls is None:
+            cur = conn.execute(
+                "UPDATE applications SET fail_count = 0 WHERE ats_status='FAIL' AND fail_count > 0"
+            )
+        else:
+            norms = [n for n in (normalize_url(u) for u in urls if u) if n]
+            if not norms:
+                return 0
+            placeholders = ",".join("?" * len(norms))
+            cur = conn.execute(
+                "UPDATE applications SET fail_count = 0 "  # noqa: S608 — placeholders only
+                f"WHERE ats_status='FAIL' AND fail_count > 0 AND url_norm IN ({placeholders})",
+                norms,
+            )
+        return cur.rowcount
+
+
 def delete_all_by_url(url: str) -> dict:
     """Delete ALL tracker rows matching this URL (any status).
 

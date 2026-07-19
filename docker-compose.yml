@@ -24,6 +24,16 @@ services:
       # If it doesn't exist Docker will auto-create a directory, breaking GSheets sync.
       # Fix: touch ./gsheets_state.json  (or echo '{}' > ./gsheets_state.json)
       - ./gsheets_state.json:/app/gsheets_state.json
+      # Claude CLI login for the LLM-outage fallback (docs/
+      # LLM_OUTAGE_RESILIENCE_PLAN.md M4). The login IS the on/off switch — no
+      # env flag: with credentials here, an API billing outage automatically
+      # retries through the Pro subscription; empty dir = fallback off. Host
+      # dir is .claude-cli (NOT .claude — that's the repo's own slash-commands
+      # dir) and holds the owner's PERSONAL subscription OAuth credentials;
+      # gitignored, never commit. One-time login:
+      #   docker compose exec -it job-hunter claude
+      # then follow the OAuth URL flow; the login persists in this volume.
+      - ./.claude-cli:/root/.claude
       - ./logs:/app/logs
       # Personal candidate data — gitignored, NOT in the image (see prompts/README.md).
       # Copy your real files into ./prompts/ on the deploy host once; each file must
