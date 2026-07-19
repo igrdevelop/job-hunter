@@ -142,24 +142,52 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 
 
 # ── CLI (Pro subscription) fallback for account outages ───────────────────────
-# docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4b: when LLM_OUTAGE_FALLBACK_CLI is on,
-# an LLMOutageError from ANY provider retries the same prompt ONCE through
-# `claude -p` (subscription — separate billing pool). Living here, at the one
-# choke point every LLM call goes through, it covers the cheap stages too
-# (claim judge, PDF verdict, refine rewrites, translate, outreach) — the
-# pipeline-level M4 fallback in apply_agent.main() only covered the main
-# generation call; the Haiku-tier calls just went best-effort-skipped when the
-# Anthropic balance was the one that died.
+# docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4b: an LLMOutageError from ANY provider
+# retries the same prompt ONCE through `claude -p` (subscription — separate
+# billing pool). Living here, at the one choke point every LLM call goes
+# through, it covers the cheap stages too (claim judge, PDF verdict, refine
+# rewrites, translate, outreach) — the pipeline-level fallback in
+# apply_agent.main() only covered the main generation call; the Haiku-tier
+# calls just went best-effort-skipped when the Anthropic balance was the one
+# that died. No feature flag (owner decision 2026-07-18: "если закончились
+# деньги — пробуем через cli, если не получилось — стандартный сценарий"):
+# the ON/OFF switch is the LOGIN itself — no `claude` credentials on disk, no
+# fallback. To disable on the deploy host: remove the ./.claude-cli volume
+# contents (or `claude /logout` in the container).
+
+
+def cli_credentials_present() -> bool:
+    """True if a Claude CLI login exists on disk.
+
+    `claude --version` prints the version whether or not anyone is logged in
+    (live-verified on 2.1.92), so probing the binary can't detect a fresh,
+    never-logged-in install — exactly the state of a just-rebuilt Docker image
+    before the one-time OAuth login. The OAuth credentials land in
+    $CLAUDE_CONFIG_DIR/.credentials.json (the Dockerfile pins CLAUDE_CONFIG_DIR
+    into the mounted volume) or ~/.claude/.credentials.json on a default
+    install (live-verified on the owner's Windows machine). macOS keeps them in
+    the Keychain (no file), but this project only runs on Windows (owner
+    desktop) and Linux (deploy image). Lives here rather than in apply_cli so
+    the call_llm fallback doesn't have to import the apply stack.
+    """
+    from pathlib import Path
+
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    candidates = []
+    if cfg:
+        candidates.append(Path(cfg) / ".credentials.json")
+    candidates.append(Path.home() / ".claude" / ".credentials.json")
+    return any(p.is_file() for p in candidates)
 
 
 def _cli_fallback_enabled() -> bool:
-    """Flag on AND not inside a dual-apply shadow run.
+    """CLI login present AND not inside a dual-apply shadow run.
 
     The shadow forces a specific generator model via llm_profiles.set_override
     for an A/B comparison — silently serving its calls with the subscription's
     model would poison the comparison, so the shadow never falls back.
     """
-    if os.getenv("LLM_OUTAGE_FALLBACK_CLI", "false").lower() not in ("true", "1", "yes"):
+    if not cli_credentials_present():
         return False
     try:
         from hunter import llm_profiles

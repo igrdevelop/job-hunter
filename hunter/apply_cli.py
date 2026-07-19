@@ -109,21 +109,15 @@ def _cli_credentials_present() -> bool:
     (live-verified on 2.1.92), so the output grep below can't detect a fresh,
     never-logged-in install — exactly the state of a just-rebuilt Docker image
     before the one-time OAuth login (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4
-    step 4). Without this check, the "CLI detected → try CLI first" auto-
-    preference in apply_agent.main() would burn a doomed CLI attempt + a
-    Telegram "CLI failed" notify on EVERY vacancy in that window. The OAuth
-    credentials land in $CLAUDE_CONFIG_DIR/.credentials.json (the Dockerfile
-    pins CLAUDE_CONFIG_DIR into the mounted volume) or ~/.claude/
-    .credentials.json on a default install (live-verified on the owner's
-    Windows machine). macOS keeps them in the Keychain (no file), but this
-    project only runs on Windows (owner desktop) and Linux (deploy image).
+    step 4). Without this check, the CLI dispatch in apply_agent.main() would
+    burn a doomed CLI attempt + a Telegram "CLI failed" notify on EVERY
+    vacancy in that window. Thin wrapper over llm_client.cli_credentials_present
+    (shared with the call_llm-level M4b fallback) so both layers agree on what
+    "logged in" means.
     """
-    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
-    candidates = []
-    if cfg:
-        candidates.append(Path(cfg) / ".credentials.json")
-    candidates.append(Path.home() / ".claude" / ".credentials.json")
-    return any(p.is_file() for p in candidates)
+    from llm_client import cli_credentials_present
+
+    return cli_credentials_present()
 
 
 def _is_cli_available() -> bool:

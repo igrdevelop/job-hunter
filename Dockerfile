@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude CLI (Pro subscription path). Only used when LLM_OUTAGE_FALLBACK_CLI=true
-# AND a logged-in config dir is mounted (docker-compose: ./.claude-cli:/root/.claude);
-# otherwise apply_cli._is_cli_available()'s login check keeps it out of the way.
+# Claude CLI (Pro subscription path). Only used when a logged-in config dir is
+# mounted (docker-compose: ./.claude-cli:/root/.claude) — the login IS the
+# on/off switch (no feature flag); without credentials on disk,
+# llm_client.cli_credentials_present() keeps the CLI out of the way entirely.
 RUN npm install -g @anthropic-ai/claude-code
 # Keep ALL claude state (config + OAuth credentials) inside the mounted volume —
 # without this the global config lands in /root/.claude.json OUTSIDE the mount

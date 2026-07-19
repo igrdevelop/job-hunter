@@ -56,6 +56,9 @@ def run_track(track: str) -> bool:
     cmd = [
         sys.executable,
         str(PROJECT_DIR / "apply_agent.py"),
+        "--cli",  # explicit: previews run on the Pro subscription, never the paid API
+        # (used to be implicit via the old "CLI detected → try CLI first" auto-
+        # preference, removed 2026-07-18 — API is primary now when a key is set)
         "--paste-file",
         str(fixture),
         "--force",  # skip dedup (same fixture would be skipped otherwise)

@@ -257,9 +257,24 @@ shipped in the same branch:*
 4. ⬜ On the deploy host, after the image rebuild:
    `docker compose exec -it job-hunter claude` → follow the OAuth URL flow (open the
    printed URL in any browser, paste the code back). The login persists in
-   `./.claude-cli/`. Verify: `docker compose exec job-hunter claude --version` shows no
-   "not logged in".
-5. ⬜ `.env` on the deploy host: `LLM_OUTAGE_FALLBACK_CLI=true`, restart.
+   `./.claude-cli/`. This is the ONLY activation step — see the flag-removal note below.
+
+**Flag removed (2026-07-18, owner decision: "а зачем флаг? если закончились деньги —
+пробуем через cli, если не получилось — стандартный сценарий").** `LLM_OUTAGE_FALLBACK_CLI`
+is gone; **the CLI login itself is the on/off switch** — credentials on disk
+(`llm_client.cli_credentials_present`: `$CLAUDE_CONFIG_DIR/.credentials.json`, i.e. the
+mounted `./.claude-cli/`) mean the fallback is live; an empty/absent login dir means the
+CLI is invisible and the container behaves exactly like API-only prod. To disable:
+`claude /logout` in the container or empty `./.claude-cli/`. Dispatch semantics in
+`apply_agent.main()` are now fixed rather than flag-dependent: `--cli`/`APPLY_USE_CLI`
+→ CLI-only; `LLM_API_KEY` set → **API primary**, CLI only on exit 46; no key → CLI-only
+(the original subscription mode). ⚠️ Behavior change on the owner's DESKTOP: a machine
+with both an API key and a CLI login used to auto-prefer the CLI (free) for bare
+`python apply_agent.py URL` runs — those now go through the paid API; use `--cli` or
+`APPLY_USE_CLI=true` locally for subscription-only runs. `tools/preview_apply.py`
+relied on the removed auto-preference (no `--cli` in its cmd) and was fixed in the same
+commit to pass `--cli` explicitly, preserving its documented "via CLI subscription"
+behavior.
 
 ### M4b — CLI fallback for the cheap calls too ✅ DONE (2026-07-18, owner request)
 
@@ -323,4 +338,6 @@ stand alone and already answer *"будут ли они обработаны п�
 | 2026-07-17 | An outage leaves **no tracker row** for a new job (re-fetched next hunt) and leaves an existing FAIL row's count untouched. |
 | 2026-07-17 | The outage pause is time-boxed (`LLM_OUTAGE_PAUSE_MIN`, default 60), not sticky — a top-up must heal the bot without owner action. |
 | 2026-07-17 | CLI-subscription fallback is opt-in (`LLM_OUTAGE_FALLBACK_CLI=false`) and ships last; it needs an ops decision about a personal token on the server. |
-| 2026-07-17 | M0 verdict: no billing outage has ever occurred (log retention 05-28→07-17); the visible FAIL rows are findmyremote link-rot (dead at fail_count=3, root cause already fixed 07-12) + LinkedIn no-session. Milestone order changed to **M3 → M1 → M2 → M4**. |
+| 2026-07-17 | M0 verdict: no billing outage found in RETAINED logs (05-28→07-17, with gaps — the owner reports outages did happen elsewhere/earlier); the visible FAIL rows are findmyremote link-rot (dead at fail_count=3, root cause already fixed 07-12) + LinkedIn no-session. Milestone order changed to **M3 → M1 → M2 → M4**. |
+| 2026-07-18 | M4b: the CLI fallback moved into `llm_client.call_llm` so the cheap stages (judge/verdict/translate/outreach) are covered too, not just the main generation call. Dual-apply shadow never falls back. |
+| 2026-07-18 | `LLM_OUTAGE_FALLBACK_CLI` flag REMOVED (owner: "а зачем флаг?"). The CLI login is the switch: credentials in `./.claude-cli/` = fallback live, empty = off. Dispatch fixed: API primary whenever `LLM_API_KEY` is set (the "CLI detected → try CLI first" auto-preference is gone; desktop subscription-only runs need `--cli`/`APPLY_USE_CLI`; `tools/preview_apply.py` now passes `--cli` explicitly). |

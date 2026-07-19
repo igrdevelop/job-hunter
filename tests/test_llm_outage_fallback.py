@@ -1,12 +1,11 @@
-"""M4 (docs/LLM_OUTAGE_RESILIENCE_PLAN.md): opt-in CLI (Pro subscription)
-fallback when the API account is down.
+"""M4 (docs/LLM_OUTAGE_RESILIENCE_PLAN.md): CLI (Pro subscription) fallback
+when the API account is down.
 
-Contract: LLM_OUTAGE_FALLBACK_CLI=false (default) preserves today's behavior
-byte-for-byte. When true AND the CLI is available:
-  - the CLI-first auto-preference is skipped (CLI is reserved as fallback,
-    the paid API stays primary);
-  - an API exit 46 retries ONCE via main_cli — success is a normal apply
-    (no pause armed), any CLI failure re-reports exit 46 so M1/M2 take over.
+Contract (owner decision 2026-07-18, no feature flag — the CLI LOGIN is the
+switch): with LLM_API_KEY set the paid API is always primary; an API exit 46
+retries ONCE via main_cli when a login exists — success is a normal apply (no
+pause armed), any CLI failure re-reports exit 46 so M1/M2 take over. Without
+a login the CLI is invisible. Without an API key the CLI is the only path.
 """
 
 import pytest
@@ -53,51 +52,32 @@ def rig(monkeypatch):
     return rec
 
 
-def _set(monkeypatch, *, flag: bool, cli_ok: bool):
-    monkeypatch.setattr(apply_agent, "LLM_OUTAGE_FALLBACK_CLI", flag)
+def _set(monkeypatch, *, cli_ok: bool):
     monkeypatch.setattr(apply_agent, "_is_cli_available", lambda: cli_ok)
 
 
-# ── flag OFF: today's behavior preserved ──────────────────────────────────────
+# ── API primary, CLI reserved as fallback ─────────────────────────────────────
 
 
-def test_flag_off_outage_propagates(rig, monkeypatch):
-    _set(monkeypatch, flag=False, cli_ok=False)
-    rig.api_effect = SystemExit(APPLY_LLM_OUTAGE_EXIT_CODE)
-    with pytest.raises(SystemExit) as ei:
-        apply_agent.main("https://example.com/job/1")
-    assert ei.value.code == APPLY_LLM_OUTAGE_EXIT_CODE
-    assert "cli" not in rig.calls
-
-
-def test_flag_off_cli_still_tried_first_when_available(rig, monkeypatch):
-    _set(monkeypatch, flag=False, cli_ok=True)
-    apply_agent.main("https://example.com/job/1")
-    assert rig.calls[0] == "cli"
-    assert "api" not in rig.calls
-
-
-# ── flag ON: API primary, CLI reserved as fallback ────────────────────────────
-
-
-def test_flag_on_api_is_primary(rig, monkeypatch):
-    _set(monkeypatch, flag=True, cli_ok=True)
+def test_api_is_primary_even_with_cli_login(rig, monkeypatch):
+    """The old "CLI detected → try CLI first" auto-preference is gone."""
+    _set(monkeypatch, cli_ok=True)
     apply_agent.main("https://example.com/job/1")
     assert rig.calls[0] == "api"
     assert "cli" not in rig.calls
     assert ("shadow", "api-folder") in rig.calls
 
 
-def test_flag_on_outage_falls_back_to_cli(rig, monkeypatch):
-    _set(monkeypatch, flag=True, cli_ok=True)
+def test_outage_falls_back_to_cli(rig, monkeypatch):
+    _set(monkeypatch, cli_ok=True)
     rig.api_effect = SystemExit(APPLY_LLM_OUTAGE_EXIT_CODE)
     apply_agent.main("https://example.com/job/1")  # no SystemExit — normal apply
     assert [c for c in rig.calls if c in ("api", "cli")] == ["api", "cli"]
     assert ("shadow", "cli-folder") in rig.calls
 
 
-def test_flag_on_cli_failure_reports_outage(rig, monkeypatch):
-    _set(monkeypatch, flag=True, cli_ok=True)
+def test_cli_failure_reports_outage(rig, monkeypatch):
+    _set(monkeypatch, cli_ok=True)
     rig.api_effect = SystemExit(APPLY_LLM_OUTAGE_EXIT_CODE)
     rig.cli_effect = ApplyError("CLI died too")
     with pytest.raises(SystemExit) as ei:
@@ -105,8 +85,9 @@ def test_flag_on_cli_failure_reports_outage(rig, monkeypatch):
     assert ei.value.code == APPLY_LLM_OUTAGE_EXIT_CODE
 
 
-def test_flag_on_no_cli_installed_reports_outage(rig, monkeypatch):
-    _set(monkeypatch, flag=True, cli_ok=False)
+def test_no_cli_login_outage_propagates(rig, monkeypatch):
+    """No login → the CLI is invisible; exit-46 semantics untouched."""
+    _set(monkeypatch, cli_ok=False)
     rig.api_effect = SystemExit(APPLY_LLM_OUTAGE_EXIT_CODE)
     with pytest.raises(SystemExit) as ei:
         apply_agent.main("https://example.com/job/1")
@@ -114,11 +95,30 @@ def test_flag_on_no_cli_installed_reports_outage(rig, monkeypatch):
     assert "cli" not in rig.calls
 
 
-def test_flag_on_non_outage_exits_propagate(rig, monkeypatch):
+def test_non_outage_exits_propagate(rig, monkeypatch):
     """A normal skip path (sys.exit(0)) must never trigger the CLI fallback."""
-    _set(monkeypatch, flag=True, cli_ok=True)
+    _set(monkeypatch, cli_ok=True)
     rig.api_effect = SystemExit(0)
     with pytest.raises(SystemExit) as ei:
         apply_agent.main("https://example.com/job/1")
     assert ei.value.code == 0
     assert "cli" not in rig.calls
+
+
+# ── no API key: CLI is the only path (original mode) ──────────────────────────
+
+
+def test_no_api_key_runs_cli(rig, monkeypatch):
+    _set(monkeypatch, cli_ok=True)
+    monkeypatch.setattr(apply_agent, "LLM_API_KEY", "")
+    apply_agent.main("https://example.com/job/1")
+    assert rig.calls[0] == "cli"
+    assert "api" not in rig.calls
+
+
+def test_no_api_key_no_cli_exits_1(rig, monkeypatch):
+    _set(monkeypatch, cli_ok=False)
+    monkeypatch.setattr(apply_agent, "LLM_API_KEY", "")
+    with pytest.raises(SystemExit) as ei:
+        apply_agent.main("https://example.com/job/1")
+    assert ei.value.code == 1
