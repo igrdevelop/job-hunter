@@ -81,6 +81,10 @@ _*.py
 .claude/settings.local.json
 .claude/worktrees/
 
+# Claude CLI login for the M4 outage fallback (docker-compose mounts it to
+# /root/.claude). PERSONAL subscription OAuth token — never commit.
+.claude-cli/
+
 # Runtime logs
 logs/
 

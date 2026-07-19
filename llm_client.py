@@ -105,6 +105,143 @@ class LLMRateLimitError(LLMError):
     """Rate limit or overloaded — retryable."""
 
 
+class LLMOutageError(LLMError):
+    """Account-level failure: drained balance, bad/rotated key, revoked access.
+
+    Not the vacancy's fault and not transient at call scale — retrying the same
+    call is pointless, but the job itself is fine and should be retried once the
+    account recovers. Callers map this to APPLY_LLM_OUTAGE_EXIT_CODE (46) so the
+    hunt loop stops the batch WITHOUT writing FAIL rows or escalating fail_count
+    (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1). Subclass of LLMError so existing
+    `except LLMError` callers keep working unless they opt in.
+    """
+
+
+# Account-level failure signatures (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1).
+# 401/402/403 are always a key/account problem, never a request problem. A 400
+# is normally a request bug (must stay a plain LLMError — misclassifying a code
+# bug as an outage would retry it forever), EXCEPT the billing-shaped messages:
+# Anthropic reports a drained balance as 400 invalid_request_error ("Your credit
+# balance is too low…"). OpenAI reports a drained quota as 429 insufficient_quota
+# ("…check your plan and billing details") — the message check pulls it out of
+# the retry ladder, where it would burn the full ~10-min backoff per vacancy and
+# make the outage slower to detect. OpenRouter uses a plain 402.
+_OUTAGE_ALWAYS_STATUSES = {401, 402, 403}
+_OUTAGE_MSG_RE = re.compile(
+    r"credit balance|insufficient[_ ]quota|billing|spend(?:ing)? limit|payment required",
+    re.IGNORECASE,
+)
+
+
+def is_outage_signature(status_code: int | None, message: str) -> bool:
+    """True if an API error is an account-level outage (billing/auth), shared by
+    all three providers so they classify identically."""
+    if status_code in _OUTAGE_ALWAYS_STATUSES:
+        return True
+    return bool(_OUTAGE_MSG_RE.search(message or ""))
+
+
+# ── CLI (Pro subscription) fallback for account outages ───────────────────────
+# docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4b: an LLMOutageError from ANY provider
+# retries the same prompt ONCE through `claude -p` (subscription — separate
+# billing pool). Living here, at the one choke point every LLM call goes
+# through, it covers the cheap stages too (claim judge, PDF verdict, refine
+# rewrites, translate, outreach) — the pipeline-level fallback in
+# apply_agent.main() only covered the main generation call; the Haiku-tier
+# calls just went best-effort-skipped when the Anthropic balance was the one
+# that died. No feature flag (owner decision 2026-07-18: "если закончились
+# деньги — пробуем через cli, если не получилось — стандартный сценарий"):
+# the ON/OFF switch is the LOGIN itself — no `claude` credentials on disk, no
+# fallback. To disable on the deploy host: remove the ./.claude-cli volume
+# contents (or `claude /logout` in the container).
+
+
+def cli_credentials_present() -> bool:
+    """True if a Claude CLI login exists on disk.
+
+    `claude --version` prints the version whether or not anyone is logged in
+    (live-verified on 2.1.92), so probing the binary can't detect a fresh,
+    never-logged-in install — exactly the state of a just-rebuilt Docker image
+    before the one-time OAuth login. The OAuth credentials land in
+    $CLAUDE_CONFIG_DIR/.credentials.json (the Dockerfile pins CLAUDE_CONFIG_DIR
+    into the mounted volume) or ~/.claude/.credentials.json on a default
+    install (live-verified on the owner's Windows machine). macOS keeps them in
+    the Keychain (no file), but this project only runs on Windows (owner
+    desktop) and Linux (deploy image). Lives here rather than in apply_cli so
+    the call_llm fallback doesn't have to import the apply stack.
+    """
+    from pathlib import Path
+
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    candidates = []
+    if cfg:
+        candidates.append(Path(cfg) / ".credentials.json")
+    candidates.append(Path.home() / ".claude" / ".credentials.json")
+    return any(p.is_file() for p in candidates)
+
+
+def _cli_fallback_enabled() -> bool:
+    """CLI login present AND not inside a dual-apply shadow run.
+
+    The shadow forces a specific generator model via llm_profiles.set_override
+    for an A/B comparison — silently serving its calls with the subscription's
+    model would poison the comparison, so the shadow never falls back.
+    """
+    if not cli_credentials_present():
+        return False
+    try:
+        from hunter import llm_profiles
+
+        if llm_profiles._override is not None:
+            return False
+    except Exception:  # noqa: BLE001 — llm_client stays importable standalone
+        pass
+    return True
+
+
+def _call_cli_fallback(system_prompt: str, user_message: str) -> dict | None:
+    """One `claude -p` run for an outage-hit prompt. Returns the parsed JSON
+    dict, or None on ANY failure (no CLI, not logged in, timeout, non-JSON) —
+    the caller then re-raises the original LLMOutageError, so a broken fallback
+    can never masquerade as a different error class.
+
+    The prompt goes through STDIN, not argv: judge/verdict prompts carry the
+    full job text + resume JSON, well past the Windows ~32K argv limit. Plain
+    print mode, no --dangerously-skip-permissions — these are pure text-in/
+    text-out calls, no tools involved. No usage is recorded (subscription has
+    no per-token stats), so the tracker Cost $ column simply won't include
+    CLI-served calls.
+    """
+    import subprocess
+
+    prompt = f"{system_prompt}\n\n---\n\n{user_message}"
+    try:
+        result = subprocess.run(
+            ["claude", "-p"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("[LLM] CLI fallback unavailable/failed: %s", e)
+        return None
+    if result.returncode != 0:
+        logger.warning(
+            "[LLM] CLI fallback exited %d: %s",
+            result.returncode,
+            (result.stderr or result.stdout or "")[-300:],
+        )
+        return None
+    try:
+        return _parse_json(result.stdout or "")
+    except LLMError as e:
+        logger.warning("[LLM] CLI fallback returned unparseable output: %s", e)
+        return None
+
+
 def _backoff_seconds(attempt: int) -> float:
     """Exponential backoff with jitter. attempt is 1-based.
 
@@ -186,6 +323,20 @@ def call_llm(
             else:
                 raise LLMError(f"Rate limit after {max_retries} retries: {e}") from e
 
+        except LLMOutageError:
+            # Account dead (billing/auth) — retrying the API is pointless, but
+            # the subscription is a separate billing pool: one `claude -p` shot
+            # when the fallback is enabled (M4b). None → re-raise the ORIGINAL
+            # outage so exit-46 semantics (stop batch, no FAIL row, pause) hold.
+            if _cli_fallback_enabled():
+                parsed = _call_cli_fallback(system_prompt, user_message)
+                if parsed is not None:
+                    logger.warning(
+                        f"[LLM] outage on {active_model} — served via Claude CLI fallback"
+                    )
+                    return parsed
+            raise
+
         except LLMError:
             raise
 
@@ -266,10 +417,14 @@ def _call_anthropic(
         _record_usage(model, getattr(response, "usage", None))
         return response.content[0].text
     except anthropic.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except anthropic.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"Anthropic outage ({e.status_code}): {e}") from e
         raise LLMError(f"Anthropic API error {e.status_code}: {e}") from e
 
 
@@ -304,10 +459,14 @@ def _call_openai(system: str, user: str, model: str, key: str, max_tokens: int) 
             )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except openai.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"OpenAI outage ({e.status_code}): {e}") from e
         raise LLMError(f"OpenAI API error {e.status_code}: {e}") from e
 
 
@@ -373,12 +532,16 @@ def _call_openrouter(system: str, user: str, model: str, key: str, max_tokens: i
             )
         return response.choices[0].message.content
     except openai.RateLimitError as e:
+        if is_outage_signature(None, str(e)):
+            raise LLMOutageError(str(e)) from e
         raise LLMRateLimitError(str(e)) from e
     except openai.APITimeoutError as e:
         raise LLMRateLimitError(f"OpenRouter timeout: {e}") from e
     except openai.APIStatusError as e:
         if e.status_code in _RETRYABLE:
             raise LLMRateLimitError(str(e)) from e
+        if is_outage_signature(e.status_code, str(e)):
+            raise LLMOutageError(f"OpenRouter outage ({e.status_code}): {e}") from e
         raise LLMError(f"OpenRouter API error {e.status_code}: {e}") from e
 
 

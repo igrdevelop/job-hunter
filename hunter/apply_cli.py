@@ -102,8 +102,28 @@ def _find_new_folder(before: set[str], timeout: int = 300) -> str | None:
 # ── CLI availability check ────────────────────────────────────────────────────
 
 
+def _cli_credentials_present() -> bool:
+    """True if a Claude CLI login exists on disk.
+
+    `claude --version` prints the version whether or not anyone is logged in
+    (live-verified on 2.1.92), so the output grep below can't detect a fresh,
+    never-logged-in install — exactly the state of a just-rebuilt Docker image
+    before the one-time OAuth login (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4
+    step 4). Without this check, the CLI dispatch in apply_agent.main() would
+    burn a doomed CLI attempt + a Telegram "CLI failed" notify on EVERY
+    vacancy in that window. Thin wrapper over llm_client.cli_credentials_present
+    (shared with the call_llm-level M4b fallback) so both layers agree on what
+    "logged in" means.
+    """
+    from llm_client import cli_credentials_present
+
+    return cli_credentials_present()
+
+
 def _is_cli_available() -> bool:
     """Check if Claude CLI is installed and logged in (Pro subscription)."""
+    if not _cli_credentials_present():
+        return False
     try:
         r = subprocess.run(
             ["claude", "--version"],

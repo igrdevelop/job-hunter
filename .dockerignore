@@ -12,6 +12,10 @@ backups/
 *.pdf
 *.docx
 .claude/
+# ...but the CLI pipeline runs `claude -p "/apply ..."` with cwd=/app, and that
+# slash command lives in .claude/commands/ -- re-include it (M4 CLI fallback,
+# docs/LLM_OUTAGE_RESILIENCE_PLAN.md). Everything else under .claude/ stays out.
+!.claude/commands/
 gmail_token.json
 drive_token.json
 gmail_credentials.json

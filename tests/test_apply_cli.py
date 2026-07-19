@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -118,9 +119,17 @@ def test_find_new_folder_ignores_known_folders(tmp_path, monkeypatch) -> None:
 
 
 # ── _is_cli_available ─────────────────────────────────────────────────────────
+# The version-check tests pin _cli_credentials_present to True so they exercise
+# the subprocess branch regardless of whether the machine running the suite
+# (dev box vs CI) actually has a ~/.claude login.
 
 
-def test_is_cli_available_when_claude_not_found(monkeypatch) -> None:
+@pytest.fixture()
+def _creds_present(monkeypatch):
+    monkeypatch.setattr("hunter.apply_cli._cli_credentials_present", lambda: True)
+
+
+def test_is_cli_available_when_claude_not_found(_creds_present, monkeypatch) -> None:
     def _raise(*a, **kw):
         raise FileNotFoundError("claude not found")
 
@@ -128,7 +137,7 @@ def test_is_cli_available_when_claude_not_found(monkeypatch) -> None:
     assert _is_cli_available() is False
 
 
-def test_is_cli_available_when_nonzero_exit(monkeypatch) -> None:
+def test_is_cli_available_when_nonzero_exit(_creds_present, monkeypatch) -> None:
     mock_result = MagicMock()
     mock_result.returncode = 1
     mock_result.stdout = ""
@@ -137,7 +146,7 @@ def test_is_cli_available_when_nonzero_exit(monkeypatch) -> None:
     assert _is_cli_available() is False
 
 
-def test_is_cli_available_when_not_logged_in(monkeypatch) -> None:
+def test_is_cli_available_when_not_logged_in(_creds_present, monkeypatch) -> None:
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "Claude CLI not logged in"
@@ -146,7 +155,7 @@ def test_is_cli_available_when_not_logged_in(monkeypatch) -> None:
     assert _is_cli_available() is False
 
 
-def test_is_cli_available_when_ok(monkeypatch) -> None:
+def test_is_cli_available_when_ok(_creds_present, monkeypatch) -> None:
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "claude 1.0.0"
@@ -155,12 +164,64 @@ def test_is_cli_available_when_ok(monkeypatch) -> None:
     assert _is_cli_available() is True
 
 
-def test_is_cli_available_on_timeout(monkeypatch) -> None:
+def test_is_cli_available_on_timeout(_creds_present, monkeypatch) -> None:
     def _raise(*a, **kw):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=15)
 
     monkeypatch.setattr(subprocess, "run", _raise)
     assert _is_cli_available() is False
+
+
+# ── _cli_credentials_present: the no-login guard ──────────────────────────────
+# `claude --version` prints the version even with NO login (live-verified on
+# 2.1.92), so a fresh container with the CLI installed but never logged in used
+# to look "available" — and apply_agent.main's CLI-first auto-preference then
+# burned a doomed CLI attempt per vacancy until the one-time OAuth login.
+
+
+def _isolate_home(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    return home
+
+
+def test_no_credentials_means_unavailable_without_subprocess(monkeypatch, tmp_path) -> None:
+    """Fresh install, no login anywhere → False, and no subprocess spawned."""
+    _isolate_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("must not spawn claude"))
+    assert _is_cli_available() is False
+
+
+def test_credentials_in_config_dir_env(monkeypatch, tmp_path) -> None:
+    """The Docker path: CLAUDE_CONFIG_DIR points at the mounted volume."""
+    _isolate_home(monkeypatch, tmp_path)
+    cfg = tmp_path / "claude-cli"
+    cfg.mkdir()
+    (cfg / ".credentials.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "2.1.92 (Claude Code)"
+    mock_result.stderr = ""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+    assert _is_cli_available() is True
+
+
+def test_credentials_in_default_home(monkeypatch, tmp_path) -> None:
+    """The desktop path: default ~/.claude install, no env var."""
+    home = _isolate_home(monkeypatch, tmp_path)
+    (home / ".claude").mkdir()
+    (home / ".claude" / ".credentials.json").write_text("{}", encoding="utf-8")
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "2.1.92 (Claude Code)"
+    mock_result.stderr = ""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+    assert _is_cli_available() is True
 
 
 # ── main_cli — dedup short-circuit ────────────────────────────────────────────

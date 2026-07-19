@@ -48,6 +48,19 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception:
         pass
 
+    # LLM-outage pause (M2, docs/LLM_OUTAGE_RESILIENCE_PLAN.md)
+    try:
+        from hunter import llm_outage
+
+        pause_left = await asyncio.to_thread(llm_outage.pause_remaining)
+        if pause_left:
+            lines.append(
+                f"⏸ LLM outage: auto-apply paused ~{(pause_left + 59) // 60} min "
+                f"(<code>/llm outage clear</code>)"
+            )
+    except Exception:
+        pass
+
     if _active_apply_urls:
         now = datetime.now(timezone.utc)
         lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")

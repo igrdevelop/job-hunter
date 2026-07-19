@@ -108,6 +108,10 @@ def test_run_apply_agent_subprocess_times_out_and_kills_process(monkeypatch) -> 
         "hunter.services.apply_service.asyncio.create_subprocess_exec",
         _fake_create_subprocess_exec,
     )
+    # Pin the timeout widening to identity: this test exercises the kill
+    # mechanics, and on a dev machine with a real CLI login _effective_timeout
+    # would stretch 0.01s to APPLY_AGENT_CLI_TIMEOUT_SEC.
+    monkeypatch.setattr("hunter.services.apply_service._effective_timeout", lambda t: t)
 
     result = asyncio.run(
         run_apply_agent_subprocess(
@@ -494,3 +498,57 @@ def test_run_apply_agent_for_url_reports_no_output_when_both_streams_empty(monke
     outcome, detail = _run_for_url(monkeypatch, _FakeProc(returncode=1))
     assert outcome == "fail"
     assert detail == "(no output)"
+
+
+# ── _effective_timeout: CLI runs get a wider wall clock ───────────────────────
+# A CLI-served vacancy spawns ~10-20 sequential `claude -p` calls (M4b) — far
+# past the 15-minute API budget. Killing a slow-but-working subscription apply
+# at 900s would turn it into the exact FAIL row the outage work eliminates.
+
+
+def test_effective_timeout_widened_when_cli_login_present(monkeypatch) -> None:
+    from hunter.services.apply_service import _effective_timeout
+
+    monkeypatch.setattr("llm_client.cli_credentials_present", lambda: True)
+    monkeypatch.setattr("hunter.config.APPLY_USE_CLI", False)
+    monkeypatch.setattr("hunter.config.APPLY_AGENT_CLI_TIMEOUT_SEC", 2700)
+    assert _effective_timeout(900) == 2700
+
+
+def test_effective_timeout_unchanged_without_cli(monkeypatch) -> None:
+    from hunter.services.apply_service import _effective_timeout
+
+    monkeypatch.setattr("llm_client.cli_credentials_present", lambda: False)
+    monkeypatch.setattr("hunter.config.APPLY_USE_CLI", False)
+    assert _effective_timeout(900) == 900
+
+
+def test_effective_timeout_widened_in_explicit_cli_mode(monkeypatch) -> None:
+    from hunter.services.apply_service import _effective_timeout
+
+    monkeypatch.setattr("llm_client.cli_credentials_present", lambda: False)
+    monkeypatch.setattr("hunter.config.APPLY_USE_CLI", True)
+    monkeypatch.setattr("hunter.config.APPLY_AGENT_CLI_TIMEOUT_SEC", 2700)
+    assert _effective_timeout(900) == 2700
+
+
+def test_effective_timeout_never_shrinks(monkeypatch) -> None:
+    """A caller-provided budget larger than the CLI cap must win (max, not replace)."""
+    from hunter.services.apply_service import _effective_timeout
+
+    monkeypatch.setattr("llm_client.cli_credentials_present", lambda: True)
+    monkeypatch.setattr("hunter.config.APPLY_USE_CLI", False)
+    monkeypatch.setattr("hunter.config.APPLY_AGENT_CLI_TIMEOUT_SEC", 2700)
+    assert _effective_timeout(9000) == 9000
+
+
+def test_effective_timeout_survives_check_failure(monkeypatch) -> None:
+    """Best-effort: a broken login probe keeps the caller's timeout."""
+    from hunter.services.apply_service import _effective_timeout
+
+    def _boom() -> bool:
+        raise OSError("fs is on fire")
+
+    monkeypatch.setattr("llm_client.cli_credentials_present", _boom)
+    monkeypatch.setattr("hunter.config.APPLY_USE_CLI", False)
+    assert _effective_timeout(900) == 900
