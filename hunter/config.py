@@ -132,6 +132,16 @@ CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))
 MAX_JOBS_PER_RUN: int = int(os.getenv("MAX_JOBS_PER_RUN", "40"))
 APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
+# Wall-clock cap when the run may go through the Claude CLI: explicit CLI mode
+# (APPLY_USE_CLI) or a CLI login present (the outage fallback can fire mid-run,
+# and the parent process cannot know in advance whether it will). A CLI-served
+# vacancy spawns ~10-20 sequential `claude -p` calls (M4b) — far past the
+# 15-minute API budget; killing it at 900s would turn a slow-but-WORKING
+# subscription apply into the very FAIL row the outage work eliminates.
+# apply_service picks max(APPLY_AGENT_TIMEOUT_SEC, this) in that case. The
+# trade-off — a genuinely hung run holds _hunt_lock up to 45 min instead of
+# 15 — is bounded by the FIFO hunt queue (waiting slots run late, never skip).
+APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", "2700"))
 # Hard wall-clock cap for the detached dual-apply shadow run (its own budget,
 # independent of the primary's APPLY_AGENT_TIMEOUT_SEC). A watchdog force-exits
 # the detached shadow process after this many seconds. Default 1800 (was 900):

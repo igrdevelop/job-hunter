@@ -25,6 +25,28 @@ ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited", "llm_outage"]
 ApplyResult = tuple[ApplyOutcome, str]
 
 
+def _effective_timeout(timeout_sec: int) -> int:
+    """Widen the subprocess timeout when the run may go through the Claude CLI.
+
+    The parent cannot know in advance whether a vacancy will hit the outage
+    fallback mid-run (M4b spawns ~10-20 sequential `claude -p` calls — far
+    past the 15-minute API budget), so whenever that is POSSIBLE (explicit
+    CLI mode, or a CLI login on disk) the cap is raised to
+    APPLY_AGENT_CLI_TIMEOUT_SEC. Killing a slow-but-working subscription
+    apply at 900s would turn it into the exact FAIL row the outage work
+    eliminates. Best-effort: any error keeps the caller's timeout.
+    """
+    try:
+        from hunter.config import APPLY_AGENT_CLI_TIMEOUT_SEC, APPLY_USE_CLI
+        from llm_client import cli_credentials_present
+
+        if APPLY_USE_CLI or cli_credentials_present():
+            return max(timeout_sec, APPLY_AGENT_CLI_TIMEOUT_SEC)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[apply_service] effective-timeout check failed: %s", e)
+    return timeout_sec
+
+
 def build_generate_docs_cmd(
     generate_docs_script: Path,
     content_json_path: Path,
@@ -114,15 +136,16 @@ async def run_apply_agent_subprocess(
             logger.error(f"[auto-apply] failed to start subprocess for {job.url}: {e}")
             return "fail"
 
+        effective_timeout = _effective_timeout(timeout_sec)
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),
-                timeout=timeout_sec,
+                timeout=effective_timeout,
             )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()
-            logger.error(f"[auto-apply] TIMEOUT ({timeout_sec}s) for {job.url}")
+            logger.error(f"[auto-apply] TIMEOUT ({effective_timeout}s) for {job.url}")
             return "fail"
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
@@ -202,16 +225,17 @@ async def run_apply_agent_for_url(
         logger.error(f"[apply_agent] failed to start subprocess for {label}: {e}")
         return "fail", f"Failed to start process: {e}"
 
+    effective_timeout = _effective_timeout(timeout_sec)
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
-            timeout=timeout_sec,
+            timeout=effective_timeout,
         )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.communicate()
-        logger.error(f"[apply_agent] TIMEOUT ({timeout_sec}s) for {label}")
-        return "fail", f"Timed out after {timeout_sec}s"
+        logger.error(f"[apply_agent] TIMEOUT ({effective_timeout}s) for {label}")
+        return "fail", f"Timed out after {effective_timeout}s"
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
