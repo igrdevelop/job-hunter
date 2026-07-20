@@ -267,6 +267,22 @@ def main_cli(
         ):
             return
 
+        # Step 1.5g — Re-post gate (mirror of apply_api Step 1.5g): a
+        # near-verbatim re-post of a recently applied vacancy reuses the
+        # existing CV ($0, Re-application tracker row) instead of spinning up
+        # the Claude CLI at all. Returning None here (not the folder) also
+        # skips the dual-apply shadow. No company hint on the CLI path — only
+        # the strict any-company similarity branch can fire.
+        from hunter.repost_gate import run_repost_gate
+
+        if run_repost_gate(
+            job_text,
+            url,
+            permalink=permalink,
+            is_force_override=skip_dedup,
+        ):
+            return
+
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
     print("[apply_agent] Running claude CLI...\n")
 

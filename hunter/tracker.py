@@ -22,7 +22,7 @@ Testable: monkeypatch hunter.tracker.DB_PATH to an isolated tmp path.
 
 import re
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
@@ -702,8 +702,42 @@ def add_manual_jobleads_pending(
     return True
 
 
-def add_applied(content: dict, force: bool = False) -> bool:
-    """Append a successful apply row. Returns True when a row was written."""
+def get_recent_applied_for_repost(window_days: int) -> list[dict]:
+    """Applied rows from the last `window_days` days that have a docs folder —
+    the donor candidates for the re-post gate (hunter.repost_gate). Excludes
+    non-apply statuses (SKIP/FAIL/EXPIRED/MANUAL): only a row whose CV was
+    actually generated can donate its documents. Newest first."""
+    cutoff = (date.today() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT url, company, title, folder, date
+              FROM applications
+             WHERE folder != '' AND folder IS NOT NULL
+               AND date >= ?
+               AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?)
+             ORDER BY date DESC, id DESC
+            """,
+            (cutoff, MANUAL_PENDING_ATS),
+        ).fetchall()
+    return [
+        {
+            "url": r["url"] or "",
+            "company": r["company"] or "",
+            "title": r["title"] or "",
+            "folder": r["folder"],
+            "date": r["date"] or "",
+        }
+        for r in rows
+    ]
+
+
+def add_applied(content: dict, force: bool = False, reapplication: bool = False) -> bool:
+    """Append a successful apply row. Returns True when a row was written.
+
+    `reapplication=True` forces the Re-application flag regardless of URL
+    history — used by the re-post gate, where the URL is NEW by definition
+    (that's why URL dedup missed it) but the vacancy itself is a repeat."""
     company = _company_from_content(content)
     job_title = str(content.get("job_title", "") or "")
     stack = str(content.get("stack", "") or "")
@@ -769,7 +803,7 @@ def add_applied(content: dict, force: bool = False) -> bool:
                 norm_url or apply_url,
                 norm_url,
                 folder,
-                "+" if is_reapply else "",
+                "+" if (is_reapply or reapplication) else "",
                 to_learn,
                 cost_usd,
             ),

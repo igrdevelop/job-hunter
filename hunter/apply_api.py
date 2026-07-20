@@ -340,6 +340,25 @@ def _run_main_api(
     ):
         return
 
+    # Step 1.5g — Re-post gate (hunter/repost_gate.py): if this posting is a
+    # near-verbatim re-post of a vacancy applied to recently (new URL, same
+    # text), REUSE the existing CV — copy the donor docs, write a
+    # Re-application tracker row at $0, notify with the files — and skip
+    # generation entirely. Returning None (not the folder) also skips the
+    # dual-apply shadow in apply_agent.main(): an A/B model comparison on a
+    # copied CV is meaningless. `/force` bypasses; failures fall through to
+    # normal generation (best-effort).
+    from hunter.repost_gate import run_repost_gate
+
+    if run_repost_gate(
+        job_text,
+        url,
+        company=jobleads_company,
+        permalink=permalink,
+        is_force_override=skip_dedup,
+    ):
+        return
+
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "generation_rules.md"
     profile_path = PROMPTS_DIR / "candidate_profile.md"

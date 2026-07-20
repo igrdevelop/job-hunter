@@ -109,6 +109,20 @@ DOOMED_GATE_ENABLED: bool = os.getenv("DOOMED_GATE_ENABLED", "true").lower() in 
 # gate entirely, e.g. if live-data precision turns out worse than calibration.
 DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").strip().lower()
 
+# Re-post gate (hunter/repost_gate.py, Step 1.5g): when a freshly fetched
+# posting is a near-verbatim re-post of a vacancy applied to in the last
+# REPOST_WINDOW_DAYS days (new URL — re-listed after expiry, cross-board
+# duplicate, agency re-post under a name variation), REUSE the existing CV:
+# copy the donor folder's docs, write a Re-application tracker row at $0,
+# skip generation entirely. Thresholds live in repost_gate.py (calibrated
+# 2026-07-20 on the real corpus). `/force` bypasses the gate.
+REPOST_GATE_ENABLED: bool = os.getenv("REPOST_GATE_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+REPOST_WINDOW_DAYS: int = int(os.getenv("REPOST_WINDOW_DAYS", "60"))
+
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
 GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in (
