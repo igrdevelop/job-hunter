@@ -252,10 +252,22 @@ def execute_reuse(
         content = json.loads((match.donor_folder / "content.json").read_text(encoding="utf-8"))
 
         # Folder name: reuse the donor's already-sanitized folder name (minus
-        # any same-day _2/_3 suffix) rather than the raw content.json company
-        # string — the donor name is proven filesystem-safe.
-        folder_base = re.sub(r"_\d+$", "", match.donor_folder.name) or "Unknown"
-        new_folder = compute_output_folder(folder_base)
+        # any earlier _reused_{date} tag and same-day _2/_3 suffix — a chained
+        # re-post must not grow "AcmeCorp_reused_A_reused_B") rather than the
+        # raw content.json company string — the donor name is proven
+        # filesystem-safe. Then tag the copy with WHERE it came from (owner
+        # request 2026-07-20): "AcmeCorp_reused_2026-07-01" is visible at a
+        # glance locally and on Drive, so a reused application is never
+        # mistaken for a freshly generated one.
+        folder_base = (
+            re.sub(r"(?:_reused(?:_\d{4}-\d{2}-\d{2})?)?(?:_\d+)?$", "", match.donor_folder.name)
+            or "Unknown"
+        )
+        donor_day = (
+            match.donor_date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", match.donor_date or "") else ""
+        )
+        reuse_tag = f"_reused_{donor_day}" if donor_day else "_reused"
+        new_folder = compute_output_folder(folder_base + reuse_tag)
         new_folder.mkdir(parents=True, exist_ok=True)
 
         copied: list[Path] = []

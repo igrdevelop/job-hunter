@@ -255,6 +255,9 @@ class TestExecuteReuse:
             new_folder = execute_reuse(self._match(donor), new_url, _LONG_TEXT)
 
         assert new_folder is not None and new_folder != donor
+        # The folder name itself carries the reuse provenance (owner request):
+        # company + the donor application's date.
+        assert new_folder.name == "AcmeCorp_reused_2026-07-01"
         assert (new_folder / "AcmeCorp_CV_EN_ats91.pdf").exists()
         assert (new_folder / "outreach.md").exists()
 
@@ -283,6 +286,35 @@ class TestExecuteReuse:
         mock_notify.assert_called_once()
         assert "Re-post detected" in mock_notify.call_args[0][0]
         mock_send.assert_called_once()
+
+    def test_chained_repost_does_not_stack_reuse_tags(
+        self, tmp_path, tracker_db, monkeypatch
+    ) -> None:
+        """A reused folder later becoming a donor itself must not grow
+        AcmeCorp_reused_A_reused_B — the base name is re-derived each time."""
+        donor = _make_donor_folder(tmp_path, "AcmeCorp_reused_2026-06-15")
+        monkeypatch.setattr("hunter.apply_shared.APPLICATIONS_DIR", tmp_path / "out")
+        with (
+            patch("hunter.apply_shared.notify"),
+            patch("hunter.apply_shared.send_telegram_documents"),
+        ):
+            new_folder = execute_reuse(self._match(donor), "https://x/chained", _LONG_TEXT)
+        assert new_folder is not None
+        assert new_folder.name == "AcmeCorp_reused_2026-07-01"
+
+    def test_missing_donor_date_falls_back_to_plain_tag(
+        self, tmp_path, tracker_db, monkeypatch
+    ) -> None:
+        donor = _make_donor_folder(tmp_path, "AcmeCorp")
+        monkeypatch.setattr("hunter.apply_shared.APPLICATIONS_DIR", tmp_path / "out")
+        match = RepostMatch("reuse", 0.99, "https://old/x", "AcmeCorp", "", donor)
+        with (
+            patch("hunter.apply_shared.notify"),
+            patch("hunter.apply_shared.send_telegram_documents"),
+        ):
+            new_folder = execute_reuse(match, "https://x/nodate", _LONG_TEXT)
+        assert new_folder is not None
+        assert new_folder.name == "AcmeCorp_reused"
 
     def test_donor_without_rendered_docs_returns_none(
         self, tmp_path, tracker_db, monkeypatch
