@@ -224,7 +224,7 @@ already dead.
 - The next `RETRY_FAILED_TIMES` slot then picks them up through the existing loop; no
   change to the retry machinery itself.
 
-### M4 — CLI (Pro subscription) fallback — **opt-in, ship last** 🟡 CODE DONE (2026-07-18), OPS PENDING OWNER
+### M4 — CLI (Pro subscription) fallback — **ship last** ✅ DONE (code 2026-07-18, live in prod 2026-07-29)
 
 *Code half shipped:* `LLM_OUTAGE_FALLBACK_CLI` (default **false** — today's behavior is
 preserved byte-for-byte while off). When on and the CLI is available:
@@ -253,11 +253,22 @@ shipped in the same branch:*
    named `.claude` — that's the repo's own slash-commands dir). `.claude-cli/` added to
    `.gitignore` — it will hold the owner's PERSONAL subscription OAuth token.
 
-*Remaining — owner's hands only (interactive OAuth, can't be done by an agent):*
-4. ⬜ On the deploy host, after the image rebuild:
-   `docker compose exec -it job-hunter claude` → follow the OAuth URL flow (open the
-   printed URL in any browser, paste the code back). The login persists in
-   `./.claude-cli/`. This is the ONLY activation step — see the flag-removal note below.
+*Owner's hands only (interactive OAuth, can't be done by an agent):*
+4. ✅ Done 2026-07-29 on the deploy host: `docker compose exec -it job-hunter claude` →
+   OAuth URL flow. The login persists in `./.claude-cli/.credentials.json` (root-owned,
+   mode 600) and survives `docker compose pull` + recreate. This was the ONLY activation
+   step — see the flag-removal note below.
+
+   *Verified the same session:* `claude --version` → 2.1.220 inside the container; the
+   interactive banner reports `Claude Pro` (so the mounted token is a live subscription
+   login, not a stale file); and — the path the fallback actually uses — non-interactive
+   print mode returns parseable JSON:
+   `docker compose exec -T job-hunter claude -p 'Reply with only this JSON and nothing
+   else: {"ok": true}'` → `{"ok": true}`. That last check matters on its own: the
+   fallback calls `["claude", "-p"]` with the prompt on **stdin** and feeds stdout to
+   `_parse_json`, so an interactive login alone would not have proven it works. (The
+   CLI's "no stdin data received in 3s" warning appears only on a slow pipe —
+   `subprocess.run(..., input=prompt)` writes immediately.)
 
 **Flag removed (2026-07-18, owner decision: "а зачем флаг? если закончились деньги —
 пробуем через cli, если не получилось — стандартный сценарий").** `LLM_OUTAGE_FALLBACK_CLI`
@@ -341,4 +352,5 @@ stand alone and already answer *"будут ли они обработаны п�
 | 2026-07-17 | M0 verdict: no billing outage found in RETAINED logs (05-28→07-17, with gaps — the owner reports outages did happen elsewhere/earlier); the visible FAIL rows are findmyremote link-rot (dead at fail_count=3, root cause already fixed 07-12) + LinkedIn no-session. Milestone order changed to **M3 → M1 → M2 → M4**. |
 | 2026-07-18 | M4b: the CLI fallback moved into `llm_client.call_llm` so the cheap stages (judge/verdict/translate/outreach) are covered too, not just the main generation call. Dual-apply shadow never falls back. |
 | 2026-07-18 | `LLM_OUTAGE_FALLBACK_CLI` flag REMOVED (owner: "а зачем флаг?"). The CLI login is the switch: credentials in `./.claude-cli/` = fallback live, empty = off. Dispatch fixed: API primary whenever `LLM_API_KEY` is set (the "CLI detected → try CLI first" auto-preference is gone; desktop subscription-only runs need `--cli`/`APPLY_USE_CLI`; `tools/preview_apply.py` now passes `--cli` explicitly). |
+| 2026-07-29 | M4 activated in prod: OAuth login done inside the container, token persisted in `./.claude-cli/`, `claude -p` stdin/JSON path smoke-tested. The whole plan (M0–M4b) is now closed. |
 | 2026-07-18 | Owner: "cli дольше отрабатывает, должна поддерживаться очередь." The QUEUE already exists — hunts serialize through `_hunt_lock` FIFO (a slot that fires during a long CLI batch waits, never skips; overflow jobs have no tracker row and return next hunt), nothing to build. What WAS missing: the 900s `APPLY_AGENT_TIMEOUT_SEC` would kill a slow-but-working CLI-served vacancy (~10–20 sequential `claude -p` spawns) and turn it into a FAIL row. New `APPLY_AGENT_CLI_TIMEOUT_SEC` (default 2700): `apply_service._effective_timeout` widens the cap to max(base, cli) whenever the run MAY go through the CLI (explicit `APPLY_USE_CLI` or a login on disk — the parent can't know in advance whether the fallback fires mid-run). Trade-off accepted: a genuinely hung run holds the lock ≤45 min instead of 15; the FIFO queue absorbs it. |
