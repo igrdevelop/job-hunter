@@ -371,6 +371,17 @@ async def upload_log_file(
 
 _UPLOAD_TIMEOUT = 120  # seconds per folder
 
+# Re-entrancy guard: the delivery fallback (hunter/delivery.py, whenever the
+# targeted post-apply upload misses its tracker row) and the periodic
+# scheduled_gdrive_upload_missing backfill routinely fire within the same
+# second, and a second full pass over the SAME folder list is not just
+# unsafe (see the M2 _DRIVE_LOCK below) — it is pointless: the first pass is
+# already uploading exactly what the second would. A plain module-level bool
+# is enough here (not asyncio.Lock): both callers run in this one process's
+# single-threaded event loop, so the check-then-set below never interleaves
+# with another coroutine — there is no `await` between them.
+_backfill_running = False
+
 
 async def upload_missing_folders(
     project_dir: Path,
@@ -382,6 +393,11 @@ async def upload_missing_folders(
     upload, writes the Drive URL back to tracker so the row is not re-uploaded.
 
     progress_cb: optional async callable(str) for Telegram progress updates.
+
+    If a pass is already running (delivery's fallback and the scheduled
+    backfill overlapped), this call returns immediately with
+    ``"skipped_busy": True`` and zero counters — deliberately not an
+    exception, so `best_effort` never counts a busy-skip as a failure.
 
     Returns:
       {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str]}
@@ -396,6 +412,30 @@ async def upload_missing_folders(
             "shadow_errors": [],
         }
 
+    global _backfill_running
+    if _backfill_running:
+        log.info("gdrive_sync: upload_missing_folders already running — skipping this pass")
+        return {
+            "uploaded": 0,
+            "already_uploaded": 0,
+            "skipped_missing": 0,
+            "errors": [],
+            "shadow_uploaded": 0,
+            "shadow_errors": [],
+            "skipped_busy": True,
+        }
+    _backfill_running = True
+    try:
+        return await _upload_missing_folders_locked(project_dir, progress_cb)
+    finally:
+        _backfill_running = False
+
+
+async def _upload_missing_folders_locked(
+    project_dir: Path,
+    progress_cb=None,
+) -> dict:
+    """Body of upload_missing_folders, run under the `_backfill_running` guard."""
     from hunter.gdrive_client import upload_folder, folder_url
     from hunter.tracker import read_all_tracker_rows, set_drive_url
 

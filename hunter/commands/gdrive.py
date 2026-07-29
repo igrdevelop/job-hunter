@@ -43,6 +43,13 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
             )
             return
 
+        if result.get("skipped_busy"):
+            await update.message.reply_text(
+                "⏳ a backfill is already running — skipped",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
         uploaded = result["uploaded"]
         already = result.get("already_uploaded", 0)
         skipped = result["skipped_missing"]

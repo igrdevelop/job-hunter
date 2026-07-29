@@ -323,7 +323,7 @@ prod now.
 
 ## 5. Milestone checklist
 
-- [ ] **M1** re-entrancy guard + `skipped_busy` reporting + tests
+- [x] **M1** re-entrancy guard + `skipped_busy` reporting + tests
 - [ ] **M2** `_DRIVE_LOCK` over all Drive calls, `GDRIVE_HTTP_TIMEOUT_SEC`,
       service invalidation on `wait_for` timeout + overlap tests
 - [ ] **M3** `drive_uploads` table, `hunter/drive_ledger.py`, shadow skip,

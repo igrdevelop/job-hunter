@@ -247,7 +247,18 @@ hunter/
                             upload-missing backfill routinely overlap in this one event loop, and
                             interleaved list-then-create is what duplicated the date folders.
                             Deliberately NOT memoized: a cached id goes stale the moment a folder is
-                            trashed/moved by hand and would silently absorb uploads into the trash
+                            trashed/moved by hand and would silently absorb uploads into the trash.
+                            `upload_missing_folders` is re-entrancy-guarded (module-level
+                            `_backfill_running` bool, docs/GDRIVE_SSL_RACE_PLAN.md M1): the delivery
+                            fallback and the scheduled backfill routinely fire within the same
+                            second, and a second full pass over the identical folder list is not
+                            just unsafe but pointless — the first pass already covers it. A second
+                            concurrent call returns immediately with `"skipped_busy": True` and zero
+                            counters (never an exception, so `best_effort` never counts it as a
+                            failure); `/gdrive_upload_missing` reports "a backfill is already
+                            running — skipped" instead of a misleading "Uploaded: 0". The guard sits
+                            in a try/finally around the actual pass (`_upload_missing_folders_locked`)
+                            so a mid-pass exception still releases it.
   gdrive_client.py          Low-level Drive API v3 wrapper. Drive allows same-named siblings, so
                             get_or_create_folder (a) converges on the OLDEST copy when duplicates
                             exist, so uploads stop scattering, and (b) re-lists after create and

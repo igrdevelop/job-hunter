@@ -624,3 +624,117 @@ def test_resolve_folder_passes_through_args():
     mock_goc.assert_called_once_with(svc, "2026-07-06", "root")
 
     _reset_folder_lock()
+
+
+# ---------------------------------------------------------------------------
+# upload_missing_folders — re-entrancy guard (M1, docs/GDRIVE_SSL_RACE_PLAN.md)
+# ---------------------------------------------------------------------------
+# The delivery fallback (hunter/delivery.py) and the scheduled backfill
+# (hunter/schedules/gdrive.py) routinely overlap within the same second — a
+# second full pass over the same folder list is both unsafe (M2) and
+# pointless (the first pass already covers it). A second concurrent call
+# must short-circuit with skipped_busy=True instead of walking the list again.
+
+
+def _reset_backfill_guard():
+    from hunter import gdrive_sync
+
+    gdrive_sync._backfill_running = False
+
+
+def test_upload_missing_folders_concurrent_call_skips_busy(tmp_path):
+    _reset_backfill_guard()
+
+    folder = tmp_path / "2026-07-06" / "Acme"
+    folder.mkdir(parents=True)
+    (folder / "cv.pdf").write_bytes(b"x")
+
+    rows = [
+        {
+            "Company": "Acme",
+            "URL": "https://acme.example/job",
+            "Folder": str(folder),
+            "Drive URL": "",
+        }
+    ]
+
+    upload_calls = {"n": 0}
+
+    def fake_upload_folder(svc, fp, parent_id):
+        upload_calls["n"] += 1
+        return "company_id"
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", "root_id"),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.tracker.read_all_tracker_rows", return_value=rows),
+        patch("hunter.tracker.set_drive_url"),
+        patch("hunter.gdrive_client.get_or_create_folder", return_value="date_id"),
+        patch("hunter.gdrive_client.upload_folder", side_effect=fake_upload_folder),
+        patch(
+            "hunter.gdrive_client.folder_url",
+            return_value="https://drive.google.com/drive/folders/company_id",
+        ),
+    ):
+        from hunter import gdrive_sync
+
+        async def scenario():
+            return await asyncio.gather(
+                gdrive_sync.upload_missing_folders(tmp_path),
+                gdrive_sync.upload_missing_folders(tmp_path),
+            )
+
+        r1, r2 = run(scenario())
+
+    busy = [r for r in (r1, r2) if r.get("skipped_busy")]
+    real = [r for r in (r1, r2) if not r.get("skipped_busy")]
+    assert len(busy) == 1, "exactly one of the two concurrent calls must be turned away"
+    assert len(real) == 1
+    assert real[0]["uploaded"] == 1
+    # The turned-away call must report zero counters, not a misleading "0 uploaded".
+    assert busy[0] == {
+        "uploaded": 0,
+        "already_uploaded": 0,
+        "skipped_missing": 0,
+        "errors": [],
+        "shadow_uploaded": 0,
+        "shadow_errors": [],
+        "skipped_busy": True,
+    }
+    # upload_folder must run exactly once per folder — not once per overlapping pass.
+    assert upload_calls["n"] == 1
+
+    _reset_backfill_guard()
+
+
+def test_upload_missing_folders_guard_released_after_exception(tmp_path):
+    """The guard must sit in a finally: a pass that raises must not wedge the
+    flag True forever and permanently turn away every later call."""
+    import pytest
+
+    _reset_backfill_guard()
+    from hunter import gdrive_sync
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.tracker.read_all_tracker_rows", side_effect=RuntimeError("db locked")),
+    ):
+        with pytest.raises(RuntimeError):
+            run(gdrive_sync.upload_missing_folders(tmp_path))
+
+    assert gdrive_sync._backfill_running is False, (
+        "guard left True after an exception — every later call would be wrongly skipped_busy"
+    )
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.tracker.read_all_tracker_rows", return_value=[]),
+    ):
+        result = run(gdrive_sync.upload_missing_folders(tmp_path))
+
+    assert not result.get("skipped_busy")
+
+    _reset_backfill_guard()
