@@ -415,11 +415,18 @@ _backfill_running = False
 async def upload_missing_folders(
     project_dir: Path,
     progress_cb=None,
+    *,
+    force: bool = False,
 ) -> dict:
     """Upload tracker.xlsx application folders that haven't been uploaded to Drive yet.
 
     Skips rows that already have a Drive URL in col 12. After each successful
     upload, writes the Drive URL back to tracker so the row is not re-uploaded.
+    Shadow (dual-apply comparison) subfolders are separately skipped via the
+    content-signature ledger (hunter.drive_ledger) when unchanged since their
+    last successful upload — pass `force=True` to bypass the ledger and
+    re-upload every shadow subfolder regardless (the one case the ledger
+    gets wrong: a folder deleted on Drive by hand, which the bot can't see).
 
     progress_cb: optional async callable(str) for Telegram progress updates.
 
@@ -429,7 +436,8 @@ async def upload_missing_folders(
     exception, so `best_effort` never counts a busy-skip as a failure.
 
     Returns:
-      {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str]}
+      {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str],
+       "shadow_uploaded": int, "shadow_skipped": int, "shadow_errors": list[str]}
     """
     if not _ready():
         return {
@@ -438,6 +446,7 @@ async def upload_missing_folders(
             "skipped_missing": 0,
             "errors": ["GDRIVE_ENABLED is false or service not ready"],
             "shadow_uploaded": 0,
+            "shadow_skipped": 0,
             "shadow_errors": [],
         }
 
@@ -450,12 +459,13 @@ async def upload_missing_folders(
             "skipped_missing": 0,
             "errors": [],
             "shadow_uploaded": 0,
+            "shadow_skipped": 0,
             "shadow_errors": [],
             "skipped_busy": True,
         }
     _backfill_running = True
     try:
-        return await _upload_missing_folders_locked(project_dir, progress_cb)
+        return await _upload_missing_folders_locked(project_dir, progress_cb, force=force)
     finally:
         _backfill_running = False
 
@@ -463,6 +473,8 @@ async def upload_missing_folders(
 async def _upload_missing_folders_locked(
     project_dir: Path,
     progress_cb=None,
+    *,
+    force: bool = False,
 ) -> dict:
     """Body of upload_missing_folders, run under the `_backfill_running` guard."""
     from hunter.gdrive_client import upload_folder, folder_url
@@ -499,7 +511,9 @@ async def _upload_missing_folders_locked(
             continue
         to_upload.append((row.get("Company", folder_path.name), row.get("URL", ""), folder_path))
 
-    shadow_uploaded, shadow_errors = await _upload_shadow_subfolders(existing_folders)
+    shadow_uploaded, shadow_skipped, shadow_errors = await _upload_shadow_subfolders(
+        existing_folders, force=force
+    )
 
     if not to_upload:
         return {
@@ -508,6 +522,7 @@ async def _upload_missing_folders_locked(
             "skipped_missing": skipped_missing,
             "errors": [],
             "shadow_uploaded": shadow_uploaded,
+            "shadow_skipped": shadow_skipped,
             "shadow_errors": shadow_errors,
         }
 
@@ -547,6 +562,7 @@ async def _upload_missing_folders_locked(
             "skipped_missing": skipped_missing,
             "errors": [f"root folder: {root_error}"],
             "shadow_uploaded": shadow_uploaded,
+            "shadow_skipped": shadow_skipped,
             "shadow_errors": shadow_errors,
         }
 
@@ -592,11 +608,16 @@ async def _upload_missing_folders_locked(
         "skipped_missing": skipped_missing,
         "errors": errors,
         "shadow_uploaded": shadow_uploaded,
+        "shadow_skipped": shadow_skipped,
         "shadow_errors": shadow_errors,
     }
 
 
-async def _upload_shadow_subfolders(folders: set[Path]) -> tuple[int, list[str]]:
+async def _upload_shadow_subfolders(
+    folders: set[Path],
+    *,
+    force: bool = False,
+) -> tuple[int, int, list[str]]:
     """Upload any dual-apply shadow subfolder found under the given company folders.
 
     Shadow sets (``{company}/{shadow_profile_name}/``) have no tracker row, so
@@ -604,22 +625,44 @@ async def _upload_shadow_subfolders(folders: set[Path]) -> tuple[int, list[str]]
     upload_missing_folders. This scans every locally-present company folder
     for a subdirectory matching a known LLM profile name and uploads it —
     idempotent (Drive upserts by name), so re-running is safe.
+
+    Without a tracker row there is also no per-row "already uploaded" check,
+    so without the ledger every shadow subfolder would be re-uploaded on
+    EVERY pass forever (docs/GDRIVE_SSL_RACE_PLAN.md M3). `hunter.drive_ledger`
+    tracks a content signature per folder path; a folder whose signature is
+    unchanged since its last successful upload is skipped. `force=True`
+    bypasses the ledger check (still records afterwards) — the escape hatch
+    for a folder deleted on Drive by hand, which the ledger cannot see.
+
+    Returns (uploaded, skipped, errors).
     """
+    from hunter import drive_ledger
     from hunter.llm_profiles import PROFILES
 
     uploaded = 0
+    skipped = 0
     errors: list[str] = []
     for folder_path in folders:
         for name in PROFILES:
             sub = folder_path / name
             if not sub.is_dir() or not any(f.is_file() for f in sub.iterdir()):
                 continue
+            path_key = str(sub)
+            try:
+                sig = drive_ledger.signature(sub)
+            except Exception as e:
+                errors.append(f"{folder_path.name}/{name}: signature failed: {e}")
+                continue
+            if not force and drive_ledger.is_current(path_key, sig):
+                skipped += 1
+                continue
             try:
                 url = await upload_shadow_folder(folder_path, sub)
                 if url:
                     uploaded += 1
+                    drive_ledger.record(path_key, sig, url)
                 else:
                     errors.append(f"{folder_path.name}/{name}: upload failed")
             except Exception as e:
                 errors.append(f"{folder_path.name}/{name}: {e}")
-    return uploaded, errors
+    return uploaded, skipped, errors

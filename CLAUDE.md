@@ -279,6 +279,29 @@ hunter/
                             lingering one. Cross-*process* concurrency (detached dual-apply shadows)
                             is unaffected — each process has its own service/socket;
                             `gdrive_client._resolve_create_race` remains the guard there.
+                            `_upload_shadow_subfolders` (M3, docs/GDRIVE_SSL_RACE_PLAN.md) consults
+                            `hunter.drive_ledger` before each shadow subfolder upload and skips it
+                            when unchanged since its last successful upload — dual-apply shadow sets
+                            have no tracker row, so without this every one of them was re-uploaded on
+                            EVERY backfill pass forever (measured on the live corpus: 86 distinct
+                            shadow folders, ~1192 uploads/day, ~14 full passes). `force=True`
+                            (threaded from `/gdrive_upload_missing force`) bypasses the ledger check
+                            for one pass — the escape hatch for a folder deleted on Drive by hand,
+                            which the ledger can't see — while still recording afterwards.
+  drive_ledger.py           Content-signature ledger for dual-apply shadow uploads (M3): a small,
+                            self-contained module (mirrors `hunter.source_health`'s own lazy-ensure
+                            pattern for `source_runs` — not part of `hunter.db`'s `init_db()`) over a
+                            lazily-created `drive_uploads` table in the same tracker.db:
+                            `path TEXT PRIMARY KEY, signature TEXT NOT NULL, drive_url TEXT NOT NULL
+                            DEFAULT '', uploaded_at TEXT NOT NULL`. `signature(folder)` is content-
+                            derived (`file_count:max_mtime_ns:total_size` over direct files only,
+                            matching `gdrive_client.upload_folder`'s own flat-folder assumption) —
+                            deliberately NOT a marker file inside the folder, which would itself be
+                            uploaded to Drive and lives in the gitignored, periodically-pruned
+                            `Applications/` tree; the DB is the durable, already-mounted store.
+                            `is_current(path, sig)` / `record(path, sig, url)` / `forget(path)` round
+                            out the API; `record()` is called only after a successful upload so a
+                            failed one is retried next pass, never silently dropped.
   gdrive_client.py          Low-level Drive API v3 wrapper. Drive allows same-named siblings, so
                             get_or_create_folder (a) converges on the OLDEST copy when duplicates
                             exist, so uploads stop scattering, and (b) re-lists after create and

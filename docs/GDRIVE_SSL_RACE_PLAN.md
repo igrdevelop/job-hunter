@@ -228,8 +228,18 @@ skip cannot see them and they are re-uploaded forever.
 
 **Change:**
 
-1. New table in `hunter/db.py`, lazily ensured exactly like `source_runs` /
-   `subsystem_health`:
+**Implementation note (deviation from the sketch below):** the DDL was NOT
+added to `hunter/db.py`'s `_DDL`/`init_db()`. "Lazily ensured exactly like
+`source_runs`" is itself the more specific instruction — `source_runs`'
+schema lives entirely inside `hunter/source_health.py`, self-contained, never
+touching `hunter/db.py`. `drive_ledger.py` follows that exact precedent: its
+own `_DDL` + `_ensure_table(conn)`, called defensively on every read/write,
+with a module-level `DB_PATH = TRACKER_DB_PATH` tests can monkeypatch (same
+shape as `hunter.source_health.DB_PATH`). Same SQLite file (`tracker.db`),
+different Python module. The schema is unchanged from the sketch.
+
+1. New table (in `hunter/drive_ledger.py`, not `hunter/db.py` — see note
+   above), lazily ensured exactly like `source_runs` / `subsystem_health`:
 
    ```sql
    CREATE TABLE IF NOT EXISTS drive_uploads (
@@ -326,7 +336,7 @@ prod now.
 - [x] **M1** re-entrancy guard + `skipped_busy` reporting + tests
 - [x] **M2** `_DRIVE_LOCK` over all Drive calls, `GDRIVE_HTTP_TIMEOUT_SEC`,
       service invalidation on `wait_for` timeout + overlap tests
-- [ ] **M3** `drive_uploads` table, `hunter/drive_ledger.py`, shadow skip,
+- [x] **M3** `drive_uploads` table, `hunter/drive_ledger.py`, shadow skip,
       `/gdrive_upload_missing force` + tests
 - [ ] CLAUDE.md updated in the same commit (config table, `gdrive_sync`
       description, repository layout entry for `drive_ledger.py`, work-log entry)

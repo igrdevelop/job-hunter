@@ -525,15 +525,19 @@ def test_upload_shadow_subfolders_finds_known_profile_dirs(tmp_path):
     (company / "random_dir").mkdir()
     (company / "random_dir" / "junk.txt").write_bytes(b"x")
 
-    with patch(
-        "hunter.gdrive_sync.upload_shadow_folder",
-        return_value="https://drive.google.com/drive/folders/x",
-    ) as mock_upload:
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch(
+            "hunter.gdrive_sync.upload_shadow_folder",
+            return_value="https://drive.google.com/drive/folders/x",
+        ) as mock_upload,
+    ):
         from hunter import gdrive_sync
 
-        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+        uploaded, skipped, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
     assert uploaded == 1
+    assert skipped == 0
     assert errors == []
     mock_upload.assert_called_once_with(company, shadow)
 
@@ -542,12 +546,16 @@ def test_upload_shadow_subfolders_skips_empty_dirs(tmp_path):
     company = tmp_path / "2026-05-15" / "Acme"
     (company / "deepseek-v3").mkdir(parents=True)  # empty — no files inside
 
-    with patch("hunter.gdrive_sync.upload_shadow_folder") as mock_upload:
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch("hunter.gdrive_sync.upload_shadow_folder") as mock_upload,
+    ):
         from hunter import gdrive_sync
 
-        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+        uploaded, skipped, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
     assert uploaded == 0
+    assert skipped == 0
     assert errors == []
     mock_upload.assert_not_called()
 
@@ -558,14 +566,100 @@ def test_upload_shadow_subfolders_records_failure(tmp_path):
     shadow.mkdir(parents=True)
     (shadow / "cv.pdf").write_bytes(b"x")
 
-    with patch("hunter.gdrive_sync.upload_shadow_folder", return_value=None):
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch("hunter.gdrive_sync.upload_shadow_folder", return_value=None),
+    ):
         from hunter import gdrive_sync
 
-        uploaded, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
+        uploaded, skipped, errors = run(gdrive_sync._upload_shadow_subfolders({company}))
 
-    assert uploaded == 0
-    assert len(errors) == 1
-    assert "gpt-4o" in errors[0]
+        assert uploaded == 0
+        assert skipped == 0
+        assert len(errors) == 1
+        assert "gpt-4o" in errors[0]
+        # A failed upload must never be recorded — it has to be retried next pass.
+        from hunter import drive_ledger
+
+        assert not drive_ledger.is_current(str(shadow), drive_ledger.signature(shadow))
+
+
+# ---------------------------------------------------------------------------
+# _upload_shadow_subfolders — content-signature ledger skip / force (M3,
+# docs/GDRIVE_SSL_RACE_PLAN.md). Without this, every shadow subfolder is
+# re-uploaded on EVERY backfill pass forever (no tracker row => no per-row
+# "already uploaded" check).
+# ---------------------------------------------------------------------------
+
+
+def test_upload_shadow_subfolders_skips_unchanged_second_pass(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    shadow = company / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    (shadow / "cv.pdf").write_bytes(b"x")
+
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch(
+            "hunter.gdrive_sync.upload_shadow_folder",
+            return_value="https://drive.google.com/drive/folders/x",
+        ) as mock_upload,
+    ):
+        from hunter import gdrive_sync
+
+        first = run(gdrive_sync._upload_shadow_subfolders({company}))
+        second = run(gdrive_sync._upload_shadow_subfolders({company}))
+
+    assert first == (1, 0, [])
+    assert second == (0, 1, [])
+    # upload_shadow_folder must have run exactly once — not once per pass.
+    mock_upload.assert_called_once()
+
+
+def test_upload_shadow_subfolders_reuploads_after_file_change(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    shadow = company / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    cv = shadow / "cv.pdf"
+    cv.write_bytes(b"x")
+
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch(
+            "hunter.gdrive_sync.upload_shadow_folder",
+            return_value="https://drive.google.com/drive/folders/x",
+        ) as mock_upload,
+    ):
+        from hunter import gdrive_sync
+
+        run(gdrive_sync._upload_shadow_subfolders({company}))
+        cv.write_bytes(b"a different, longer body")  # changes size + mtime
+        second = run(gdrive_sync._upload_shadow_subfolders({company}))
+
+    assert second == (1, 0, [])
+    assert mock_upload.call_count == 2
+
+
+def test_upload_shadow_subfolders_force_bypasses_ledger(tmp_path):
+    company = tmp_path / "2026-05-15" / "Acme"
+    shadow = company / "deepseek-v3"
+    shadow.mkdir(parents=True)
+    (shadow / "cv.pdf").write_bytes(b"x")
+
+    with (
+        patch("hunter.drive_ledger.DB_PATH", tmp_path / "ledger.db"),
+        patch(
+            "hunter.gdrive_sync.upload_shadow_folder",
+            return_value="https://drive.google.com/drive/folders/x",
+        ) as mock_upload,
+    ):
+        from hunter import gdrive_sync
+
+        run(gdrive_sync._upload_shadow_subfolders({company}))
+        forced = run(gdrive_sync._upload_shadow_subfolders({company}, force=True))
+
+    assert forced == (1, 0, [])
+    assert mock_upload.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +794,7 @@ def test_upload_missing_folders_concurrent_call_skips_busy(tmp_path):
         "skipped_missing": 0,
         "errors": [],
         "shadow_uploaded": 0,
+        "shadow_skipped": 0,
         "shadow_errors": [],
         "skipped_busy": True,
     }
