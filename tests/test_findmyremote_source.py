@@ -65,7 +65,9 @@ def test_search_parses_listing_and_uses_external_url() -> None:
 
 def test_search_dedups_across_queries() -> None:
     src = FindMyRemoteSource()
+    queries = ("angular", "frontend", "react")
     with (
+        patch("hunter.sources.findmyremote.SEARCH_QUERIES", queries),
         patch(
             "hunter.sources.findmyremote.requests.get",
             return_value=_mock_response({"totalCount": 1, "jobs": [LISTING_JOB]}),
@@ -73,8 +75,7 @@ def test_search_dedups_across_queries() -> None:
         patch("hunter.sources.findmyremote.time.sleep"),
     ):
         jobs = src.search()
-    # 3 queries, same job each time -> one Job
-    assert m.call_count == 3
+    assert m.call_count == len(queries)
     assert len(jobs) == 1
 
 

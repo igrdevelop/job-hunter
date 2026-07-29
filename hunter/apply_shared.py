@@ -16,6 +16,7 @@ from pathlib import Path
 
 import requests
 
+from hunter.candidate_config import EXPECTED_ROLE_COUNT
 from hunter.config import (
     APPLICATIONS_DIR,
     GENERATE_PL_RESUME,
@@ -1875,9 +1876,13 @@ def validate_content(data: dict, *, pl_optional: bool = False) -> list[str]:
         for sub in ("summary", "skills", "experience", "education"):
             if sub not in resume:
                 errors.append(f"resume_en missing: {sub}")
-        if isinstance(resume.get("experience"), list) and len(resume["experience"]) < 7:
+        if (
+            isinstance(resume.get("experience"), list)
+            and len(resume["experience"]) < EXPECTED_ROLE_COUNT
+        ):
             errors.append(
-                f"resume_en.experience has only {len(resume['experience'])} jobs (expected 7 — ALL roles required)"
+                f"resume_en.experience has only {len(resume['experience'])} jobs "
+                f"(expected {EXPECTED_ROLE_COUNT} — ALL roles required)"
             )
     else:
         errors.append("resume_en is not a dict")

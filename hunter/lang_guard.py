@@ -47,9 +47,13 @@ from __future__ import annotations
 
 import re
 
+from hunter.candidate_config import EMPLOYER_TECH_TERMS as _EMPLOYER_TECH_TERMS
+
 # ---------------------------------------------------------------------------
 # Tech / proper-noun allowlist — tokens that look foreign but are language-neutral
 # and must never be flagged. Kept broad on purpose; matched case-insensitively.
+# The per-user employer names (candidate_config.EMPLOYER_TECH_TERMS) are merged
+# in at the bottom of the set literal below.
 # ---------------------------------------------------------------------------
 _TECH_TERMS = {
     # frameworks / libs / langs
@@ -178,20 +182,10 @@ _TECH_TERMS = {
     "kafka",
     "rabbitmq",
     "elasticsearch",
-    "intel",
-    "atruvia",
-    "fairmarkit",
-    "altoros",
-    "solbegsoft",
-    "staronka",
-    "alten",
-    "sii",
-    "venture",
-    "labs",
     "opus",
     "haiku",
     "sonnet",
-}
+} | _EMPLOYER_TECH_TERMS  # per-user employer names, see candidate_config.py
 
 # Proper nouns — place names that legitimately carry Polish diacritics but are NOT
 # contamination when they appear in an English CV (the candidate lives in Wrocław).

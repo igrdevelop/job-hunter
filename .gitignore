@@ -100,3 +100,9 @@ prompts/base_cv_*.md
 !prompts/*.example.md
 prompts/candidate/
 prompts/examples/
+
+# Personal search-criteria / identity config (repo root only — the loader
+# modules of the same name in hunter/ stay tracked). Create yours from the
+# .example templates, see prompts/README.md / CLAUDE.md "Setup for New Users".
+/filter_config.py
+/candidate_config.py

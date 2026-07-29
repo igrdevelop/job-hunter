@@ -24,6 +24,7 @@ from urllib.parse import urljoin, urlparse
 
 import cloudscraper
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://builtin.com"
 LISTING_TMPL = "https://builtin.com/jobs/remote/dev-engineering?search={term}"
-SEARCH_TERMS = ("angular", "frontend", "react")
+SEARCH_TERMS = tuple(FILTER.get("search_queries", FILTER["title_keywords"]))
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

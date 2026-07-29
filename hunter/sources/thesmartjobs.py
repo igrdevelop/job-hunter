@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 from hunter.sources.text_utils import ensure_remote_token, strip_html
@@ -60,7 +61,7 @@ SEARCH_LIMIT = 100
 
 # Complementary queries; merged and deduped by url. Each returns the freshest
 # matches first, so the union stays fresh and the central filter prunes it.
-SEARCH_QUERIES: tuple[str, ...] = ("angular", "frontend", "react")
+SEARCH_QUERIES: tuple[str, ...] = tuple(FILTER.get("search_queries", FILTER["title_keywords"]))
 
 # Matches EXPIRED_PATTERNS in hunter/expired_check.py — the apply pipeline's
 # Step 3 turns this into a clean EXPIRED skip before any LLM spend.

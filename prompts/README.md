@@ -24,13 +24,26 @@ gitignored and every user creates their own from the `.example` templates.
 | `examples/` | Few-shot examples: your best cover letters (`cl_examples_en.md`, `cl_examples_pl.md`) and about-me texts (`about_me_en.md`, `about_me_pl.md`) | optional |
 | `candidate/` | Free-form private notes (not read by the pipeline) | optional |
 
-## Setup
+## Setup for new users
+
+A new user needs to create **four** personal config files (all gitignored):
 
 ```bash
+# 1. Job search filters — what roles/locations/stacks to target
+cp filter_config.example.py filter_config.py
+
+# 2. Candidate identity — your name, contact, employment history
+cp candidate_config.example.py candidate_config.py
+
+# 3. Candidate profile — single source of truth for who you are
 cp prompts/candidate_profile.example.md prompts/candidate_profile.md
+
+# 4. Base CV for at least one track (Angular shown; add others as needed)
 cp prompts/base_cv_angular.example.md prompts/base_cv_angular.md
-# fill both in with your real data; add other track CVs as needed
 ```
+
+Then edit each file with your real data. The bot will exit on startup with a
+clear error message if `filter_config.py` or `candidate_config.py` is missing.
 
 Notes:
 

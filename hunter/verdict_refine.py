@@ -13,9 +13,9 @@ Escalating rounds (owner decision 2026-07-07: max 3, stretch on the last):
   round 3+ (stretch)  — may add posting technologies absent from the profile,
                         as plain skills/summary entries; every addition is
                         tracked in content["to_learn"]. May be woven into ONE
-                        flexible Altoros project (2018-2022); never into the
-                        recent/verifiable employers (Atruvia, Fairmarkit,
-                        Intel, SII, SolbegSoft).
+                        of candidate_config.FLEXIBLE_PROJECTS; never into
+                        candidate_config.PROTECTED_EMPLOYERS (per-user data,
+                        see candidate_config.example.py).
 
 Both functions are pure orchestration: no Telegram, no tracker writes. The
 caller (apply_api / apply_cli) decides what to notify and persists the
@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Callable
 
 from hunter.apply_shared import PROMPTS_DIR, _llm_p, validate_content
+from hunter.candidate_config import FLEXIBLE_PROJECTS as _ALTOROS_FLEXIBLE_PROJECTS
+from hunter.candidate_config import PROTECTED_EMPLOYERS as _PROTECTED_EMPLOYERS
 
 # Recommendations the independent verdict sometimes returns that no CV edit
 # can fix — they're facts about the candidate/logistics, not about the text.
@@ -46,13 +48,10 @@ _DROP_RE = re.compile(
 # profile). Rounds below this are HONEST (visibility-only rewrites).
 STRETCH_FROM_ROUND = 3
 
-# Recent, verifiable employers — never touched by a stretch-round addition.
-_PROTECTED_EMPLOYERS = ("Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft")
-
-# Flexible Altoros client projects a stretch-round tech MAY be woven into
-# (2018-2022 — era-plausible, owner-approved precedent: React prototypes in
-# the E-commerce project).
-_ALTOROS_FLEXIBLE_PROJECTS = ("E-commerce", "Insurance", "Healthcare", "Grant Management")
+# _PROTECTED_EMPLOYERS (recent, verifiable employers — never touched by a
+# stretch-round addition) and _ALTOROS_FLEXIBLE_PROJECTS (flexible past client
+# projects a stretch-round tech MAY be woven into) now come from
+# hunter.candidate_config (per-user data) — imported above.
 
 
 def _is_actionable(item: object) -> bool:
@@ -120,12 +119,8 @@ Every technology you add this way MUST also be listed in a top-level JSON
 field "stretch_additions" (a flat array of strings, one per added
 technology) so it can be tracked as the candidate's learning debt.
 
-Default placement: Skills section and/or summary. If (and only if) a
-technology needs experience-level grounding, you MAY weave it into ONE of
-these flexible Altoros client projects (2018-2022, choose the single most
-era/stack-plausible one): {altoros_projects} — add it to that project's
-Stack line and/or ONE modest bullet. NEVER invent numbers, metrics, or scale
-that aren't already there.
+Default placement: Skills section and/or summary.{flexible_projects_clause}
+NEVER invent numbers, metrics, or scale that aren't already there.
 
 NEVER touch these employers — recent, verifiable, off-limits for ANY
 addition: {protected_employers}.
@@ -135,12 +130,25 @@ NEVER invent employers, projects, metrics, or years — on any round.
 Return the complete JSON:
 {{"resume_en": <same schema as the current resume_en, fully populated>, "stretch_additions": [<strings>]}}."""
 
+# Only offered when candidate_config.FLEXIBLE_PROJECTS is non-empty — a
+# candidate with no flexible past project simply doesn't get this option.
+_FLEXIBLE_PROJECTS_CLAUSE = """ If (and only if) a
+technology needs experience-level grounding, you MAY weave it into ONE of
+these flexible past client projects (choose the single most era/stack-
+plausible one): {projects} — add it to that project's Stack line and/or ONE
+modest bullet."""
+
 
 def _round_block(round_num: int, kind: str) -> str:
     if kind == "stretch":
+        clause = (
+            _FLEXIBLE_PROJECTS_CLAUSE.format(projects=", ".join(_ALTOROS_FLEXIBLE_PROJECTS))
+            if _ALTOROS_FLEXIBLE_PROJECTS
+            else ""
+        )
         return _STRETCH_BLOCK.format(
             round=round_num,
-            altoros_projects=", ".join(_ALTOROS_FLEXIBLE_PROJECTS),
+            flexible_projects_clause=clause,
             protected_employers=", ".join(_PROTECTED_EMPLOYERS),
         )
     return _HONEST_BLOCK.format(round=round_num)

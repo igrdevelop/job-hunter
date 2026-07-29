@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 
@@ -207,9 +208,8 @@ class LinkedInSource(BaseSource):
         return text
 
     def search(self) -> list[Job]:
-        keywords_raw = os.environ.get(
-            "LINKEDIN_KEYWORDS", "angular,angular developer,frontend angular"
-        )
+        _default_kws = ",".join(FILTER.get("search_queries", FILTER["title_keywords"]))
+        keywords_raw = os.environ.get("LINKEDIN_KEYWORDS", _default_kws)
         geo_id = os.environ.get("LINKEDIN_GEO_ID", "105072130")  # Poland
         keywords_list = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
 

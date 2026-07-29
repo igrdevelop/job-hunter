@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 
@@ -245,13 +246,14 @@ class NoFluffJobsSource(BaseSource):
 
     def _search_bodies(self) -> list[dict]:
         """Two queries: all frontend + remote-only for better coverage."""
+        categories = list(FILTER.get("nofluffjobs_categories", ["frontend"]))
         return [
             {
-                "criteriaSearch": {"category": ["frontend"]},
+                "criteriaSearch": {"category": categories},
                 "page": 1,
             },
             {
-                "criteriaSearch": {"category": ["frontend"], "requirement": ["remote"]},
+                "criteriaSearch": {"category": categories, "requirement": ["remote"]},
                 "page": 1,
             },
         ]

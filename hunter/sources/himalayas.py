@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 from hunter.sources.text_utils import strip_html
@@ -40,7 +41,7 @@ REQUEST_DELAY_SEC = 0.45
 RATE_LIMIT_RETRY_WAIT_SEC = 60
 
 # Complementary queries; merged and deduped by application URL.
-SEARCH_QUERIES: tuple[str, ...] = ("frontend", "typescript", "angular")
+SEARCH_QUERIES: tuple[str, ...] = tuple(FILTER.get("search_queries", FILTER["title_keywords"]))
 
 
 class HimalayasSource(BaseSource):

@@ -78,7 +78,9 @@ def test_search_parses_listing_and_builds_public_url() -> None:
 
 def test_search_dedups_across_queries() -> None:
     src = TheSmartJobsSource()
+    queries = ("angular", "frontend", "react")
     with (
+        patch("hunter.sources.thesmartjobs.SEARCH_QUERIES", queries),
         patch(
             "hunter.sources.thesmartjobs.requests.get",
             return_value=_mock_response({"data": [LISTING_JOB]}),
@@ -86,7 +88,7 @@ def test_search_dedups_across_queries() -> None:
         patch("hunter.sources.thesmartjobs.time.sleep"),
     ):
         jobs = src.search()
-    assert m.call_count == 3  # 3 queries
+    assert m.call_count == len(queries)
     assert len(jobs) == 1  # same job each time -> one Job
 
 

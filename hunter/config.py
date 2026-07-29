@@ -528,8 +528,4 @@ SOFFICE_PATH: str = os.getenv(
 )
 
 # ── JustJoin source config ────────────────────────────────────────────────────
-JUSTJOIN_MARKER_ICONS = [
-    "angular",
-    "javascript",
-    "html",
-]
+JUSTJOIN_MARKER_ICONS = list(FILTER.get("justjoin_marker_icons", ["angular", "javascript", "html"]))

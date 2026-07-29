@@ -3,7 +3,7 @@ hunter/content_qa.py — Post-generation sanity check for content.json.
 
 Runs after sanitize_content, before generate_docs.
 Catches issues that the LLM was supposed to follow but didn't:
-  1. Role count in resume_en (must be 7)
+  1. Role count in resume_en (must match candidate_config.EXPECTED_ROLE_COUNT)
   2. Polish diacritics / words in resume_en summary and bullets
   3. cover_letter_en written in wrong language (must be EN)
   4. Education stored as stringified Python dict (hallucinated)
@@ -20,6 +20,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from hunter.candidate_config import (
+    EXPECTED_ROLE_COUNT as _EXPECTED_ROLE_COUNT,
+)
+from hunter.candidate_config import (
+    PROFILE_TITLES as _PROFILE_TITLES_NORM,
+)
+from hunter.candidate_config import (
+    REAL_COMPANIES as _REAL_COMPANIES,
+)
+
 # ---------------------------------------------------------------------------
 # Polish-contamination detection delegates to hunter.lang_guard (see _has_polish),
 # the SAME allowlist-aware detector the apply enforce-gate uses. Sharing it keeps QA
@@ -34,27 +44,9 @@ _EN_SENTENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_EXPECTED_ROLE_COUNT = 7
-
-# Known canonical profile titles (lowercase normalised)
-_PROFILE_TITLES_NORM = {
-    "frontend developer (angular, part-time contract)",  # Alten Poland
-    "senior frontend developer (angular)",  # Fairmarkit, Venture Labs, SII
-    "senior frontend developer",  # Altoros
-    "frontend developer (angular)",  # SolbegSoft
-    "frontend developer",  # Staronka
-}
-
-# Known real company names (lowercase)
-_REAL_COMPANIES = {
-    "alten poland",
-    "fairmarkit",
-    "venture labs",
-    "sii",
-    "altoros",
-    "solbegsoft",
-    "staronka",
-}
+# _EXPECTED_ROLE_COUNT, _PROFILE_TITLES_NORM, _REAL_COMPANIES now come from
+# hunter.candidate_config (per-user data, see candidate_config.example.py) —
+# imported above.
 
 
 def _norm_title(t: str) -> str:

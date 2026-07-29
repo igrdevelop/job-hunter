@@ -380,44 +380,17 @@ def _is_german_language_required(job: Job) -> bool:
     return False
 
 
-# Cities where hybrid work is NOT acceptable (too far from Wrocław).
+# Cities where hybrid work is NOT acceptable (too far from home base).
 # A job whose location or title contains one of these AND doesn't contain an
 # allowed location token (remote/wroclaw) is rejected.
 # LinkedIn often returns "Poland" as location with the city in the title (e.g.
 # "Jlabs Angular Dev Kraków - Zabłocie"), so we check BOTH location and title.
-# Extra cities from FILTER["extra_anti_hybrid_cities"] (config.py) are merged in
-# at module load time so the set is computed once and stays O(1) per lookup.
+# Full list lives in FILTER["anti_hybrid_cities"] (filter_config.py) — per-user,
+# not hardcoded, so a different candidate's commute geography is a config edit,
+# not a code change. Computed once at module load time so the set stays O(1)
+# per lookup.
 _ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
-    {
-        "kraków",
-        "krakow",
-        "cracow",
-        "warszawa",
-        "warsaw",
-        "gdańsk",
-        "gdansk",
-        "gdynia",
-        "trójmiasto",
-        "trojmiasto",
-        "poznań",
-        "poznan",
-        "łódź",
-        "lodz",
-        "katowice",
-        "silesia",
-        "śląsk",
-        "slask",
-        "rzeszów",
-        "rzeszow",
-        "lublin",
-        "szczecin",
-        "bydgoszcz",
-        "toruń",
-        "torun",
-        "białystok",
-        "bialystok",
-    }
-    | {c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])}
+    c.lower() for c in FILTER.get("anti_hybrid_cities", [])
 )
 
 # ── Contract / part-time patterns (checked against full job text blob) ────────
@@ -575,9 +548,10 @@ _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-# Cities for which a ~1-day/week hybrid is acceptable (commutable from Wrocław).
+# Cities for which a ~1-day/week hybrid is acceptable (commutable from home
+# base). Per-user list in FILTER["weekly_hybrid_cities"] (filter_config.py).
 _WEEKLY_HYBRID_CITIES: frozenset[str] = frozenset(
-    {"warszawa", "warsaw", "kraków", "krakow", "cracow"}
+    c.lower() for c in FILTER.get("weekly_hybrid_cities", [])
 )
 
 # Low-frequency hybrid phrasing (≈ once a week) — English + Polish.
@@ -901,33 +875,21 @@ def _context_snippet(blob: str, start: int, end: int, pad: int = 40) -> str:
     return re.sub(r"\s+", " ", snippet).strip()
 
 
-# On-site/hybrid coupled with a location OUTSIDE Poland — no commute is possible
-# for a Wrocław-based candidate, unlike the PL anti-hybrid cities above (which at
-# least share a country and, for Warsaw/Kraków, an acceptable weekly exception).
-# Deliberately conservative (word-boundary, no bare state abbreviations like "VA")
-# to keep the false-positive rate near zero — see M4 calibration in the plan.
+# On-site/hybrid coupled with a location OUTSIDE the candidate's home country —
+# no commute is possible, unlike the anti-hybrid cities above (which at least
+# share a country and, for the configured weekly-hybrid cities, an acceptable
+# weekly exception). Deliberately conservative (word-boundary, no bare state
+# abbreviations like "VA") to keep the false-positive rate near zero — see M4
+# calibration in docs/DOOMED_GATE_PLAN.md. Per-user list in
+# FILTER["foreign_onsite_locations"] (filter_config.py) — built here into one
+# alternation regex, each entry re.escape()'d so literal dots/commas in an
+# entry (e.g. "washington, d.c.", "u.s.a.") match literally.
 _FOREIGN_LOCATION_RE = re.compile(
     r"\b(?:"
-    # US states (spelled out only — abbreviations are too ambiguous)
-    r"virginia|california|texas|massachusetts|illinois|colorado|florida|"
-    r"north\s+carolina|pennsylvania|ohio|michigan|arizona|new\s+jersey|"
-    # US / Canada cities
-    r"mclean|arlington|washington,?\s*d\.?c\.?|austin|san\s+francisco|"
-    r"san\s+jose|seattle|chicago|boston|los\s+angeles|dallas|denver|atlanta|"
-    r"miami|houston|phoenix|philadelphia|detroit|minneapolis|charlotte|"
-    r"san\s+diego|portland|nashville|raleigh|new\s+york\s+city|"
-    r"toronto|vancouver|montreal|ottawa|"
-    # UK
-    r"london|manchester|birmingham|edinburgh|glasgow|"
-    # Western Europe (non-PL)
-    r"berlin|munich|münchen|frankfurt|hamburg|cologne|köln|paris|amsterdam|"
-    r"rotterdam|dublin|zurich|zürich|geneva|vienna|brussels|madrid|barcelona|"
-    r"milan|milano|rome|stockholm|copenhagen|oslo|helsinki|lisbon|"
-    # Country / region names
-    r"united\s+states|u\.s\.a\.?|united\s+kingdom|canada|england|scotland|"
-    r"germany|france|netherlands|switzerland|austria|belgium|spain|italy|"
-    r"sweden|denmark|norway|finland|ireland"
-    r")\b",
+    + "|".join(
+        re.escape(loc).replace(r"\ ", r"\s+") for loc in FILTER.get("foreign_onsite_locations", [])
+    )
+    + r")\b",
     re.IGNORECASE,
 )
 
@@ -998,39 +960,42 @@ def _assess_work_authorization(blob: str) -> "GateFinding | None":
 
 # Required-language detection for languages the candidate does NOT speak, beyond
 # German (already covered end-to-end by _is_german_language_required). Narrow,
-# high-precision list — same "required/native/fluent/CEFR level" pattern shape.
+# high-precision list — same "required/native/fluent/CEFR level" pattern shape,
+# generated from FILTER["unsupported_languages"] (filter_config.py) so a
+# different candidate's language gaps are a config edit, not a code change.
+def _unsupported_language_patterns(lang_name: str) -> tuple[str, ...]:
+    """Standard 'required/native/fluent/CEFR level' regex shapes for one language."""
+    lang = re.escape(lang_name)
+    return (
+        rf"\bwith\s+{lang}\b",
+        rf"\({lang}\)",
+        rf"\b{lang}\s+speaking\b",
+        rf"\bspeaking\s+{lang}\b",
+        rf"\bfluent\s+in\s+{lang}\b",
+        rf"\bnative(?:[-\s]+level)?\s+{lang}\b",
+        rf"\b{lang}\s+native\b",
+        rf"\b{lang}\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
+        rf"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?{lang}\b",
+        rf"\b{lang}\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
+    )
+
+
+# Extra bilingual/native-phrase patterns per language that can't be expressed by
+# the generic template above (e.g. the language's own word for "fluent in ...").
+# Add an entry here only when a real posting demonstrated the need.
+_UNSUPPORTED_LANG_EXTRA_PATTERNS: dict[str, tuple[str, ...]] = {
+    "French": (r"\bcourant\s+en\s+français\b",),
+}
+
 _UNSUPPORTED_LANG_REQUIRED_RES: dict[str, tuple[re.Pattern[str], ...]] = {
-    "French": tuple(
+    lang_name: tuple(
         re.compile(p, re.IGNORECASE)
         for p in (
-            r"\bwith\s+french\b",
-            r"\(french\)",
-            r"\bfrench\s+speaking\b",
-            r"\bspeaking\s+french\b",
-            r"\bfluent\s+in\s+french\b",
-            r"\bnative(?:[-\s]+level)?\s+french\b",
-            r"\bfrench\s+native\b",
-            r"\bfrench\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
-            r"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?french\b",
-            r"\bfrench\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
-            r"\bcourant\s+en\s+français\b",
+            _unsupported_language_patterns(lang_name)
+            + _UNSUPPORTED_LANG_EXTRA_PATTERNS.get(lang_name, ())
         )
-    ),
-    "Dutch": tuple(
-        re.compile(p, re.IGNORECASE)
-        for p in (
-            r"\bwith\s+dutch\b",
-            r"\(dutch\)",
-            r"\bdutch\s+speaking\b",
-            r"\bspeaking\s+dutch\b",
-            r"\bfluent\s+in\s+dutch\b",
-            r"\bnative(?:[-\s]+level)?\s+dutch\b",
-            r"\bdutch\s+native\b",
-            r"\bdutch\s+(?:is\s+)?(?:required|mandatory|essential|a\s+must)\b",
-            r"\b(?:c1|c2|b2|b1)[\s\-]*(?:\(\s*)?dutch\b",
-            r"\bdutch\s*[\(:]?\s*(?:c1|c2|b2|b1)\b",
-        )
-    ),
+    )
+    for lang_name in FILTER.get("unsupported_languages", [])
 }
 
 # English-as-working-language vetoes any required-foreign-language finding

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 from hunter.sources.text_utils import REMOTE_ANY, ensure_remote_token, strip_html
@@ -43,7 +44,7 @@ MAX_RESULTS = 100
 # we pull are the ones the central filter will actually keep (it requires a
 # frontend keyword in the title). A broad multi_match over the description pulled
 # mostly generic "Software Engineer" rows that the central title filter dropped.
-TITLE_TERMS = "angular frontend front-end javascript typescript"
+TITLE_TERMS = " ".join(FILTER.get("search_queries", FILTER["title_keywords"]))
 
 
 class WorkingNomadsSource(BaseSource):

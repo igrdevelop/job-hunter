@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
 
@@ -40,7 +41,7 @@ REQUEST_DELAY_SEC = 0.45
 DEFAULT_RATE_LIMIT_WAIT_SEC = 60
 
 # Complementary full-text queries; merged and deduped by job URL.
-SEARCH_QUERIES: tuple[str, ...] = ("frontend", "typescript", "angular")
+SEARCH_QUERIES: tuple[str, ...] = tuple(FILTER.get("search_queries", FILTER["title_keywords"]))
 
 
 _SLUG_OK = re.compile(r"^[a-z0-9][a-z0-9\-_]{0,200}$", re.I)

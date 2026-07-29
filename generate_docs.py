@@ -47,6 +47,13 @@ from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from hunter.candidate_config import (
+    CANDIDATE_CONTACT,
+    CANDIDATE_HEADLINE,
+    CANDIDATE_NAME,
+    CANDIDATE_SUBTITLE,
+    CV_FILENAME_PREFIX,
+)
 from hunter.services.tracker_service import record_successful_apply
 
 # Polish boards (e.g. Pracuj.pl) often reject uploads when the filename exceeds ~50 characters.
@@ -83,13 +90,14 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
     lang_u = (lang or "EN").strip().upper()[:2] or "EN"
     ext = ".docx"
-    # Fixed parts: "Ihar_Petrasheuski_CV_" (21) + "_2026_XX.docx" (13) = 34 chars reserved
-    max_stack = MAX_ATTACHMENT_BASENAME_LEN - 34
+    # Fixed parts: "{prefix}_CV_" + "_2026_XX.docx" (13) reserved
+    prefix = CV_FILENAME_PREFIX
+    max_stack = MAX_ATTACHMENT_BASENAME_LEN - len(prefix) - len("_CV_") - 13
     safe = _safe_stack_segment(stack, max_len=max_stack)
-    primary = f"Ihar_Petrasheuski_CV_{safe}_2026_{lang_u}{ext}"
+    primary = f"{prefix}_CV_{safe}_2026_{lang_u}{ext}"
     if len(primary) <= MAX_ATTACHMENT_BASENAME_LEN:
         return primary
-    fallback = f"Ihar_Petrasheuski_CV_2026_{lang_u}{ext}"
+    fallback = f"{prefix}_CV_2026_{lang_u}{ext}"
     if len(fallback) <= MAX_ATTACHMENT_BASENAME_LEN:
         return fallback
     return f"CV_2026_{lang_u}{ext}"
@@ -177,10 +185,10 @@ def add_gdpr_clause(doc, lang):
 
 
 def build_resume(doc, data, stack, lang="EN"):
-    name = "Ihar Petrasheuski"
-    subtitle = "also known as Igor Pietraszewski"
-    headline = f"Senior Frontend Developer ({stack})"
-    contact = "+48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland"
+    name = CANDIDATE_NAME
+    subtitle = CANDIDATE_SUBTITLE
+    headline = CANDIDATE_HEADLINE.format(stack=stack)
+    contact = CANDIDATE_CONTACT
 
     # Name
     p = doc.add_paragraph()
@@ -189,12 +197,13 @@ def build_resume(doc, data, stack, lang="EN"):
     set_font(run, size=16, bold=True)
     set_paragraph_spacing(p, before=0, after=2)
 
-    # Subtitle (also known as)
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(subtitle)
-    set_font(run, size=10, italic=True)
-    set_paragraph_spacing(p, before=0, after=2)
+    # Subtitle (e.g. "also known as ...") — omitted entirely when not configured
+    if subtitle:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(subtitle)
+        set_font(run, size=10, italic=True)
+        set_paragraph_spacing(p, before=0, after=2)
 
     # Headline
     p = doc.add_paragraph()
@@ -321,7 +330,7 @@ def set_margins(doc, top_cm=0.8, bottom_cm=0.5, left_cm=1.0, right_cm=1.0):
         section.right_margin = Cm(right_cm)
 
 
-def set_author(doc, name="Ihar Petrasheuski"):
+def set_author(doc, name=CANDIDATE_NAME):
     props = doc.core_properties
     props.author = name
     props.last_modified_by = name

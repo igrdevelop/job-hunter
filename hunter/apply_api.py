@@ -16,6 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from hunter.candidate_config import EXPECTED_ROLE_COUNT, REAL_COMPANIES_ORDERED
 from hunter.config import (
     GENERATE_DOCS_PATH,
     PROJECT_DIR,
@@ -471,11 +472,10 @@ def _run_main_api(
                 "invalid. Fix ALL of the issues below and return the COMPLETE JSON "
                 "again (same schema, every field), not just the changed parts:\n"
                 + "\n".join(f"- {e}" for e in errors)
-                + "\n\nCRITICAL: resume_en.experience MUST contain ALL 7 roles in this "
-                "exact order: Alten Poland, Fairmarkit, Venture Labs, SII, Altoros, "
-                "SolbegSoft, Staronka. Never drop a role to fit 2 pages — compress "
-                "older roles to 1-2 bullets instead. Keep company, period, title, "
-                "subtitle verbatim per the rules.\n\n"
+                + f"\n\nCRITICAL: resume_en.experience MUST contain ALL {EXPECTED_ROLE_COUNT} "
+                f"roles in this exact order: {', '.join(REAL_COMPANIES_ORDERED)}. Never drop "
+                "a role to fit 2 pages — compress older roles to 1-2 bullets instead. Keep "
+                "company, period, title, subtitle verbatim per the rules.\n\n"
                 f"Previous JSON to fix:\n{json.dumps(content, ensure_ascii=False)}"
             )
             from llm_client import call_llm as _repair_call_llm
