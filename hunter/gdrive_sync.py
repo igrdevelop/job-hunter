@@ -70,22 +70,52 @@ def _invalidate_service() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Folder resolution (serialized)
+# Drive API call serialization (M2, docs/GDRIVE_SSL_RACE_PLAN.md)
 # ---------------------------------------------------------------------------
+# One cached googleapiclient service (`_get_service()` above) sits on one
+# httplib2.Http object with one keep-alive TLS socket, and httplib2 is not
+# thread-safe (documented upstream). Every upload runs that service inside a
+# worker thread (asyncio.to_thread) — two in flight at once write into the
+# same TLS stream and read each other's bytes, surfacing as
+# `[SSL] record layer failure` / `LENGTH_MISMATCH`. `_DRIVE_LOCK` (renamed
+# from `_FOLDER_LOCK`, which only ever covered folder resolution — the file
+# uploads it didn't cover are exactly where the SSL race was happening)
+# serializes EVERY Drive API call in this process through the one
+# `_drive_call()` helper below. Acquired per call, not per pass, so a
+# post-apply targeted upload waits at most one call (~seconds) behind a
+# backfill pass, not the whole pass. Cross-*process* concurrency (detached
+# dual-apply shadows) is unaffected — each process has its own service and
+# socket; `gdrive_client._resolve_create_race` remains the guard there.
 
-_FOLDER_LOCK: asyncio.Lock | None = None
+_DRIVE_LOCK: asyncio.Lock | None = None
 
 
-def _folder_lock() -> asyncio.Lock:
+def _drive_lock() -> asyncio.Lock:
     # Created lazily: at import time there is no running loop to bind to.
-    global _FOLDER_LOCK
-    if _FOLDER_LOCK is None:
-        _FOLDER_LOCK = asyncio.Lock()
-    return _FOLDER_LOCK
+    global _DRIVE_LOCK
+    if _DRIVE_LOCK is None:
+        _DRIVE_LOCK = asyncio.Lock()
+    return _DRIVE_LOCK
+
+
+async def _drive_call(fn, *args, timeout: float | None = None):
+    """Run a blocking Drive API call in a worker thread, serialized against
+    every other Drive call in this process, with an optional wall-clock cap.
+
+    `asyncio.to_thread` is not cancellable: on a `timeout`, the awaiting
+    coroutine gives up but the worker thread keeps running, still holding the
+    (now abandoned) service's socket. Callers that wrap a `_drive_call` in
+    their own retry logic on `asyncio.TimeoutError` MUST call
+    `_invalidate_service()` too, so the NEXT call builds a fresh service (and
+    a fresh, distinct socket) instead of racing the abandoned thread's
+    lingering one — see `upload_missing_folders`.
+    """
+    async with _drive_lock():
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
 
 
 async def _resolve_folder(svc: Any, name: str, parent_id: str | None) -> str:
-    """get_or_create_folder, serialized against this process's other callers.
+    """get_or_create_folder, serialized against this process's other Drive callers.
 
     Several coroutines resolve the same date folder concurrently — the
     post-apply delivery hook and the periodic upload-missing backfill overlap
@@ -102,8 +132,7 @@ async def _resolve_folder(svc: Any, name: str, parent_id: str | None) -> str:
     """
     from hunter.gdrive_client import get_or_create_folder
 
-    async with _folder_lock():
-        return await asyncio.to_thread(get_or_create_folder, svc, name, parent_id)
+    return await _drive_call(get_or_create_folder, svc, name, parent_id)
 
 
 async def _call_with_reauth(op):
@@ -154,7 +183,7 @@ async def _do_upload(folder_path: Path) -> str:
         root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
     date_id = await _resolve_folder(svc, date_name, root_id)
-    company_id = await asyncio.to_thread(upload_folder, svc, folder_path, date_id)
+    company_id = await _drive_call(upload_folder, svc, folder_path, date_id)
     return folder_url(company_id)
 
 
@@ -227,7 +256,7 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
             root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
         date_id = await _resolve_folder(svc, date_name, root_id)
         company_id = await _resolve_folder(svc, primary_folder.name, date_id)
-        shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
+        shadow_id = await _drive_call(upload_folder, svc, shadow_subfolder, company_id)
         return folder_url(shadow_id)
 
     url: str | None = None
@@ -345,7 +374,7 @@ async def upload_log_file(
             root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
         logs_folder_id = await _resolve_folder(svc, "Logs", root_id)
-        file_id = await asyncio.to_thread(upload_file, svc, dated_file, logs_folder_id)
+        file_id = await _drive_call(upload_file, svc, dated_file, logs_folder_id)
         url = f"https://drive.google.com/file/d/{file_id}/view"
         log.info(
             "gdrive_sync: uploaded %s (%d lines) → %s",
@@ -500,6 +529,14 @@ async def _upload_missing_folders_locked(
     with best_effort("gdrive.upload_missing_folders"):
         try:
             root_id = await _call_with_reauth(_resolve_root)
+        except asyncio.TimeoutError as e:
+            # The wait_for above abandoned a worker thread mid-request — the
+            # connection state on the cached service is now unknown. Rebuild
+            # from disk so the next call gets a fresh service and socket
+            # instead of racing the abandoned thread's lingering one.
+            root_error = str(e)
+            _invalidate_service()
+            raise
         except Exception as e:
             root_error = str(e)
             raise
@@ -526,10 +563,7 @@ async def _upload_missing_folders_locked(
                 _resolve_folder(svc, fp.parent.name, root_id),
                 timeout=30,
             )
-            company_id = await asyncio.wait_for(
-                asyncio.to_thread(upload_folder, svc, fp, date_id),
-                timeout=_UPLOAD_TIMEOUT,
-            )
+            company_id = await _drive_call(upload_folder, svc, fp, date_id, timeout=_UPLOAD_TIMEOUT)
             return folder_url(company_id)
 
         with best_effort("gdrive.upload_missing_folders"):
@@ -540,9 +574,12 @@ async def _upload_missing_folders_locked(
                 if job_url:
                     await asyncio.to_thread(set_drive_url, job_url, drive_url)
             except asyncio.TimeoutError:
+                # Same reasoning as the root-resolve timeout above: a worker
+                # thread was abandoned holding the cached service's socket.
                 msg = f"{company}: timeout after {_UPLOAD_TIMEOUT}s"
                 errors.append(msg)
                 log.warning("gdrive_sync: %s", msg)
+                _invalidate_service()
                 raise
             except Exception as e:
                 errors.append(f"{company}: {e}")

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from hunter.gdrive_client import (
     _q,
+    build_service,
     folder_url,
     get_or_create_folder,
     upload_file,
@@ -298,3 +299,66 @@ class TestUploadFolder:
             result = upload_folder(mock_service(), folder, "parent")
 
         assert result == "fid123"
+
+
+# ---------------------------------------------------------------------------
+# build_service — explicit socket timeout (M2, docs/GDRIVE_SSL_RACE_PLAN.md)
+# ---------------------------------------------------------------------------
+# Without an explicit httplib2.Http timeout, a hung read can block a worker
+# thread — and the shared TLS socket it holds — forever.
+
+
+class TestBuildServiceTimeout:
+    def test_passes_configured_http_timeout(self, tmp_path):
+        token_file = tmp_path / "token.json"
+        token_file.write_text("{}")
+
+        fake_creds = MagicMock()
+        fake_creds.valid = True
+
+        captured: dict = {}
+
+        def fake_build(api, version, **kwargs):
+            captured.update(kwargs)
+            return MagicMock()
+
+        with (
+            patch(
+                "hunter.gdrive_client.Credentials.from_authorized_user_file",
+                return_value=fake_creds,
+            ),
+            patch("hunter.gdrive_client.build", side_effect=fake_build),
+            patch("hunter.gdrive_client.GDRIVE_HTTP_TIMEOUT_SEC", 45),
+        ):
+            build_service(tmp_path / "creds.json", token_file)
+
+        # build() accepts either credentials= or http=, never both.
+        assert "http" in captured
+        assert "credentials" not in captured
+        assert captured["http"].http.timeout == 45
+
+    def test_default_timeout_from_config(self, tmp_path):
+        token_file = tmp_path / "token.json"
+        token_file.write_text("{}")
+
+        fake_creds = MagicMock()
+        fake_creds.valid = True
+
+        captured: dict = {}
+
+        def fake_build(api, version, **kwargs):
+            captured.update(kwargs)
+            return MagicMock()
+
+        with (
+            patch(
+                "hunter.gdrive_client.Credentials.from_authorized_user_file",
+                return_value=fake_creds,
+            ),
+            patch("hunter.gdrive_client.build", side_effect=fake_build),
+        ):
+            build_service(tmp_path / "creds.json", token_file)
+
+        from hunter.config import GDRIVE_HTTP_TIMEOUT_SEC
+
+        assert captured["http"].http.timeout == GDRIVE_HTTP_TIMEOUT_SEC

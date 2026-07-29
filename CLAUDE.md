@@ -243,7 +243,7 @@ hunter/
   gsheets_client.py         Low-level Sheets API v4 wrapper
   gdrive_sync.py            High-level Drive upload (upload_application_folder). Every folder
                             resolution goes through `_resolve_folder()`, which serializes
-                            get_or_create_folder behind an asyncio.Lock — the delivery hook and the
+                            get_or_create_folder behind `_DRIVE_LOCK` — the delivery hook and the
                             upload-missing backfill routinely overlap in this one event loop, and
                             interleaved list-then-create is what duplicated the date folders.
                             Deliberately NOT memoized: a cached id goes stale the moment a folder is
@@ -259,13 +259,40 @@ hunter/
                             running — skipped" instead of a misleading "Uploaded: 0". The guard sits
                             in a try/finally around the actual pass (`_upload_missing_folders_locked`)
                             so a mid-pass exception still releases it.
+                            `_DRIVE_LOCK` + `_drive_call()` (M2, renamed from the narrower
+                            `_FOLDER_LOCK`, which only ever covered folder resolution — the file
+                            uploads it didn't cover are exactly where the SSL race lived) serialize
+                            EVERY Drive API call in this process, not just folder resolution: the
+                            cached googleapiclient service sits on one httplib2.Http object with one
+                            keep-alive TLS socket, and httplib2 is not thread-safe — two calls in
+                            flight at once write into the same TLS stream and read each other's
+                            bytes, surfacing as `[SSL] record layer failure`. `_drive_call(fn, *args,
+                            timeout=...)` is the one place every Drive call routes through: acquires
+                            the lock, runs `fn` in a worker thread, optional wall-clock cap. Acquired
+                            PER CALL, not per pass, so a post-apply targeted upload waits at most one
+                            call behind a backfill pass. `upload_missing_folders`'s per-row
+                            `asyncio.wait_for` timeouts (root resolve, per-row upload) call
+                            `_invalidate_service()` on `asyncio.TimeoutError`: `asyncio.to_thread` is
+                            not cancellable, so a timeout abandons a worker thread still holding the
+                            service's socket — invalidating means the NEXT call gets a fresh service
+                            and a fresh, distinct socket instead of racing the abandoned thread's
+                            lingering one. Cross-*process* concurrency (detached dual-apply shadows)
+                            is unaffected — each process has its own service/socket;
+                            `gdrive_client._resolve_create_race` remains the guard there.
   gdrive_client.py          Low-level Drive API v3 wrapper. Drive allows same-named siblings, so
                             get_or_create_folder (a) converges on the OLDEST copy when duplicates
                             exist, so uploads stop scattering, and (b) re-lists after create and
                             yields to an older concurrent winner, trashing its own loser copy —
                             closing the cross-PROCESS race (detached dual-apply shadows) that no
                             in-process lock can see. tools/dedup_drive_folders.py merges historical
-                            duplicates
+                            duplicates. `build_service` (M2) builds with an explicit
+                            `httplib2.Http(timeout=GDRIVE_HTTP_TIMEOUT_SEC)` via
+                            `google_auth_httplib2.AuthorizedHttp` (`build()` accepts either
+                            `credentials=` or `http=`, never both) so a hung read dies inside its
+                            worker thread instead of blocking it — and the shared TLS socket it
+                            holds — forever. `google-auth-httplib2`/`httplib2` are already transitive
+                            deps of `google-api-python-client` (no new dependency, no lock
+                            regeneration)
   gmail_client.py           Gmail API wrapper
   oauth_alert.py            Detect Google OAuth token expiry (invalid_grant/RefreshError) at the
                             gsheets/gmail/gdrive auth boundary; refresh_or_alert() fires a
@@ -546,6 +573,7 @@ Applications/               Generated documents (gitignored)
 | `GDRIVE_ENABLED` | `false` | Upload application docs to Google Drive after apply |
 | `GDRIVE_ROOT_FOLDER_ID` | — | Optional: existing Drive folder ID (auto-creates "Job Hunter" if empty) |
 | `GDRIVE_ROOT_FOLDER_NAME` | `Job Hunter` | Name of auto-created root folder on Drive |
+| `GDRIVE_HTTP_TIMEOUT_SEC` | `60` | Socket-level timeout on the Drive service's underlying `httplib2.Http`. Without it a hung read can block a worker thread — and the shared TLS socket it holds — forever, which is how one abandoned request used to poison every other concurrent Drive call (`[SSL] record layer failure`). See docs/GDRIVE_SSL_RACE_PLAN.md M2. |
 | `GDRIVE_UPLOAD_MISSING_INTERVAL_MIN` | `30` | Drive backfill interval for application folders that missed their instant post-apply upload (`hunter/delivery.py`). Was hardcoded 3 h — the "not on Drive yet" lag the owner reported 2026-07-12. Idempotent (skips rows that already have a Drive URL). |
 | `GMAIL_LOOKBACK_HOURS` | `25` | How far back the Gmail scan reads the inbox (hours) |
 | `GMAIL_MAX_RESULTS` | `100` | Max alert emails per scan; report warns if ceiling hit |

@@ -6,6 +6,7 @@ Uses synchronous asyncio.run() wrappers (no pytest-asyncio dependency).
 """
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -579,7 +580,7 @@ def test_upload_shadow_subfolders_records_failure(tmp_path):
 def _reset_folder_lock():
     from hunter import gdrive_sync
 
-    gdrive_sync._FOLDER_LOCK = None
+    gdrive_sync._DRIVE_LOCK = None
 
 
 def test_resolve_folder_serializes_concurrent_callers():
@@ -736,5 +737,193 @@ def test_upload_missing_folders_guard_released_after_exception(tmp_path):
         result = run(gdrive_sync.upload_missing_folders(tmp_path))
 
     assert not result.get("skipped_busy")
+
+    _reset_backfill_guard()
+
+
+# ---------------------------------------------------------------------------
+# _drive_call — process-wide Drive API serialization (M2)
+# ---------------------------------------------------------------------------
+# One cached googleapiclient service sits on one httplib2.Http object with
+# one keep-alive TLS socket, and httplib2 is not thread-safe. Two Drive calls
+# in flight at once write into the same TLS stream and read each other's
+# bytes — surfacing in prod as `[SSL] record layer failure`. Every Drive call
+# must be serialized through _drive_call so at most one is ever in flight.
+
+
+def _reset_drive_lock():
+    from hunter import gdrive_sync
+
+    gdrive_sync._DRIVE_LOCK = None
+
+
+def test_drive_call_serializes_concurrent_callers():
+    """N concurrent _drive_call() invocations must produce ZERO overlapping
+    wall-clock intervals — mutation-verified: dropping the lock inside
+    _drive_call makes this fail (real OS threads then run in parallel)."""
+    _reset_drive_lock()
+    from hunter import gdrive_sync
+
+    intervals: list[tuple[float, float]] = []
+    intervals_lock = threading.Lock()
+
+    def blocking_call(n: int) -> int:
+        # Runs in a real worker thread (asyncio.to_thread) — if the
+        # asyncio-level lock is not actually serializing entry, several of
+        # these run truly concurrently and their [start, end) spans overlap.
+        start = time.monotonic()
+        time.sleep(0.02)
+        end = time.monotonic()
+        with intervals_lock:
+            intervals.append((start, end))
+        return n
+
+    async def scenario():
+        return await asyncio.gather(*[gdrive_sync._drive_call(blocking_call, i) for i in range(5)])
+
+    results = run(scenario())
+
+    assert sorted(results) == [0, 1, 2, 3, 4]
+    intervals.sort()
+    for (_, end_a), (start_b, _) in zip(intervals, intervals[1:], strict=False):
+        assert end_a <= start_b, (
+            "two Drive API calls ran concurrently — the shared TLS socket race is back"
+        )
+
+    _reset_drive_lock()
+
+
+def test_drive_call_passes_through_return_value_and_args():
+    _reset_drive_lock()
+    from hunter import gdrive_sync
+
+    def fn(a, b):
+        return a + b
+
+    result = run(gdrive_sync._drive_call(fn, 2, 3))
+    assert result == 5
+
+    _reset_drive_lock()
+
+
+def test_drive_call_timeout_raises_and_releases_lock():
+    """A timed-out call must not wedge the lock for later callers — the
+    abandoned thread keeps running, but the asyncio-level lock is released
+    via the async-with's normal exception/cancellation handling."""
+    import pytest
+
+    _reset_drive_lock()
+    from hunter import gdrive_sync
+
+    def slow(n):
+        time.sleep(0.3)
+        return n
+
+    async def scenario():
+        with pytest.raises(asyncio.TimeoutError):
+            await gdrive_sync._drive_call(slow, 1, timeout=0.01)
+        # A fresh call must be able to acquire the lock right away.
+        return await gdrive_sync._drive_call(lambda: "ok")
+
+    result = run(scenario())
+    assert result == "ok"
+
+    _reset_drive_lock()
+
+
+# ---------------------------------------------------------------------------
+# upload_missing_folders — service invalidation after a wait_for timeout (M2)
+# ---------------------------------------------------------------------------
+# asyncio.to_thread is not cancellable: a wait_for timeout abandons the
+# worker thread mid-request, still holding the cached service's socket. The
+# next call must not inherit that poisoned service — it must rebuild.
+
+
+def test_upload_missing_folders_invalidates_service_on_root_resolve_timeout(tmp_path):
+    """asyncio.wait_for propagates whatever exception the awaited coroutine
+    raises — a directly-raised TimeoutError exercises the exact except branch
+    a genuine 30s stall would hit, without a real 30s wait in the test."""
+    _reset_backfill_guard()
+    from hunter import gdrive_sync
+
+    invalidate_calls = {"n": 0}
+
+    folder = tmp_path / "2026-07-06" / "Acme"
+    folder.mkdir(parents=True)
+    (folder / "cv.pdf").write_bytes(b"x")
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", ""),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch(
+            "hunter.tracker.read_all_tracker_rows",
+            return_value=[
+                {
+                    "Company": "Acme",
+                    "URL": "https://acme.example/job",
+                    "Folder": str(folder),
+                    "Drive URL": "",
+                }
+            ],
+        ),
+        patch(
+            "hunter.gdrive_sync._resolve_folder",
+            side_effect=asyncio.TimeoutError("boom"),
+        ),
+        patch(
+            "hunter.gdrive_sync._invalidate_service",
+            lambda: invalidate_calls.__setitem__("n", invalidate_calls["n"] + 1),
+        ),
+    ):
+        result = run(gdrive_sync.upload_missing_folders(tmp_path))
+
+    assert invalidate_calls["n"] == 1, "a root-resolve timeout must invalidate the cached service"
+    assert any("root folder" in e for e in result["errors"])
+
+    _reset_backfill_guard()
+
+
+def test_upload_missing_folders_invalidates_service_on_row_upload_timeout(tmp_path):
+    _reset_backfill_guard()
+    from hunter import gdrive_sync
+
+    folder = tmp_path / "2026-07-06" / "Acme"
+    folder.mkdir(parents=True)
+    (folder / "cv.pdf").write_bytes(b"x")
+
+    rows = [
+        {
+            "Company": "Acme",
+            "URL": "https://acme.example/job",
+            "Folder": str(folder),
+            "Drive URL": "",
+        }
+    ]
+
+    invalidate_calls = {"n": 0}
+
+    def slow_upload_folder(svc, fp, parent_id):
+        time.sleep(0.3)
+        return "company_id"
+
+    with (
+        patch("hunter.gdrive_sync.GDRIVE_ENABLED", True),
+        patch("hunter.gdrive_sync.GDRIVE_ROOT_FOLDER_ID", "root_id"),
+        patch("hunter.gdrive_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gdrive_sync._UPLOAD_TIMEOUT", 0.01),
+        patch("hunter.tracker.read_all_tracker_rows", return_value=rows),
+        patch("hunter.gdrive_client.get_or_create_folder", return_value="date_id"),
+        patch("hunter.gdrive_client.upload_folder", side_effect=slow_upload_folder),
+        patch(
+            "hunter.gdrive_sync._invalidate_service",
+            lambda: invalidate_calls.__setitem__("n", invalidate_calls["n"] + 1),
+        ),
+    ):
+        result = run(gdrive_sync.upload_missing_folders(tmp_path))
+
+    assert invalidate_calls["n"] == 1, "a per-row upload timeout must invalidate the cached service"
+    assert result["uploaded"] == 0
+    assert any("timeout" in e for e in result["errors"])
 
     _reset_backfill_guard()
