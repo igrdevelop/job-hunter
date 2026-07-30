@@ -75,6 +75,15 @@ async def _run_apply_agent(
                 f"🔗 {label}\n"
                 "Check the provider account/key, then send the URL again."
             )
+        elif outcome == "cli_timeout":
+            # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): infrastructure timeout, not
+            # a vacancy failure — same treatment as llm_outage: no FAIL row
+            # (this flow never wrote one for plain "fail" either), the URL
+            # can simply be re-sent.
+            logger.error("[apply_agent] CLI timeout for %s", label)
+            await _tg_notify(
+                f"⏰ <b>CLI timed out</b> — no docs generated.\n🔗 {label}\nSend the URL again."
+            )
         else:
             logger.info("[apply_agent] done (%s) for %s", outcome, label)
             # Instant Sheets mirror + Drive upload. deliver_apply_now also

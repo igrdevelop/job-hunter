@@ -507,6 +507,18 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "Check the provider account/key. Vacancies were NOT marked FAIL.",
             )
             break
+        elif outcome == "cli_timeout":
+            # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): a widened (CLI-eligible)
+            # subprocess timeout is infrastructure, not the vacancy's fault —
+            # no FAIL row, no tracker row at all. The job has no tracker row,
+            # so the next hunt re-fetches it (the listing is the queue). The
+            # batch continues — unlike llm_outage this isn't global state.
+            consecutive_fails = 0
+            await send_text(
+                context,
+                f"⏰ [{i}/{total}] <b>CLI timed out</b>: {job.company} — {job.title} "
+                "— will retry on the next hunt.",
+            )
         else:
             failed += 1
             consecutive_fails += 1
@@ -615,6 +627,21 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Check the provider account/key.",
             )
             break
+        elif outcome == "cli_timeout":
+            # M3: infrastructure timeout, not the vacancy's fault — leave
+            # fail_count untouched (row stays retryable at its current count).
+            # Counted toward the consecutive-fail breaker (a broken CLI would
+            # otherwise time out on every remaining row in the batch).
+            consecutive_fails += 1
+            logger.warning(
+                "[retry] CLI timed out, not escalating fail_count: %s - %s",
+                job.company,
+                job.title,
+            )
+            await send_text(
+                context,
+                f"⏰ Retry CLI timeout: {job.company} — {job.title} — will retry next cycle.",
+            )
         else:
             consecutive_fails += 1
             new_count = await asyncio.to_thread(increment_fail_count, job.url)

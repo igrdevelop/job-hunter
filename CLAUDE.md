@@ -382,7 +382,17 @@ hunter/
     normalize_sent.py       scheduled_normalize_sent (daily 00:20, refreshes Sheets column L)
     __init__.py             register(app, tz) — wires all callbacks into the Application
   services/
-    apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder
+    apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder.
+                             ApplyOutcome includes "cli_timeout" (docs/HUNT_APPLY_SPLIT_PLAN.md
+                             M3): when a subprocess `asyncio.TimeoutError` fires AFTER
+                             `_effective_timeout` widened the caller's budget (CLI-eligible
+                             run), that's an infrastructure timeout, not the vacancy's fault —
+                             distinct from a plain "fail" so callers never write a FAIL row or
+                             escalate fail_count for it. `_auto_apply_all`/`_retry_failed`
+                             (hunter/main.py) and `bot/apply_runner._run_apply_agent` all treat
+                             it like `llm_outage` (no FAIL row, Telegram notify, URL/job returns
+                             next hunt) EXCEPT it does NOT stop the batch or arm any pause —
+                             it's per-job infrastructure flakiness, not a global account state.
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
   sources/                  24 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()

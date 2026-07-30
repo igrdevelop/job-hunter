@@ -19,7 +19,7 @@ _APPLY_RATE_LIMITED_EXIT_CODE = 45
 # global state, not the vacancy's fault; the batch loop stops without FAIL rows)
 _APPLY_LLM_OUTAGE_EXIT_CODE = 46
 
-ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited", "llm_outage"]
+ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited", "llm_outage", "cli_timeout"]
 
 # Second element: human-readable error snippet for Telegram (empty string on success).
 ApplyResult = tuple[ApplyOutcome, str]
@@ -146,6 +146,11 @@ async def run_apply_agent_subprocess(
             proc.kill()
             await proc.communicate()
             logger.error(f"[auto-apply] TIMEOUT ({effective_timeout}s) for {job.url}")
+            # A widened (CLI-eligible) timeout is infrastructure, not the
+            # vacancy's fault (docs/HUNT_APPLY_SPLIT_PLAN.md M3) — the caller
+            # must not write a FAIL row that escalates fail_count.
+            if effective_timeout != timeout_sec:
+                return "cli_timeout"
             return "fail"
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
@@ -199,7 +204,7 @@ async def run_apply_agent_for_url(
     run_apply_agent_subprocess's matching docstring note.
 
     Returns (outcome, error_detail):
-      outcome    — "ok" | "fail" | "manual" | "llm_outage"
+      outcome    — "ok" | "fail" | "manual" | "llm_outage" | "cli_timeout"
       error_detail — non-empty string on failure (stderr snippet / timeout reason)
     """
     label = url or "(pasted text)"
@@ -235,6 +240,8 @@ async def run_apply_agent_for_url(
         proc.kill()
         await proc.communicate()
         logger.error(f"[apply_agent] TIMEOUT ({effective_timeout}s) for {label}")
+        if effective_timeout != timeout_sec:
+            return "cli_timeout", f"CLI timed out after {effective_timeout}s"
         return "fail", f"Timed out after {effective_timeout}s"
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
