@@ -1,0 +1,69 @@
+# candidate.yaml — copy this file to candidate.yaml and fill in your own data.
+#
+# This is the single source of truth for the candidate's identity, location,
+# languages and employer history that the bot injects into generated CVs,
+# cover letters, filters and LLM prompts. See docs/SETUP_NEW_USER.md for the
+# full setup walkthrough.
+#
+# candidate.yaml itself is gitignored — never commit your real personal data.
+
+identity:
+  full_name: "Jane Doe"
+  aka: ""                          # optional "also known as" subtitle on the CV; leave "" to omit
+  cv_filename_prefix: "Jane_Doe_CV"  # generated files look like Jane_Doe_CV_Frontend_2026_EN.docx
+  headline: "Senior Frontend Developer"
+  contact: "+48 123 456 789 | jane@example.com | linkedin.com/in/janedoe | Warsaw, Poland"
+
+location:
+  home_city: "Warsaw"               # primary city used for filters and "wroc"-style substring checks
+  home_city_aliases:                # lowercase variants the location filter should match
+    - "warszawa"
+    - "warsaw"
+  acceptable_hybrid: ["Warsaw"]     # cities where hybrid is fine
+  weekly_hybrid: ["Krakow"]         # cities acceptable for <=1 day/week hybrid
+  work_authorization: "EU"          # EU | US | any — feeds the doomed-vacancy gate
+
+languages:
+  spoken: ["pl", "en"]              # all languages the candidate speaks
+  cv_languages: ["en", "pl"]        # which CV language variants to generate
+  disqualify_required:              # a posting REQUIRING one of these (that the candidate
+    - "de"                          # doesn't speak) is a hard skip
+    - "fr"
+    - "nl"
+
+employers:
+  protected:                        # verifiable, real employers — never touched by the
+    - "Company A"                   # verdict-refine loop's stretch rounds
+    - "Company B"
+    - "Company C"
+  flexible:                         # one agency-style employer whose project list MAY
+    name: "Agency X"                # absorb stretch-round tech additions (never invented
+    period: "2018-2022"             # employers/metrics/years)
+    projects:
+      - "E-commerce"
+      - "Healthcare"
+      - "Insurance"
+  real_companies:                   # lowercase names for the content-QA "is this a real
+    - "company a"                   # employer" check — keep in sync with `protected` + `flexible.name`
+    - "company b"
+    - "company c"
+    - "agency x"
+  profile_titles:                   # canonical role titles as they appear in candidate_profile.md
+    - "senior frontend developer"
+    - "frontend developer"
+
+education:
+  school_keyword: "university of warsaw"   # lowercase substring used by the education QA check
+  expected_role_count: 5                   # how many roles the generated resume_en should list
+
+tracks:
+  base_cv:                          # stack key -> prompt filename (relative to prompts/)
+    angular: "base_cv_angular.md"
+    react: "base_cv_react.md"
+
+# Source-specific location overrides (optional). Only needed for scrapers that
+# hardcode a city in their listing URL (Pracuj.pl, theprotocol.it, JobLeads).
+source_urls:
+  pracuj_location: "warszawa"
+  theprotocol_location: "warszawa"
+  jobleads_location: "warszawa"

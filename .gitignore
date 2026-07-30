@@ -100,3 +100,6 @@ prompts/base_cv_*.md
 !prompts/*.example.md
 prompts/candidate/
 prompts/examples/
+
+# Personal candidate config — never commit (create yours from candidate.example.yaml)
+candidate.yaml

@@ -40,6 +40,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from docx import Document
@@ -47,6 +48,7 @@ from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from hunter import candidate
 from hunter.services.tracker_service import record_successful_apply
 
 # Polish boards (e.g. Pracuj.pl) often reject uploads when the filename exceeds ~50 characters.
@@ -83,16 +85,19 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
     lang_u = (lang or "EN").strip().upper()[:2] or "EN"
     ext = ".docx"
-    # Fixed parts: "Ihar_Petrasheuski_CV_" (21) + "_2026_XX.docx" (13) = 34 chars reserved
-    max_stack = MAX_ATTACHMENT_BASENAME_LEN - 34
+    prefix = candidate.get("identity.cv_filename_prefix", "Ihar_Petrasheuski_CV")
+    year = datetime.now().year
+    # Fixed parts: "{prefix}_" + "_{year}_XX.docx" reserved around the stack segment
+    reserved = len(prefix) + 1 + len(f"_{year}_{lang_u}{ext}")
+    max_stack = MAX_ATTACHMENT_BASENAME_LEN - reserved
     safe = _safe_stack_segment(stack, max_len=max_stack)
-    primary = f"Ihar_Petrasheuski_CV_{safe}_2026_{lang_u}{ext}"
+    primary = f"{prefix}_{safe}_{year}_{lang_u}{ext}"
     if len(primary) <= MAX_ATTACHMENT_BASENAME_LEN:
         return primary
-    fallback = f"Ihar_Petrasheuski_CV_2026_{lang_u}{ext}"
+    fallback = f"{prefix}_{year}_{lang_u}{ext}"
     if len(fallback) <= MAX_ATTACHMENT_BASENAME_LEN:
         return fallback
-    return f"CV_2026_{lang_u}{ext}"
+    return f"CV_{year}_{lang_u}{ext}"
 
 
 def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
@@ -177,10 +182,15 @@ def add_gdpr_clause(doc, lang):
 
 
 def build_resume(doc, data, stack, lang="EN"):
-    name = "Ihar Petrasheuski"
-    subtitle = "also known as Igor Pietraszewski"
-    headline = f"Senior Frontend Developer ({stack})"
-    contact = "+48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland"
+    name = candidate.get("identity.full_name", "Ihar Petrasheuski")
+    aka = candidate.get("identity.aka", "Igor Pietraszewski")
+    subtitle = f"also known as {aka}" if aka else ""
+    headline_base = candidate.get("identity.headline", "Senior Frontend Developer")
+    headline = f"{headline_base} ({stack})"
+    contact = candidate.get(
+        "identity.contact",
+        "+48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland",
+    )
 
     # Name
     p = doc.add_paragraph()
@@ -189,12 +199,13 @@ def build_resume(doc, data, stack, lang="EN"):
     set_font(run, size=16, bold=True)
     set_paragraph_spacing(p, before=0, after=2)
 
-    # Subtitle (also known as)
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(subtitle)
-    set_font(run, size=10, italic=True)
-    set_paragraph_spacing(p, before=0, after=2)
+    # Subtitle (also known as) — optional, skipped when aka is blank
+    if subtitle:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(subtitle)
+        set_font(run, size=10, italic=True)
+        set_paragraph_spacing(p, before=0, after=2)
 
     # Headline
     p = doc.add_paragraph()
@@ -321,7 +332,9 @@ def set_margins(doc, top_cm=0.8, bottom_cm=0.5, left_cm=1.0, right_cm=1.0):
         section.right_margin = Cm(right_cm)
 
 
-def set_author(doc, name="Ihar Petrasheuski"):
+def set_author(doc, name=None):
+    if name is None:
+        name = candidate.get("identity.full_name", "Ihar Petrasheuski")
     props = doc.core_properties
     props.author = name
     props.last_modified_by = name
