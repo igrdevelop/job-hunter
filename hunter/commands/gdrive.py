@@ -10,7 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Upload all tracker.xlsx application folders to Google Drive (runs in background)."""
+    """Upload all tracker.xlsx application folders to Google Drive (runs in background).
+
+    ``/gdrive_upload_missing force`` bypasses the shadow-upload ledger
+    (hunter.drive_ledger) and re-uploads every dual-apply shadow subfolder
+    regardless of whether its content signature is unchanged — the one case
+    the ledger gets wrong: a folder deleted on Drive by hand.
+    """
     from hunter.config import GDRIVE_ENABLED, PROJECT_DIR
 
     if not GDRIVE_ENABLED:
@@ -20,8 +26,12 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         )
         return
 
+    args = list(context.args or [])
+    force = bool(args) and args[0].lower() == "force"
+
     status_msg = await update.message.reply_text(
-        "⏳ Upload to Google Drive started in background…",
+        "⏳ Upload to Google Drive started in background…"
+        + (" (force: re-uploading every shadow subfolder)" if force else ""),
         parse_mode=ParseMode.HTML,
     )
 
@@ -35,10 +45,19 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         try:
             from hunter import gdrive_sync
 
-            result = await gdrive_sync.upload_missing_folders(PROJECT_DIR, progress_cb=_progress)
+            result = await gdrive_sync.upload_missing_folders(
+                PROJECT_DIR, progress_cb=_progress, force=force
+            )
         except Exception as e:
             await update.message.reply_text(
                 f"❌ gdrive_upload_missing error: <code>{e}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        if result.get("skipped_busy"):
+            await update.message.reply_text(
+                "⏳ a backfill is already running — skipped",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -48,6 +67,7 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
         skipped = result["skipped_missing"]
         errors = result.get("errors", [])
         shadow_uploaded = result.get("shadow_uploaded", 0)
+        shadow_skipped = result.get("shadow_skipped", 0)
         shadow_errors = result.get("shadow_errors", [])
         err_note = ""
         if errors:
@@ -61,7 +81,8 @@ async def cmd_gdrive_upload_missing(update: Update, context: ContextTypes.DEFAUL
             f"  📤 Uploaded: {uploaded}\n"
             f"  ✔ Already on Drive: {already}\n"
             f"  ⏭ Missing locally: {skipped}\n"
-            f"  🔀 Shadow (dual-apply) uploaded: {shadow_uploaded}"
+            f"  🔀 Shadow (dual-apply) uploaded: {shadow_uploaded}\n"
+            f"  🔀 Shadow unchanged (skipped): {shadow_skipped}"
             f"{err_note}",
             parse_mode=ParseMode.HTML,
         )

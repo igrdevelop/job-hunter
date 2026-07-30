@@ -14,11 +14,15 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
+import google_auth_httplib2
+import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+
+from hunter.config import GDRIVE_HTTP_TIMEOUT_SEC
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +46,12 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
     """Load credentials and return a Drive API v3 service object.
 
     Reuses gsheets_token.json (already has drive.file scope).
+
+    Builds with an explicit ``httplib2.Http(timeout=GDRIVE_HTTP_TIMEOUT_SEC)``
+    (via AuthorizedHttp, since ``build()`` accepts either ``credentials=`` or
+    ``http=``, never both) so a hung read dies inside its worker thread
+    instead of blocking it — and the shared TLS socket it holds — forever.
+    See docs/GDRIVE_SSL_RACE_PLAN.md M2.
     """
     creds = None
     if token_file.exists():
@@ -67,7 +77,10 @@ def build_service(credentials_file: Path, token_file: Path) -> Any:
             alert_oauth_expired("Google Drive", err, reauth_cmd="python tools/gsheets_auth.py")
             raise err
 
-    return build("drive", "v3", credentials=creds)
+    authed_http = google_auth_httplib2.AuthorizedHttp(
+        creds, http=httplib2.Http(timeout=GDRIVE_HTTP_TIMEOUT_SEC)
+    )
+    return build("drive", "v3", http=authed_http)
 
 
 # ---------------------------------------------------------------------------

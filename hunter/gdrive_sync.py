@@ -70,22 +70,52 @@ def _invalidate_service() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Folder resolution (serialized)
+# Drive API call serialization (M2, docs/GDRIVE_SSL_RACE_PLAN.md)
 # ---------------------------------------------------------------------------
+# One cached googleapiclient service (`_get_service()` above) sits on one
+# httplib2.Http object with one keep-alive TLS socket, and httplib2 is not
+# thread-safe (documented upstream). Every upload runs that service inside a
+# worker thread (asyncio.to_thread) — two in flight at once write into the
+# same TLS stream and read each other's bytes, surfacing as
+# `[SSL] record layer failure` / `LENGTH_MISMATCH`. `_DRIVE_LOCK` (renamed
+# from `_FOLDER_LOCK`, which only ever covered folder resolution — the file
+# uploads it didn't cover are exactly where the SSL race was happening)
+# serializes EVERY Drive API call in this process through the one
+# `_drive_call()` helper below. Acquired per call, not per pass, so a
+# post-apply targeted upload waits at most one call (~seconds) behind a
+# backfill pass, not the whole pass. Cross-*process* concurrency (detached
+# dual-apply shadows) is unaffected — each process has its own service and
+# socket; `gdrive_client._resolve_create_race` remains the guard there.
 
-_FOLDER_LOCK: asyncio.Lock | None = None
+_DRIVE_LOCK: asyncio.Lock | None = None
 
 
-def _folder_lock() -> asyncio.Lock:
+def _drive_lock() -> asyncio.Lock:
     # Created lazily: at import time there is no running loop to bind to.
-    global _FOLDER_LOCK
-    if _FOLDER_LOCK is None:
-        _FOLDER_LOCK = asyncio.Lock()
-    return _FOLDER_LOCK
+    global _DRIVE_LOCK
+    if _DRIVE_LOCK is None:
+        _DRIVE_LOCK = asyncio.Lock()
+    return _DRIVE_LOCK
+
+
+async def _drive_call(fn, *args, timeout: float | None = None):
+    """Run a blocking Drive API call in a worker thread, serialized against
+    every other Drive call in this process, with an optional wall-clock cap.
+
+    `asyncio.to_thread` is not cancellable: on a `timeout`, the awaiting
+    coroutine gives up but the worker thread keeps running, still holding the
+    (now abandoned) service's socket. Callers that wrap a `_drive_call` in
+    their own retry logic on `asyncio.TimeoutError` MUST call
+    `_invalidate_service()` too, so the NEXT call builds a fresh service (and
+    a fresh, distinct socket) instead of racing the abandoned thread's
+    lingering one — see `upload_missing_folders`.
+    """
+    async with _drive_lock():
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
 
 
 async def _resolve_folder(svc: Any, name: str, parent_id: str | None) -> str:
-    """get_or_create_folder, serialized against this process's other callers.
+    """get_or_create_folder, serialized against this process's other Drive callers.
 
     Several coroutines resolve the same date folder concurrently — the
     post-apply delivery hook and the periodic upload-missing backfill overlap
@@ -102,8 +132,7 @@ async def _resolve_folder(svc: Any, name: str, parent_id: str | None) -> str:
     """
     from hunter.gdrive_client import get_or_create_folder
 
-    async with _folder_lock():
-        return await asyncio.to_thread(get_or_create_folder, svc, name, parent_id)
+    return await _drive_call(get_or_create_folder, svc, name, parent_id)
 
 
 async def _call_with_reauth(op):
@@ -154,7 +183,7 @@ async def _do_upload(folder_path: Path) -> str:
         root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
     date_id = await _resolve_folder(svc, date_name, root_id)
-    company_id = await asyncio.to_thread(upload_folder, svc, folder_path, date_id)
+    company_id = await _drive_call(upload_folder, svc, folder_path, date_id)
     return folder_url(company_id)
 
 
@@ -227,7 +256,7 @@ async def upload_shadow_folder(primary_folder: Path, shadow_subfolder: Path) -> 
             root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
         date_id = await _resolve_folder(svc, date_name, root_id)
         company_id = await _resolve_folder(svc, primary_folder.name, date_id)
-        shadow_id = await asyncio.to_thread(upload_folder, svc, shadow_subfolder, company_id)
+        shadow_id = await _drive_call(upload_folder, svc, shadow_subfolder, company_id)
         return folder_url(shadow_id)
 
     url: str | None = None
@@ -345,7 +374,7 @@ async def upload_log_file(
             root_id = await _resolve_folder(svc, GDRIVE_ROOT_FOLDER_NAME, None)
 
         logs_folder_id = await _resolve_folder(svc, "Logs", root_id)
-        file_id = await asyncio.to_thread(upload_file, svc, dated_file, logs_folder_id)
+        file_id = await _drive_call(upload_file, svc, dated_file, logs_folder_id)
         url = f"https://drive.google.com/file/d/{file_id}/view"
         log.info(
             "gdrive_sync: uploaded %s (%d lines) → %s",
@@ -371,20 +400,44 @@ async def upload_log_file(
 
 _UPLOAD_TIMEOUT = 120  # seconds per folder
 
+# Re-entrancy guard: the delivery fallback (hunter/delivery.py, whenever the
+# targeted post-apply upload misses its tracker row) and the periodic
+# scheduled_gdrive_upload_missing backfill routinely fire within the same
+# second, and a second full pass over the SAME folder list is not just
+# unsafe (see the M2 _DRIVE_LOCK below) — it is pointless: the first pass is
+# already uploading exactly what the second would. A plain module-level bool
+# is enough here (not asyncio.Lock): both callers run in this one process's
+# single-threaded event loop, so the check-then-set below never interleaves
+# with another coroutine — there is no `await` between them.
+_backfill_running = False
+
 
 async def upload_missing_folders(
     project_dir: Path,
     progress_cb=None,
+    *,
+    force: bool = False,
 ) -> dict:
     """Upload tracker.xlsx application folders that haven't been uploaded to Drive yet.
 
     Skips rows that already have a Drive URL in col 12. After each successful
     upload, writes the Drive URL back to tracker so the row is not re-uploaded.
+    Shadow (dual-apply comparison) subfolders are separately skipped via the
+    content-signature ledger (hunter.drive_ledger) when unchanged since their
+    last successful upload — pass `force=True` to bypass the ledger and
+    re-upload every shadow subfolder regardless (the one case the ledger
+    gets wrong: a folder deleted on Drive by hand, which the bot can't see).
 
     progress_cb: optional async callable(str) for Telegram progress updates.
 
+    If a pass is already running (delivery's fallback and the scheduled
+    backfill overlapped), this call returns immediately with
+    ``"skipped_busy": True`` and zero counters — deliberately not an
+    exception, so `best_effort` never counts a busy-skip as a failure.
+
     Returns:
-      {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str]}
+      {"uploaded": int, "already_uploaded": int, "skipped_missing": int, "errors": list[str],
+       "shadow_uploaded": int, "shadow_skipped": int, "shadow_errors": list[str]}
     """
     if not _ready():
         return {
@@ -393,9 +446,37 @@ async def upload_missing_folders(
             "skipped_missing": 0,
             "errors": ["GDRIVE_ENABLED is false or service not ready"],
             "shadow_uploaded": 0,
+            "shadow_skipped": 0,
             "shadow_errors": [],
         }
 
+    global _backfill_running
+    if _backfill_running:
+        log.info("gdrive_sync: upload_missing_folders already running — skipping this pass")
+        return {
+            "uploaded": 0,
+            "already_uploaded": 0,
+            "skipped_missing": 0,
+            "errors": [],
+            "shadow_uploaded": 0,
+            "shadow_skipped": 0,
+            "shadow_errors": [],
+            "skipped_busy": True,
+        }
+    _backfill_running = True
+    try:
+        return await _upload_missing_folders_locked(project_dir, progress_cb, force=force)
+    finally:
+        _backfill_running = False
+
+
+async def _upload_missing_folders_locked(
+    project_dir: Path,
+    progress_cb=None,
+    *,
+    force: bool = False,
+) -> dict:
+    """Body of upload_missing_folders, run under the `_backfill_running` guard."""
     from hunter.gdrive_client import upload_folder, folder_url
     from hunter.tracker import read_all_tracker_rows, set_drive_url
 
@@ -430,7 +511,9 @@ async def upload_missing_folders(
             continue
         to_upload.append((row.get("Company", folder_path.name), row.get("URL", ""), folder_path))
 
-    shadow_uploaded, shadow_errors = await _upload_shadow_subfolders(existing_folders)
+    shadow_uploaded, shadow_skipped, shadow_errors = await _upload_shadow_subfolders(
+        existing_folders, force=force
+    )
 
     if not to_upload:
         return {
@@ -439,6 +522,7 @@ async def upload_missing_folders(
             "skipped_missing": skipped_missing,
             "errors": [],
             "shadow_uploaded": shadow_uploaded,
+            "shadow_skipped": shadow_skipped,
             "shadow_errors": shadow_errors,
         }
 
@@ -460,6 +544,14 @@ async def upload_missing_folders(
     with best_effort("gdrive.upload_missing_folders"):
         try:
             root_id = await _call_with_reauth(_resolve_root)
+        except asyncio.TimeoutError as e:
+            # The wait_for above abandoned a worker thread mid-request — the
+            # connection state on the cached service is now unknown. Rebuild
+            # from disk so the next call gets a fresh service and socket
+            # instead of racing the abandoned thread's lingering one.
+            root_error = str(e)
+            _invalidate_service()
+            raise
         except Exception as e:
             root_error = str(e)
             raise
@@ -470,6 +562,7 @@ async def upload_missing_folders(
             "skipped_missing": skipped_missing,
             "errors": [f"root folder: {root_error}"],
             "shadow_uploaded": shadow_uploaded,
+            "shadow_skipped": shadow_skipped,
             "shadow_errors": shadow_errors,
         }
 
@@ -486,10 +579,7 @@ async def upload_missing_folders(
                 _resolve_folder(svc, fp.parent.name, root_id),
                 timeout=30,
             )
-            company_id = await asyncio.wait_for(
-                asyncio.to_thread(upload_folder, svc, fp, date_id),
-                timeout=_UPLOAD_TIMEOUT,
-            )
+            company_id = await _drive_call(upload_folder, svc, fp, date_id, timeout=_UPLOAD_TIMEOUT)
             return folder_url(company_id)
 
         with best_effort("gdrive.upload_missing_folders"):
@@ -500,9 +590,12 @@ async def upload_missing_folders(
                 if job_url:
                     await asyncio.to_thread(set_drive_url, job_url, drive_url)
             except asyncio.TimeoutError:
+                # Same reasoning as the root-resolve timeout above: a worker
+                # thread was abandoned holding the cached service's socket.
                 msg = f"{company}: timeout after {_UPLOAD_TIMEOUT}s"
                 errors.append(msg)
                 log.warning("gdrive_sync: %s", msg)
+                _invalidate_service()
                 raise
             except Exception as e:
                 errors.append(f"{company}: {e}")
@@ -515,11 +608,16 @@ async def upload_missing_folders(
         "skipped_missing": skipped_missing,
         "errors": errors,
         "shadow_uploaded": shadow_uploaded,
+        "shadow_skipped": shadow_skipped,
         "shadow_errors": shadow_errors,
     }
 
 
-async def _upload_shadow_subfolders(folders: set[Path]) -> tuple[int, list[str]]:
+async def _upload_shadow_subfolders(
+    folders: set[Path],
+    *,
+    force: bool = False,
+) -> tuple[int, int, list[str]]:
     """Upload any dual-apply shadow subfolder found under the given company folders.
 
     Shadow sets (``{company}/{shadow_profile_name}/``) have no tracker row, so
@@ -527,22 +625,44 @@ async def _upload_shadow_subfolders(folders: set[Path]) -> tuple[int, list[str]]
     upload_missing_folders. This scans every locally-present company folder
     for a subdirectory matching a known LLM profile name and uploads it —
     idempotent (Drive upserts by name), so re-running is safe.
+
+    Without a tracker row there is also no per-row "already uploaded" check,
+    so without the ledger every shadow subfolder would be re-uploaded on
+    EVERY pass forever (docs/GDRIVE_SSL_RACE_PLAN.md M3). `hunter.drive_ledger`
+    tracks a content signature per folder path; a folder whose signature is
+    unchanged since its last successful upload is skipped. `force=True`
+    bypasses the ledger check (still records afterwards) — the escape hatch
+    for a folder deleted on Drive by hand, which the ledger cannot see.
+
+    Returns (uploaded, skipped, errors).
     """
+    from hunter import drive_ledger
     from hunter.llm_profiles import PROFILES
 
     uploaded = 0
+    skipped = 0
     errors: list[str] = []
     for folder_path in folders:
         for name in PROFILES:
             sub = folder_path / name
             if not sub.is_dir() or not any(f.is_file() for f in sub.iterdir()):
                 continue
+            path_key = str(sub)
+            try:
+                sig = drive_ledger.signature(sub)
+            except Exception as e:
+                errors.append(f"{folder_path.name}/{name}: signature failed: {e}")
+                continue
+            if not force and drive_ledger.is_current(path_key, sig):
+                skipped += 1
+                continue
             try:
                 url = await upload_shadow_folder(folder_path, sub)
                 if url:
                     uploaded += 1
+                    drive_ledger.record(path_key, sig, url)
                 else:
                     errors.append(f"{folder_path.name}/{name}: upload failed")
             except Exception as e:
                 errors.append(f"{folder_path.name}/{name}: {e}")
-    return uploaded, errors
+    return uploaded, skipped, errors

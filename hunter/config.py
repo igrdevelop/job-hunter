@@ -218,6 +218,10 @@ GDRIVE_ENABLED: bool = os.getenv("GDRIVE_ENABLED", "false").lower() in ("true", 
 GDRIVE_ROOT_FOLDER_ID: str = os.getenv("GDRIVE_ROOT_FOLDER_ID", "")
 # Name of the root folder created automatically when GDRIVE_ROOT_FOLDER_ID is not set
 GDRIVE_ROOT_FOLDER_NAME: str = os.getenv("GDRIVE_ROOT_FOLDER_NAME", "Job Hunter")
+# Socket-level timeout (seconds) on the httplib2.Http underlying the Drive
+# service. Without this, a hung read can block a worker thread — and the
+# shared TLS socket it holds — indefinitely (docs/GDRIVE_SSL_RACE_PLAN.md M2).
+GDRIVE_HTTP_TIMEOUT_SEC: int = int(os.getenv("GDRIVE_HTTP_TIMEOUT_SEC", "60"))
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
