@@ -104,7 +104,7 @@ def test_success_after_alert_sends_recovery(be_db, sent):
         pass  # success
 
     assert len(sent) == 2
-    assert "восстановился" in sent[1]
+    assert "recovered" in sent[1]
 
 
 def test_success_without_prior_alert_no_recovery_message(be_db, sent):

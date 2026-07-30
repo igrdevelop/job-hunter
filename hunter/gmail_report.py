@@ -22,16 +22,16 @@ from dataclasses import dataclass
 
 # Human-friendly labels for hunter.filters.FILTER_REASONS.
 _REASON_LABELS: dict[str, str] = {
-    "title_kw": "не по ключевым словам",
-    "require_angular": "нет Angular",
-    "level": "уровень",
-    "exclude_pattern": "стоп-стек",
-    "react_no_angular": "React без Angular",
-    "location": "локация",
-    "russia": "работа в РФ",
-    "german": "нужен немецкий",
-    "contract": "контракт/part-time",
-    "relocation": "релокация",
+    "title_kw": "keyword mismatch",
+    "require_angular": "no Angular",
+    "level": "level",
+    "exclude_pattern": "excluded stack",
+    "react_no_angular": "React w/o Angular",
+    "location": "location",
+    "russia": "Russia-based",
+    "german": "German required",
+    "contract": "contract/part-time",
+    "relocation": "relocation",
 }
 
 _DUP_STATUSES = frozenset({"dup_url", "dup_ct", "cooldown"})
@@ -89,11 +89,11 @@ def _email_lines(record: dict, outcomes: list[JobOutcome]) -> list[str]:
 
     # Confirmation / activity email — collapse to one dim line.
     if record.get("skipped"):
-        return [f"📧 {date} · {agg} · «{subj}» — подтверждение, пропущено"]
+        return [f"📧 {date} · {agg} · «{subj}» — confirmation, skipped"]
 
     # Regex miss: email arrived but no extractable URL — a real coverage gap.
     if extracted == 0:
-        return [f"📧 {date} · {agg} · «{subj}» — ⚠️ 0 ссылок (парсер не распознал)"]
+        return [f"📧 {date} · {agg} · «{subj}» — ⚠️ 0 URLs (parser miss)"]
 
     taken = [o for o in outcomes if o.status == "taken"]
     dups = [o for o in outcomes if o.status in _DUP_STATUSES]
@@ -105,7 +105,7 @@ def _email_lines(record: dict, outcomes: list[JobOutcome]) -> list[str]:
 
     tail_parts: list[str] = []
     if dups:
-        tail_parts.append(f"♻️ {len(dups)} дубл")
+        tail_parts.append(f"♻️ {len(dups)} dup")
     if filtered:
         labels = sorted({_REASON_LABELS.get(o.reason, o.reason or "?") for o in filtered})
         tail_parts.append(f"✂️ {len(filtered)} ({', '.join(labels)})")
@@ -145,17 +145,17 @@ def build_gmail_report(
     skipped = sum(1 for r in email_log if r.get("skipped"))
 
     header = [
-        "<b>--- Gmail (по письмам) ---</b>",
-        f"{total_emails} писем · {total_found} вакансий · взято <b>{total_taken}</b>",
+        "<b>--- Gmail (by email) ---</b>",
+        f"{total_emails} emails · {total_found} vacancies · taken <b>{total_taken}</b>",
     ]
     if zero_url:
-        header.append(f"⚠️ {zero_url} писем без распознанных ссылок (см. ниже)")
+        header.append(f"⚠️ {zero_url} emails with no parsed URLs (see below)")
     if skipped:
-        header.append(f"· {skipped} писем-подтверждений пропущено")
+        header.append(f"· {skipped} confirmation emails skipped")
     if capped:
         header.append(
-            f"⚠️ достигнут потолок {max_results} писем — часть писем могла не попасть "
-            f"(подними GMAIL_MAX_RESULTS)"
+            f"⚠️ ceiling of {max_results} emails reached — some may be missing "
+            f"(raise GMAIL_MAX_RESULTS)"
         )
 
     # Chunk by whole-email blocks so a message never splits mid-email.

@@ -57,9 +57,9 @@ def test_header_totals():
         _out("m1", "filtered", "location"),
     ]
     text = "\n".join(build_gmail_report(log, False, 100, outcomes))
-    assert "1 писем" in text
-    assert "3 вакансий" in text
-    assert "взято <b>1</b>" in text
+    assert "1 emails" in text
+    assert "3 vacancies" in text
+    assert "taken <b>1</b>" in text
 
 
 def test_taken_jobs_listed():
@@ -70,35 +70,35 @@ def test_taken_jobs_listed():
     ]
     text = "\n".join(build_gmail_report(log, False, 100, outcomes))
     assert "✅ Senior Angular @ Acme" in text
-    assert "♻️ 1 дубл" in text
+    assert "♻️ 1 dup" in text
 
 
 def test_filtered_reason_label():
     log = [_rec("m1", "pracuj", "oferty", 1)]
     outcomes = [_out("m1", "filtered", "react_no_angular")]
     text = "\n".join(build_gmail_report(log, False, 100, outcomes))
-    assert "✂️ 1 (React без Angular)" in text
+    assert "✂️ 1 (React w/o Angular)" in text
 
 
 def test_zero_url_email_surfaced():
     log = [_rec("m1", "pracuj", "Praca dla Ciebie", 0)]
     chunks = build_gmail_report(log, False, 100, [])
     text = "\n".join(chunks)
-    assert "0 ссылок" in text
-    assert "без распознанных ссылок" in text  # header coverage warning
+    assert "0 URLs" in text
+    assert "no parsed URLs" in text  # header coverage warning
 
 
 def test_skipped_email_collapsed():
     log = [_rec("m1", "", "Your application was sent", 0, skipped=True)]
     text = "\n".join(build_gmail_report(log, False, 100, []))
-    assert "подтверждение, пропущено" in text
-    assert "1 писем-подтверждений" in text
+    assert "confirmation, skipped" in text
+    assert "1 confirmation emails" in text
 
 
 def test_ceiling_warning_when_capped():
     log = [_rec("m1", "linkedin", "digest", 1)]
     text = "\n".join(build_gmail_report(log, True, 100, [_out("m1", "taken")]))
-    assert "потолок 100" in text
+    assert "ceiling of 100" in text
 
 
 def test_chunks_stay_under_limit():

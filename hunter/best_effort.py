@@ -181,7 +181,7 @@ def best_effort(
             return
         if should_alert:
             _notify_safe(
-                f"⚠️ <b>{subsystem}</b>: {failures} подряд сбоев, последний: {str(e)[:200]}"
+                f"⚠️ <b>{subsystem}</b>: {failures} consecutive failures, latest: {str(e)[:200]}"
             )
             log.error("best_effort(%s): alert sent (%d consecutive failures)", subsystem, failures)
     else:
@@ -191,5 +191,5 @@ def best_effort(
             log.warning("best_effort(%s): failed to record success: %s", subsystem, inner)
             return
         if had_alert:
-            _notify_safe(f"✅ <b>{subsystem}</b> восстановился")
+            _notify_safe(f"✅ <b>{subsystem}</b> recovered")
             log.info("best_effort(%s): recovered", subsystem)
