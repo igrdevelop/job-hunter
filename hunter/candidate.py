@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "candidate.yaml"
 _path_override: Path | None = None
 
+# The project owner's original hardcoded identity, kept here (not inlined at
+# each call site) so this personal data lives in exactly one place outside
+# candidate.yaml itself. Callers that need the byte-for-byte original
+# behavior when candidate.yaml is absent pass these as their default, e.g.
+# ``candidate.get("identity.full_name", DEFAULT_FULL_NAME)``.
+DEFAULT_FULL_NAME = "Ihar Petrasheuski"
+DEFAULT_CV_FILENAME_PREFIX = "Ihar_Petrasheuski_CV"
+
 
 def _set_path(path) -> None:
     """Test helper: point the loader at a different file and drop the cache."""

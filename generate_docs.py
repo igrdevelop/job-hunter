@@ -85,7 +85,7 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     """CV file basename for DOCX/PDF; length <= MAX_ATTACHMENT_BASENAME_LEN (incl. .docx)."""
     lang_u = (lang or "EN").strip().upper()[:2] or "EN"
     ext = ".docx"
-    prefix = candidate.get("identity.cv_filename_prefix", "Ihar_Petrasheuski_CV")
+    prefix = candidate.get("identity.cv_filename_prefix", candidate.DEFAULT_CV_FILENAME_PREFIX)
     year = datetime.now().year
     # Fixed parts: "{prefix}_" + "_{year}_XX.docx" reserved around the stack segment
     reserved = len(prefix) + 1 + len(f"_{year}_{lang_u}{ext}")
@@ -182,7 +182,7 @@ def add_gdpr_clause(doc, lang):
 
 
 def build_resume(doc, data, stack, lang="EN"):
-    name = candidate.get("identity.full_name", "Ihar Petrasheuski")
+    name = candidate.get("identity.full_name", candidate.DEFAULT_FULL_NAME)
     aka = candidate.get("identity.aka", "Igor Pietraszewski")
     subtitle = f"also known as {aka}" if aka else ""
     headline_base = candidate.get("identity.headline", "Senior Frontend Developer")
@@ -334,7 +334,7 @@ def set_margins(doc, top_cm=0.8, bottom_cm=0.5, left_cm=1.0, right_cm=1.0):
 
 def set_author(doc, name=None):
     if name is None:
-        name = candidate.get("identity.full_name", "Ihar Petrasheuski")
+        name = candidate.get("identity.full_name", candidate.DEFAULT_FULL_NAME)
     props = doc.core_properties
     props.author = name
     props.last_modified_by = name
