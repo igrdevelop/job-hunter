@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 import cloudscraper
 from bs4 import BeautifulSoup
 
+from hunter import candidate
 from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
@@ -38,9 +39,13 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://www.jobleads.com"
 
+# Location slug from candidate.yaml (source_urls.jobleads_location); defaults to
+# the project owner's original Wrocław-based listing.
+_LOCATION = candidate.get("source_urls.jobleads_location", "wroclaw")
+
 LISTING_URLS = [
-    f"{BASE}/pl/jobs?q=angular&location=wroclaw",
-    f"{BASE}/pl/jobs?q=frontend&location=wroclaw",
+    f"{BASE}/pl/jobs?q=angular&location={_LOCATION}",
+    f"{BASE}/pl/jobs?q=frontend&location={_LOCATION}",
     f"{BASE}/pl/jobs?q=angular&location=poland",
 ]
 
