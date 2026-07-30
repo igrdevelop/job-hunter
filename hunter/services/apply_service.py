@@ -4,9 +4,11 @@ import asyncio
 import logging
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Literal, Optional
 
+from hunter.apply_failures_log import log_apply_failure
 from hunter.models import Job
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,7 @@ async def run_apply_agent_subprocess(
     --permalink so it lands in content.json/outreach.md as the actual link
     to go apply/message on (job.url stays the opaque dedup key).
     """
+    started = time.monotonic()
     paste_text = (job.raw or {}).get("post_text")
     paste_path: Optional[Path] = None
     if paste_text:
@@ -105,6 +108,14 @@ async def run_apply_agent_subprocess(
             paste_path = Path(fh.name)
         except OSError as e:
             logger.error(f"[auto-apply] failed to write paste temp file for {job.url}: {e}")
+            log_apply_failure(
+                url=job.url,
+                outcome="fail",
+                company=job.company,
+                title=job.title,
+                error=str(e),
+                duration_sec=time.monotonic() - started,
+            )
             return "fail"
 
     cmd = [python_executable, str(apply_agent_path), job.url]
@@ -134,9 +145,18 @@ async def run_apply_agent_subprocess(
             )
         except (OSError, subprocess.SubprocessError) as e:
             logger.error(f"[auto-apply] failed to start subprocess for {job.url}: {e}")
+            log_apply_failure(
+                url=job.url,
+                outcome="fail",
+                company=job.company,
+                title=job.title,
+                error=str(e),
+                duration_sec=time.monotonic() - started,
+            )
             return "fail"
 
         effective_timeout = _effective_timeout(timeout_sec)
+        cli_mode = effective_timeout != timeout_sec
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),
@@ -149,9 +169,17 @@ async def run_apply_agent_subprocess(
             # A widened (CLI-eligible) timeout is infrastructure, not the
             # vacancy's fault (docs/HUNT_APPLY_SPLIT_PLAN.md M3) — the caller
             # must not write a FAIL row that escalates fail_count.
-            if effective_timeout != timeout_sec:
-                return "cli_timeout"
-            return "fail"
+            outcome: ApplyOutcome = "cli_timeout" if cli_mode else "fail"
+            log_apply_failure(
+                url=job.url,
+                outcome=outcome,
+                company=job.company,
+                title=job.title,
+                error=f"timed out after {effective_timeout}s",
+                duration_sec=time.monotonic() - started,
+                cli_mode=cli_mode,
+            )
+            return outcome
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
             logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
@@ -159,6 +187,15 @@ async def run_apply_agent_subprocess(
 
         if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
             logger.warning(f"[auto-apply] RATE-LIMITED (429) {job.company} — {job.title}")
+            log_apply_failure(
+                url=job.url,
+                outcome="rate_limited",
+                company=job.company,
+                title=job.title,
+                exit_code=proc.returncode,
+                duration_sec=time.monotonic() - started,
+                cli_mode=cli_mode,
+            )
             return "rate_limited"
 
         if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
@@ -172,6 +209,16 @@ async def run_apply_agent_subprocess(
             if not detail and stdout:
                 detail = stdout.decode(errors="replace").strip()
             logger.error(f"[auto-apply] FAIL {job.company}: {detail[-500:]}")
+            log_apply_failure(
+                url=job.url,
+                outcome="fail",
+                company=job.company,
+                title=job.title,
+                exit_code=proc.returncode,
+                error=detail,
+                duration_sec=time.monotonic() - started,
+                cli_mode=cli_mode,
+            )
             return "fail"
 
         if stdout:
@@ -207,6 +254,7 @@ async def run_apply_agent_for_url(
       outcome    — "ok" | "fail" | "manual" | "llm_outage" | "cli_timeout"
       error_detail — non-empty string on failure (stderr snippet / timeout reason)
     """
+    started = time.monotonic()
     label = url or "(pasted text)"
     cmd = [python_executable, str(apply_agent_path)]
     if url:
@@ -228,9 +276,16 @@ async def run_apply_agent_for_url(
         )
     except (OSError, subprocess.SubprocessError) as e:
         logger.error(f"[apply_agent] failed to start subprocess for {label}: {e}")
+        log_apply_failure(
+            url=url,
+            outcome="fail",
+            error=str(e),
+            duration_sec=time.monotonic() - started,
+        )
         return "fail", f"Failed to start process: {e}"
 
     effective_timeout = _effective_timeout(timeout_sec)
+    cli_mode = effective_timeout != timeout_sec
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -240,9 +295,16 @@ async def run_apply_agent_for_url(
         proc.kill()
         await proc.communicate()
         logger.error(f"[apply_agent] TIMEOUT ({effective_timeout}s) for {label}")
-        if effective_timeout != timeout_sec:
-            return "cli_timeout", f"CLI timed out after {effective_timeout}s"
-        return "fail", f"Timed out after {effective_timeout}s"
+        outcome = "cli_timeout" if cli_mode else "fail"
+        detail = f"{'CLI timed' if cli_mode else 'Timed'} out after {effective_timeout}s"
+        log_apply_failure(
+            url=url,
+            outcome=outcome,
+            error=detail,
+            duration_sec=time.monotonic() - started,
+            cli_mode=cli_mode,
+        )
+        return outcome, detail
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
@@ -263,6 +325,14 @@ async def run_apply_agent_for_url(
             detail = stdout.decode(errors="replace").strip()
         snippet = detail[-600:].strip() if detail else "(no output)"
         logger.error(f"[apply_agent] FAIL for {label}: {snippet}")
+        log_apply_failure(
+            url=url,
+            outcome="fail",
+            exit_code=proc.returncode,
+            error=snippet,
+            duration_sec=time.monotonic() - started,
+            cli_mode=cli_mode,
+        )
         return "fail", snippet
 
     if stdout:

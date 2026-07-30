@@ -179,6 +179,18 @@ hunter/
                             Telegram alert goes out at arm time) until expiry
                             (LLM_OUTAGE_PAUSE_MIN, default 60 min) or /llm outage clear.
                             Fetch/filter/dedup still run; skipped jobs return next hunt
+  apply_failures_log.py     M4 fail-audit log (docs/HUNT_APPLY_SPLIT_PLAN.md): 
+                            `log_apply_failure()` appends one JSON line
+                            (`{ts, url, company, title, outcome, exit_code, error,
+                            duration_sec, cli_mode}`) to `logs/apply_failures.jsonl`
+                            (RotatingFileHandler, 5MB x5 backups, `propagate=False` so it
+                            never duplicates into `hunter_errors.log`) for every "fail" /
+                            "cli_timeout" / "rate_limited" outcome from
+                            `hunter.services.apply_service`; "llm_outage" is deliberately
+                            excluded (global account state, already tracked by
+                            `hunter.llm_outage`). `read_last_failures(n)` is the read side,
+                            used by `/fails [N]` (hunter/commands/fails.py). Best-effort —
+                            a logging failure never breaks an apply run
   repost_gate.py            Same-vacancy re-post gate (Step 1.5g, $0): TF-IDF text match
                             of the fetched posting vs recent applied rows' job_posting.txt
                             + fuzzy company-name agreement → reuse the existing CV (copy
@@ -356,6 +368,9 @@ hunter/
                             MAX_FAIL_RETRIES and were dropped from the retry loop forever
                             (tracker.get_gave_up_failed/reset_fail_counts; report-first —
                             no-arg form never mutates. docs/LLM_OUTAGE_RESILIENCE_PLAN.md M3)
+    fails.py                /fails [N] — last N (default 10, max 30) entries from the
+                            apply-failure audit log (hunter.apply_failures_log, M4 —
+                            docs/HUNT_APPLY_SPLIT_PLAN.md); read-only
     health.py               /health — per-source scraper yield report (source_health)
     llm.py                  /llm [name] — show/switch active LLM profile (hunter.llm_profiles);
                             /llm outage [clear] — show/lift the M2 auto-apply outage pause
@@ -393,6 +408,12 @@ hunter/
                              it like `llm_outage` (no FAIL row, Telegram notify, URL/job returns
                              next hunt) EXCEPT it does NOT stop the batch or arm any pause —
                              it's per-job infrastructure flakiness, not a global account state.
+                             M4 (docs/HUNT_APPLY_SPLIT_PLAN.md): every non-ok, non-manual outcome
+                             ("fail"/"cli_timeout"/"rate_limited" — NOT "llm_outage", which is
+                             global account state tracked separately by hunter.llm_outage) also
+                             calls `hunter.apply_failures_log.log_apply_failure()`, appending one
+                             JSON line to `logs/apply_failures.jsonl` (RotatingFileHandler, 5MB x5).
+                             Read via `/fails [N]` (hunter/commands/fails.py, default 10/max 30).
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
   sources/                  24 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()

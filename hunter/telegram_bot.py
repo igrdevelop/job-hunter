@@ -92,6 +92,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_normalize": ("hunter.commands.normalize", "cmd_normalize"),
     "cmd_funnel": ("hunter.commands.funnel", "cmd_funnel"),
     "cmd_retry_reset": ("hunter.commands.retry_reset", "cmd_retry_reset"),
+    "cmd_fails": ("hunter.commands.fails", "cmd_fails"),
     "cmd_health": ("hunter.commands.health", "cmd_health"),
     "cmd_llm": ("hunter.commands.llm", "cmd_llm"),
     "cmd_dual": ("hunter.commands.dual", "cmd_dual"),
@@ -166,6 +167,7 @@ async def _post_init(app: Application) -> None:
             BotCommand("llm", "Show/switch active LLM profile [name]"),
             BotCommand("dual", "Toggle dual-apply A/B comparison [on|off]"),
             BotCommand("tracks", "Show/switch active candidate tracks [angular|react|both]"),
+            BotCommand("fails", "Last N apply failures from the audit log [N]"),
         ]
     )
 
@@ -268,6 +270,7 @@ def build_application() -> Application:
     from hunter.commands.normalize import cmd_normalize
     from hunter.commands.funnel import cmd_funnel
     from hunter.commands.retry_reset import cmd_retry_reset
+    from hunter.commands.fails import cmd_fails
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
     from hunter.commands.dual import cmd_dual
@@ -299,6 +302,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("normalize", cmd_normalize))
     app.add_handler(CommandHandler("funnel", cmd_funnel))
     app.add_handler(CommandHandler("retry_reset", cmd_retry_reset))
+    app.add_handler(CommandHandler("fails", cmd_fails))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("llm", cmd_llm))
     app.add_handler(CommandHandler("dual", cmd_dual))
