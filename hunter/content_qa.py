@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from hunter import candidate
+
 # ---------------------------------------------------------------------------
 # Polish-contamination detection delegates to hunter.lang_guard (see _has_polish),
 # the SAME allowlist-aware detector the apply enforce-gate uses. Sharing it keeps QA
@@ -34,27 +36,40 @@ _EN_SENTENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_EXPECTED_ROLE_COUNT = 7
+_EXPECTED_ROLE_COUNT = candidate.get("education.expected_role_count", 7)
 
-# Known canonical profile titles (lowercase normalised)
-_PROFILE_TITLES_NORM = {
-    "frontend developer (angular, part-time contract)",  # Alten Poland
-    "senior frontend developer (angular)",  # Fairmarkit, Venture Labs, SII
-    "senior frontend developer",  # Altoros
-    "frontend developer (angular)",  # SolbegSoft
-    "frontend developer",  # Staronka
-}
+# Known canonical profile titles (lowercase normalised). Read from
+# candidate.yaml (employers.profile_titles); falls back to the project
+# owner's original title list when candidate.yaml is absent.
+_PROFILE_TITLES_NORM = set(
+    candidate.get(
+        "employers.profile_titles",
+        [
+            "frontend developer (angular, part-time contract)",  # Alten Poland
+            "senior frontend developer (angular)",  # Fairmarkit, Venture Labs, SII
+            "senior frontend developer",  # Altoros
+            "frontend developer (angular)",  # SolbegSoft
+            "frontend developer",  # Staronka
+        ],
+    )
+)
 
-# Known real company names (lowercase)
-_REAL_COMPANIES = {
-    "alten poland",
-    "fairmarkit",
-    "venture labs",
-    "sii",
-    "altoros",
-    "solbegsoft",
-    "staronka",
-}
+# Known real company names (lowercase). Read from candidate.yaml
+# (employers.real_companies); falls back to the project owner's original list.
+_REAL_COMPANIES = set(
+    candidate.get(
+        "employers.real_companies",
+        [
+            "alten poland",
+            "fairmarkit",
+            "venture labs",
+            "sii",
+            "altoros",
+            "solbegsoft",
+            "staronka",
+        ],
+    )
+)
 
 
 def _norm_title(t: str) -> str:
@@ -208,7 +223,10 @@ def _check_education(resume_en: dict[str, Any]) -> QACheck:
             detail=f"education is a stringified dict: {edu[:80]}",
         )
     # Check known correct school name
-    if "belarusian state technological university" not in edu.lower():
+    school_keyword = candidate.get(
+        "education.school_keyword", "belarusian state technological university"
+    )
+    if school_keyword.lower() not in edu.lower():
         return QACheck(
             name="Education matches profile",
             passed=False,
