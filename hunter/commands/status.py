@@ -61,6 +61,22 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception:
         pass
 
+    # Apply queue (M1, docs/HUNT_APPLY_SPLIT_PLAN.md) — only worth showing
+    # once the split is actually turned on.
+    try:
+        from hunter.config import APPLY_QUEUE_ENABLED
+
+        if APPLY_QUEUE_ENABLED:
+            from hunter.tracker import count_in_progress, count_pending
+
+            qp = await asyncio.to_thread(count_pending)
+            qi = await asyncio.to_thread(count_in_progress)
+            lines.append(
+                f"📥 Apply queue: PENDING <b>{qp}</b>  IN_PROGRESS <b>{qi}</b> (<code>/queue</code>)"
+            )
+    except Exception:
+        pass
+
     if _active_apply_urls:
         now = datetime.now(timezone.utc)
         lines.append(f"\n⚙️ <b>Generating ({len(_active_apply_urls)}):</b>")

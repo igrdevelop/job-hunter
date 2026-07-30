@@ -21,6 +21,7 @@ from hunter.config import (
     GSHEETS_REFRESH_INTERVAL_MIN,
     GDRIVE_UPLOAD_MISSING_INTERVAL_MIN,
     EMAIL_RESPONSE_CHECK_TIME,
+    APPLY_QUEUE_ENABLED,
 )
 
 from hunter.schedules.hunt import scheduled_hunt
@@ -33,6 +34,7 @@ from hunter.schedules.pending_report import scheduled_pending_report
 from hunter.schedules.email_responses import scheduled_check_email_responses
 from hunter.schedules.daily_summary import scheduled_daily_summary
 from hunter.schedules.normalize_sent import scheduled_normalize_sent
+from hunter.schedules.apply_queue import scheduled_reset_stale_claims
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ __all__ = [
     "scheduled_check_email_responses",
     "scheduled_daily_summary",
     "scheduled_normalize_sent",
+    "scheduled_reset_stale_claims",
 ]
 
 
@@ -209,3 +212,13 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             name="normalize_sent_daily",
         )
         logger.info("[Schedule] normalize_sent at 00:20 %s", TIMEZONE)
+
+    # ── Stale apply-claim sweep every 15 min (M1, docs/HUNT_APPLY_SPLIT_PLAN.md) ──
+    if APPLY_QUEUE_ENABLED:
+        app.job_queue.run_repeating(
+            callback=scheduled_reset_stale_claims,
+            interval=900,
+            first=900,
+            name="reset_stale_claims",
+        )
+        logger.info("[Schedule] reset_stale_claims every 15 min")
