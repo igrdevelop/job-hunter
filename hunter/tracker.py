@@ -20,9 +20,10 @@ DB path: hunter.config.TRACKER_DB_PATH  (default: project root/tracker.db)
 Testable: monkeypatch hunter.tracker.DB_PATH to an isolated tmp path.
 """
 
+import json
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
@@ -66,7 +67,15 @@ COL_COST_USD = 15
 
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 MANUAL_PENDING_ATS = "MANUAL"
-_COOLDOWN_SKIP_STATUSES = frozenset({"SKIP", "FAIL", "MANUAL", "EXPIRED"})
+PENDING_ATS = "PENDING"
+IN_PROGRESS_ATS = "IN_PROGRESS"
+# Statuses that must NOT count as "recently applied" for the company/title
+# cooldown checks below (is_in_cooldown/company_cooldown_active): a queued-
+# but-not-yet-attempted PENDING/IN_PROGRESS row (M1, docs/
+# HUNT_APPLY_SPLIT_PLAN.md) is exactly as un-applied as a SKIP/FAIL row.
+_COOLDOWN_SKIP_STATUSES = frozenset(
+    {"SKIP", "FAIL", "MANUAL", "EXPIRED", PENDING_ATS, IN_PROGRESS_ATS}
+)
 
 # ── gsheets column map (used by read_all_tracker_rows + gsheets_sync) ─────────
 _GSHEETS_COLS = [
@@ -329,7 +338,15 @@ def company_matches_sent(comp_key: str, sent_companies: set[str]) -> bool:
 
 
 def is_known(url: str, company: str = "", title: str = "") -> bool:
-    """Check if a job is already in tracker (by URL or company+title)."""
+    """Check if a job is already in tracker (by URL or company+title).
+
+    Status-agnostic by construction — a PENDING or IN_PROGRESS row (M1,
+    docs/HUNT_APPLY_SPLIT_PLAN.md) already makes this return True, same as
+    SKIP/FAIL/MANUAL/a real ATS score, since the query below never filters
+    on ats_status at all. That's exactly the guard the queue needs: a job
+    already sitting in the PENDING queue must not be re-queued by the next
+    hunt cycle.
+    """
     norm = normalize_url(url)
     with get_db(DB_PATH) as conn:
         if (
@@ -348,6 +365,60 @@ def is_known(url: str, company: str = "", title: str = "") -> bool:
                 if dedup_key(r["company"], r["title"]) == key:
                     return True
     return False
+
+
+def _is_known_terminal(url: str, company: str = "", title: str = "") -> bool:
+    """Same contract as is_known(), but a PENDING/IN_PROGRESS placeholder for
+    THIS exact job does not count (M1, docs/HUNT_APPLY_SPLIT_PLAN.md).
+
+    Used internally by the terminal-write functions (add_failed, add_skipped,
+    add_expired, add_react_skipped, add_manual_jobleads_pending) instead of
+    is_known(): in queue mode the row already exists as PENDING/IN_PROGRESS
+    by the time the apply pipeline resolves it, and that placeholder must not
+    block the pipeline from writing its own outcome onto the same URL. With
+    the queue disabled (APPLY_QUEUE_ENABLED=false, the default) no PENDING/
+    IN_PROGRESS row is ever created, so this behaves identically to
+    is_known() — zero behavior change for the non-queue path.
+    """
+    norm = normalize_url(url)
+    with get_db(DB_PATH) as conn:
+        if norm:
+            rows = conn.execute(
+                "SELECT ats_status FROM applications WHERE url_norm=?", (norm,)
+            ).fetchall()
+            if any((r["ats_status"] or "") not in (PENDING_ATS, IN_PROGRESS_ATS) for r in rows):
+                return True
+        if company and title:
+            key = dedup_key(company, title)
+            rows = conn.execute(
+                "SELECT company, title, ats_status FROM applications "
+                "WHERE company != '' AND title != ''"
+            ).fetchall()
+            for r in rows:
+                if dedup_key(r["company"], r["title"]) == key and (r["ats_status"] or "") not in (
+                    PENDING_ATS,
+                    IN_PROGRESS_ATS,
+                ):
+                    return True
+    return False
+
+
+def _clear_own_placeholder(conn, url: str) -> None:
+    """Delete this job's own PENDING/IN_PROGRESS row, if any, within an
+    already-open connection/transaction.
+
+    Called by every terminal-write function right before inserting the real
+    row so a queued job's placeholder is replaced in place instead of left
+    behind as a stale duplicate. A no-op when queue mode is off (no such row
+    ever exists) or `url` is empty.
+    """
+    norm = normalize_url(url) if url else ""
+    if not norm:
+        return
+    conn.execute(
+        f"DELETE FROM applications WHERE url_norm=? AND ats_status IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')",  # noqa: S608
+        (norm,),
+    )
 
 
 # ── Status queries ────────────────────────────────────────────────────────────
@@ -374,7 +445,7 @@ def get_url_status_flags(url: str) -> dict[str, bool]:
     for row in rows:
         ats = (row["ats_status"] or "").strip().upper()
         sent = (row["sent"] or "").strip()
-        if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
+        if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS):
             has_success = True
         elif ats == "SKIP" and sent in REACT_SKIP_SENT_MARKERS:
             is_react_skip = True
@@ -670,8 +741,12 @@ def add_manual_jobleads_pending(
     """Append MANUAL row for JobLeads when description cannot be fetched.
 
     Returns False when URL already has any tracker row (dedup / FAIL / MANUAL / success).
+    A PENDING/IN_PROGRESS placeholder for this same URL (M1, queue mode) does
+    not count — it's replaced in place, same as every other terminal write.
     """
-    if has_successful_entry(url) or lookup_url(url):
+    if has_successful_entry(url) or any(
+        r["ats"] not in (PENDING_ATS, IN_PROGRESS_ATS) for r in lookup_url(url)
+    ):
         return False
 
     row_id = _new_row_id()
@@ -680,6 +755,7 @@ def add_manual_jobleads_pending(
     folder_str = str(folder_abs).replace("\\", "/")
 
     with get_db(DB_PATH) as conn:
+        _clear_own_placeholder(conn, url)
         conn.execute(
             """
             INSERT INTO applications
@@ -767,15 +843,29 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
             ).fetchall()
             for row in existing:
                 ats = (row["ats_status"] or "").strip().upper()
-                if ats not in ("FAIL", "SKIP", "?", "", MANUAL_PENDING_ATS):
+                # PENDING/IN_PROGRESS (M1, queue mode) is this job's OWN
+                # placeholder, not a prior successful entry — never blocks.
+                if ats not in (
+                    "FAIL",
+                    "SKIP",
+                    "?",
+                    "",
+                    MANUAL_PENDING_ATS,
+                    PENDING_ATS,
+                    IN_PROGRESS_ATS,
+                ):
                     return False  # already has a successful entry
 
         # Is this a re-application (same URL exists with any status)?
         # Check BEFORE the force-mode delete below so the flag is accurate.
+        # A PENDING/IN_PROGRESS placeholder doesn't count — every normal
+        # queued apply would otherwise be misflagged as a re-application.
         is_reapply = bool(
             norm_url
             and conn.execute(
-                "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm_url,)
+                f"SELECT 1 FROM applications WHERE url_norm=? "  # noqa: S608
+                f"AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}') LIMIT 1",
+                (norm_url,),
             ).fetchone()
         )
 
@@ -785,6 +875,11 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
         # get_folder_by_url would return the OLD folder path (yesterday's date).
         if force and norm_url:
             conn.execute("DELETE FROM applications WHERE url_norm=?", (norm_url,))
+        elif norm_url:
+            # Replace this job's own PENDING/IN_PROGRESS placeholder in place
+            # (M1) — leaving it would duplicate the row once the real one
+            # below is inserted.
+            _clear_own_placeholder(conn, apply_url)
 
         conn.execute(
             """
@@ -813,7 +908,7 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
 
 def add_skipped(job: Job) -> dict | None:
     """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
-    if is_known(job.url, job.company, job.title):
+    if _is_known_terminal(job.url, job.company, job.title):
         return None
 
     row_id = _new_row_id()
@@ -821,6 +916,7 @@ def add_skipped(job: Job) -> dict | None:
     today = date.today().strftime("%Y-%m-%d")
 
     with get_db(DB_PATH) as conn:
+        _clear_own_placeholder(conn, job.url)
         conn.execute(
             """
             INSERT INTO applications
@@ -852,13 +948,14 @@ def add_react_skipped(content: dict, url: str) -> None:
     """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered."""
     company = (content.get("company_name") or "").strip()
     title = (content.get("job_title") or "").strip()
-    if is_known(url, company, title):
+    if _is_known_terminal(url, company, title):
         return
 
     norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
 
     with get_db(DB_PATH) as conn:
+        _clear_own_placeholder(conn, url)
         conn.execute(
             """
             INSERT INTO applications
@@ -885,13 +982,14 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
     generated). Both ``SKIP`` and a non-blank ``sent`` keep the row out of future
     hunts via the dedup/cooldown path.
     """
-    if is_known(url, company, title):
+    if _is_known_terminal(url, company, title):
         return
 
     norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
 
     with get_db(DB_PATH) as conn:
+        _clear_own_placeholder(conn, url)
         conn.execute(
             """
             INSERT INTO applications
@@ -903,14 +1001,19 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
 
 
 def add_failed(job: Job) -> None:
-    """Append a FAIL row so the job is not retried on next hunt."""
-    if is_known(job.url, job.company, job.title):
+    """Append a FAIL row so the job is not retried on next hunt.
+
+    A PENDING/IN_PROGRESS placeholder for this same URL (M1, queue mode) is
+    replaced in place rather than blocking the write — see _is_known_terminal.
+    """
+    if _is_known_terminal(job.url, job.company, job.title):
         return
 
     norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
 
     with get_db(DB_PATH) as conn:
+        _clear_own_placeholder(conn, job.url)
         conn.execute(
             """
             INSERT INTO applications
@@ -921,6 +1024,222 @@ def add_failed(job: Job) -> None:
         )
 
 
+# ── PENDING queue (M1, docs/HUNT_APPLY_SPLIT_PLAN.md) ─────────────────────────
+#
+# Decouples "hunt found this job" from "apply worker processed it": the hunt
+# loop calls add_pending() for every new job and moves on immediately instead
+# of running the apply subprocess inline under _hunt_lock; a separate
+# apply_worker_loop drains the queue on its own schedule. Feature-gated by
+# APPLY_QUEUE_ENABLED — with the flag off nothing in this section is called.
+
+
+def _serialize_pending_meta(job: Job) -> str:
+    """JSON-encode everything apply_worker needs to rebuild this Job.
+
+    `default=str` covers non-JSON-native values that can end up in `raw`/
+    `email_meta` (e.g. Gmail's `email_meta["date"]` datetime) — the queue
+    only needs these fields for display/logging on the worker side, not for
+    round-tripping the exact Python type.
+    """
+    return json.dumps(
+        {
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "salary": job.salary,
+            "url": job.url,
+            "source": job.source,
+            "raw": job.raw or {},
+            "email_meta": job.email_meta or {},
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def add_pending(job: Job) -> str:
+    """INSERT a PENDING row for a job the hunt loop found but hasn't applied to yet.
+
+    Stores the full Job as JSON in `pending_meta` (see `_serialize_pending_meta`)
+    so `job_from_pending_row` can reconstruct it later without re-fetching or
+    re-filtering. Returns the new row id.
+
+    Mirrors add_skipped/add_failed's contract: callers must check
+    is_known()/should_skip_url() themselves first — this function does not
+    dedup on its own.
+    """
+    row_id = _new_row_id()
+    norm = normalize_url(job.url)
+    today = date.today().strftime("%Y-%m-%d")
+
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO applications
+            (id, date, company, title, ats_status, url, url_norm, pending_meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row_id,
+                today,
+                job.company,
+                job.title,
+                PENDING_ATS,
+                job.url,
+                norm,
+                _serialize_pending_meta(job),
+            ),
+        )
+    return row_id
+
+
+def job_from_pending_row(row: dict) -> Job:
+    """Reconstruct a Job from a claimed PENDING/IN_PROGRESS row's `pending_meta`.
+
+    Falls back to the row's own company/title/url columns when `pending_meta`
+    is missing or unparsable (defensive — should not happen for a row written
+    by add_pending, but a hand-edited/legacy row must not crash the worker).
+    """
+    meta: dict = {}
+    raw_meta = row.get("pending_meta")
+    if raw_meta:
+        try:
+            meta = json.loads(raw_meta)
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
+    return Job(
+        title=meta.get("title") or row.get("title") or "",
+        company=meta.get("company") or row.get("company") or "",
+        location=meta.get("location") or "",
+        salary=meta.get("salary"),
+        url=meta.get("url") or row.get("url") or "",
+        source=meta.get("source") or "pending",
+        raw=meta.get("raw") or {},
+        email_meta=meta.get("email_meta") or {},
+    )
+
+
+def claim_pending() -> dict | None:
+    """Atomically claim the oldest PENDING row: ats_status -> IN_PROGRESS + claimed_at.
+
+    A single UPDATE...RETURNING statement (SQLite >= 3.35) — the row selection
+    and the status flip happen in one atomic write, so two workers can never
+    both claim the same row (M2/parallel workers is deferred, but this makes
+    the primitive correct now instead of needing a rewrite later). Ordered by
+    SQLite's implicit `rowid` (true insertion order) rather than `id` — the
+    primary key is a random UUID hex fragment (`_new_row_id`), not a
+    sequential one, so sorting by it would NOT give FIFO. Returns the full
+    row as a dict (including `pending_meta`), or None when the queue is
+    empty.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            f"""
+            UPDATE applications
+            SET ats_status='{IN_PROGRESS_ATS}', claimed_at=?
+            WHERE rowid = (
+                SELECT rowid FROM applications
+                WHERE ats_status='{PENDING_ATS}'
+                ORDER BY rowid
+                LIMIT 1
+            )
+            RETURNING *
+            """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
+            (now,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def release_claim(url: str) -> None:
+    """IN_PROGRESS -> PENDING, clearing claimed_at.
+
+    Used for outcomes that are infrastructure hiccups, not the vacancy's
+    fault (cli_timeout, llm_outage) — the row goes back to the front of the
+    queue instead of being marked FAIL.
+    """
+    norm = normalize_url(url)
+    if not norm:
+        return
+    with get_db(DB_PATH) as conn:
+        conn.execute(
+            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL "  # noqa: S608
+            f"WHERE ats_status='{IN_PROGRESS_ATS}' AND url_norm=?",
+            (norm,),
+        )
+
+
+def reset_stale_claims(timeout_min: int) -> int:
+    """IN_PROGRESS -> PENDING for rows claimed more than `timeout_min` minutes ago.
+
+    A worker that crashed or was killed mid-apply leaves its row stuck
+    IN_PROGRESS forever; the periodic sweep (hunter/schedules) calls this so
+    it re-enters the queue instead of being lost. Returns the number of rows
+    reset. A row with a NULL `claimed_at` (should not happen via
+    claim_pending, but defensive) is left alone — there's no age to compare.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL "  # noqa: S608
+            f"WHERE ats_status='{IN_PROGRESS_ATS}' AND claimed_at IS NOT NULL AND claimed_at < ?",
+            (cutoff,),
+        )
+        return cur.rowcount
+
+
+def count_pending() -> int:
+    """Number of PENDING rows currently queued (for /status, /queue)."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM applications WHERE ats_status='{PENDING_ATS}'"  # noqa: S608
+        ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def count_in_progress() -> int:
+    """Number of IN_PROGRESS rows currently claimed by a worker (for /status)."""
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM applications WHERE ats_status='{IN_PROGRESS_ATS}'"  # noqa: S608
+        ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def list_pending(limit: int = 20) -> list[dict]:
+    """PENDING rows in queue order (oldest first) for /queue. Each: {company, title, url, date}."""
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            f"SELECT company, title, url, date FROM applications "  # noqa: S608
+            f"WHERE ats_status='{PENDING_ATS}' ORDER BY rowid LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_pending_row(url: str) -> bool:
+    """Delete a PENDING/IN_PROGRESS row for this URL outright.
+
+    Not needed by the normal worker flow — every terminal-write function
+    (add_applied/add_failed/add_skipped/...) already clears its own
+    placeholder in place via `_clear_own_placeholder`. This is the manual
+    escape hatch (e.g. a future `/queue cancel <url>`) for dropping a queued
+    job without giving it any terminal status at all. Returns True if a row
+    was deleted.
+    """
+    norm = normalize_url(url)
+    if not norm:
+        return False
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            f"DELETE FROM applications WHERE url_norm=? AND ats_status IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')",  # noqa: S608
+            (norm,),
+        )
+        return cur.rowcount > 0
+
+
 # ── Unsent rows ───────────────────────────────────────────────────────────────
 
 
@@ -929,17 +1248,24 @@ def iter_unsent_rows() -> list[dict]:
 
     Each dict has keys: id, date, company, title, stack, ats, url, folder,
     sent, reapp, to_learn.
+
+    PENDING/IN_PROGRESS rows (M1, queue mode) are excluded — they haven't
+    been attempted yet, so an expiry check here would be premature (the
+    apply pipeline runs its own expiry check when it eventually processes
+    the row) and a stray EXPIRED stamp on a still-queued row would leave it
+    in a confusing half-state (ats_status='PENDING', sent='EXPIRED').
     """
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, date, company, title, stack, ats_status, url, folder,
                    sent, reapplication, to_learn
             FROM applications
             WHERE ats_status != 'SKIP'
+              AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
               AND id != ''
               AND (sent = '' OR sent IN ('—', '–', '-'))
-            """
+            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
         ).fetchall()
 
     return [
@@ -1258,15 +1584,21 @@ def read_all_tracker_rows() -> list[dict]:
 
     Keys: all _GSHEETS_COLS names + "Drive URL", "Confirmation", "Answer".
     Rows with no ID are skipped. Used by gsheets_sync and gdrive_sync.
+
+    PENDING/IN_PROGRESS rows (M1, queue mode) are excluded — Sheets/Drive
+    stay exactly as blind to the internal queue as they were before it
+    existed; pushing a placeholder with no folder/score would be noise at
+    best and a premature Drive-upload attempt at worst.
     """
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, date, company, title, stack, ats_status, url, folder,
                    sent, reapplication, to_learn, drive_url, confirmation, answer
             FROM applications
             WHERE id != ''
-            """
+              AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
+            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
         ).fetchall()
 
     result = []
@@ -1300,12 +1632,14 @@ def is_in_cooldown(company: str, title: str, cooldown_days: int = 12) -> bool:
 
     target_key = dedup_key(company, title)
     today = date.today()
+    placeholders = ",".join("?" * len(_COOLDOWN_SKIP_STATUSES))
 
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT date, company, title FROM applications "
-            "WHERE ats_status NOT IN ('SKIP','FAIL','MANUAL','EXPIRED') "
+            "SELECT date, company, title FROM applications "  # noqa: S608 — placeholders only
+            f"WHERE ats_status NOT IN ({placeholders}) "
             "AND ats_status != ''",
+            tuple(_COOLDOWN_SKIP_STATUSES),
         ).fetchall()
 
     most_recent: date | None = None
@@ -1336,12 +1670,14 @@ def company_cooldown_active(company: str, days: int = 180) -> bool:
         return False
 
     today = date.today()
+    placeholders = ",".join("?" * len(_COOLDOWN_SKIP_STATUSES))
 
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT date, company FROM applications "
-            "WHERE ats_status NOT IN ('SKIP','FAIL','MANUAL','EXPIRED') "
+            "SELECT date, company FROM applications "  # noqa: S608 — placeholders only
+            f"WHERE ats_status NOT IN ({placeholders}) "
             "AND ats_status != '' AND company != ''",
+            tuple(_COOLDOWN_SKIP_STATUSES),
         ).fetchall()
 
     most_recent: date | None = None

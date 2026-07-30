@@ -164,6 +164,19 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # unreadable, or a pre-verdict row). Mirrored to Sheet column N by
         # hunter.verdict_writer (parallel to cost_usd -> column M).
         ("ats_verdict", "REAL"),
+        # M1 (docs/HUNT_APPLY_SPLIT_PLAN.md): claimed_at is the UTC timestamp
+        # an apply_worker atomically claimed a PENDING row (ats_status set to
+        # IN_PROGRESS in the same UPDATE). NULL for every row that was never
+        # claimed (including all non-PENDING/IN_PROGRESS statuses). Used only
+        # by reset_stale_claims() to detect a worker that crashed mid-apply.
+        ("claimed_at", "TEXT"),
+        # pending_meta is a JSON blob of the full Job the hunt loop found
+        # (source, location, salary, raw dict incl. permalink/post_text) —
+        # everything apply_worker needs to reconstruct a Job object without
+        # re-fetching or re-filtering. Written once by add_pending(), read
+        # once by the worker after claim_pending(); NULL outside PENDING/
+        # IN_PROGRESS rows.
+        ("pending_meta", "TEXT"),
     ]
     for col, definition in migrations:
         if col not in existing:

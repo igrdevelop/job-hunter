@@ -1770,9 +1770,9 @@ def _sanitize_folder_company(name: str) -> str:
 def _handle_jobleads_fetch_blocked(url: str, err: str, company: str = "", title: str = "") -> None:
     """Stub job_posting.txt + MANUAL tracker row; Telegram instructs user; process exits 44."""
     from hunter.tracker import (
+        _is_known_terminal,
         add_manual_jobleads_pending,
         has_manual_pending,
-        lookup_url,
         manual_jobleads_job_posting_path,
     )
     from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER
@@ -1790,7 +1790,10 @@ def _handle_jobleads_fetch_blocked(url: str, err: str, company: str = "", title:
         print(f"[apply_agent] MANUAL_PENDING (existing) exit={APPLY_MANUAL_EXIT_CODE}")
         sys.exit(APPLY_MANUAL_EXIT_CODE)
 
-    if lookup_url(url):
+    # A PENDING/IN_PROGRESS placeholder for THIS url (M1, queue mode — the
+    # worker's own claim row) must not trip this dedup check; only a genuine
+    # terminal row (FAIL/SKIP/MANUAL/score/...) means "already tracked".
+    if _is_known_terminal(url):
         notify(
             "📋 <b>JobLeads — URL already in tracker.xlsx</b> (dedup).\n"
             f"🔗 {url}\n"
