@@ -21,7 +21,7 @@ same-company re-posts cluster at sim>=0.95 while agency-boilerplate false
 positives (Hays/UST/emagine posting DIFFERENT roles in near-identical words)
 live in the 0.85-0.90 band, so that band only ever warns):
 
-    sim >= 0.97  and both texts >= 1500 chars      -> re-post (any company)
+    sim >= 0.94  and both texts >= 1500 chars      -> re-post (any company)
     sim >= 0.90  and fuzzy company-name agreement  -> re-post
     sim >= 0.85  otherwise                          -> warn only, generate
 
@@ -54,7 +54,7 @@ from pathlib import Path
 # ── Decision thresholds (calibrated 2026-07-20, tools/reuse_calibrate.py) ─────
 
 MIN_TEXT_CHARS = 1500  # below this, block pages / stubs produce garbage sims
-SIM_HARD = 0.97  # re-post regardless of company-name agreement
+SIM_HARD = 0.94  # re-post regardless of company-name agreement
 SIM_COMPANY = 0.90  # re-post when the fuzzy company names also agree
 SIM_WARN = 0.85  # below SIM_COMPANY (or no name agreement): warn only
 
