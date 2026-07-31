@@ -113,6 +113,25 @@ def test_logging_never_raises(failures_log, monkeypatch):
     apply_failures_log.log_apply_failure(url="https://example.com/8", outcome="fail")  # no raise
 
 
+def test_stale_stream_handler_does_not_swallow_writes(failures_log):
+    """Regression: a non-file handler left on the logger must not block the JSONL write.
+
+    CI failed with FileNotFoundError on the tmp path while still showing the
+    JSON in pytest's captured log — classic early-return on a stale
+    StreamHandler (propagate to root) that never opened the override file.
+    """
+    import logging
+
+    from hunter import apply_failures_log
+    from hunter.apply_failures_log import log_apply_failure
+
+    log_obj = logging.getLogger(apply_failures_log._FAILURE_LOGGER_NAME)
+    log_obj.addHandler(logging.StreamHandler())
+    log_apply_failure(url="https://example.com/stale", outcome="fail", company="Stale")
+    assert failures_log.exists()
+    assert "Stale" in failures_log.read_text(encoding="utf-8")
+
+
 # ── read_last_failures ────────────────────────────────────────────────────────
 
 

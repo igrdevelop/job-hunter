@@ -31,21 +31,49 @@ LOGGED_OUTCOMES = frozenset({"fail", "cli_timeout", "rate_limited"})
 _log_path_override: Path | str | None = None  # test hook — see set_log_path_for_tests
 
 
+def _desired_log_path() -> Path:
+    if _log_path_override is not None:
+        return Path(_log_path_override)
+    from hunter.config import PROJECT_DIR
+
+    log_dir = PROJECT_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    return log_dir / "apply_failures.jsonl"
+
+
+def _clear_failure_handlers() -> None:
+    log_obj = logging.getLogger(_FAILURE_LOGGER_NAME)
+    for h in list(log_obj.handlers):
+        log_obj.removeHandler(h)
+        h.close()
+
+
 def _get_failure_logger() -> logging.Logger:
     """Lazily create (once per process) the JSONL file logger.
 
     `propagate = False` keeps these lines out of hunter_errors.log — they'd
     otherwise be duplicated (once as a plain-text log line, once as JSON).
+
+    Handlers are reused ONLY when they already point at the current desired
+    path. A bare `if log_obj.handlers: return` is wrong: pytest (or a prior
+    test) can leave a StreamHandler / closed FileHandler on this logger, and
+    we'd then .info() into the void while the test's tmp JSONL never appears.
     """
     log_obj = logging.getLogger(_FAILURE_LOGGER_NAME)
-    if log_obj.handlers:
-        return log_obj
+    path = _desired_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    desired = path.resolve()
 
-    from hunter.config import PROJECT_DIR
+    for h in list(log_obj.handlers):
+        if (
+            isinstance(h, RotatingFileHandler)
+            and Path(getattr(h, "baseFilename", "")).resolve() == desired
+        ):
+            log_obj.setLevel(logging.INFO)
+            log_obj.propagate = False
+            return log_obj
 
-    log_dir = PROJECT_DIR / "logs"
-    log_dir.mkdir(exist_ok=True)
-    path = _log_path_override or (log_dir / "apply_failures.jsonl")
+    _clear_failure_handlers()
 
     handler = RotatingFileHandler(
         path,
@@ -65,10 +93,7 @@ def set_log_path_for_tests(path) -> None:
     so the next log_apply_failure() call reopens at the new path."""
     global _log_path_override
     _log_path_override = path
-    log_obj = logging.getLogger(_FAILURE_LOGGER_NAME)
-    for h in list(log_obj.handlers):
-        log_obj.removeHandler(h)
-        h.close()
+    _clear_failure_handlers()
 
 
 def log_apply_failure(
@@ -113,9 +138,7 @@ def read_last_failures(n: int = 5) -> list[dict]:
     line from a mid-write crash) yields fewer/no records rather than raising
     — a Telegram command must never 500 on a broken log line.
     """
-    from hunter.config import PROJECT_DIR
-
-    path = _log_path_override or (PROJECT_DIR / "logs" / "apply_failures.jsonl")
+    path = _desired_log_path()
     try:
         with open(path, encoding="utf-8") as fh:
             lines = fh.readlines()

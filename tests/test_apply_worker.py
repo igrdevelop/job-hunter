@@ -49,6 +49,10 @@ def _no_real_delay(monkeypatch):
     monkeypatch.setattr(apply_worker, "POLL_INTERVAL_SEC", 0)
     monkeypatch.setattr(apply_worker, "_BACKOFF_SEC", 0)
     monkeypatch.setattr(apply_worker, "_DUP_BACKOFF_SEC", 0)
+    # Fresh CI VMs often have time.monotonic() << 1800s. Resetting the
+    # last-alert stamps to 0.0 then makes `now - 0 < cooldown` and silently
+    # suppresses the Telegram lines these tests assert on.
+    monkeypatch.setattr(apply_worker, "_READY_ALERT_COOLDOWN_SEC", 0)
     # Never touch the real repo tracker.db's config KV table.
     monkeypatch.setattr(apply_worker.llm_outage, "pause_remaining", MagicMock(return_value=0))
     # Readiness gate must pass by default — individual tests override.
