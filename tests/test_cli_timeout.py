@@ -113,6 +113,71 @@ def test_url_variant_timeout_maps_to_cli_timeout_when_widened(monkeypatch):
     assert "timed out" in detail.lower()
 
 
+# ── Cancel must kill the child so release_claim can't double-apply ────────────
+
+
+def test_subprocess_cancel_kills_child(monkeypatch):
+    from hunter.services import apply_service
+
+    proc = _FakeProc()
+
+    async def _fake_exec(*a, **k):
+        return proc
+
+    async def _cancel(*a, **k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(apply_service.asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(apply_service, "_effective_timeout", lambda t: t)
+    monkeypatch.setattr(apply_service.asyncio, "wait_for", _cancel)
+
+    async def _run():
+        await apply_service.run_apply_agent_subprocess(
+            job=_job(),
+            timeout_sec=5,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+
+    try:
+        asyncio.run(_run())
+        raise AssertionError("CancelledError was not raised")
+    except asyncio.CancelledError:
+        pass
+    assert proc.killed is True
+
+
+def test_url_variant_cancel_kills_child(monkeypatch):
+    from hunter.services import apply_service
+
+    proc = _FakeProc()
+
+    async def _fake_exec(*a, **k):
+        return proc
+
+    async def _cancel(*a, **k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(apply_service.asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(apply_service, "_effective_timeout", lambda t: t)
+    monkeypatch.setattr(apply_service.asyncio, "wait_for", _cancel)
+
+    async def _run():
+        await apply_service.run_apply_agent_for_url(
+            url="https://example.com/job/1",
+            timeout_sec=5,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+
+    try:
+        asyncio.run(_run())
+        raise AssertionError("CancelledError was not raised")
+    except asyncio.CancelledError:
+        pass
+    assert proc.killed is True
+
+
 # ── _auto_apply_all: no FAIL row, batch continues (unlike llm_outage) ────────
 
 

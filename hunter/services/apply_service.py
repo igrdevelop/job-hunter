@@ -180,6 +180,16 @@ async def run_apply_agent_subprocess(
                 cli_mode=cli_mode,
             )
             return outcome
+        except asyncio.CancelledError:
+            # Worker/task cancel must not leave apply_agent.py running while
+            # the claim is released back to PENDING — otherwise the next
+            # claim launches a duplicate apply against the same vacancy.
+            proc.kill()
+            try:
+                await proc.communicate()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[auto-apply] communicate after cancel kill: %s", e)
+            raise
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
             logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
@@ -305,6 +315,13 @@ async def run_apply_agent_for_url(
             cli_mode=cli_mode,
         )
         return outcome, detail
+    except asyncio.CancelledError:
+        proc.kill()
+        try:
+            await proc.communicate()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[apply_agent] communicate after cancel kill: %s", e)
+        raise
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
