@@ -166,6 +166,22 @@ DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "1800"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 
+# Hunt / apply split (docs/HUNT_APPLY_SPLIT_PLAN.md M1): feature-gated so the
+# old same-loop behavior is the default. When true, the hunt loop writes new
+# jobs to a PENDING queue in tracker.db (ats_status='PENDING') instead of
+# applying inline under _hunt_lock, and a separate apply_worker_loop drains
+# that queue on its own schedule — a long apply batch no longer blocks hunts.
+APPLY_QUEUE_ENABLED: bool = os.getenv("APPLY_QUEUE_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# A PENDING row claimed (ats_status -> IN_PROGRESS, claimed_at stamped) but
+# never resolved within this many minutes means the worker that claimed it
+# crashed/was killed — the periodic stale-claim sweep resets it back to
+# PENDING so it isn't stuck forever.
+APPLY_CLAIM_TIMEOUT_MIN: int = int(os.getenv("APPLY_CLAIM_TIMEOUT_MIN", "60"))
+
 # ── Scraper health monitoring ─────────────────────────────────────────────────
 # Track per-source raw yield per hunt run; alert when a source that used to
 # produce jobs goes dry for N consecutive runs (broken selector / renamed field).

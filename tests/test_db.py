@@ -67,6 +67,8 @@ def test_init_db_has_all_columns(db_path: Path) -> None:
         "fail_count",
         "cost_usd",
         "ats_verdict",
+        "claimed_at",
+        "pending_meta",
     }
     with get_db(db_path) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}

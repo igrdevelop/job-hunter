@@ -18,6 +18,7 @@ from telegram.ext import ContextTypes
 from hunter.config import (
     AUTO_APPLY,
     APPLY_AGENT_PATH,
+    APPLY_QUEUE_ENABLED,
     APPLY_USE_CLI,
     LLM_API_KEY,
     LLM_PROVIDER,
@@ -39,6 +40,7 @@ from hunter.tracker import (
     dedup_key,
     normalize_url,
     add_failed,
+    add_pending,
     get_failed_jobs,
     remove_failed,
     increment_fail_count,
@@ -352,7 +354,40 @@ async def _run_hunt_impl(
     if not auto_eligible_jobs:
         return
 
-    if AUTO_APPLY:
+    if AUTO_APPLY and APPLY_QUEUE_ENABLED:
+        # M1 (docs/HUNT_APPLY_SPLIT_PLAN.md): hand off to the PENDING queue
+        # instead of applying inline — _hunt_lock (held for this whole
+        # function) is released in seconds instead of however long a batch
+        # of CLI-fallback applies would take. A separate apply_worker_loop
+        # (hunter/apply_worker.py) drains the queue on its own schedule.
+        # Outage pause still lives in the worker (jobs can wait in PENDING).
+        # Readiness gate runs HERE too so we don't fill the queue when apply
+        # can't run at all (no API key / CLI) — those vacancies return next
+        # hunt instead of becoming FAIL rows in the worker.
+        auth_error = await asyncio.to_thread(_check_apply_ready)
+        if auth_error:
+            await send_text(
+                context,
+                f"🔐 <b>Apply not ready ({mode}) — not queuing</b>\n\n"
+                f"<pre>{auth_error[:300]}</pre>\n\n"
+                f"Fix the issue and restart the bot. Vacancies return on the next hunt.",
+            )
+            return
+
+        capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
+        skipped_count = len(auto_eligible_jobs) - len(capped)
+        for j in capped:
+            await asyncio.to_thread(add_pending, j)
+        if skipped_count:
+            await send_text(
+                context,
+                f"⚠️ Capped to {MAX_JOBS_PER_RUN} (skipped {skipped_count})",
+            )
+        await send_text(
+            context,
+            f"📥 Queued {len(capped)} job(s) for the apply worker (<code>/queue</code>).",
+        )
+    elif AUTO_APPLY:
         # M2 (docs/LLM_OUTAGE_RESILIENCE_PLAN.md): while the LLM outage pause
         # is armed, skip the apply step SILENTLY (log only) — the one alert was
         # sent when the pause was armed; per-slot messages would repeat all
@@ -507,6 +542,18 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "Check the provider account/key. Vacancies were NOT marked FAIL.",
             )
             break
+        elif outcome == "cli_timeout":
+            # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): a widened (CLI-eligible)
+            # subprocess timeout is infrastructure, not the vacancy's fault —
+            # no FAIL row, no tracker row at all. The job has no tracker row,
+            # so the next hunt re-fetches it (the listing is the queue). The
+            # batch continues — unlike llm_outage this isn't global state.
+            consecutive_fails = 0
+            await send_text(
+                context,
+                f"⏰ [{i}/{total}] <b>CLI timed out</b>: {job.company} — {job.title} "
+                "— will retry on the next hunt.",
+            )
         elif outcome == "duplicate":
             # A manual paste/Apply-button click is already generating this
             # exact URL right now — not this vacancy's fault, no FAIL row.
@@ -625,6 +672,21 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Check the provider account/key.",
             )
             break
+        elif outcome == "cli_timeout":
+            # M3: infrastructure timeout, not the vacancy's fault — leave
+            # fail_count untouched (row stays retryable at its current count).
+            # Counted toward the consecutive-fail breaker (a broken CLI would
+            # otherwise time out on every remaining row in the batch).
+            consecutive_fails += 1
+            logger.warning(
+                "[retry] CLI timed out, not escalating fail_count: %s - %s",
+                job.company,
+                job.title,
+            )
+            await send_text(
+                context,
+                f"⏰ Retry CLI timeout: {job.company} — {job.title} — will retry next cycle.",
+            )
         elif outcome == "duplicate":
             # Already generating elsewhere (manual paste/Apply-button) —
             # leave fail_count untouched, this row's turn just comes again

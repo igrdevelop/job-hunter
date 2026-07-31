@@ -92,6 +92,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_normalize": ("hunter.commands.normalize", "cmd_normalize"),
     "cmd_funnel": ("hunter.commands.funnel", "cmd_funnel"),
     "cmd_retry_reset": ("hunter.commands.retry_reset", "cmd_retry_reset"),
+    "cmd_fails": ("hunter.commands.fails", "cmd_fails"),
+    "cmd_queue": ("hunter.commands.queue", "cmd_queue"),
     "cmd_health": ("hunter.commands.health", "cmd_health"),
     "cmd_llm": ("hunter.commands.llm", "cmd_llm"),
     "cmd_dual": ("hunter.commands.dual", "cmd_dual"),
@@ -166,8 +168,23 @@ async def _post_init(app: Application) -> None:
             BotCommand("llm", "Show/switch active LLM profile [name]"),
             BotCommand("dual", "Toggle dual-apply A/B comparison [on|off]"),
             BotCommand("tracks", "Show/switch active candidate tracks [angular|react|both]"),
+            BotCommand("fails", "Last N apply failures from the audit log [N]"),
+            BotCommand("queue", "Apply queue: PENDING/IN_PROGRESS jobs [limit]"),
         ]
     )
+
+    # Apply worker (M1, docs/HUNT_APPLY_SPLIT_PLAN.md): a long-running
+    # background task draining the PENDING queue, independent of the hunt
+    # loop / _hunt_lock. Only started when the split is turned on; `app`
+    # itself is passed as the worker's "context" — it exposes `.bot` same as
+    # a real ContextTypes.DEFAULT_TYPE, which is all send_text() needs.
+    from hunter.config import APPLY_QUEUE_ENABLED
+
+    if APPLY_QUEUE_ENABLED:
+        from hunter.apply_worker import apply_worker_loop
+
+        app.create_task(apply_worker_loop(app, worker_id=0), name="apply_worker_0")
+        logger.info("[apply_worker] background task started (APPLY_QUEUE_ENABLED=true)")
 
     # Bootstrap / validate Google Sheets on startup.
     try:
@@ -268,6 +285,8 @@ def build_application() -> Application:
     from hunter.commands.normalize import cmd_normalize
     from hunter.commands.funnel import cmd_funnel
     from hunter.commands.retry_reset import cmd_retry_reset
+    from hunter.commands.fails import cmd_fails
+    from hunter.commands.queue import cmd_queue
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
     from hunter.commands.dual import cmd_dual
@@ -299,6 +318,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("normalize", cmd_normalize))
     app.add_handler(CommandHandler("funnel", cmd_funnel))
     app.add_handler(CommandHandler("retry_reset", cmd_retry_reset))
+    app.add_handler(CommandHandler("fails", cmd_fails))
+    app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("llm", cmd_llm))
     app.add_handler(CommandHandler("dual", cmd_dual))

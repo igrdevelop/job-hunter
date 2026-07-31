@@ -101,6 +101,12 @@ async def _force_run(update: Update, url: str | None, body: str) -> None:
     Called from cmd_force (inline args) and from cmd_url (_force_waiting path).
     """
     if body and _looks_like_paste(body):
+        # Force-paste still goes through _handle_paste → _run_apply_agent,
+        # which refuses via try_mark_apply_active if a worker/manual run is
+        # already in flight for the extracted URL.
+        paste_url = _extract_url(body)
+        if paste_url and await _force_blocked_by_inflight(update, paste_url):
+            return
         await update.message.reply_text(
             f"🔧 <b>Force + job text</b> — {len(body.strip())} chars.\n"
             "Bypasses: tracker dedup, React-only. Starting…",
@@ -122,6 +128,12 @@ async def _force_run(update: Update, url: str | None, body: str) -> None:
         )
         return
 
+    # Deleting the tracker row does NOT kill a live apply_agent child. If the
+    # worker (or a manual run) is mid-generation, refuse rather than starting
+    # a second LLM pipeline for the same vacancy (Bugbot finding on PR #177).
+    if await _force_blocked_by_inflight(update, url):
+        return
+
     await update.message.reply_text(
         f"🔍 <b>Force: checking for existing entry…</b>\n🔗 {url}",
         parse_mode=ParseMode.HTML,
@@ -137,6 +149,38 @@ async def _force_run(update: Update, url: str | None, body: str) -> None:
     )
     logger.info("[Force] Launching apply_agent --force for: %s", url)
     asyncio.create_task(_run_apply_agent(url, force=True))
+
+
+async def _force_blocked_by_inflight(update: Update, url: str) -> bool:
+    """True (and reply sent) when a generation for ``url`` is already running.
+
+    Covers both the apply-queue worker (IN_PROGRESS tracker row) and any
+    in-memory claim from try_mark_apply_active (manual paste / hunt / worker).
+    """
+    from hunter.bot.state import _active_apply_urls
+    from hunter.tracker import IN_PROGRESS_ATS, lookup_url, normalize_url
+
+    rows = await asyncio.to_thread(lookup_url, url)
+    if any((r.get("ats") or "") == IN_PROGRESS_ATS for r in rows):
+        await update.message.reply_text(
+            "⚠️ <b>Already generating</b> — this URL is IN_PROGRESS in the apply queue.\n"
+            "Wait until it finishes (<code>/status</code> / <code>/queue</code>), "
+            "then <code>/force</code> again.\n"
+            f"🔗 {url}",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return True
+
+    key = normalize_url(url)
+    if key and key in _active_apply_urls:
+        await update.message.reply_text(
+            f"⚠️ <b>Already generating</b> for this vacancy — wait for it to finish.\n🔗 {url}",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return True
+    return False
 
 
 async def cmd_force(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
