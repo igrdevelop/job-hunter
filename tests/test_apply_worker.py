@@ -63,6 +63,18 @@ def test_resolve_ok_delivers_and_notifies(tracker_db, monkeypatch):
     monkeypatch.setattr("hunter.delivery.deliver_apply_now", deliver)
 
     job = _job(1)
+    # Real success leaves a terminal applied row (add_applied clears any
+    # IN_PROGRESS placeholder). Without it, "ok" is treated as a soft abort.
+    tracker.add_applied(
+        {
+            "company_name": job.company,
+            "job_title": job.title,
+            "apply_url": job.url,
+            "stack": "Angular",
+            "ats_score": "90",
+            "output_folder": "/tmp/x",
+        }
+    )
     is_fail = asyncio.run(apply_worker._resolve_outcome(None, 0, job, "ok"))
 
     assert is_fail is False
@@ -78,9 +90,69 @@ def test_resolve_ok_shows_permalink_when_present(tracker_db, monkeypatch):
     monkeypatch.setattr("hunter.delivery.deliver_apply_now", AsyncMock())
 
     job = _job(2, raw={"permalink": "https://real.example.com/p/2"})
+    tracker.add_applied(
+        {
+            "company_name": job.company,
+            "job_title": job.title,
+            "apply_url": job.url,
+            "stack": "Angular",
+            "ats_score": "90",
+            "output_folder": "/tmp/x",
+        }
+    )
     asyncio.run(apply_worker._resolve_outcome(None, 0, job, "ok"))
 
     assert any("https://real.example.com/p/2" in t for t in sent)
+
+
+def test_resolve_ok_soft_abort_clears_in_progress_placeholder(tracker_db, monkeypatch):
+    """Exit 0 with no terminal tracker write must not leave IN_PROGRESS."""
+    sent = []
+    monkeypatch.setattr(
+        apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
+    )
+    deliver = AsyncMock()
+    monkeypatch.setattr("hunter.delivery.deliver_apply_now", deliver)
+
+    job = _job(20)
+    tracker.add_pending(job)
+    tracker.claim_pending()
+    assert tracker.count_in_progress() == 1
+
+    is_fail = asyncio.run(apply_worker._resolve_outcome(None, 0, job, "ok"))
+
+    assert is_fail is False
+    deliver.assert_not_awaited()
+    assert tracker.lookup_url(job.url) == []
+    assert tracker.count_in_progress() == 0
+    assert any("without docs" in t for t in sent)
+    assert not any("Done" in t for t in sent)
+
+
+def test_resolve_ok_soft_terminal_skips_delivery(tracker_db, monkeypatch):
+    """Exit 0 after EXPIRED/SKIP (terminal write) — no Done, no deliver."""
+    sent = []
+    monkeypatch.setattr(
+        apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
+    )
+    deliver = AsyncMock()
+    monkeypatch.setattr("hunter.delivery.deliver_apply_now", deliver)
+
+    job = _job(21)
+    tracker.add_pending(job)
+    tracker.claim_pending()
+    tracker.add_expired(job.url)  # clears IN_PROGRESS, writes EXPIRED
+
+    is_fail = asyncio.run(apply_worker._resolve_outcome(None, 0, job, "ok"))
+
+    assert is_fail is False
+    deliver.assert_not_awaited()
+    assert not any("Done" in t for t in sent)
+    rows = tracker.lookup_url(job.url)
+    assert len(rows) == 1
+    # Convention: ats_status=SKIP, the EXPIRED marker lives in Sent.
+    assert rows[0]["ats"] == "SKIP"
+    assert (rows[0].get("sent") or "").upper() == "EXPIRED"
 
 
 def test_resolve_manual_notifies_no_tracker_write(tracker_db, monkeypatch):
@@ -214,7 +286,21 @@ def test_loop_claims_and_processes_one_pending_job(tracker_db, monkeypatch):
         calls["n"] += 1
         if calls["n"] > 1:
             raise _StopLoop()
-        return real_claim()
+        row = real_claim()
+        # Simulate a successful apply writing the terminal row before the
+        # worker resolves the "ok" outcome (what apply_agent does on exit 0
+        # after generate_docs).
+        tracker.add_applied(
+            {
+                "company_name": job.company,
+                "job_title": job.title,
+                "apply_url": job.url,
+                "stack": "Angular",
+                "ats_score": "90",
+                "output_folder": "/tmp/x",
+            }
+        )
+        return row
 
     monkeypatch.setattr(tracker, "claim_pending", MagicMock(side_effect=_claim_then_stop))
 

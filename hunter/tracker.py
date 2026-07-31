@@ -1222,11 +1222,11 @@ def list_pending(limit: int = 20) -> list[dict]:
 def delete_pending_row(url: str) -> bool:
     """Delete a PENDING/IN_PROGRESS row for this URL outright.
 
-    Not needed by the normal worker flow — every terminal-write function
-    (add_applied/add_failed/add_skipped/...) already clears its own
-    placeholder in place via `_clear_own_placeholder`. This is the manual
-    escape hatch (e.g. a future `/queue cancel <url>`) for dropping a queued
-    job without giving it any terminal status at all. Returns True if a row
+    Used by `apply_worker._resolve_outcome` when apply_agent exits 0 without
+    writing a terminal row (soft abort — too-short text, lang/judge block,
+    bogus company): drop the placeholder so the URL isn't stranded
+    IN_PROGRESS / deduped until the stale-claim sweep. Also the manual
+    escape hatch for a future `/queue cancel <url>`. Returns True if a row
     was deleted.
     """
     norm = normalize_url(url)

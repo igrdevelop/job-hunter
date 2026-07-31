@@ -44,13 +44,36 @@ async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
     permalink = (job.raw or {}).get("permalink")
 
     if outcome == "ok":
-        from hunter.delivery import deliver_apply_now
+        # apply_agent exits 0 for BOTH real success and soft aborts that write
+        # no terminal tracker row (too-short text, lang/judge block, bogus
+        # company — see apply_api.py sys.exit(0) paths). Soft-abort EXPIRED/
+        # SKIP/REACT paths DO write a terminal row and clear the placeholder.
+        # Without this check we'd deliver + claim "Done" while leaving
+        # IN_PROGRESS stranded until the stale-claim sweep (Bugbot finding).
+        if await asyncio.to_thread(tracker.has_successful_entry, job.url):
+            from hunter.delivery import deliver_apply_now
 
-        await deliver_apply_now(job.url)
-        text = f"✅ [W{worker_id}] Done: {job.company} — {job.title}"
-        if permalink:
-            text += f"\n🔗 Post: {permalink}"
-        await send_text(context, text)
+            await deliver_apply_now(job.url)
+            text = f"✅ [W{worker_id}] Done: {job.company} — {job.title}"
+            if permalink:
+                text += f"\n🔗 Post: {permalink}"
+            await send_text(context, text)
+            return False
+
+        if await asyncio.to_thread(tracker._is_known_terminal, job.url, job.company, job.title):
+            # Soft terminal (EXPIRED / SKIP / react) — apply_agent already
+            # notified Telegram and cleared the placeholder. No delivery.
+            return False
+
+        # Exit 0 left only the IN_PROGRESS placeholder. Drop it so the URL
+        # isn't deduped until the stale-claim sweep — matches the inline path
+        # (no tracker row → vacancy returns on the next hunt).
+        await asyncio.to_thread(tracker.delete_pending_row, job.url)
+        await send_text(
+            context,
+            f"ℹ️ [W{worker_id}] Apply exited without docs: {job.company} — {job.title} "
+            "— placeholder cleared, vacancy can return on the next hunt.",
+        )
         return False
 
     if outcome == "manual":
