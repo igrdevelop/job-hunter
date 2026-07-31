@@ -12,14 +12,13 @@ import html
 import logging
 import sys
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from telegram import Update
 
 from hunter.config import APPLY_AGENT_PATH
-from hunter.bot.state import _active_apply_urls, _APPLY_AGENT_TIMEOUT
+from hunter.bot.state import _APPLY_AGENT_TIMEOUT, mark_apply_done, try_mark_apply_active
 from hunter.bot.notifications import _tg_notify
 from hunter.bot.paste import _extract_url
 
@@ -47,8 +46,24 @@ async def _run_apply_agent(
     from hunter.services.apply_service import run_apply_agent_for_url
 
     label = url or "(pasted text)"
-    if url:
-        _active_apply_urls[url] = datetime.now(timezone.utc)
+    if url and not try_mark_apply_active(url):
+        logger.warning(
+            "[apply_agent] duplicate request for %s — already generating elsewhere, skipping",
+            label,
+        )
+        await _tg_notify(
+            f"⏭ <b>Already generating</b> for this vacancy — skipping duplicate.\n🔗 {label}"
+        )
+        if paste_file:
+            try:
+                Path(paste_file).unlink(missing_ok=True)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "[apply_agent] could not delete paste file %s: %s",
+                    paste_file,
+                    cleanup_err,
+                )
+        return
     try:
         outcome, error_detail = await run_apply_agent_for_url(
             url=url,
@@ -98,7 +113,8 @@ async def _run_apply_agent(
         logger.error("[apply_agent] exception: %s", e)
         await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
     finally:
-        _active_apply_urls.pop(url, None)
+        if url:
+            mark_apply_done(url)
         if paste_file:
             try:
                 Path(paste_file).unlink(missing_ok=True)
@@ -121,64 +137,79 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
 
     for i, jid in enumerate(job_ids, 1):
         url = job_view_url(jid)
-        try:
-            await update.message.reply_text(
-                f"⏳ [{i}/{total}] LinkedIn job {jid}",
-                disable_web_page_preview=True,
-            )
-        except Exception:
-            pass
 
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(APPLY_AGENT_PATH),
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode == 0:
-            ok += 1
-            logger.info("[linkedin_batch] OK job %s", jid)
-            # This path had no immediate Sheets/Drive hooks at all — rows used
-            # to appear only via the periodic backfills.
-            from hunter.delivery import deliver_apply_now
-
-            await deliver_apply_now(url)
-        elif proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
-            # Global account state — no FAIL row, and the rest of the batch
-            # would only hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
-            logger.error("[linkedin_batch] LLM outage — stopping batch at job %s", jid)
+        if not try_mark_apply_active(url):
+            logger.warning("[linkedin_batch] skipping job %s — already generating elsewhere", jid)
             try:
                 await update.message.reply_text(
-                    f"💳 LLM outage (billing/auth) — stopping batch at [{i}/{total}]. "
-                    "Jobs were NOT marked FAIL; re-run once the account is fixed.",
+                    f"⏭ [{i}/{total}] Skipping {jid} — already generating elsewhere",
                     disable_web_page_preview=True,
                 )
             except Exception:
                 pass
-            break
-        else:
-            failed += 1
-            logger.error(
-                "[linkedin_batch] FAIL job %s: %s",
-                jid,
-                stderr.decode(errors="replace")[-300:],
-            )
+            continue
+
+        try:
             try:
-                stub = Job(
-                    title=f"LinkedIn {jid}",
-                    company="LinkedIn",
-                    url=url,
-                    source="linkedin",
-                    location="",
+                await update.message.reply_text(
+                    f"⏳ [{i}/{total}] LinkedIn job {jid}",
+                    disable_web_page_preview=True,
                 )
-                await asyncio.to_thread(add_failed, stub)
-            except Exception as e:
-                logger.warning(
-                    "[linkedin_batch] could not write FAIL to tracker for %s: %s", jid, e
+            except Exception:
+                pass
+
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(APPLY_AGENT_PATH),
+                url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                ok += 1
+                logger.info("[linkedin_batch] OK job %s", jid)
+                # This path had no immediate Sheets/Drive hooks at all — rows used
+                # to appear only via the periodic backfills.
+                from hunter.delivery import deliver_apply_now
+
+                await deliver_apply_now(url)
+            elif proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
+                # Global account state — no FAIL row, and the rest of the batch
+                # would only hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
+                logger.error("[linkedin_batch] LLM outage — stopping batch at job %s", jid)
+                try:
+                    await update.message.reply_text(
+                        f"💳 LLM outage (billing/auth) — stopping batch at [{i}/{total}]. "
+                        "Jobs were NOT marked FAIL; re-run once the account is fixed.",
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    pass
+                break
+            else:
+                failed += 1
+                logger.error(
+                    "[linkedin_batch] FAIL job %s: %s",
+                    jid,
+                    stderr.decode(errors="replace")[-300:],
                 )
+                try:
+                    stub = Job(
+                        title=f"LinkedIn {jid}",
+                        company="LinkedIn",
+                        url=url,
+                        source="linkedin",
+                        location="",
+                    )
+                    await asyncio.to_thread(add_failed, stub)
+                except Exception as e:
+                    logger.warning(
+                        "[linkedin_batch] could not write FAIL to tracker for %s: %s", jid, e
+                    )
+        finally:
+            mark_apply_done(url)
 
     try:
         from telegram.constants import ParseMode
