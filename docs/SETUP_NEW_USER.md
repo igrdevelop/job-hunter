@@ -54,46 +54,24 @@ Fill in the three required variables at minimum:
 
 Everything else in `.env.example` has a working default; tune it later.
 
-## 6. Configure your identity: candidate.yaml
+## 6. Configure your candidate data
 
-```bash
-cp candidate.example.yaml candidate.yaml
-```
+All candidate-personal files live in the `candidate/` folder. Edit them
+with your real data — see [candidate/README.md](../candidate/README.md)
+for what each file does.
 
-Fill in:
+The three files to edit:
 
-- `identity` — your name, headline, CV filename prefix, and the contact line
-  printed on the generated CV.
-- `location` — your home city (and lowercase aliases), which cities you'll
-  accept a hybrid commute to, and your work authorization (`EU`/`US`/`any`).
-  This drives the job-board location filters and the doomed-vacancy gate.
-- `languages` — which languages you speak, which CV language variants to
-  generate, and which REQUIRED languages in a posting should auto-skip it
-  (defaults to German/French/Dutch — drop a code if you speak that language).
-- `employers` — your real employer names (used by content QA and the
-  contamination guard so a company name is never mistaken for a foreign-
-  language leak), your canonical profile titles, and one optional "flexible"
-  employer whose project list the verdict-refine loop may lightly extend on
-  its last, most aggressive rewrite round (never invents an employer).
-- `education` — your school (substring match, lowercase) and how many roles
-  your resume should list.
-- `source_urls` — only needed if you want Pracuj.pl / theprotocol.it /
-  JobLeads to search a specific city instead of your `location.home_city`.
+1. **`candidate/candidate.yaml`** — structured identity: name, city,
+   languages, employers. Drives filters, QA checks and LLM prompts.
+2. **`candidate/candidate_profile.md`** — free-text career history.
+   The LLM reads this + the job posting to generate your CV.
+3. **`candidate/base_cv_angular.md`** (or whichever track you target) —
+   pre-polished resume bullets. Dates and companies must match
+   `candidate_profile.md`.
 
-`candidate.yaml` is gitignored — it stays on your machine only. If you skip
-this step entirely, the bot still runs using its original built-in defaults
-(a warning is logged once); nothing crashes.
-
-## 7. Configure your CV content
-
-```bash
-cp prompts/candidate_profile.example.md prompts/candidate_profile.md
-cp prompts/base_cv_angular.example.md   prompts/base_cv_angular.md
-```
-
-Fill both in with your real work history, skills and projects. See
-[prompts/README.md](../prompts/README.md) for the full system-vs-personal
-file split and what each file is for.
+If you skip this step, the bot runs using the example data that ships
+with the repo (a warning is logged once); nothing crashes.
 
 ## 8. Start the bot
 

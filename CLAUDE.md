@@ -153,7 +153,7 @@ llm_client.py               LLM wrapper: Anthropic + OpenAI with retry + JSON pa
                             vacancy's fault). Dead rows from before: /retry_reset revives them.
 
 hunter/
-  candidate.py               Loader for the gitignored candidate.yaml (docs/
+  candidate.py               Loader for candidate/candidate.yaml (docs/
                             CANDIDATE_YAML_PLAN.md, docs/SETUP_NEW_USER.md): the
                             single source of truth for the candidate's identity,
                             home city, languages and employer history, so a
@@ -544,23 +544,11 @@ hunter/
     workable.py / greenhouse.py / lever.py / recruitee.py / ashby.py
   ats_companies.json        Company list for ATS aggregator
 
-prompts/                        See prompts/README.md. System files are tracked; ALL
-                                candidate-personal files are GITIGNORED (public repo) —
-                                they exist locally / on the deploy host only, and
-                                docker-compose mounts them into the image.
-  README.md                     System-vs-personal split + setup instructions
-  generation_rules.md           LLM instructions for resume/CL generation (was system_prompt.md) [tracked]
+prompts/                        System-level LLM instructions (see prompts/README.md).
+                                Candidate-personal files moved to candidate/ (see above).
+  README.md                     What lives here vs candidate/
+  generation_rules.md           LLM instructions for resume/CL generation [tracked]
   judge_rules.md                Claim-judge instructions [tracked]
-  candidate_profile.example.md  Template for candidate_profile.md [tracked]
-  base_cv_angular.example.md    Template for base CV track files [tracked]
-  candidate_profile.md          Candidate data (single source of truth for personal info) [GITIGNORED]
-  base_cv_angular.md            Pre-polished bullets for Angular track [GITIGNORED]
-  base_cv_react.md              Pre-polished bullets for React / JS track [GITIGNORED]
-  base_cv_ai.md                 Pre-polished bullets for AI-first track [GITIGNORED]
-  base_cv_fullstack_angular_nest.md  Pre-polished bullets for Angular + NestJS track [GITIGNORED]
-  base_cv_fullstack_react_next.md    Pre-polished bullets for React + Next.js track [GITIGNORED]
-  examples/                     Cover letter examples, About Me texts [GITIGNORED]
-  candidate/                    Private interview notes (not read by code) [GITIGNORED]
 
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
@@ -721,10 +709,12 @@ requirements.lock            GENERATED (`uv pip compile pyproject.toml --all-ext
                             both install from this file, not from pyproject.toml directly, so
                             prod and CI always run the exact same transitive versions. Replaces
                             the old hand-maintained, mostly-unpinned `requirements.txt`.
-candidate.example.yaml       Tracked template for candidate.yaml (below) — see
-                            docs/SETUP_NEW_USER.md + hunter/candidate.py
-candidate.yaml               Candidate identity/location/languages/employers config
-                            (gitignored — never commit; copy from the .example above)
+candidate/                  All candidate-personal files (see candidate/README.md):
+                            candidate.yaml (identity/location/languages/employers),
+                            candidate_profile.md (career narrative for LLM),
+                            base_cv_*.md (pre-polished bullets per stack),
+                            examples/ (few-shot cover letters / about-me),
+                            notes/ (private interview notes, gitignored)
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -746,7 +736,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_DEFAULT_PROFILE` | — | Pin a named profile as default (e.g. `deepseek-r1`). Overrides `LLM_PROVIDER+LLM_MODEL`. Persisted per-vacancy selection via `/llm <name>` wins over this. |
 | `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` wins over this env fallback — set it at runtime via `/dual shadow <name>` in Telegram (e.g. `/dual shadow deepseek-v4-pro`). Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
-| `CANDIDATE_TRACKS` | `angular` | Which stacks the candidate is applying for (docs/quality/09-multi-track-react.md). Default is today's behavior unchanged — React-only vacancies are filtered at three points (listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5 post-generation check). Set `angular,react` to also apply to React-only roles (uses `prompts/base_cv_react.md`, already-existing infra). Runtime override without a bot restart: `/tracks angular\|react\|both` (DB key `tracks_enabled` wins over this env var, same DB-wins-over-env pattern as `DUAL_SHADOW_PROFILE`). `hunter.config.active_tracks()` is the read helper. |
+| `CANDIDATE_TRACKS` | `angular` | Which stacks the candidate is applying for (docs/quality/09-multi-track-react.md). Default is today's behavior unchanged — React-only vacancies are filtered at three points (listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5 post-generation check). Set `angular,react` to also apply to React-only roles (uses `candidate/base_cv_react.md`, already-existing infra). Runtime override without a bot restart: `/tracks angular\|react\|both` (DB key `tracks_enabled` wins over this env var, same DB-wins-over-env pattern as `DUAL_SHADOW_PROFILE`). `hunter.config.active_tracks()` is the read helper. |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
 | `ANTHROPIC_API_KEY` | — | Anthropic key (for `sonnet` profile + judge) |
 | `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`, `deepseek-v4-pro`, `glm-5.2`) |
@@ -1460,8 +1450,8 @@ second `html.unescape()` pass.
 
 ## Important Rules for Agents
 
-- **Never commit** `.env`, `candidate.yaml`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`, and the personal prompt files (`prompts/candidate_profile.md`, `prompts/base_cv_*.md`, `prompts/candidate/`, `prompts/examples/` — gitignored; repo is public, only `.example` templates are tracked)
-- **Personal candidate facts (name, city, employers, languages) go through `hunter/candidate.py` only.** Don't hardcode a new name/city/employer/language string in production code — read it via `candidate.get(dotpath, default)`, with `default` reproducing today's behavior so a missing `candidate.yaml` degrades gracefully instead of crashing (see docs/CANDIDATE_YAML_PLAN.md). `prompts/candidate_profile.md` and the base-CV prompt files remain the source of truth for free-text career narrative — this rule is about short, structured facts that filters/QA/prompts compare against, not prose.
+- **Never commit** `.env`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`, `candidate/notes/`
+- **Personal candidate facts (name, city, employers, languages) go through `hunter/candidate.py` only.** Don't hardcode a new name/city/employer/language string in production code — read it via `candidate.get(dotpath, default)`, with `default` reproducing today's behavior so a missing `candidate.yaml` degrades gracefully instead of crashing (see docs/CANDIDATE_YAML_PLAN.md). `candidate/candidate_profile.md` and the base-CV files in `candidate/` remain the source of truth for free-text career narrative — this rule is about short, structured facts that filters/QA/prompts compare against, not prose.
 - Always test syntax after edits: `python -m compileall .`
 - Run `ruff check .` AND `ruff format .` before committing — CI gates on both
   (`ruff format --check`). Config in `pyproject.toml`, covers the whole repo:
@@ -1488,7 +1478,7 @@ second `html.unescape()` pass.
   (e.g. `colorama`) that don't belong in the Linux deploy image.
 - Run `pytest tests/` after changes to tracker, filters, or sources
 - Column index constants in `tracker.py` are hardcoded — update carefully
-- Candidate profile single source of truth: `prompts/candidate_profile.md`
+- Candidate profile single source of truth: `candidate/candidate_profile.md`
 - LibreOffice path: `C:/Program Files/LibreOffice/program/soffice.exe` (in `generate_docs.py`)
 - When changing tracker schema, bot behavior, or adding files — update CLAUDE.md in the same commit
 - New best-effort code (a subsystem that must swallow its own errors — Sheets/

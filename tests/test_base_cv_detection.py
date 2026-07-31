@@ -104,35 +104,35 @@ class TestLoadBaseCv:
 
     def test_loads_angular_base_cv(self, tmp_path):
         fake_content = "# Base CV Angular\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_angular.md").write_text(fake_content, encoding="utf-8")
             result = _load_base_cv("angular")
         assert result == fake_content
 
     def test_loads_react_base_cv(self, tmp_path):
         fake_content = "# Base CV React\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_react.md").write_text(fake_content, encoding="utf-8")
             result = _load_base_cv("react")
         assert result == fake_content
 
     def test_javascript_uses_react_file(self, tmp_path):
         fake_content = "# Base CV React/JS\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_react.md").write_text(fake_content, encoding="utf-8")
             result = _load_base_cv("javascript")
         assert result == fake_content
 
     def test_loads_ai_base_cv(self, tmp_path):
         fake_content = "# Base CV AI\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_ai.md").write_text(fake_content, encoding="utf-8")
             result = _load_base_cv("ai")
         assert result == fake_content
 
     def test_loads_fullstack_angular_nest(self, tmp_path):
         fake_content = "# Base CV Angular+Nest\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_fullstack_angular_nest.md").write_text(
                 fake_content, encoding="utf-8"
             )
@@ -141,7 +141,7 @@ class TestLoadBaseCv:
 
     def test_loads_fullstack_react_next(self, tmp_path):
         fake_content = "# Base CV React+Next\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_fullstack_react_next.md").write_text(
                 fake_content, encoding="utf-8"
             )
@@ -149,7 +149,7 @@ class TestLoadBaseCv:
         assert result == fake_content
 
     def test_returns_empty_when_file_missing(self, tmp_path, capsys):
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             result = _load_base_cv("angular")
         assert result == ""
         captured = capsys.readouterr()
@@ -157,7 +157,7 @@ class TestLoadBaseCv:
 
     def test_case_insensitive_key(self, tmp_path):
         fake_content = "# Base CV Angular\n..."
-        with patch("hunter.apply_api.PROMPTS_DIR", tmp_path):
+        with patch("hunter.apply_api.CANDIDATE_DIR", tmp_path):
             (tmp_path / "base_cv_angular.md").write_text(fake_content, encoding="utf-8")
             result = _load_base_cv("Angular")  # uppercase
         assert result == fake_content

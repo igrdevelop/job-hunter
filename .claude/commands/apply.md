@@ -9,14 +9,14 @@ $ARGUMENTS
 
 Read the file `D:/LearningProject/Claude/prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
 
-Also read the candidate profile from `D:/LearningProject/Claude/prompts/candidate_profile.md` — use it as the single source of truth for all candidate data.
+Also read the candidate profile from `D:/LearningProject/Claude/candidate/candidate_profile.md` — use it as the single source of truth for all candidate data.
 
 After reading the job posting (Step 2), detect the primary stack and load the matching base CV:
-- AI-first / LLM / Agentic roles → `D:/LearningProject/Claude/prompts/base_cv_ai.md`
-- React + Next.js / NestJS (React prominent) → `D:/LearningProject/Claude/prompts/base_cv_fullstack_react_next.md`
-- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `D:/LearningProject/Claude/prompts/base_cv_fullstack_angular_nest.md`
-- Angular → `D:/LearningProject/Claude/prompts/base_cv_angular.md`
-- React / Next.js / JavaScript → `D:/LearningProject/Claude/prompts/base_cv_react.md`
+- AI-first / LLM / Agentic roles → `D:/LearningProject/Claude/candidate/base_cv_ai.md`
+- React + Next.js / NestJS (React prominent) → `D:/LearningProject/Claude/candidate/base_cv_fullstack_react_next.md`
+- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `D:/LearningProject/Claude/candidate/base_cv_fullstack_angular_nest.md`
+- Angular → `D:/LearningProject/Claude/candidate/base_cv_angular.md`
+- React / Next.js / JavaScript → `D:/LearningProject/Claude/candidate/base_cv_react.md`
 
 Use the base CV as a starting point for experience bullets and skills order. Follow the "Base CV" instructions in `generation_rules.md`.
 

@@ -41,7 +41,7 @@ If a hook or a compile error shows up, `python -m compileall .` narrows it down.
 Run the `project-invariants-review` agent against the branch diff.
 
 Its findings are advisory except for two, which are hard stops:
-- a protected file staged (`.env`, `tracker.xlsx`, `Applications/`, tokens, `prompts/candidate_profile.md`, `prompts/base_cv_*.md`)
+- a protected file staged (`.env`, `tracker.xlsx`, `Applications/`, tokens)
 - `requirements.lock` out of sync with `pyproject.toml`
 
 Report the rest to the human and let them decide whether to fix now or file follow-up.

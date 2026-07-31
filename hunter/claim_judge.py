@@ -40,6 +40,7 @@ from hunter.config import (
 )
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+CANDIDATE_DIR = Path(__file__).parent.parent / "candidate"
 
 # Severities that justify a repair / block. `style` is report-only — the
 # deterministic gloss-dedup owns it.
@@ -214,7 +215,7 @@ def _load_rules() -> str:
 
 
 def _load_profile() -> str:
-    path = PROMPTS_DIR / "candidate_profile.md"
+    path = CANDIDATE_DIR / "candidate_profile.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 

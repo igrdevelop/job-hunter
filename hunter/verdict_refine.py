@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 from hunter import candidate
-from hunter.apply_shared import PROMPTS_DIR, _llm_p, validate_content
+from hunter.apply_shared import CANDIDATE_DIR, PROMPTS_DIR, _llm_p, validate_content
 
 # Recommendations the independent verdict sometimes returns that no CV edit
 # can fix — they're facts about the candidate/logistics, not about the text.
@@ -106,7 +106,7 @@ def _load_system_prompt() -> str:
     """Same system prompt as the original generation call (candidate_profile
     + generation_rules) so the rewrite is grounded in the same facts."""
     instructions = (PROMPTS_DIR / "generation_rules.md").read_text(encoding="utf-8")
-    profile_path = PROMPTS_DIR / "candidate_profile.md"
+    profile_path = CANDIDATE_DIR / "candidate_profile.md"
     if profile_path.exists():
         return profile_path.read_text(encoding="utf-8") + "\n\n---\n\n" + instructions
     return instructions

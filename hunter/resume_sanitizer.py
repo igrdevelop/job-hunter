@@ -49,8 +49,8 @@ _IT_TERMS_STRIP_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-_PROFILE_PATH = _PROMPTS_DIR / "candidate_profile.md"
+_CANDIDATE_DIR = Path(__file__).parent.parent / "candidate"
+_PROFILE_PATH = _CANDIDATE_DIR / "candidate_profile.md"
 
 
 def _coerce_str(val: Any) -> str:

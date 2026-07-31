@@ -33,6 +33,41 @@ def _no_telegram(monkeypatch) -> None:
     monkeypatch.setattr("hunter.apply_shared.TELEGRAM_CHAT_ID", "", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _owner_candidate_data(monkeypatch) -> None:
+    """Patch candidate-derived constants to the owner's Wroclaw-based values.
+
+    candidate/candidate.yaml may contain example data (Jane Doe / Warsaw) or
+    the real owner's data (Ihar / Wroclaw) depending on checkout. Tests were
+    written against the owner's profile, so we normalize the constants that
+    are computed at module-import time from candidate.yaml.
+    """
+    from hunter import filter_config as cfg
+    from hunter import filters as filters_module
+    from hunter import verdict_refine
+
+    monkeypatch.setitem(
+        cfg.FILTER,
+        "locations",
+        ["remote", "zdalnie", "zdalna", "wrocław", "wroclaw"],
+    )
+    monkeypatch.setattr(filters_module, "_HOME_CITY", "Wrocław")
+    monkeypatch.setattr(filters_module, "_HOME_CITY_SUBSTR", "wroc")
+
+    monkeypatch.setattr(
+        verdict_refine,
+        "_PROTECTED_EMPLOYERS",
+        ("Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft"),
+    )
+    monkeypatch.setattr(verdict_refine, "_FLEXIBLE_EMPLOYER_NAME", "Altoros")
+    monkeypatch.setattr(verdict_refine, "_FLEXIBLE_EMPLOYER_PERIOD", "2018-2022")
+    monkeypatch.setattr(
+        verdict_refine,
+        "_ALTOROS_FLEXIBLE_PROJECTS",
+        ("E-commerce", "Insurance", "Healthcare", "Grant Management"),
+    )
+
+
 @pytest.fixture()
 def tracker_db(tmp_path: Path, monkeypatch) -> Path:
     """Return a path to a fresh, isolated SQLite tracker DB.

@@ -26,6 +26,7 @@ from hunter.apply_shared import (
     APPLY_LLM_OUTAGE_EXIT_CODE,
     APPLY_RATE_LIMITED_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
+    CANDIDATE_DIR,
     PROMPTS_DIR,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
@@ -107,7 +108,7 @@ def _load_base_cv(stack_hint: str) -> str:
     filename = _BASE_CV_FILES.get(key)
     if not filename:
         return ""
-    path = PROMPTS_DIR / filename
+    path = CANDIDATE_DIR / filename
     if not path.exists():
         print(f"[apply_agent] Warning: base CV not found at {path}")
         return ""
@@ -365,7 +366,7 @@ def _run_main_api(
 
     # Step 2 — Read system prompt (instructions + candidate profile)
     prompt_path = PROMPTS_DIR / "generation_rules.md"
-    profile_path = PROMPTS_DIR / "candidate_profile.md"
+    profile_path = CANDIDATE_DIR / "candidate_profile.md"
     if not prompt_path.exists():
         print(f"[apply_agent] ERROR: {prompt_path} not found")
         sys.exit(1)
