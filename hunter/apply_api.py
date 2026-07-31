@@ -16,6 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from hunter import candidate
 from hunter.config import (
     GENERATE_DOCS_PATH,
     PROJECT_DIR,
@@ -43,7 +44,7 @@ from hunter.apply_shared import (
 )
 from hunter.services.apply_service import build_generate_docs_cmd
 
-_BASE_CV_FILES = {
+_DEFAULT_BASE_CV_FILES = {
     "angular": "base_cv_angular.md",
     "react": "base_cv_react.md",
     "javascript": "base_cv_react.md",
@@ -51,6 +52,9 @@ _BASE_CV_FILES = {
     "fullstack_react_next": "base_cv_fullstack_react_next.md",
     "ai": "base_cv_ai.md",
 }
+# candidate.yaml's tracks.base_cv can add/override stack keys on top of the
+# project owner's original defaults.
+_BASE_CV_FILES = {**_DEFAULT_BASE_CV_FILES, **candidate.get("tracks.base_cv", {})}
 
 _AI_KEYWORDS = {
     "llm",
@@ -466,16 +470,28 @@ def _run_main_api(
         # unusable, so ask the LLM once to return a complete, fixed JSON rather
         # than silently generating a broken PDF.
         try:
+            _repair_role_count = candidate.get("education.expected_role_count", 7)
+            _repair_companies = candidate.get(
+                "employers.real_companies",
+                [
+                    "Alten Poland",
+                    "Fairmarkit",
+                    "Venture Labs",
+                    "SII",
+                    "Altoros",
+                    "SolbegSoft",
+                    "Staronka",
+                ],
+            )
             _repair_msg = (
                 "The JSON you returned has structural problems that make the resume "
                 "invalid. Fix ALL of the issues below and return the COMPLETE JSON "
                 "again (same schema, every field), not just the changed parts:\n"
                 + "\n".join(f"- {e}" for e in errors)
-                + "\n\nCRITICAL: resume_en.experience MUST contain ALL 7 roles in this "
-                "exact order: Alten Poland, Fairmarkit, Venture Labs, SII, Altoros, "
-                "SolbegSoft, Staronka. Never drop a role to fit 2 pages — compress "
-                "older roles to 1-2 bullets instead. Keep company, period, title, "
-                "subtitle verbatim per the rules.\n\n"
+                + f"\n\nCRITICAL: resume_en.experience MUST contain ALL {_repair_role_count} "
+                f"roles in this exact order: {', '.join(_repair_companies)}. Never drop a "
+                "role to fit 2 pages — compress older roles to 1-2 bullets instead. Keep "
+                "company, period, title, subtitle verbatim per the rules.\n\n"
                 f"Previous JSON to fix:\n{json.dumps(content, ensure_ascii=False)}"
             )
             from llm_client import call_llm as _repair_call_llm

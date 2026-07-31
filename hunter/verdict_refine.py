@@ -30,6 +30,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from hunter import candidate
 from hunter.apply_shared import PROMPTS_DIR, _llm_p, validate_content
 
 # Recommendations the independent verdict sometimes returns that no CV edit
@@ -47,12 +48,23 @@ _DROP_RE = re.compile(
 STRETCH_FROM_ROUND = 3
 
 # Recent, verifiable employers — never touched by a stretch-round addition.
-_PROTECTED_EMPLOYERS = ("Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft")
+# Read from candidate.yaml (employers.protected); falls back to the project
+# owner's original employer list when candidate.yaml is absent.
+_PROTECTED_EMPLOYERS = tuple(
+    candidate.get("employers.protected", ["Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft"])
+)
 
-# Flexible Altoros client projects a stretch-round tech MAY be woven into
-# (2018-2022 — era-plausible, owner-approved precedent: React prototypes in
-# the E-commerce project).
-_ALTOROS_FLEXIBLE_PROJECTS = ("E-commerce", "Insurance", "Healthcare", "Grant Management")
+# One flexible client employer whose project list a stretch-round tech MAY be
+# woven into (era-plausible, owner-approved precedent: React prototypes in
+# the E-commerce project). Read from candidate.yaml (employers.flexible).
+_FLEXIBLE_EMPLOYER_NAME = candidate.get("employers.flexible.name", "Altoros")
+_FLEXIBLE_EMPLOYER_PERIOD = candidate.get("employers.flexible.period", "2018-2022")
+_ALTOROS_FLEXIBLE_PROJECTS = tuple(
+    candidate.get(
+        "employers.flexible.projects",
+        ["E-commerce", "Insurance", "Healthcare", "Grant Management"],
+    )
+)
 
 
 def _is_actionable(item: object) -> bool:
@@ -122,10 +134,10 @@ technology) so it can be tracked as the candidate's learning debt.
 
 Default placement: Skills section and/or summary. If (and only if) a
 technology needs experience-level grounding, you MAY weave it into ONE of
-these flexible Altoros client projects (2018-2022, choose the single most
-era/stack-plausible one): {altoros_projects} — add it to that project's
-Stack line and/or ONE modest bullet. NEVER invent numbers, metrics, or scale
-that aren't already there.
+these flexible {flexible_employer} client projects ({flexible_period}, choose
+the single most era/stack-plausible one): {altoros_projects} — add it to that
+project's Stack line and/or ONE modest bullet. NEVER invent numbers, metrics,
+or scale that aren't already there.
 
 NEVER touch these employers — recent, verifiable, off-limits for ANY
 addition: {protected_employers}.
@@ -140,6 +152,8 @@ def _round_block(round_num: int, kind: str) -> str:
     if kind == "stretch":
         return _STRETCH_BLOCK.format(
             round=round_num,
+            flexible_employer=_FLEXIBLE_EMPLOYER_NAME,
+            flexible_period=_FLEXIBLE_EMPLOYER_PERIOD,
             altoros_projects=", ".join(_ALTOROS_FLEXIBLE_PROJECTS),
             protected_employers=", ".join(_PROTECTED_EMPLOYERS),
         )

@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import cloudscraper
 
+from hunter import candidate
 from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
@@ -30,8 +31,12 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://theprotocol.it"
 
+# Location slug from candidate.yaml (source_urls.theprotocol_location); defaults
+# to the project owner's original Wrocław-based listing.
+_LOCATION = candidate.get("source_urls.theprotocol_location", "wroclaw")
+
 LISTING_URLS = [
-    f"{BASE}/filtry/frontend;sp/wroclaw;wp",
+    f"{BASE}/filtry/frontend;sp/{_LOCATION};wp",
     f"{BASE}/filtry/frontend;sp?remote=true",
 ]
 

@@ -107,12 +107,17 @@ pip install -r requirements.txt && pip install -e . --no-deps
 cp .env.example .env        # fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
 
 # Make it yours: personal candidate data is NOT in the repo — create it from templates
+cp candidate.example.yaml candidate.yaml
+# fill in identity, home city, languages, employers — see docs/SETUP_NEW_USER.md
 cp prompts/candidate_profile.example.md prompts/candidate_profile.md
 cp prompts/base_cv_angular.example.md   prompts/base_cv_angular.md
 # fill both in with your real experience — see prompts/README.md for details
 
 python hunter.py            # starts the Telegram bot + scheduler
 ```
+
+See [docs/SETUP_NEW_USER.md](docs/SETUP_NEW_USER.md) for the full step-by-step
+walkthrough from a fresh clone to your first `/hunt`.
 
 Docker deployment (GHCR image built by CI, LibreOffice + Playwright included):
 
@@ -124,12 +129,15 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for the full VPS deployment guide and
 [CLAUDE.md](CLAUDE.md) for the complete architecture reference (config table,
 tracker schema, pipeline internals).
 
-> **Note:** all candidate-specific files (profile, base CVs, few-shot examples)
-> are gitignored — the repo ships only `.example` templates and system prompt
-> rules, so anyone can configure the bot for themselves
-> ([prompts/README.md](prompts/README.md)). Optional integrations (Google
-> Sheets mirror, Drive upload, Gmail alerts) each need a one-time OAuth setup
-> described in CLAUDE.md.
+> **Note:** all candidate-specific files (`candidate.yaml`, profile, base CVs,
+> few-shot examples) are gitignored — the repo ships only `.example`
+> templates and system prompt rules, so anyone can configure the bot for
+> themselves ([prompts/README.md](prompts/README.md)). `candidate.yaml` drives
+> the candidate's identity, home city, languages and employer history used by
+> filters, CV generation and the LLM prompts (`hunter/candidate.py`); if it's
+> missing the bot falls back to its original built-in defaults instead of
+> crashing. Optional integrations (Google Sheets mirror, Drive upload, Gmail
+> alerts) each need a one-time OAuth setup described in CLAUDE.md.
 
 ## Tech stack
 

@@ -16,6 +16,7 @@ dependencies = [
     "openpyxl",
     "python-docx",
     "pytz",
+    "pyyaml",
     # Telegram bot
     "python-telegram-bot[job-queue]",
     # LLM

@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 import cloudscraper
 
+from hunter import candidate
 from hunter.config import FILTER
 from hunter.models import Job
 from hunter.sources.base import BaseSource
@@ -33,9 +34,13 @@ logger = logging.getLogger(__name__)
 BASE = "https://it.pracuj.pl"
 OFFER_BASE = "https://www.pracuj.pl"
 
+# Location slug from candidate.yaml (source_urls.pracuj_location); defaults to
+# the project owner's original Wrocław-based listing.
+_LOCATION = candidate.get("source_urls.pracuj_location", "wroclaw")
+
 LISTING_URLS = [
-    f"{BASE}/praca/frontend;kw/wroclaw;wp?rd=30",
-    f"{BASE}/praca/angular;kw/wroclaw;wp?rd=30",
+    f"{BASE}/praca/frontend;kw/{_LOCATION};wp?rd=30",
+    f"{BASE}/praca/angular;kw/{_LOCATION};wp?rd=30",
     f"{BASE}/praca/frontend;kw?rd=0&remote=true",
 ]
 
