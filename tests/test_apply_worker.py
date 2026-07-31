@@ -48,12 +48,14 @@ def _no_real_delay(monkeypatch):
     monkeypatch.setattr(apply_worker, "APPLY_DELAY_SEC", 0)
     monkeypatch.setattr(apply_worker, "POLL_INTERVAL_SEC", 0)
     monkeypatch.setattr(apply_worker, "_BACKOFF_SEC", 0)
+    monkeypatch.setattr(apply_worker, "_DUP_BACKOFF_SEC", 0)
     # Never touch the real repo tracker.db's config KV table.
     monkeypatch.setattr(apply_worker.llm_outage, "pause_remaining", MagicMock(return_value=0))
     # Readiness gate must pass by default — individual tests override.
     monkeypatch.setattr("hunter.main._check_apply_ready", MagicMock(return_value=None))
     # Reset the alert cooldown so readiness-alert tests don't leak state.
     apply_worker._last_ready_alert_at = 0.0
+    apply_worker._last_dup_alert_at = 0.0
     bot_state._active_apply_urls.clear()
     yield
     bot_state._active_apply_urls.clear()
@@ -429,7 +431,8 @@ def test_loop_releases_claim_when_duplicate_inflight(tracker_db, monkeypatch):
         asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
 
     subprocess_mock.assert_not_awaited()
-    assert any("already generating" in t.lower() for t in sent)
+    assert any("already generating" in t.lower() or "Queue paused" in t for t in sent)
+    assert not any("Processing" in t for t in sent)
     rows = tracker.lookup_url(job.url)
     assert len(rows) == 1
     assert rows[0]["ats"] == "PENDING"

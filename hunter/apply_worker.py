@@ -40,8 +40,13 @@ _BACKOFF_SEC = 300
 # Don't spam Telegram every POLL_INTERVAL when apply isn't ready (no API
 # key / CLI login) — one alert per this window is enough.
 _READY_ALERT_COOLDOWN_SEC = 1800
+# Backoff when a claimed job is already in-flight elsewhere (manual /force
+# or paste). Must be long enough that we don't spin-spam Telegram for the
+# whole duration of the other run; tests patch this to 0.
+_DUP_BACKOFF_SEC = 60
 
 _last_ready_alert_at: float = 0.0
+_last_dup_alert_at: float = 0.0
 
 
 async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
@@ -147,7 +152,7 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
     """
     logger.info("[apply_worker %d] started", worker_id)
     consecutive_fails = 0
-    global _last_ready_alert_at
+    global _last_ready_alert_at, _last_dup_alert_at
     while True:
         claimed_url: str | None = None
         try:
@@ -183,6 +188,28 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
 
             job = tracker.job_from_pending_row(row)
             claimed_url = job.url
+
+            # Same in-flight guard as hunt/manual (PR #178): claim the URL
+            # BEFORE the "Processing" Telegram ping. If /force or a paste
+            # already holds it, put the row back and back off — a tight
+            # re-claim loop would spam Processing/Skipped pairs for the
+            # whole duration of the other run (Bugbot follow-up).
+            from hunter.bot.state import mark_apply_done, try_mark_apply_active
+
+            if not try_mark_apply_active(job.url):
+                await asyncio.to_thread(tracker.release_claim, job.url)
+                claimed_url = None
+                now = time.monotonic()
+                if now - _last_dup_alert_at >= _READY_ALERT_COOLDOWN_SEC:
+                    _last_dup_alert_at = now
+                    await send_text(
+                        context,
+                        f"⏭ [W{worker_id}] Queue paused — already generating elsewhere "
+                        f"(e.g. {job.company}). Will retry when free.",
+                    )
+                await asyncio.sleep(max(APPLY_DELAY_SEC, POLL_INTERVAL_SEC * 4, _DUP_BACKOFF_SEC))
+                continue
+
             permalink = (job.raw or {}).get("permalink")
             text = (
                 f"⚙️ [W{worker_id}] Processing: <b>{job.company}</b> — {job.title}\n"
@@ -191,22 +218,6 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
             if permalink:
                 text += f"\n🔗 Post: {permalink}"
             await send_text(context, text)
-
-            # Same in-flight guard as hunt/manual (PR #178): if /force or a
-            # paste already claimed this URL, release the queue claim and skip
-            # — otherwise we'd race a second apply_agent against the same vacancy.
-            from hunter.bot.state import mark_apply_done, try_mark_apply_active
-
-            if not try_mark_apply_active(job.url):
-                await asyncio.to_thread(tracker.release_claim, job.url)
-                claimed_url = None
-                await send_text(
-                    context,
-                    f"⏭ [W{worker_id}] Skipped (already generating elsewhere): "
-                    f"{job.company} — {job.title} — back in queue.",
-                )
-                await asyncio.sleep(APPLY_DELAY_SEC if APPLY_DELAY_SEC > 0 else POLL_INTERVAL_SEC)
-                continue
 
             try:
                 outcome = await run_apply_agent_subprocess(
