@@ -2,10 +2,18 @@ import html
 import re
 from dataclasses import dataclass
 
+from hunter import candidate
 from hunter.models import Job
 from hunter.config import FILTER, active_tracks
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
+
+# Candidate's home city (candidate.yaml location.home_city), used both for the
+# short substring check ("wroc" catches "Wrocław"/"Wroclaw") and for reason
+# strings shown to the owner. Defaults preserve the project owner's original
+# Wrocław-based behavior when candidate.yaml is absent.
+_HOME_CITY = candidate.get("location.home_city", "Wrocław")
+_HOME_CITY_SUBSTR = candidate.get("location.home_city", "wroclaw").lower()[:4]
 
 # If any pattern matches job text → treat as German required (skip job),
 # unless a german_not_required pattern matches first.
@@ -368,6 +376,8 @@ def _is_german_language_required(job: Job) -> bool:
     """True → skip job (German appears to be a hard requirement)."""
     if not FILTER.get("exclude_german_language_required", False):
         return False
+    if "de" not in candidate.get("languages.disqualify_required", ["de", "fr", "nl"]):
+        return False
     blob = _job_plain_text_blob(job)
     if not blob.strip():
         return False
@@ -627,7 +637,7 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
     if not FILTER.get("exclude_body_onsite_city", False):
         return False
     loc = (job.location or "").lower()
-    if "wroc" in loc:  # explicitly a Wrocław role — hybrid there is fine
+    if _HOME_CITY_SUBSTR in loc:  # explicitly a home-city role — hybrid there is fine
         return False
     blob = _job_plain_text_blob(job).lower()
     if not blob.strip():
@@ -870,7 +880,7 @@ _MANUAL_SCREEN_CHECKS_HARD: tuple[tuple[str, str], ...] = (
 )
 _MANUAL_SCREEN_CHECKS_SOFT: tuple[tuple[str, str], ...] = (
     ("_has_body_disqualifier", "excluded tech/platform in the description"),
-    ("_is_unwanted_onsite_location", "on-site / hybrid outside Wrocław"),
+    ("_is_unwanted_onsite_location", f"on-site / hybrid outside {_HOME_CITY}"),
 )
 # screen_job_text() (paste-path warn-but-allow) checks both tiers uniformly.
 _MANUAL_SCREEN_CHECKS: tuple[tuple[str, str], ...] = (
@@ -942,7 +952,7 @@ def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
     """
     if any(p.search(blob) for p in _FULLY_REMOTE_RES):
         return None
-    if "wroc" in blob:
+    if _HOME_CITY_SUBSTR in blob:
         return None
     if _is_acceptable_weekly_hybrid(job):
         return None
@@ -999,6 +1009,9 @@ def _assess_work_authorization(blob: str) -> "GateFinding | None":
 # Required-language detection for languages the candidate does NOT speak, beyond
 # German (already covered end-to-end by _is_german_language_required). Narrow,
 # high-precision list — same "required/native/fluent/CEFR level" pattern shape.
+# _assess_unsupported_language gates each entry on candidate.get(
+# "languages.disqualify_required", [...]) via _LANG_NAME_TO_CODE below — a
+# candidate who speaks French can drop "fr" from that list in candidate.yaml.
 _UNSUPPORTED_LANG_REQUIRED_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     "French": tuple(
         re.compile(p, re.IGNORECASE)
@@ -1033,6 +1046,11 @@ _UNSUPPORTED_LANG_REQUIRED_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
+# ISO code (as used in candidate.yaml languages.disqualify_required) for each
+# _UNSUPPORTED_LANG_REQUIRED_RES entry, so a candidate who speaks one of these
+# can drop its code from candidate.yaml instead of editing this module.
+_LANG_NAME_TO_CODE: dict[str, str] = {"French": "fr", "Dutch": "nl"}
+
 # English-as-working-language vetoes any required-foreign-language finding
 # (shared with the German check's not-required set).
 _ENGLISH_ONLY_WORKPLACE_RES: tuple[re.Pattern[str], ...] = (
@@ -1055,7 +1073,10 @@ def _assess_unsupported_language(job: Job) -> "GateFinding | None":
         return None
     if any(p.search(blob) for p in _ENGLISH_ONLY_WORKPLACE_RES):
         return None
+    disqualify_codes = candidate.get("languages.disqualify_required", ["de", "fr", "nl"])
     for lang_name, patterns in _UNSUPPORTED_LANG_REQUIRED_RES.items():
+        if _LANG_NAME_TO_CODE.get(lang_name) not in disqualify_codes:
+            continue
         if any(p.search(blob) for p in patterns):
             return GateFinding(
                 rule="unsupported_language_required",

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import requests
 
+from hunter import candidate
 from hunter.config import (
     APPLICATIONS_DIR,
     GENERATE_PL_RESUME,
@@ -752,9 +753,21 @@ def _translate_cover_letter_pl(letter_en: str) -> str:
 # the clean opposite-language counterpart, and — if strong contamination survives —
 # signals the caller to BLOCK delivery rather than ship a broken document.
 
+# Language pair shown in the translator's own system prompt — cosmetic wording
+# only (the actual target language is always passed explicitly per call), but
+# reads from candidate.yaml (languages.cv_languages) so a non-PL/EN candidate
+# sees an accurate description. Default order reproduces the project owner's
+# original "Polish/English" phrasing when candidate.yaml is absent.
+_CV_LANG_NAMES = {"en": "English", "pl": "Polish", "de": "German", "fr": "French", "nl": "Dutch"}
+_cv_lang_codes = candidate.get("languages.cv_languages", ["pl", "en"])
+_cv_lang_names = [_CV_LANG_NAMES.get(str(c).lower(), str(c).title()) for c in _cv_lang_codes] or [
+    "Polish",
+    "English",
+]
+
 _RESUME_TRANSLATE_SYS = (
-    "You are a professional bilingual (Polish/English) resume translator. "
-    "You translate resume content between Polish and English. "
+    f"You are a professional bilingual ({'/'.join(_cv_lang_names)}) resume translator. "
+    f"You translate resume content between {' and '.join(_cv_lang_names)}. "
     "Respond ONLY with a valid JSON object — no markdown, no commentary."
 )
 

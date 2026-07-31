@@ -20,7 +20,7 @@ The shadow is comparison-only:
 Generated CV / cover-letter filenames are suffixed with the ATS score the shadow
 scored on the independent check, e.g.::
 
-    Ihar_Petrasheuski_CV_Angular_2026_EN_ats88.pdf
+    Jane_Doe_CV_Angular_2026_EN_ats88.pdf
 
 so the boevoy set and the shadow set can be eyeballed side by side.
 

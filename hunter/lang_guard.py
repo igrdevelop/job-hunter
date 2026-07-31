@@ -47,6 +47,8 @@ from __future__ import annotations
 
 import re
 
+from hunter import candidate
+
 # ---------------------------------------------------------------------------
 # Tech / proper-noun allowlist — tokens that look foreign but are language-neutral
 # and must never be flagged. Kept broad on purpose; matched case-insensitively.
@@ -192,6 +194,14 @@ _TECH_TERMS = {
     "haiku",
     "sonnet",
 }
+
+# Extend with the candidate's own real employer names (candidate.yaml
+# employers.real_companies) so a company like "Fairmarkit" is never flagged
+# as Polish contamination. Names are split into individual tokens since
+# _is_tech() below matches per-token. No-op when candidate.yaml is absent —
+# the hardcoded employer tokens above already cover the project owner's case.
+for _company_name in candidate.get("employers.real_companies", []):
+    _TECH_TERMS.update(str(_company_name).lower().split())
 
 # Proper nouns — place names that legitimately carry Polish diacritics but are NOT
 # contamination when they appear in an English CV (the candidate lives in Wrocław).

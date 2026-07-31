@@ -15,6 +15,8 @@ gate the body-level checks). No env var reads live here — this is
 static, code-reviewed policy, not a runtime toggle.
 """
 
+from hunter import candidate
+
 # ── Job filters ───────────────────────────────────────────────────────────────
 # Angular-only: title must match at least one keyword AND contain "angular"
 # (unless it's a generic "frontend"/"typescript" title — require_angular catches those)
@@ -51,15 +53,12 @@ FILTER = {
         "part time",
         "parttime",
     ],
-    "locations": [
-        # Always accept: fully remote regardless of city
-        "remote",
-        "zdalnie",
-        "zdalna",
-        # Accept Wrocław (on-site OR hybrid — hybrid elsewhere is rejected)
-        "wrocław",
-        "wroclaw",
-    ],
+    # Always accept: fully remote regardless of city, plus the candidate's home
+    # city (on-site OR hybrid — hybrid elsewhere is rejected). Aliases come from
+    # candidate.yaml (location.home_city_aliases); default preserves the project
+    # owner's original Wrocław-based list when candidate.yaml is absent.
+    "locations": ["remote", "zdalnie", "zdalna"]
+    + candidate.get("location.home_city_aliases", ["wrocław", "wroclaw"]),
     # Title matching ANY regex → skip
     "exclude_patterns": [
         r"\bjava\b",
