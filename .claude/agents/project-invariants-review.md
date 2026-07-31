@@ -88,8 +88,7 @@ English. Report the offending commit subject.
 **8. Protected files staged.**
 Never committed: `.env`, `tracker.xlsx`, `Applications/`, `backups/`,
 `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`,
-`prompts/candidate_profile.md`, `prompts/base_cv_*.md`, `prompts/candidate/`,
-`prompts/examples/`. Check `git status --porcelain` and the diff's file list.
+`candidate/notes/`. Check `git status --porcelain` and the diff's file list.
 This one is a hard stop — report it first and loudly.
 
 **9. mypy baseline grew.**

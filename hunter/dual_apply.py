@@ -153,6 +153,7 @@ def _generate_shadow(
     from llm_client import LLMError, call_llm
     from hunter.apply_api import _detect_stack_hint, _load_base_cv
     from hunter.apply_shared import (
+        CANDIDATE_DIR,
         PROMPTS_DIR,
         _ats_check_loop,
         _dedup_skill_glosses,
@@ -168,7 +169,7 @@ def _generate_shadow(
 
     # System prompt: candidate profile + generation rules (same as apply_api).
     instructions = (PROMPTS_DIR / "generation_rules.md").read_text(encoding="utf-8")
-    profile_path = PROMPTS_DIR / "candidate_profile.md"
+    profile_path = CANDIDATE_DIR / "candidate_profile.md"
     system_prompt = (
         profile_path.read_text(encoding="utf-8") + "\n\n---\n\n" + instructions
         if profile_path.exists()

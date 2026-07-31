@@ -68,7 +68,7 @@ def generate_about_me(folder: Path, lang: str) -> str:
             pass
 
     # Load candidate profile
-    profile_path = PROJECT_DIR / "prompts" / "candidate_profile.md"
+    profile_path = PROJECT_DIR / "candidate" / "candidate_profile.md"
     try:
         candidate_profile = profile_path.read_text(encoding="utf-8")
     except Exception as e:
@@ -77,7 +77,7 @@ def generate_about_me(folder: Path, lang: str) -> str:
 
     # Load few-shot examples
     example_file = f"about_me_{lang}.md"
-    examples_path = PROJECT_DIR / "prompts" / "examples" / example_file
+    examples_path = PROJECT_DIR / "candidate" / "examples" / example_file
     try:
         examples = examples_path.read_text(encoding="utf-8")
     except Exception as e:

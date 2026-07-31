@@ -58,6 +58,7 @@ def _translate_p():
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROMPTS_DIR = PROJECT_DIR / "prompts"
+CANDIDATE_DIR = PROJECT_DIR / "candidate"
 
 REQUIRED_JSON_KEYS: list[str] = [
     "company_name",

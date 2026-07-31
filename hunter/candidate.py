@@ -1,8 +1,8 @@
 """candidate.py — loader for candidate.yaml, the single source of truth for the
 candidate's identity, location, languages and employer history.
 
-candidate.yaml is gitignored (personal data); candidate.example.yaml is the
-tracked template. If candidate.yaml is absent, load() degrades gracefully —
+candidate/candidate.yaml is the tracked config file. If it is absent,
+load() degrades gracefully —
 every caller reads through get(dotpath, default) with an explicit fallback
 that reproduces the project owner's original hardcoded behavior, so a missing
 file never crashes the bot. One warning is logged the first time it's missing.
@@ -17,7 +17,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "candidate.yaml"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "candidate" / "candidate.yaml"
 _path_override: Path | None = None
 
 # The project owner's original hardcoded identity, kept here (not inlined at
@@ -53,7 +53,7 @@ def load() -> dict:
     if not path.exists():
         logger.warning(
             "candidate.yaml not found at %s — using built-in defaults. "
-            "Copy candidate.example.yaml to candidate.yaml to configure your own identity.",
+            "Edit candidate/candidate.yaml to configure your own identity.",
             path,
         )
         return {}

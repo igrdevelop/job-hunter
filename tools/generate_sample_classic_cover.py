@@ -23,7 +23,7 @@ from llm_client import LLMError, call_llm  # noqa: E402
 
 def _system_prompt() -> str:
     instructions = (PROJECT_DIR / "prompts" / "generation_rules.md").read_text(encoding="utf-8")
-    profile = PROJECT_DIR / "prompts" / "candidate_profile.md"
+    profile = PROJECT_DIR / "candidate" / "candidate_profile.md"
     if profile.exists():
         return profile.read_text(encoding="utf-8") + "\n\n---\n\n" + instructions
     return instructions

@@ -1,11 +1,9 @@
-# candidate.yaml — copy this file to candidate.yaml and fill in your own data.
+# candidate.yaml — edit this file with YOUR real data.
 #
 # This is the single source of truth for the candidate's identity, location,
 # languages and employer history that the bot injects into generated CVs,
-# cover letters, filters and LLM prompts. See docs/SETUP_NEW_USER.md for the
-# full setup walkthrough.
-#
-# candidate.yaml itself is gitignored — never commit your real personal data.
+# cover letters, filters and LLM prompts. See candidate/README.md and
+# docs/SETUP_NEW_USER.md for the full setup walkthrough.
 
 identity:
   full_name: "Jane Doe"
@@ -57,7 +55,7 @@ education:
   expected_role_count: 5                   # how many roles the generated resume_en should list
 
 tracks:
-  base_cv:                          # stack key -> prompt filename (relative to prompts/)
+  base_cv:                          # stack key -> prompt filename (relative to candidate/)
     angular: "base_cv_angular.md"
     react: "base_cv_react.md"
 
