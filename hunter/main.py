@@ -507,6 +507,16 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "Check the provider account/key. Vacancies were NOT marked FAIL.",
             )
             break
+        elif outcome == "duplicate":
+            # A manual paste/Apply-button click is already generating this
+            # exact URL right now — not this vacancy's fault, no FAIL row.
+            # It stays unprocessed and returns on the next hunt if still new.
+            consecutive_fails = 0
+            await send_text(
+                context,
+                f"⏭ [{i}/{total}] Skipped (already generating elsewhere): "
+                f"{job.company} — {job.title}",
+            )
         else:
             failed += 1
             consecutive_fails += 1
@@ -615,6 +625,20 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Check the provider account/key.",
             )
             break
+        elif outcome == "duplicate":
+            # Already generating elsewhere (manual paste/Apply-button) —
+            # leave fail_count untouched, this row's turn just comes again
+            # on the next retry slot.
+            consecutive_fails = 0
+            logger.info(
+                "[retry] Skipping %s - %s — already generating elsewhere",
+                job.company,
+                job.title,
+            )
+            await send_text(
+                context,
+                f"⏭ Retry skipped (already generating elsewhere): {job.company} — {job.title}",
+            )
         else:
             consecutive_fails += 1
             new_count = await asyncio.to_thread(increment_fail_count, job.url)
@@ -660,10 +684,30 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _run_apply_agent(job: Job):
-    """Run apply_agent.py via service wrapper. Returns ``ok`` | ``manual`` | ``fail``."""
-    return await run_apply_agent_subprocess(
-        job=job,
-        timeout_sec=APPLY_AGENT_TIMEOUT_SEC,
-        apply_agent_path=APPLY_AGENT_PATH,
-        python_executable=sys.executable,
-    )
+    """Run apply_agent.py via service wrapper.
+
+    Returns ``ok`` | ``manual`` | ``fail`` | ``rate_limited`` | ``llm_outage`` |
+    ``duplicate``. The last one means a manual paste/Apply-button click (or the
+    LinkedIn batch flow) is ALREADY generating docs for this exact URL right
+    now — tracker dedup only fires once a run finishes, so without this guard
+    the hunt loop and a concurrent manual request could both run the full LLM
+    pipeline for the same vacancy (owner report 2026-07-30, Billennium
+    "Mid Frontend Developer" generated twice, ~$0.64 combined).
+    """
+    from hunter.bot.state import mark_apply_done, try_mark_apply_active
+
+    if not try_mark_apply_active(job.url):
+        logger.warning(
+            "[auto-apply] skipping %s — already generating elsewhere (paste/manual apply in flight)",
+            job.url,
+        )
+        return "duplicate"
+    try:
+        return await run_apply_agent_subprocess(
+            job=job,
+            timeout_sec=APPLY_AGENT_TIMEOUT_SEC,
+            apply_agent_path=APPLY_AGENT_PATH,
+            python_executable=sys.executable,
+        )
+    finally:
+        mark_apply_done(job.url)
