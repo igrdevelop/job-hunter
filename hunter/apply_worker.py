@@ -149,6 +149,7 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
     consecutive_fails = 0
     global _last_ready_alert_at
     while True:
+        claimed_url: str | None = None
         try:
             remaining = await asyncio.to_thread(llm_outage.pause_remaining)
             if remaining > 0:
@@ -181,6 +182,7 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
                 continue
 
             job = tracker.job_from_pending_row(row)
+            claimed_url = job.url
             permalink = (job.raw or {}).get("permalink")
             text = (
                 f"⚙️ [W{worker_id}] Processing: <b>{job.company}</b> — {job.title}\n"
@@ -198,6 +200,7 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
             )
 
             is_fail = await _resolve_outcome(context, worker_id, job, outcome)
+            claimed_url = None  # resolved (terminal / released / deleted)
             consecutive_fails = consecutive_fails + 1 if is_fail else 0
 
             if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
@@ -211,8 +214,25 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
             elif APPLY_DELAY_SEC > 0:
                 await asyncio.sleep(APPLY_DELAY_SEC)
         except asyncio.CancelledError:
+            if claimed_url:
+                try:
+                    await asyncio.to_thread(tracker.release_claim, claimed_url)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[apply_worker %d] failed to release claim on cancel", worker_id
+                    )
             logger.info("[apply_worker %d] cancelled, stopping", worker_id)
             raise
         except Exception:
             logger.exception("[apply_worker %d] unexpected error — continuing", worker_id)
+            # Don't leave IN_PROGRESS stranded until the stale-claim sweep
+            # (default 60 min) — release_claim is a no-op if resolve already
+            # wrote a terminal row or deleted the placeholder.
+            if claimed_url:
+                try:
+                    await asyncio.to_thread(tracker.release_claim, claimed_url)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[apply_worker %d] failed to release claim after error", worker_id
+                    )
             await asyncio.sleep(POLL_INTERVAL_SEC)

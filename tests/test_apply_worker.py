@@ -395,3 +395,31 @@ def test_loop_swallows_unexpected_exception_and_continues(tracker_db, monkeypatc
         asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
 
     assert claim_mock.call_count == 2
+
+
+def test_loop_releases_claim_after_post_claim_exception(tracker_db, monkeypatch):
+    """Exception after claim must not leave IN_PROGRESS until the stale sweep."""
+    job = _job(40)
+    tracker.add_pending(job)
+
+    # First send_text (Processing) blows up; claim already succeeded.
+    monkeypatch.setattr(apply_worker, "send_text", AsyncMock(side_effect=RuntimeError("tg down")))
+
+    real_claim = tracker.claim_pending
+    calls = {"n": 0}
+
+    def _claim_then_stop():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise _StopLoop()
+        return real_claim()
+
+    monkeypatch.setattr(tracker, "claim_pending", MagicMock(side_effect=_claim_then_stop))
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
+
+    rows = tracker.lookup_url(job.url)
+    assert len(rows) == 1
+    assert rows[0]["ats"] == "PENDING"
+    assert tracker.count_in_progress() == 0
