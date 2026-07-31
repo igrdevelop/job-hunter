@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hunter import apply_worker, tracker
+from hunter.bot import state as bot_state
 from hunter.models import Job
 
 
@@ -53,6 +54,9 @@ def _no_real_delay(monkeypatch):
     monkeypatch.setattr("hunter.main._check_apply_ready", MagicMock(return_value=None))
     # Reset the alert cooldown so readiness-alert tests don't leak state.
     apply_worker._last_ready_alert_at = 0.0
+    bot_state._active_apply_urls.clear()
+    yield
+    bot_state._active_apply_urls.clear()
 
 
 # ── _resolve_outcome: one test per ApplyOutcome ───────────────────────────────
@@ -397,7 +401,38 @@ def test_loop_swallows_unexpected_exception_and_continues(tracker_db, monkeypatc
     assert claim_mock.call_count == 2
 
 
-def test_loop_releases_claim_after_post_claim_exception(tracker_db, monkeypatch):
+def test_loop_releases_claim_when_duplicate_inflight(tracker_db, monkeypatch):
+    """Worker must not start apply_agent if try_mark_apply_active fails."""
+    job = _job(50)
+    tracker.add_pending(job)
+    assert bot_state.try_mark_apply_active(job.url) is True  # pretend manual run holds it
+
+    sent = []
+    monkeypatch.setattr(
+        apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
+    )
+    subprocess_mock = AsyncMock()
+    monkeypatch.setattr(apply_worker, "run_apply_agent_subprocess", subprocess_mock)
+
+    real_claim = tracker.claim_pending
+    calls = {"n": 0}
+
+    def _claim_then_stop():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise _StopLoop()
+        return real_claim()
+
+    monkeypatch.setattr(tracker, "claim_pending", MagicMock(side_effect=_claim_then_stop))
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
+
+    subprocess_mock.assert_not_awaited()
+    assert any("already generating" in t.lower() for t in sent)
+    rows = tracker.lookup_url(job.url)
+    assert len(rows) == 1
+    assert rows[0]["ats"] == "PENDING"
     """Exception after claim must not leave IN_PROGRESS until the stale sweep."""
     job = _job(40)
     tracker.add_pending(job)

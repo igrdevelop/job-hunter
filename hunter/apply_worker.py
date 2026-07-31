@@ -192,27 +192,46 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
                 text += f"\n🔗 Post: {permalink}"
             await send_text(context, text)
 
-            outcome = await run_apply_agent_subprocess(
-                job=job,
-                timeout_sec=APPLY_AGENT_TIMEOUT_SEC,
-                apply_agent_path=APPLY_AGENT_PATH,
-                python_executable=sys.executable,
-            )
+            # Same in-flight guard as hunt/manual (PR #178): if /force or a
+            # paste already claimed this URL, release the queue claim and skip
+            # — otherwise we'd race a second apply_agent against the same vacancy.
+            from hunter.bot.state import mark_apply_done, try_mark_apply_active
 
-            is_fail = await _resolve_outcome(context, worker_id, job, outcome)
-            claimed_url = None  # resolved (terminal / released / deleted)
-            consecutive_fails = consecutive_fails + 1 if is_fail else 0
-
-            if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
+            if not try_mark_apply_active(job.url):
+                await asyncio.to_thread(tracker.release_claim, job.url)
+                claimed_url = None
                 await send_text(
                     context,
-                    f"🛑 [W{worker_id}] {_CONSECUTIVE_FAIL_LIMIT} consecutive failures — "
-                    f"pausing {_BACKOFF_SEC // 60} min.",
+                    f"⏭ [W{worker_id}] Skipped (already generating elsewhere): "
+                    f"{job.company} — {job.title} — back in queue.",
                 )
-                consecutive_fails = 0
-                await asyncio.sleep(_BACKOFF_SEC)
-            elif APPLY_DELAY_SEC > 0:
-                await asyncio.sleep(APPLY_DELAY_SEC)
+                await asyncio.sleep(APPLY_DELAY_SEC if APPLY_DELAY_SEC > 0 else POLL_INTERVAL_SEC)
+                continue
+
+            try:
+                outcome = await run_apply_agent_subprocess(
+                    job=job,
+                    timeout_sec=APPLY_AGENT_TIMEOUT_SEC,
+                    apply_agent_path=APPLY_AGENT_PATH,
+                    python_executable=sys.executable,
+                )
+
+                is_fail = await _resolve_outcome(context, worker_id, job, outcome)
+                claimed_url = None  # resolved (terminal / released / deleted)
+                consecutive_fails = consecutive_fails + 1 if is_fail else 0
+
+                if consecutive_fails >= _CONSECUTIVE_FAIL_LIMIT:
+                    await send_text(
+                        context,
+                        f"🛑 [W{worker_id}] {_CONSECUTIVE_FAIL_LIMIT} consecutive failures — "
+                        f"pausing {_BACKOFF_SEC // 60} min.",
+                    )
+                    consecutive_fails = 0
+                    await asyncio.sleep(_BACKOFF_SEC)
+                elif APPLY_DELAY_SEC > 0:
+                    await asyncio.sleep(APPLY_DELAY_SEC)
+            finally:
+                mark_apply_done(job.url)
         except asyncio.CancelledError:
             if claimed_url:
                 try:
