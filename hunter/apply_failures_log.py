@@ -16,7 +16,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ _MAX_ERROR_CHARS = 500
 # ApplyOutcome later is an explicit, reviewable decision here.
 LOGGED_OUTCOMES = frozenset({"fail", "cli_timeout", "rate_limited"})
 
-_log_path_override: Optional[object] = None  # test hook — see set_log_path_for_tests
+_log_path_override: Path | str | None = None  # test hook — see set_log_path_for_tests
 
 
 def _get_failure_logger() -> logging.Logger:
@@ -77,9 +77,9 @@ def log_apply_failure(
     outcome: str,
     company: str = "",
     title: str = "",
-    exit_code: Optional[int] = None,
+    exit_code: int | None = None,
     error: str = "",
-    duration_sec: Optional[float] = None,
+    duration_sec: float | None = None,
     cli_mode: bool = False,
 ) -> None:
     """Append one JSON line for a non-ok apply outcome.
