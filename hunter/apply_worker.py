@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 
 from hunter import llm_outage, tracker
 from hunter.config import APPLY_AGENT_PATH, APPLY_AGENT_TIMEOUT_SEC, APPLY_DELAY_SEC
@@ -36,6 +37,11 @@ POLL_INTERVAL_SEC = 15
 # backs off for a while and keeps draining the queue instead of exiting.
 _CONSECUTIVE_FAIL_LIMIT = 3
 _BACKOFF_SEC = 300
+# Don't spam Telegram every POLL_INTERVAL when apply isn't ready (no API
+# key / CLI login) — one alert per this window is enough.
+_READY_ALERT_COOLDOWN_SEC = 1800
+
+_last_ready_alert_at: float = 0.0
 
 
 async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
@@ -141,11 +147,32 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
     """
     logger.info("[apply_worker %d] started", worker_id)
     consecutive_fails = 0
+    global _last_ready_alert_at
     while True:
         try:
             remaining = await asyncio.to_thread(llm_outage.pause_remaining)
             if remaining > 0:
                 await asyncio.sleep(min(remaining, POLL_INTERVAL_SEC * 4))
+                continue
+
+            # Same readiness gate _auto_apply_all used to run before the
+            # batch. Without it, a missing API key / CLI login turns every
+            # claimed job into a permanent FAIL row (Bugbot finding) —
+            # check BEFORE claim so nothing is left IN_PROGRESS.
+            from hunter.main import _check_apply_ready
+
+            auth_error = await asyncio.to_thread(_check_apply_ready)
+            if auth_error:
+                now = time.monotonic()
+                if now - _last_ready_alert_at >= _READY_ALERT_COOLDOWN_SEC:
+                    _last_ready_alert_at = now
+                    await send_text(
+                        context,
+                        f"🔐 [W{worker_id}] <b>Apply not ready — queue paused</b>\n"
+                        f"<pre>{auth_error[:300]}</pre>\n"
+                        "PENDING jobs stay queued; fix the key/CLI and they resume.",
+                    )
+                await asyncio.sleep(POLL_INTERVAL_SEC * 4)
                 continue
 
             row = await asyncio.to_thread(tracker.claim_pending)

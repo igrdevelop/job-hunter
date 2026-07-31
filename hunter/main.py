@@ -359,9 +359,21 @@ async def _run_hunt_impl(
         # instead of applying inline — _hunt_lock (held for this whole
         # function) is released in seconds instead of however long a batch
         # of CLI-fallback applies would take. A separate apply_worker_loop
-        # (hunter/apply_worker.py) drains the queue on its own schedule, so
-        # the outage pause / auth-readiness checks that used to gate
-        # _auto_apply_all live there now, not here.
+        # (hunter/apply_worker.py) drains the queue on its own schedule.
+        # Outage pause still lives in the worker (jobs can wait in PENDING).
+        # Readiness gate runs HERE too so we don't fill the queue when apply
+        # can't run at all (no API key / CLI) — those vacancies return next
+        # hunt instead of becoming FAIL rows in the worker.
+        auth_error = await asyncio.to_thread(_check_apply_ready)
+        if auth_error:
+            await send_text(
+                context,
+                f"🔐 <b>Apply not ready ({mode}) — not queuing</b>\n\n"
+                f"<pre>{auth_error[:300]}</pre>\n\n"
+                f"Fix the issue and restart the bot. Vacancies return on the next hunt.",
+            )
+            return
+
         capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
         skipped_count = len(auto_eligible_jobs) - len(capped)
         for j in capped:

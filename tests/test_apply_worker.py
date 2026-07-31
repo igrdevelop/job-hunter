@@ -49,6 +49,10 @@ def _no_real_delay(monkeypatch):
     monkeypatch.setattr(apply_worker, "_BACKOFF_SEC", 0)
     # Never touch the real repo tracker.db's config KV table.
     monkeypatch.setattr(apply_worker.llm_outage, "pause_remaining", MagicMock(return_value=0))
+    # Readiness gate must pass by default — individual tests override.
+    monkeypatch.setattr("hunter.main._check_apply_ready", MagicMock(return_value=None))
+    # Reset the alert cooldown so readiness-alert tests don't leak state.
+    apply_worker._last_ready_alert_at = 0.0
 
 
 # ── _resolve_outcome: one test per ApplyOutcome ───────────────────────────────
@@ -325,6 +329,30 @@ def test_loop_skips_claim_while_outage_pause_active(tracker_db, monkeypatch):
 
     assert pause_mock.call_count == 2
     claim_mock.assert_called_once()  # not called during the paused iteration
+
+
+def test_loop_skips_claim_when_apply_not_ready(tracker_db, monkeypatch):
+    """Missing API key / CLI must not claim jobs (would burn FAIL rows)."""
+    ready = MagicMock(side_effect=["LLM_API_KEY not set", None])
+    monkeypatch.setattr("hunter.main._check_apply_ready", ready)
+    sent = []
+    monkeypatch.setattr(
+        apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
+    )
+
+    claim_mock = MagicMock(side_effect=[_StopLoop()])
+    monkeypatch.setattr(tracker, "claim_pending", claim_mock)
+    subprocess_mock = AsyncMock()
+    monkeypatch.setattr(apply_worker, "run_apply_agent_subprocess", subprocess_mock)
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
+
+    assert any("not ready" in t.lower() for t in sent)
+    # First poll: not ready → no claim. Second poll: ready → claim raises stop.
+    assert claim_mock.call_count == 1
+    subprocess_mock.assert_not_awaited()
+    assert ready.call_count == 2
 
 
 def test_loop_consecutive_fail_breaker_backs_off_and_resets(tracker_db, monkeypatch):

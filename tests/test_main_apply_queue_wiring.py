@@ -44,7 +44,9 @@ def test_auto_apply_writes_pending_rows_when_queue_enabled(tracker_db) -> None:
         patch("hunter.main.send_text", fake_send_text),
         # The queue path must not touch any of the inline-apply machinery.
         patch("hunter.main._auto_apply_all", AsyncMock(side_effect=_boom)),
-        patch("hunter.main._check_apply_ready", side_effect=_boom),
+        # Readiness gate still runs before enqueue (must pass).
+        patch("hunter.main._check_apply_ready", return_value=None),
+        # Outage pause lives in the worker — hunt must not consult it here.
         patch("hunter.main.llm_outage.pause_remaining", side_effect=_boom),
     ):
         asyncio.run(run_hunt(MagicMock()))
@@ -55,6 +57,33 @@ def test_auto_apply_writes_pending_rows_when_queue_enabled(tracker_db) -> None:
     assert len(rows) == 1
     assert rows[0]["ats"] == "PENDING"
     assert any("Queued" in t for t in sent_texts)
+
+
+def test_auto_apply_does_not_queue_when_apply_not_ready(tracker_db) -> None:
+    job = _make_job("Acme", "Angular Dev", "https://justjoin.it/job-offer/not-ready")
+    sent_texts: list[str] = []
+
+    async def fake_send_text(_ctx, text, **_kw):
+        sent_texts.append(text)
+
+    with (
+        patch("hunter.main.AUTO_APPLY", True),
+        patch("hunter.main.APPLY_QUEUE_ENABLED", True),
+        patch("hunter.main.ALL_SOURCES", [_FakeNormalSource()]),
+        patch("hunter.main.apply_filters_with_stats", return_value=([job], {})),
+        patch("hunter.main.get_known_urls", return_value=set()),
+        patch("hunter.main.get_known_company_titles", return_value=set()),
+        patch("hunter.main.send_job_cards", AsyncMock()),
+        patch("hunter.main.send_text", fake_send_text),
+        patch("hunter.main._auto_apply_all", AsyncMock(side_effect=_boom)),
+        patch("hunter.main._check_apply_ready", return_value="LLM_API_KEY not set"),
+    ):
+        asyncio.run(run_hunt(MagicMock()))
+
+    from hunter import tracker
+
+    assert tracker.lookup_url(job.url) == []
+    assert any("not queuing" in t.lower() or "not ready" in t.lower() for t in sent_texts)
 
 
 def test_auto_apply_respects_max_jobs_per_run_cap_when_queued(tracker_db) -> None:
@@ -77,6 +106,7 @@ def test_auto_apply_respects_max_jobs_per_run_cap_when_queued(tracker_db) -> Non
         patch("hunter.main.send_job_cards", AsyncMock()),
         patch("hunter.main.send_text", fake_send_text),
         patch("hunter.main._auto_apply_all", AsyncMock(side_effect=_boom)),
+        patch("hunter.main._check_apply_ready", return_value=None),
     ):
         asyncio.run(run_hunt(MagicMock()))
 
