@@ -12,7 +12,7 @@ After that, the bot uses the token automatically (no browser needed again).
 from pathlib import Path
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 ROOT = Path(__file__).parent.parent
 CREDENTIALS_FILE = ROOT / "gmail_credentials.json"
 TOKEN_FILE = ROOT / "gmail_token.json"
@@ -30,10 +30,6 @@ def main():
     TOKEN_FILE.write_text(creds.to_json())
     print(f"Done! Token saved to {TOKEN_FILE}")
     print("You can now start the bot — Gmail source will work automatically.")
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

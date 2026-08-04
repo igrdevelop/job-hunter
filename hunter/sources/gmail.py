@@ -5,10 +5,11 @@ from email.utils import parsedate_to_datetime
 
 from hunter.config import (
     GMAIL_ENRICH_ENABLED,
+    GMAIL_LABEL_PROCESSED,
     GMAIL_LOOKBACK_HOURS,
     GMAIL_MAX_RESULTS,
 )
-from hunter.gmail_client import get_gmail_service
+from hunter.gmail_client import get_gmail_service, get_or_create_label, label_messages
 from hunter.gmail_parsers import PARSERS
 from hunter.models import Job
 from hunter.sources.base import BaseSource
@@ -86,7 +87,24 @@ class GmailSource(BaseSource):
             jobs = enrich_jobs(jobs)
             logger.info("[gmail] After enrichment: %d job(s)", len(jobs))
 
+        self._label_processed_emails(service)
+
         return jobs
+
+    def _label_processed_emails(self, service) -> None:
+        if not GMAIL_LABEL_PROCESSED:
+            return
+        msg_ids = [rec["msg_id"] for rec in self.last_email_log if rec["msg_id"]]
+        if not msg_ids:
+            return
+        try:
+            label_id = get_or_create_label(service)
+            if not label_id:
+                return
+            labeled = label_messages(service, msg_ids, label_id)
+            logger.info("[gmail] Labeled %d/%d email(s) as processed", labeled, len(msg_ids))
+        except Exception as e:
+            logger.warning("[gmail] Failed to label emails: %s", e)
 
     @staticmethod
     def _parse_date(raw: str):

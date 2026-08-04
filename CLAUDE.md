@@ -792,6 +792,7 @@ Applications/               Generated documents (gitignored)
 | `GMAIL_ENRICH_DOMAIN_LIMIT` | `2` | Default per-host concurrent enrichment fetches |
 | `GMAIL_ENRICH_DOMAIN_DELAY` | `0.0` | Default per-host delay (sec) between enrichment fetches |
 | `GMAIL_ENRICH_SKIP_HOSTS` | `linkedin.com,pracuj.pl` | Hosts NOT enriched during the hunt (they hard-block → 429/403 and poison the shared rate budget). The email-derived stub is kept. Comma-separated; remove a host once it fetches reliably. |
+| `GMAIL_LABEL_PROCESSED` | `true` | Apply a "Job Hunter/Processed" Gmail label to every alert email the bot reads during a hunt. Requires `gmail.modify` scope — re-run `python tools/gmail_auth.py` after upgrading from a pre-labeling install. |
 | `PRACUJ_HOST_CONCURRENCY` | `2` | pracuj.pl per-host concurrency override (Cloudflare 429) |
 | `PRACUJ_HOST_DELAY_SEC` | `1.0` | pracuj.pl per-host delay (sec) override |
 

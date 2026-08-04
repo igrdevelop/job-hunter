@@ -515,6 +515,11 @@ PRACUJ_HOST_DELAY_SEC: float = float(os.getenv("PRACUJ_HOST_DELAY_SEC", "1.0"))
 # without a logged-in session (see LINKEDIN_STORAGE_STATE); pracuj Cloudflares.
 # Comma-separated host substrings. Remove a host here once it can be fetched
 # reliably (e.g. after providing a LinkedIn session).
+GMAIL_LABEL_PROCESSED: bool = os.getenv("GMAIL_LABEL_PROCESSED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 GMAIL_ENRICH_SKIP_HOSTS: list[str] = [
     h.strip().lower()
     for h in os.getenv("GMAIL_ENRICH_SKIP_HOSTS", "linkedin.com,pracuj.pl").split(",")
