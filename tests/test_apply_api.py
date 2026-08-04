@@ -78,7 +78,7 @@ def test_main_api_skip_dedup_true_bypasses_tracker(monkeypatch, capsys) -> None:
     monkeypatch.setattr("hunter.apply_api._already_processed", fake_already_processed)
 
     # Intercept the fetch step so we don't actually hit the network
-    def _boom(url):
+    def _boom(url, **_kw):
         raise RuntimeError("fetch stopped intentionally")
 
     with patch("hunter.sources.fetch_job_text", _boom):
@@ -98,7 +98,7 @@ def test_main_api_uses_paste_text_without_fetch(monkeypatch) -> None:
     """When paste_text is provided, fetch should not be called."""
     fetch_called = []
 
-    def _fetch(url):
+    def _fetch(url, **_kw):
         fetch_called.append(url)
         return "job text"
 

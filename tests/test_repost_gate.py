@@ -391,7 +391,7 @@ def _patch_api_pre_repost_gate(monkeypatch, job_text: str = _LONG_TEXT) -> None:
     """Neutralize every pipeline stage before Step 1.5g (mirror of the doomed
     gate wiring tests, plus the doomed gate itself returning False)."""
     monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: job_text)
+    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url, **_kw: job_text)
     monkeypatch.setattr("hunter.validation.is_job_text_too_short", lambda *a, **kw: False)
     monkeypatch.setattr("hunter.expired_check.is_job_expired", lambda text: False)
     monkeypatch.setattr("hunter.apply_api.is_react_only_job_text", lambda text: False)

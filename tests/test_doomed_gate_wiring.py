@@ -192,7 +192,7 @@ def _patch_api_pre_gate(monkeypatch, job_text: str = "Full job posting text " * 
     """Neutralize every pipeline stage BEFORE Step 1.5f so the gate call is
     reached deterministically without network/filesystem side effects."""
     monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: job_text)
+    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url, **_kw: job_text)
     monkeypatch.setattr("hunter.validation.is_job_text_too_short", lambda text, *a, **kw: False)
     monkeypatch.setattr("hunter.expired_check.is_job_expired", lambda text: False)
     monkeypatch.setattr("hunter.apply_api.is_react_only_job_text", lambda text: False)

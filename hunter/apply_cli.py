@@ -207,7 +207,7 @@ def main_cli(
         try:
             from hunter.sources import fetch_job_text
 
-            job_text = fetch_job_text(url)
+            job_text = fetch_job_text(url, use_session=True)
             if job_text and len(job_text) > 100:
                 apply_input = f"URL: {url}\n\n{job_text}"
                 print(f"[apply_agent] Pre-fetched {len(job_text)} chars via JSON API")

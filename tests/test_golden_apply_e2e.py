@@ -244,7 +244,9 @@ def test_golden_happy_path_en(
     fake_llm,
     monkeypatch,
 ):
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: golden_job_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
     fake_llm.generation_response = golden_generation_response
     fake_llm.verdict_response = golden_verdict_response
 
@@ -318,7 +320,7 @@ def test_golden_happy_path_paste_mode(
     fetch_calls = []
     monkeypatch.setattr(
         "hunter.sources.fetch_job_text",
-        lambda url: fetch_calls.append(url) or golden_job_text,
+        lambda url, **_kw: fetch_calls.append(url) or golden_job_text,
         raising=False,
     )
     fake_llm.generation_response = golden_generation_response
@@ -350,7 +352,9 @@ def test_golden_expired_job_no_llm_call(golden_env, fake_llm, monkeypatch):
         "The offer has been closed and is no longer active. Thank you for your interest."
     )
     assert len(expired_text) >= 300, "must clear MIN_JOB_TEXT_LEN or Step 1.5a fires first"
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: expired_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: expired_text, raising=False
+    )
 
     from hunter.apply_api import main_api
 
@@ -383,7 +387,9 @@ def test_golden_doomed_gate_hard_skips_before_llm(golden_env, fake_llm, monkeypa
         "no C2C or third-party contracts. Relocation to our Austin, Texas office is required; "
         "this is a fully onsite position, five days a week in the office."
     )
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: doomed_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: doomed_text, raising=False
+    )
 
     from hunter.apply_api import main_api
 
@@ -421,7 +427,9 @@ def test_golden_catches_missing_verdict_stamp(
     assertion on `ats_verdict` must fail — simulated by starving the verdict
     call (no verdict_response configured -> run_llm_verdict gets no judge
     key and returns None early instead)."""
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: golden_job_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
     monkeypatch.setattr("hunter.config.JUDGE_API_KEY", "")  # verdict step short-circuits to None
     fake_llm.generation_response = golden_generation_response
     fake_llm.verdict_response = golden_verdict_response
@@ -445,7 +453,9 @@ def test_golden_catches_broken_tracker_row(
     wrongly forced on the primary Step 7 call), the golden test's tracker
     assertion must fail — simulated by forcing the fake runner to always
     skip the tracker write, mirroring a hypothetical wiring bug."""
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: golden_job_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
     fake_llm.generation_response = golden_generation_response
     fake_llm.verdict_response = golden_verdict_response
 
@@ -475,7 +485,9 @@ def test_golden_catches_lost_ats_score(
     generator's own self-score instead — simulated by never configuring a
     verdict_response (JUDGE key present, but the verdict call itself would
     raise on an unset fixture) so no verdict is ever stamped."""
-    monkeypatch.setattr("hunter.sources.fetch_job_text", lambda url: golden_job_text, raising=False)
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
     monkeypatch.setattr("hunter.config.ATS_VERDICT_ENABLED", False)
     fake_llm.generation_response = golden_generation_response
 
