@@ -1,508 +1,621 @@
 # WEB APP PLAN — Job Hunter as a web application
 
-> **Goal:** Turn the single-user Python bot into a multi-user product with a
-> web UI, so a friend (or anyone) can register, fill in their profile, and
-> use the full scraping + LLM pipeline — without touching source code.
+> **Goal:** Replace Google Sheets and Google Drive with a self-hosted web UI.
+> The user logs in, sees their applications table, downloads generated files,
+> views statistics — all in the browser instead of Google products.
+> Multi-user support comes in Phase B, after the core UI works.
 >
-> **Stack decision:** Angular (frontend) + NestJS (backend) + PostgreSQL.
-> Python bot stays as the "engine" — scraping + LLM pipeline. No rewrite.
+> **Stack:** Angular (frontend) + NestJS (backend) + SQLite (Phase A) →
+> PostgreSQL (Phase B). Python bot stays as the "engine" — scraping + LLM
+> pipeline. No rewrite.
 >
 > **Repos:**
-> - `job-hunter-api` — NestJS backend (new)
-> - `job-hunter-web` — Angular frontend (new)
+> - `job-hunter-site` — Angular frontend (existing repo, igrflex.work)
+> - `job-hunter-api` — NestJS backend (new repo)
 > - `job-hunter` — Python bot (existing, adapted)
+>
+> **Decisions already made:**
+> - Telegram stays as notification/command channel alongside the web app
+> - NestJS runs in Docker on the same VPS as the bot (178.105.131.107,
+>   Ubuntu 24.04, hostname `job-hunter`)
+> - NestJS serves BOTH the Angular static files AND the API — one process,
+>   one domain, no CORS. No Cloudflare Pages needed.
+> - Cloudflare Tunnel exposes the VPS as `job-hunter.igrflex.work` (HTTPS auto)
+> - Email + password auth from day one (ready for multi-user in Phase B)
+>
+> **Domains:**
+> - `job-hunter.igrflex.work` — the web app (NestJS + Angular, via Tunnel)
+> - `igrflex.work` — future CV landing page (separate project, not this plan)
+>
+> `job-hunter.igrflex.work` currently points to a Cloudflare Pages default
+> starter. When the tunnel goes live, switch its DNS from Pages to the tunnel
+> CNAME (one click in the Cloudflare dashboard, igrflex@gmail.com account).
 
 ---
 
-## Architecture
+## Two-phase approach
 
-```
-┌───────────────────────────┐
-│   job-hunter-web          │
-│   (Angular)               │
-│                           │
-│  /login, /register        │
-│  /dashboard   — jobs list │
-│  /profile     — candidate │
-│  /settings    — filters,  │
-│                 Telegram,  │
-│                 LLM keys   │
-│  /applications — tracker  │
-│  /funnel       — stats    │
-└──────────┬────────────────┘
-           │ REST / WebSocket
-           ▼
-┌───────────────────────────┐
-│   job-hunter-api          │
-│   (NestJS)                │
-│                           │
-│  AuthModule    — JWT      │
-│  UsersModule   — CRUD     │
-│  ProfileModule — candidate│
-│                 data      │
-│  JobsModule    — vacancies│
-│  ApplyModule   — tracker  │
-│  TelegramModule— bot link │
-│  BotBridgeModule — sends  │
-│    tasks to Python bot    │
-└──────────┬────────────────┘
-           │ reads/writes
-           ▼
-┌───────────────────────────┐
-│      PostgreSQL           │
-│                           │
-│  users                    │
-│  user_profiles            │
-│  user_filters             │
-│  user_employers           │
-│  jobs                     │
-│  applications             │
-│  source_runs              │
-│  subsystem_health         │
-│  config_kv                │
-└──────────┬────────────────┘
-           │ reads/writes
-           ▼
-┌───────────────────────────┐
-│   job-hunter (Python bot) │
-│                           │
-│  Per-user scraping loop   │
-│  Per-user LLM pipeline    │
-│  Per-user Telegram notify │
-│  Per-user Applications/   │
-└───────────────────────────┘
-```
+The old plan tried to do three things at once (replace Google, add multi-user,
+learn NestJS). That's three separate projects with compounding risk. Instead:
 
-### Integration: NestJS ↔ Python Bot
+**Phase A — "Own UI instead of Google" (single-user, ~12-16 days)**
+NestJS reads the EXISTING `tracker.db` (SQLite) and serves files from the
+EXISTING `Applications/` folder. Angular shows: applications table (= Sheets),
+file browser (= Drive), statistics (= /funnel). The Python bot writes to
+tracker.db as before — zero migration. Google Sheets/Drive are disabled.
 
-**Shared PostgreSQL** — simplest approach for a learning project:
-- NestJS owns the schema (TypeORM migrations)
-- Python bot reads user config + writes jobs/applications via the same DB
-- `hunter/db.py` switches from SQLite to PostgreSQL (psycopg2/asyncpg)
-- No message queue, no REST between services — just a shared DB
+**Phase B — "Multi-user" (later, ~15-20 days)**
+SQLite → PostgreSQL. `user_id` on every table. Registration, per-user config,
+per-user bot schedule. File storage moves to Cloudflare R2 or stays local
+with per-user subdirectories.
 
-**Per-user data isolation:**
-- Every table with user data has a `user_id` FK
-- Bot queries filter by `user_id`
-- `prompts/` files generated from DB into per-user temp dirs at apply time
+Phase A alone already delivers a working product that replaces Google.
 
 ---
 
-## PostgreSQL Schema (core tables)
+## Phase A architecture
 
-```sql
--- Auth & identity
-CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email       TEXT UNIQUE NOT NULL,
-    password    TEXT NOT NULL,  -- bcrypt hash
-    created_at  TIMESTAMPTZ DEFAULT now(),
-    is_active   BOOLEAN DEFAULT true
-);
-
--- What today lives in candidate.yaml + candidate_profile.md
-CREATE TABLE user_profiles (
-    user_id         UUID PRIMARY KEY REFERENCES users(id),
-    full_name       TEXT NOT NULL,
-    cv_filename_prefix TEXT,  -- "Ihar_Petrasheuski_CV"
-    also_known_as   TEXT,     -- "also known as Igor Pietraszewski"
-    phone           TEXT,
-    email_contact   TEXT,
-    linkedin_url    TEXT,
-    home_city       TEXT NOT NULL,        -- "Wrocław"
-    home_city_aliases TEXT[],             -- ["wroclaw", "vrotslav"]
-    acceptable_hybrid TEXT[],             -- ["Wrocław"]
-    acceptable_weekly_hybrid TEXT[],      -- ["Warszawa", "Kraków"]
-    work_authorization TEXT DEFAULT 'EU', -- feeds doomed gate
-    spoken_languages TEXT[] DEFAULT '{en}',
-    cv_languages TEXT[] DEFAULT '{en}',
-    timezone TEXT DEFAULT 'Europe/Warsaw',
-    -- LLM prompt content (replaces candidate_profile.md)
-    candidate_profile_md TEXT,
-    -- Per-track base CVs (replaces base_cv_*.md files)
-    base_cv JSONB DEFAULT '{}',  -- {"angular": "..md content..", "react": "..."}
-    tracks_enabled TEXT[] DEFAULT '{angular}',
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Replaces hardcoded employer lists in verdict_refine/content_qa
-CREATE TABLE user_employers (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID REFERENCES users(id),
-    company     TEXT NOT NULL,
-    period      TEXT,           -- "2018-2022"
-    is_verifiable BOOLEAN DEFAULT true,  -- protected from stretch edits
-    is_flexible BOOLEAN DEFAULT false,   -- Altoros-like, can weave projects
-    flexible_projects TEXT[],            -- ["E-commerce", "Insurance"]
-    sort_order  INT DEFAULT 0,
-    UNIQUE(user_id, company)
-);
-
--- Per-user filter configuration
-CREATE TABLE user_filters (
-    user_id UUID PRIMARY KEY REFERENCES users(id),
-    -- What today lives in filter_config.py
-    title_keywords TEXT[],         -- ["angular", "frontend", "react"]
-    exclude_title_patterns TEXT[], -- regex patterns
-    location_whitelist TEXT[],     -- ["remote", "zdalnie", "wroclaw"]
-    exclude_languages TEXT[],      -- ["german"] (replaces exclude_german flag)
-    exclude_companies TEXT[],
-    min_seniority TEXT DEFAULT 'mid',
-    custom_rules JSONB DEFAULT '{}'
-);
-
--- Per-user Telegram + API keys
-CREATE TABLE user_settings (
-    user_id UUID PRIMARY KEY REFERENCES users(id),
-    telegram_chat_id BIGINT,
-    telegram_bot_token TEXT,     -- each user brings their own bot, OR
-    use_shared_bot BOOLEAN DEFAULT true,  -- uses the platform bot
-    -- LLM
-    llm_provider TEXT DEFAULT 'anthropic',
-    llm_model TEXT DEFAULT 'claude-sonnet-4-6',
-    llm_api_key_encrypted TEXT,  -- encrypted at rest
-    -- Google integrations (per-user OAuth)
-    gsheets_enabled BOOLEAN DEFAULT false,
-    gdrive_enabled BOOLEAN DEFAULT false,
-    google_oauth_token_encrypted TEXT,
-    -- Behavior
-    auto_apply BOOLEAN DEFAULT false,
-    max_jobs_per_run INT DEFAULT 40,
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Jobs (scraped vacancies) — shared pool + per-user applications
-CREATE TABLE jobs (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source      TEXT NOT NULL,
-    url         TEXT NOT NULL,
-    url_norm    TEXT NOT NULL,
-    company     TEXT,
-    title       TEXT,
-    location    TEXT,
-    stack       TEXT,
-    description TEXT,
-    scraped_at  TIMESTAMPTZ DEFAULT now(),
-    expired_at  TIMESTAMPTZ,
-    UNIQUE(url_norm)
-);
-
--- Per-user applications (replaces tracker.db applications table)
-CREATE TABLE applications (
-    id          TEXT PRIMARY KEY,   -- 8-char hex
-    user_id     UUID REFERENCES users(id) NOT NULL,
-    job_id      UUID REFERENCES jobs(id),
-    date        TEXT,
-    company     TEXT,
-    title       TEXT,
-    stack       TEXT,
-    ats_status  TEXT,
-    url         TEXT,
-    url_norm    TEXT,
-    folder      TEXT,
-    sent        TEXT,
-    reapplication TEXT,
-    to_learn    TEXT,
-    drive_url   TEXT,
-    confirmation TEXT,
-    answer      TEXT,
-    cost_usd    REAL,
-    ats_verdict INT,
-    fail_count  INT DEFAULT 0,
-    -- Sheets sync
-    sheets_row  INT,
-    sheets_dirty INT DEFAULT 0,
-    created_at  TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX idx_applications_user ON applications(user_id);
-CREATE INDEX idx_applications_url ON applications(url_norm);
 ```
+                    Browser
+                       │
+                       │ HTTPS
+                       ▼
+              ┌─────────────────┐
+              │ Cloudflare CDN  │
+              │ job-hunter.igrflex.work│
+              └────────┬────────┘
+                       │ Tunnel (cloudflared)
+                       ▼
+┌──────────────────────────────────────────────────┐
+│   VPS 178.105.131.107 (Ubuntu 24.04)             │
+│   docker-compose                                 │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │  job-hunter-api (NestJS) :3000             │  │
+│  │                                            │  │
+│  │  Serves Angular static files (dist/)       │  │
+│  │  + REST API:                               │  │
+│  │    /auth/*          — JWT login            │  │
+│  │    /api/applications — tracker CRUD        │  │
+│  │    /api/files/*     — serve Applications/  │  │
+│  │    /api/analytics/* — funnel, stats        │  │
+│  │  All other routes → index.html (SPA)       │  │
+│  └──────┬───────────────────┬─────────────────┘  │
+│         │ reads/writes      │ reads              │
+│         ▼                   ▼                    │
+│  ┌──────────────┐  ┌─────────────────────┐       │
+│  │  tracker.db  │  │   Applications/     │       │
+│  │  (SQLite)    │  │   {date}/{company}/ │       │
+│  │  WAL mode    │  │   PDFs, DOCXs, etc  │       │
+│  └──────┬───────┘  └──────────┬──────────┘       │
+│         │ writes              │ writes           │
+│         ▼                     ▼                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │  job-hunter (Python bot)                   │  │
+│  │  Scraping → Filtering → LLM pipeline       │  │
+│  │  Telegram notifications (unchanged)        │  │
+│  └────────────────────────────────────────────┘  │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │  cloudflared (tunnel agent)                │  │
+│  │  Routes job-hunter.igrflex.work → localhost:3000  │  │
+│  └────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────┘
+```
+
+### Why this works without migration
+
+- **SQLite WAL mode** supports concurrent readers + one writer across
+  processes. The bot is the primary writer; NestJS mostly reads. The few
+  writes NestJS does (Sent, To Learn, Re-application edits) are low-frequency
+  and serialized by SQLite's own locking — identical to what the Google Sheets
+  pull already does today (`_apply_pull_delta_db`).
+- **Applications/ folder** is a Docker volume mounted into both containers.
+  NestJS serves files via a static controller. No upload/sync logic needed.
+- **No bot code changes** for Phase A. The bot doesn't know the web app
+  exists — it writes to tracker.db and Applications/ as before.
+- **One origin, no CORS.** NestJS serves both the Angular SPA (`dist/`
+  as static files, all non-API routes → `index.html`) and the REST API
+  (`/api/*`, `/auth/*`). The browser sees one domain (`job-hunter.igrflex.work`),
+  so there are zero cross-origin issues.
+- **Cloudflare Tunnel** gives HTTPS for free with no open ports, no nginx,
+  no Let's Encrypt. `cloudflared` runs as a Docker service alongside the
+  bot and NestJS.
+
+### What Google code becomes dead
+
+Once the web app replaces Sheets/Drive, these modules are no longer needed
+(disable first via `GSHEETS_ENABLED=false`, `GDRIVE_ENABLED=false`; delete
+in a later cleanup):
+
+| Module | What it did | Replaced by |
+|--------|-------------|-------------|
+| `hunter/gsheets_sync.py` | Mirror tracker rows to Sheets | Web app reads tracker.db directly |
+| `hunter/gsheets_client.py` | Sheets API v4 wrapper | — |
+| `hunter/gdrive_sync.py` | Upload folders to Drive | NestJS serves Applications/ directly |
+| `hunter/gdrive_client.py` | Drive API v3 wrapper | — |
+| `hunter/drive_ledger.py` | Shadow upload dedup | — |
+| `hunter/sent_normalizer.py` | Parse Sent → Sheets col L | Web app shows Sent directly from DB |
+| `hunter/cost_writer.py` | Write cost to Sheets col M | Web app shows cost_usd from DB |
+| `hunter/verdict_writer.py` | Write verdict to Sheets col N | Web app shows ats_verdict from DB |
+| `hunter/oauth_alert.py` | Google OAuth token expiry | No more Google OAuth |
+| `hunter/schedules/gsheets.py` | Sheets resync/pull schedule | — |
+| `hunter/schedules/gdrive.py` | Drive upload schedule | — |
+| `hunter/schedules/normalize_sent.py` | Sheets col L refresh | — |
+| `hunter/commands/gsheets.py` | /gsheets_status, /gsheets_push_* | — |
+| `hunter/commands/gdrive.py` | /gdrive_upload_missing | — |
+| `hunter/commands/normalize.py` | /normalize | — |
+| `hunter/delivery.py` | Post-apply Sheets+Drive push | Bot writes DB; web app reads it |
+
+Also unnecessary: `gsheets_credentials.json`, `gsheets_token.json`,
+`gsheets_state.json` (all Google OAuth artifacts).
+
+**Keep:** `gmail_client.py` / `gmail_token.json` — Gmail job alert source is
+independent from Sheets/Drive.
 
 ---
 
-## NestJS Backend — Module Structure
+## Phase A — Development Steps
+
+### A0: Infrastructure (1-2 days)
+
+**Goal:** NestJS skeleton running in Docker alongside the bot, serving
+Angular static files + API, reachable via Cloudflare Tunnel.
+
+1. Create `job-hunter-api` repo: `nest new job-hunter-api`
+2. Configure NestJS to serve Angular dist as static files:
+   ```typescript
+   // main.ts — serve Angular SPA
+   app.useStaticAssets(join(__dirname, '..', 'public'));
+   // All non-API routes → index.html (SPA fallback)
+   ```
+3. Dockerfile: multi-stage build
+   - Stage 1: `npm run build` Angular → `dist/job-hunter-site/browser/`
+   - Stage 2: `npm run build` NestJS → `dist/`
+   - Stage 3: production image, copy both dists
+   (Angular source lives in `job-hunter-site` repo; either git-submodule,
+   or CI clones both repos. Decide at implementation time.)
+4. Add to existing `docker-compose.yml`:
+   ```yaml
+   job-hunter-api:
+     build: ../job-hunter-api
+     volumes:
+       - ./tracker.db:/app/data/tracker.db    # read-write
+       - ./Applications:/app/data/Applications:ro
+     environment:
+       - DB_PATH=/app/data/tracker.db
+       - FILES_PATH=/app/data/Applications
+       - JWT_SECRET=${JWT_SECRET}
+     # No ports exposed — cloudflared handles routing
+
+   cloudflared:
+     image: cloudflare/cloudflared:latest
+     command: tunnel run
+     environment:
+       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+     # Routes job-hunter.igrflex.work → job-hunter-api:3000
+   ```
+5. Set up Cloudflare Tunnel (one-time, in igrflex@gmail.com dashboard):
+   - Zero Trust → Networks → Tunnels → Create
+   - Copy tunnel token → `CLOUDFLARE_TUNNEL_TOKEN` in `.env`
+   - Add public hostname: `job-hunter.igrflex.work` → `http://job-hunter-api:3000`
+   - DNS CNAME auto-created by Cloudflare
+6. Verify: `curl https://job-hunter.igrflex.work/health` returns 200
+
+**Deliverable:** `GET /health` + Angular starter page at `job-hunter.igrflex.work`
+
+### A1: Auth module (1-2 days)
+
+**Learning goal:** NestJS modules, services, guards, JWT, bcrypt
+
+1. `users` table via TypeORM (SQLite driver — NestJS has its OWN SQLite DB
+   for users, separate from tracker.db; no write contention):
+   ```typescript
+   @Entity()
+   export class User {
+     @PrimaryGeneratedColumn('uuid') id: string;
+     @Column({ unique: true }) email: string;
+     @Column() password: string; // bcrypt
+     @CreateDateColumn() createdAt: Date;
+   }
+   ```
+2. AuthModule: register, login (returns JWT), `/auth/me` (JWT guard)
+3. Seed the owner's account via env var or migration
+4. CORS config for `igrflex.work`
+
+**Deliverable:** `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
+
+### A2: Applications API — read tracker (2-3 days)
+
+**Learning goal:** TypeORM raw queries (reading a foreign SQLite DB),
+pagination, sorting, filtering
+
+NestJS connects to the bot's tracker.db as a SECOND database (read-only
+connection). This is the critical integration point.
+
+1. TrackerModule: read-only service over tracker.db
+   ```typescript
+   // TypeORM can open a second SQLite connection alongside its own DB
+   @Module({
+     imports: [
+       TypeOrmModule.forRoot({
+         name: 'tracker',
+         type: 'better-sqlite3',
+         database: process.env.DB_PATH,
+         // No entities — raw queries only (bot owns the schema)
+       }),
+     ],
+   })
+   ```
+2. Endpoints:
+   ```
+   GET /applications          — paginated list (sort, filter by status/date/company)
+   GET /applications/:id      — single row detail
+   PATCH /applications/:id    — update Sent, To Learn, Re-application (the 3 user-editable fields)
+   GET /applications/stats    — counts by status (applied/sent/failed/expired/pending)
+   GET /applications/funnel   — funnel data (same logic as hunter/funnel.py)
+   ```
+3. The PATCH endpoint writes to tracker.db (upgrade mount to read-write).
+   Same fields that Google Sheets pull currently updates — no new writes.
+
+**Deliverable:** `GET /applications` returns the full tracker in JSON
+
+### A3: Files API — serve Applications/ (1-2 days)
+
+**Learning goal:** NestJS file streaming, static assets, path security
+
+1. FilesModule: controller that serves files from `Applications/`
+   ```
+   GET /files                         — list date folders
+   GET /files/:date                   — list company folders for a date
+   GET /files/:date/:company          — list files in a company folder
+   GET /files/:date/:company/:file    — download/stream a file
+   ```
+2. Path traversal protection (sanitize `..` and absolute paths)
+3. Content-Type headers for PDF/DOCX/TXT/JSON
+4. Optional: PDF inline preview (Content-Disposition: inline)
+
+**Deliverable:** browser can list and download any generated file
+
+### A4: Analytics API (1 day)
+
+**Learning goal:** SQL aggregation queries
+
+1. AnalyticsModule: replicates `hunter/funnel.py` logic in SQL
+   ```
+   GET /analytics/funnel?days=30      — tracked→generated→sent→confirmed→answered
+   GET /analytics/per-source          — breakdown by source
+   GET /analytics/cost?days=30        — total/median/tail cost_usd
+   GET /analytics/timeline?days=90    — applications per day/week
+   ```
+
+**Deliverable:** analytics data available as JSON
+
+### A5: Angular — Login + Applications table (3-4 days)
+
+**Learning goal:** Angular 19 features (signals, standalone components),
+HttpClient, reactive forms, route guards
+
+This is the BIG frontend step — the applications table that replaces
+Google Sheets.
+
+1. Core infrastructure in `job-hunter-site`:
+   - `core/auth/` — AuthService (JWT in localStorage), AuthGuard,
+     AuthInterceptor (attach JWT to requests)
+   - `core/api/` — ApiService (base URL: `/api` — same origin, no CORS)
+   - `environments/` — apiUrl per env (dev: `localhost:3000`, prod: `/api`)
+2. Login page (`/login`) — email + password form
+3. Applications table (`/applications`):
+   - Full data table with all tracker columns
+   - Sortable columns (Date, Company, ATS %, Verdict)
+   - Filter by status (Applied/Sent/Failed/Expired/Pending)
+   - Search by company/title
+   - **Inline edit** for Sent, To Learn, Re-application (click cell → input → save)
+   - Status badges with colors (green=sent, red=failed, grey=expired)
+   - Click URL → opens job page in new tab
+   - Click Folder → navigates to `/files/{date}/{company}`
+**UI framework:** Angular Material (familiar from Angular ecosystem) or
+PrimeNG (richer data table). Decision at implementation time.
+
+**SPA routing:** NestJS handles this — all non-`/api/*` and non-`/auth/*`
+routes serve `index.html`, Angular router takes over client-side.
+
+**Deliverable:** user logs in, sees their tracker table, edits Sent dates
+
+### A6: Angular — Files browser (2-3 days)
+
+**Learning goal:** File tree UI, PDF preview, routing
+
+1. Files page (`/files`):
+   - Tree view: dates → companies → files
+   - File list with icons (PDF, DOCX, TXT, JSON)
+   - Click file → download (DOCX) or inline preview (PDF)
+   - Per-company folder view with all generated docs
+   - Link from Applications table Folder column → jump to company's files
+2. PDF preview component (embedded `<iframe>` or pdf.js)
+
+**Deliverable:** user browses and downloads all generated documents
+
+### A7: Angular — Statistics (1-2 days)
+
+**Learning goal:** Charts (Chart.js or ngx-charts)
+
+1. Stats page (`/stats`):
+   - Funnel chart (tracked → generated → sent → confirmed → answered)
+   - Per-source breakdown table
+   - Cost summary (total, median, last 7/30 days)
+   - Timeline chart (applications per day/week)
+2. Dashboard cards on the main page after login
+
+**Deliverable:** user sees application funnel and cost analytics
+
+### A8: Google removal + deploy (1-2 days)
+
+1. Set `GSHEETS_ENABLED=false`, `GDRIVE_ENABLED=false` in bot's `.env`
+2. Verify bot still works without Google (it should — both are best-effort)
+3. Full docker-compose with all three services:
+   ```yaml
+   services:
+     job-hunter:         # Python bot (existing)
+     job-hunter-api:     # NestJS + Angular static files
+     cloudflared:        # Tunnel → job-hunter.igrflex.work
+   ```
+4. Smoke test: bot applies → row appears in web table → files visible
+5. Switch `job-hunter.igrflex.work` DNS from Cloudflare Pages CNAME to the
+   tunnel CNAME (if not already done in A0)
+6. Delete the old Cloudflare Pages project `job-hunter-site` (optional cleanup)
+
+**Deliverable:** Google Sheets and Drive fully replaced, app live at
+`job-hunter.igrflex.work`
+
+---
+
+## Phase A summary
+
+| Step | Days | Deliverable |
+|------|------|-------------|
+| A0: Infrastructure | 1 | NestJS in Docker + Tunnel |
+| A1: Auth | 1-2 | Login/register API |
+| A2: Applications API | 2-3 | Tracker read/write API |
+| A3: Files API | 1-2 | File listing + download |
+| A4: Analytics API | 1 | Funnel/cost/timeline data |
+| A5: Angular table | 3-4 | Applications table (= Sheets) |
+| A6: Angular files | 2-3 | File browser (= Drive) |
+| A7: Angular stats | 1-2 | Charts + funnel |
+| A8: Google removal | 1-2 | Disable Sheets/Drive |
+| **Total** | **13-20** | **Google fully replaced** |
+
+### What the user gets after Phase A
+
+1. Opens `igrflex.work` → logs in with email/password
+2. **Applications page** — same tracker table as Google Sheets, but:
+   - Faster (no Sheets API latency, no sync delays)
+   - Editable inline (Sent, To Learn, Re-application)
+   - Always up-to-date (reads tracker.db directly)
+   - Sortable, filterable, searchable
+3. **Files page** — browse `Applications/` folder, preview PDFs, download DOCXs
+4. **Stats page** — funnel chart, per-source breakdown, cost summary
+5. Telegram keeps working exactly as before (notifications + commands)
+6. No more Google account dependency
+
+---
+
+## Phase B — Multi-user (outline, detailed later)
+
+Phase B adds support for multiple users. Only start after Phase A is stable
+and the owner has used the web UI daily for at least a week.
+
+### B0: PostgreSQL migration (3-5 days)
+
+- Add PostgreSQL to docker-compose
+- NestJS switches its own DB from SQLite to PostgreSQL (TypeORM config change)
+- Migrate bot's tracker.db schema to PostgreSQL:
+  - New `hunter/db_postgres.py` (or adapt `hunter/db.py` with a driver switch)
+  - Import existing data
+  - All bot queries gain `WHERE user_id = $1`
+- NestJS reads/writes the SAME PostgreSQL (no more second-DB hack)
+
+### B1: User model + per-user data (3-4 days)
+
+- `user_profiles` table (replaces candidate.yaml — already done in bot as
+  `hunter/candidate.py`, but currently file-based)
+- `user_filters` table (replaces filter_config.py)
+- `user_employers` table (replaces hardcoded employer lists)
+- `user_settings` table (LLM keys, Telegram chat_id, behavior flags)
+- Bot's `candidate.load()` gains a PostgreSQL backend when `DATABASE_URL` set
+
+### B2: Per-user bot schedule (2-3 days)
+
+- `_hunt_lock` becomes per-user (Dict[user_id, asyncio.Lock])
+- Schedule stagger per user (not just per source)
+- `config_kv` table per-user for runtime toggles (/llm, /dual, /tracks)
+
+### B3: File storage (2-3 days)
+
+Options (decide at B-time):
+- **Local disk per-user**: `Applications/{user_id}/{date}/{company}/` —
+  simplest, works with the existing NestJS files controller
+- **Cloudflare R2**: object storage, S3-compatible. Better for scale but
+  adds complexity. Worth it only if 5+ users.
+
+### B4: Telegram per-user routing (2-3 days)
+
+- Link code flow: web UI → NestJS generates code → user sends `/link CODE`
+  to bot → bound
+- Bot routes all notifications by `chat_id → user_id`
+- Commands respect user context
+
+### B5: Angular multi-user pages (2-3 days)
+
+- Registration page (currently seeded, now open)
+- Profile editor (name, city, employers, candidate_profile.md, base CVs)
+- Filter settings editor
+- LLM provider/model/key settings
+
+### Phase B summary
+
+| Step | Days | Deliverable |
+|------|------|-------------|
+| B0: PostgreSQL | 3-5 | Bot + NestJS on PostgreSQL |
+| B1: User model | 3-4 | Per-user profiles/filters/settings |
+| B2: Per-user bot | 2-3 | Per-user hunt schedule + locks |
+| B3: File storage | 2-3 | Per-user file isolation |
+| B4: Telegram routing | 2-3 | Per-user notifications |
+| B5: Angular pages | 2-3 | Profile/settings editors |
+| **Total** | **15-21** | **Multi-user working** |
+
+### What the friend gets after Phase B
+
+1. Opens `igrflex.work` → registers with email/password
+2. Fills in their profile: name, city, stack, languages, employers
+3. Writes their candidate_profile.md and base_cv in the web editor
+4. Configures filters (keywords, locations, exclusions)
+5. Links their Telegram (sends `/link CODE` to the bot)
+6. Bot starts hunting for them on the next cycle
+7. Gets Telegram notifications + browses jobs/applications in web UI
+8. Sees their own applications, funnel stats, generated files
+
+---
+
+## Already done (from old plan)
+
+These items from the original plan are already implemented in the bot:
+
+- **candidate.yaml / hunter/candidate.py** — fully implemented with
+  `load()`, `get(dotpath, default)`, per-module consumption. Phase 3 of
+  the old plan estimated 3-4 days; this is done. For Phase B, the only
+  change is adding a PostgreSQL backend to `candidate.load()`.
+- **filter_config.py** — split out of config.py, structured FILTER dict.
+  For Phase B, moves to user_filters DB table.
+- **APPLY_QUEUE_ENABLED / apply_worker** — PENDING/IN_PROGRESS queue
+  already in tracker.db. For Phase B, needs `user_id` on pending rows.
+
+## What stays OUT of scope
+
+- Payment/billing — this is for friends, not a SaaS
+- Admin panel — overkill for 2-3 users
+- Mobile app — Angular PWA is enough
+- Rewriting the Python scraping/LLM engine in TypeScript
+- Google Sheets/Drive as a feature (once replaced, no going back)
+- Real-time WebSocket for Phase A (polling every 30s is enough; add
+  WebSocket in Phase B if needed)
+- Cloudflare Pages deployment — NestJS serves everything from the VPS
+- Separate frontend domain — one origin, no CORS
+
+---
+
+## Key risks and mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| SQLite concurrent access (bot writes + NestJS reads/writes) | WAL mode handles this. NestJS writes are rare (3 editable fields). Same as Sheets pull today. |
+| Cloudflare Tunnel reliability | Tunnel is production-grade (Cloudflare uses it themselves). Fallback: A-record `job-hunter.igrflex.work` → `178.105.131.107` + nginx + Let's Encrypt. |
+| NestJS learning curve slows Phase A | NestJS is Angular-shaped (decorators, DI, modules). Auth + CRUD is day-1 NestJS territory. The hard parts (PostgreSQL migration, per-user isolation) are deferred to Phase B. |
+| Phase A "good enough" kills motivation for Phase B | Phase A is genuinely useful on its own. Phase B only starts when there's a real second user waiting. |
+| Bot code changes break during Phase B | Phase A requires ZERO bot changes. Phase B's bot changes are isolated behind `DATABASE_URL` — SQLite path stays as fallback. |
+
+---
+
+## NestJS module structure (Phase A, minimal)
 
 ```
 job-hunter-api/
 ├── src/
-│   ├── auth/              # JWT, registration, login
+│   ├── auth/                # JWT, login, register
 │   │   ├── auth.module.ts
 │   │   ├── auth.controller.ts
 │   │   ├── auth.service.ts
 │   │   ├── jwt.strategy.ts
 │   │   └── dto/
-│   ├── users/             # User CRUD
-│   │   ├── users.module.ts
-│   │   ├── users.controller.ts
-│   │   ├── users.service.ts
-│   │   └── entities/user.entity.ts
-│   ├── profile/           # Candidate profile + employers
-│   │   ├── profile.module.ts
-│   │   ├── profile.controller.ts
-│   │   ├── profile.service.ts
-│   │   └── entities/
-│   ├── filters/           # Per-user filter config
-│   │   ├── filters.module.ts
-│   │   ├── filters.controller.ts
-│   │   └── filters.service.ts
-│   ├── jobs/              # Scraped vacancies
-│   │   ├── jobs.module.ts
-│   │   ├── jobs.controller.ts   # GET /jobs, GET /jobs/:id
-│   │   ├── jobs.service.ts
-│   │   └── jobs.gateway.ts      # WebSocket for live updates
-│   ├── applications/      # Per-user tracker
+│   ├── applications/        # Read/edit tracker.db
 │   │   ├── applications.module.ts
 │   │   ├── applications.controller.ts
 │   │   └── applications.service.ts
-│   ├── telegram/          # Bot linking
-│   │   ├── telegram.module.ts
-│   │   └── telegram.service.ts  # generates link code
-│   ├── settings/          # Per-user settings
-│   │   ├── settings.module.ts
-│   │   ├── settings.controller.ts
-│   │   └── settings.service.ts
-│   ├── analytics/         # Funnel, stats
+│   ├── files/               # Serve Applications/ folder
+│   │   ├── files.module.ts
+│   │   └── files.controller.ts
+│   ├── analytics/           # Funnel, stats, cost
 │   │   ├── analytics.module.ts
 │   │   └── analytics.service.ts
+│   ├── health/              # Health check endpoint
+│   │   └── health.controller.ts
 │   └── app.module.ts
-├── migrations/            # TypeORM migrations
 ├── test/
+├── Dockerfile
 ├── .env.example
 ├── nest-cli.json
 ├── tsconfig.json
 └── package.json
 ```
 
-### Key API Endpoints
+Only 4 feature modules for Phase A. Profile, filters, settings, telegram,
+jobs, users — all deferred to Phase B.
+
+## Angular page structure (Phase A, in job-hunter-site)
 
 ```
-POST   /auth/register          — email + password
-POST   /auth/login             — returns JWT
-GET    /auth/me                — current user
-
-GET    /profile                — candidate profile
-PUT    /profile                — update profile
-GET    /profile/employers      — employer list
-POST   /profile/employers      — add employer
-PUT    /profile/employers/:id  — update employer
-DELETE /profile/employers/:id  — remove employer
-
-GET    /filters                — filter config
-PUT    /filters                — update filters
-
-GET    /jobs                   — paginated, filterable
-GET    /jobs/:id               — job detail
-
-GET    /applications           — user's applications
-GET    /applications/funnel    — funnel analytics
-GET    /applications/stats     — summary stats
-
-GET    /settings               — user settings
-PUT    /settings               — update settings
-POST   /settings/link-telegram — generate Telegram link code
-
-WS     /jobs/live              — real-time new job notifications
+job-hunter-site/src/app/
+├── core/
+│   ├── auth/
+│   │   ├── auth.service.ts        # JWT, login/logout
+│   │   ├── auth.guard.ts          # Route protection
+│   │   └── auth.interceptor.ts    # Attach JWT to requests
+│   └── api/
+│       └── api.service.ts         # Base HTTP client
+├── features/
+│   ├── login/                     # Login page
+│   │   └── login.component.ts
+│   ├── applications/              # Tracker table (= Sheets)
+│   │   ├── applications.component.ts
+│   │   └── application-row/       # Inline-editable row
+│   ├── files/                     # File browser (= Drive)
+│   │   ├── files.component.ts
+│   │   └── file-preview/          # PDF inline viewer
+│   └── stats/                     # Funnel + analytics
+│       ├── stats.component.ts
+│       ├── funnel-chart/
+│       └── cost-summary/
+├── shared/                        # Common UI components
+├── app.routes.ts
+├── app.config.ts
+└── app.ts
 ```
 
----
+4 pages: login, applications, files, stats. No dashboard, no profile editor,
+no settings — all Phase B.
 
-## Angular Frontend — Pages
+## API endpoints (Phase A)
 
 ```
-job-hunter-web/
-├── src/app/
-│   ├── core/              # Auth interceptor, guards, services
-│   │   ├── auth/
-│   │   │   ├── auth.service.ts
-│   │   │   ├── auth.guard.ts
-│   │   │   └── auth.interceptor.ts
-│   │   └── api/
-│   │       └── api.service.ts
-│   ├── features/
-│   │   ├── auth/          # Login, Register pages
-│   │   │   ├── login/
-│   │   │   └── register/
-│   │   ├── dashboard/     # Main page: recent jobs, stats
-│   │   │   ├── dashboard.component.ts
-│   │   │   ├── job-card/
-│   │   │   └── stats-widget/
-│   │   ├── jobs/          # Job browser with filters
-│   │   │   ├── jobs-list/
-│   │   │   ├── job-detail/
-│   │   │   └── job-filters/
-│   │   ├── applications/  # Tracker view
-│   │   │   ├── applications-table/
-│   │   │   └── funnel-chart/
-│   │   ├── profile/       # Candidate profile editor
-│   │   │   ├── profile-form/
-│   │   │   ├── employers-list/
-│   │   │   └── cv-editor/   # markdown editor for base CVs
-│   │   └── settings/      # Filters, Telegram, API keys
-│   │       ├── filter-settings/
-│   │       ├── telegram-link/
-│   │       └── llm-settings/
-│   └── shared/            # UI components, pipes, directives
-├── environments/
-└── angular.json
+# Auth
+POST   /auth/register              — email + password → user created
+POST   /auth/login                 — email + password → JWT
+GET    /auth/me                    — current user (JWT required)
+
+# Applications (tracker table)
+GET    /applications               — paginated list
+       ?page=1&limit=50
+       &sort=date&order=desc
+       &status=applied|sent|failed|expired
+       &search=company+name
+GET    /applications/:id           — single row
+PATCH  /applications/:id           — update Sent | To Learn | Re-application
+GET    /applications/stats         — {total, applied, sent, failed, expired, pending}
+GET    /applications/funnel        — funnel data
+       ?days=30
+
+# Files
+GET    /files                      — list date folders [{name, count, date}]
+GET    /files/:date                — list company folders [{name, files_count}]
+GET    /files/:date/:company       — list files [{name, size, type}]
+GET    /files/:date/:company/:file — download/stream file
+
+# Analytics
+GET    /analytics/funnel?days=30   — tracked→generated→sent→confirmed→answered
+GET    /analytics/per-source       — per-source breakdown
+GET    /analytics/cost?days=30     — total, median, p95 cost_usd
+GET    /analytics/timeline?days=90 — applications per day
+
+# Health
+GET    /health                     — {status: "ok", db: "connected"}
 ```
-
-### Key Screens
-
-1. **Dashboard** — cards: new jobs today, pending applications, unsent count,
-   funnel summary. Live WebSocket updates when bot finds new jobs.
-2. **Jobs** — table/cards with filtering by source, date, stack. "Apply" button
-   triggers bot pipeline for this user.
-3. **Applications** — full tracker table (mirrors Google Sheets view). Inline
-   edit for Sent/To Learn/Re-application. Funnel chart.
-4. **Profile** — form for name, city, stack, languages, employers. Markdown
-   editor for `candidate_profile.md` content and per-track base CVs.
-5. **Settings** — filter rules, Telegram linking, LLM provider/model/key,
-   Google OAuth connect, auto-apply toggle.
-
----
-
-## Python Bot Adaptation
-
-The existing bot stays as the scraping + LLM engine. Key changes:
-
-### DB migration: SQLite → PostgreSQL
-- `hunter/db.py`: replace `sqlite3` with `psycopg2` (sync) or `asyncpg` (async)
-- Every query gains `WHERE user_id = %s`
-- Config KV table becomes per-user
-- Connection string from `DATABASE_URL` env var
-
-### Per-user config loading
-- New `hunter/candidate.py` (doc 08's candidate.yaml, but reads from PostgreSQL
-  instead of a YAML file):
-  ```python
-  def load_candidate(user_id: str) -> CandidateConfig:
-      """Load candidate profile from PostgreSQL."""
-      # Returns: name, city, employers, languages, filters, etc.
-  ```
-- Every module that today has hardcoded values imports from `candidate.py`
-
-### Per-user prompts
-- At apply time, generate temp `candidate_profile.md` + `base_cv_*.md` from DB
-  into a per-user temp directory
-- `PROMPTS_DIR` becomes per-invocation, not global
-
-### Per-user hunt loop
-- Bot runs one event loop, but schedules per-user hunts
-- Each user's hunt uses their filters, their sources config, their chat_id
-- `_hunt_lock` becomes per-user (no user blocks another)
-
-### Telegram: shared bot, per-user routing
-- One bot instance, commands routed by `chat_id → user_id` lookup
-- `/start` sends a link code; user enters it in the web UI to bind
-- All notifications go to the user's own chat
-- Each user can optionally run their own bot (token in user_settings)
-
----
-
-## Development Phases
-
-### Phase 0 — NestJS skeleton + Auth (1-2 days)
-**Learning goal:** NestJS basics — modules, controllers, services, TypeORM, JWT
-
-- `nest new job-hunter-api`
-- PostgreSQL + TypeORM setup
-- `users` table + AuthModule (register, login, JWT)
-- Basic tests
-
-**Deliverable:** `POST /auth/register`, `POST /auth/login`, `GET /auth/me` working
-
-### Phase 1 — Profile & Settings API (2-3 days)
-**Learning goal:** TypeORM relations, DTOs, validation
-
-- `user_profiles`, `user_employers`, `user_filters`, `user_settings` tables
-- Full CRUD for profile, employers, filters
-- Validation (class-validator)
-
-**Deliverable:** user can create/read/update their candidate profile via API
-
-### Phase 2 — Angular frontend: Auth + Profile (3-4 days)
-**Learning goal:** Angular HttpClient, reactive forms, route guards
-
-- `ng new job-hunter-web`
-- Login/register pages
-- Profile editor (reactive form)
-- Employer list management
-- Auth interceptor + JWT storage
-
-**Deliverable:** user can register, log in, fill in their profile in the browser
-
-### Phase 3 — candidate.yaml / doc 08 in Python bot (3-4 days)
-**Learning goal:** (Python, not NestJS — but required for integration)
-
-- Implement `hunter/candidate.py` (doc 08)
-- Replace all hardcoded values (5 waves from the doc)
-- Bot reads from candidate.yaml (file) OR PostgreSQL (when `DATABASE_URL` set)
-- Tests: "second user" smoke test
-
-**Deliverable:** Python bot is configurable per-user without code edits
-
-### Phase 4 — Jobs & Applications API (2-3 days)
-**Learning goal:** pagination, WebSocket gateway, complex queries
-
-- `jobs` + `applications` tables
-- Python bot writes to PostgreSQL
-- NestJS serves job list (paginated, filterable)
-- Applications API (tracker view)
-- WebSocket gateway for live job notifications
-
-**Deliverable:** jobs scraped by bot appear in the NestJS API
-
-### Phase 5 — Angular frontend: Dashboard + Jobs (3-4 days)
-**Learning goal:** Angular Material/PrimeNG, WebSocket, data tables
-
-- Dashboard page with stats widgets
-- Jobs list with filters
-- Applications table (inline edit)
-- Live notifications via WebSocket
-
-**Deliverable:** working dashboard showing real jobs and applications
-
-### Phase 6 — Telegram linking + multi-user bot (2-3 days)
-**Learning goal:** Telegram Bot API from NestJS side
-
-- Link code flow: web UI → NestJS generates code → user sends to bot → bound
-- Bot routes notifications by `chat_id → user_id`
-- Per-user hunt schedule
-
-**Deliverable:** friend registers on the web, links Telegram, gets job notifications
-
-### Phase 7 — Polish & deploy (2-3 days)
-- Docker compose: NestJS + Angular + PostgreSQL + Python bot
-- Cloudflare Pages for Angular (or serve from NestJS)
-- Environment configs
-- Friend onboarding walkthrough
-
----
-
-## Total estimate
-
-~20-25 days of focused work, spread across phases. Each phase is a usable
-increment — the friend can start using it after Phase 6.
-
-The NestJS learning curve is gentle for an Angular developer — same decorators,
-same DI, same module system. The real complexity is in Phase 3 (making the
-Python bot multi-user) and Phase 4 (DB migration).
-
-## What the friend gets (after Phase 6)
-
-1. Opens the web app → registers with email/password
-2. Fills in their profile: name, city, stack, languages, work history
-3. Writes their candidate_profile.md and base_cv in the web editor
-4. Configures filters (what keywords, what locations, what to exclude)
-5. Links their Telegram (sends a code to the bot)
-6. Bot starts hunting for them on the next cycle
-7. Gets Telegram notifications + can browse jobs in the web UI
-8. Sees their applications, funnel stats in the dashboard
-
-## What stays OUT of scope
-
-- Payment/billing — this is for friends, not a SaaS
-- Per-user Google OAuth in the web UI (complex; Sheets/Drive optional)
-- Admin panel — overkill for 2-3 users
-- Mobile app — Angular PWA is enough
-- Rewriting the Python scraping/LLM engine in TypeScript
