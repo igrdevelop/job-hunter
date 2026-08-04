@@ -1,37 +1,117 @@
 # Setup for a new user
 
-This is the step-by-step path from a fresh clone of this repo to your first
-`/hunt` run, running the bot locally on your own machine (not the Docker VPS
-deploy — see [docs/DEPLOY.md](DEPLOY.md) for that). No source code changes
-are needed; everything candidate-specific lives in a few config files.
+This is the step-by-step path from a fresh clone of this repo to generating
+your first tailored CV. Two paths are covered:
+
+- **Quick start (CLI only)** — generate a CV for a single vacancy URL.
+  No Telegram bot, no API key — just a Claude Pro subscription.
+- **Full setup** — the Telegram bot + automated hunting across 25 job boards.
 
 See [docs/CANDIDATE_YAML_PLAN.md](CANDIDATE_YAML_PLAN.md) for the design
 rationale behind `candidate.yaml`.
 
-## 1. Clone the repo
+---
+
+## Quick start: CLI only (Claude Pro, no Telegram)
+
+If you have a Claude Pro/Max subscription and just want to try the pipeline
+on a single vacancy, this is the fastest path. No Telegram bot, no API key.
+
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/igrdevelop/job-hunter.git
 cd job-hunter
+pip install -e .
 ```
 
-## 2. Install dependencies
+### 2. Install LibreOffice
+
+Required for PDF rendering. Install from
+[libreoffice.org](https://www.libreoffice.org/download/download/).
+
+On Windows, add to your `.env`:
+
+```
+SOFFICE_PATH=C:/Program Files/LibreOffice/program/soffice.exe
+```
+
+On Linux/Mac, `libreoffice` on PATH is usually enough.
+
+### 3. Log in to Claude CLI
 
 ```bash
+claude
+```
+
+Follow the OAuth prompt to authenticate with your Claude Pro account.
+
+### 4. Configure your candidate data
+
+Edit the files in `candidate/` with your real data — see
+[candidate/README.md](../candidate/README.md) for what each file does:
+
+1. **`candidate/candidate.yaml`** — name, city, languages, employers
+2. **`candidate/candidate_profile.md`** — free-text career history
+3. **`candidate/base_cv_angular.md`** (or your track) — pre-polished resume bullets
+
+If you skip this step, the bot runs with example data (a warning is logged).
+
+### 5. Generate a CV
+
+```bash
+python apply_agent.py --cli "https://nofluffjobs.com/pl/job/some-position"
+```
+
+### 6. Find your documents
+
+Generated documents are saved to:
+
+```
+Applications/{date}/{CompanyName}/
+  content.json          # structured LLM output
+  job_posting.txt       # fetched job description
+  CV_*.docx / .pdf      # tailored resume
+  Cover_Letter_*.docx / .pdf
+  judge_report.json     # claim verification results
+  outreach.md           # recruiter contact + LinkedIn message draft
+```
+
+The `Applications/` folder is in the project root (gitignored). Override
+with `APPLICATIONS_DIR` in `.env`.
+
+You can also test with bundled fixtures (no real URL needed):
+
+```bash
+python tools/preview_apply.py --track angular
+```
+
+---
+
+## Full setup: Telegram bot + automated hunting
+
+This gives you the full experience: automated scraping of 25 job boards,
+Telegram notifications with Apply/Skip buttons, scheduled hunts, and
+tracking in SQLite (with optional Google Sheets/Drive mirror).
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/igrdevelop/job-hunter.git
+cd job-hunter
 pip install -e .
 ```
 
 (or `pip install -r requirements.lock` for the exact pinned versions CI and
 Docker use)
 
-## 3. Install LibreOffice
+### 2. Install LibreOffice
 
-The bot renders generated resumes/cover letters to PDF via LibreOffice
-headless. Install it from [libreoffice.org](https://www.libreoffice.org/download/download/)
-and confirm the path in `generate_docs.py` matches your install
-(`C:/Program Files/LibreOffice/program/soffice.exe` on Windows by default).
+Install from [libreoffice.org](https://www.libreoffice.org/download/download/)
+and confirm the path matches your install. On Windows, set `SOFFICE_PATH`
+in `.env` (see step 5).
 
-## 4. Create a Telegram bot
+### 3. Create a Telegram bot
 
 1. Message [@BotFather](https://t.me/BotFather) on Telegram, run `/newbot`,
    and follow the prompts to get a bot token.
@@ -39,22 +119,7 @@ and confirm the path in `generate_docs.py` matches your install
    `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser to find your
    numeric `chat.id` — that's your `TELEGRAM_CHAT_ID`.
 
-## 5. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Fill in the three required variables at minimum:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-- `ANTHROPIC_API_KEY` (or another provider's key — see the `LLM_PROVIDER`
-  table in [CLAUDE.md](../CLAUDE.md))
-
-Everything else in `.env.example` has a working default; tune it later.
-
-## 6. Configure your candidate data
+### 4. Configure your candidate data
 
 All candidate-personal files live in the `candidate/` folder. Edit them
 with your real data — see [candidate/README.md](../candidate/README.md)
@@ -73,7 +138,29 @@ The three files to edit:
 If you skip this step, the bot runs using the example data that ships
 with the repo (a warning is logged once); nothing crashes.
 
-## 8. Start the bot
+### 5. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Fill in the required variables:
+
+- `TELEGRAM_BOT_TOKEN` — from step 3
+- `TELEGRAM_CHAT_ID` — from step 3
+
+For LLM, choose one of:
+
+| Option | What to set |
+|--------|-------------|
+| Anthropic API key | `ANTHROPIC_API_KEY=sk-ant-...` |
+| OpenAI API key | `LLM_PROVIDER=openai` + `OPENAI_API_KEY=sk-...` |
+| OpenRouter API key | `LLM_PROVIDER=openrouter` + `OPENROUTER_API_KEY=sk-or-...` |
+| Claude Pro subscription (no API key) | `APPLY_USE_CLI=true` — and run `claude` to log in first |
+
+Everything else in `.env.example` has a working default; tune it later.
+
+### 6. Start the bot
 
 ```bash
 python hunter.py
@@ -81,7 +168,7 @@ python hunter.py
 
 Message your bot `/start` in Telegram to confirm it's alive.
 
-## 9. Run your first hunt
+### 7. Run your first hunt
 
 ```
 /hunt justjoin
@@ -89,7 +176,12 @@ Message your bot `/start` in Telegram to confirm it's alive.
 
 This scrapes a single source (JustJoin.it) so you can verify filtering and
 (if `AUTO_APPLY=true`) generation work end-to-end before turning on the full
-24-source schedule. Check `/status` and `/health` afterwards.
+25-source schedule. Check `/status` and `/health` afterwards.
+
+### Where are the generated documents?
+
+Same as CLI mode — in `Applications/{date}/{CompanyName}/` relative to the
+project root (gitignored). Override with `APPLICATIONS_DIR` in `.env`.
 
 ## Optional: Google Sheets / Drive / Gmail
 
