@@ -42,3 +42,40 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Web app (job-hunter-site + job-hunter-api) — replaces Google Sheets/Drive.
+  # Image built + pushed by job-hunter-api's own CI (.github/workflows/deploy.yml)
+  # on push to master. Mounted against job-hunter-api's own test fixtures, NOT
+  # the bot's ./tracker.db / ./Applications — this container never touches the
+  # bot's live data.
+  job-hunter-api:
+    image: ghcr.io/igrdevelop/job-hunter-api:${WEB_IMAGE_TAG:-latest}
+    container_name: job-hunter-api
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      JWT_SECRET: ${WEB_JWT_SECRET}
+      SEED_USER_EMAIL: ${WEB_SEED_USER_EMAIL}
+      SEED_USER_PASSWORD: ${WEB_SEED_USER_PASSWORD}
+      TRACKER_DB_PATH: /app/data/tracker.db
+      FILES_PATH: /app/data/Applications
+    volumes:
+      - ../job-hunter-api/test/fixtures/tracker.db:/app/data/tracker.db
+      - ../job-hunter-api/test/fixtures/Applications:/app/data/Applications:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Exposes job-hunter-api at job-hunter.igrflex.work over Cloudflare Tunnel
+  # (dashboard: Zero Trust → Networks → Tunnels). Public hostname routes to
+  # http://job-hunter-api:3000 inside this compose network.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: job-hunter-cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
