@@ -99,24 +99,37 @@ tracker and can never be attached to verifiable past employers.
 
 ## Quick start
 
+### Try it on a single vacancy (CLI only, Claude Pro)
+
+No Telegram, no API key — just a Claude Pro subscription:
+
 ```bash
 git clone https://github.com/igrdevelop/job-hunter.git
 cd job-hunter
-pip install -r requirements.lock && pip install -e . --no-deps
+pip install -e .
 
-cp .env.example .env        # fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
+claude                      # log in to your Claude Pro account
 
-# Make it yours: edit the files in candidate/ with your real data
-# see candidate/README.md for what each file does
+# Edit candidate/ with your real data (see candidate/README.md)
 nano candidate/candidate.yaml          # name, city, languages, employers
 nano candidate/candidate_profile.md    # your full work experience
 nano candidate/base_cv_angular.md      # polished resume bullets for Angular track
 
+python apply_agent.py --cli "https://nofluffjobs.com/pl/job/..."
+```
+
+Generated documents land in `Applications/{date}/{CompanyName}/` (CV, cover
+letter, judge report — DOCX + PDF). LibreOffice is required for PDF rendering.
+
+### Full setup (Telegram bot + automated hunting)
+
+```bash
+cp .env.example .env        # fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
 python hunter.py            # starts the Telegram bot + scheduler
 ```
 
 See [docs/SETUP_NEW_USER.md](docs/SETUP_NEW_USER.md) for the full step-by-step
-walkthrough from a fresh clone to your first `/hunt`.
+walkthrough covering both paths.
 
 Docker deployment (GHCR image built by CI, LibreOffice + Playwright included):
 
