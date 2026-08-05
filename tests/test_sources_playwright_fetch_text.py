@@ -46,19 +46,8 @@ def test_linkedin_matches_url() -> None:
     assert not s.matches_url("https://example.com/x")
 
 
-def test_linkedin_fetch_text_falls_back_when_no_playwright(monkeypatch) -> None:
-    """If playwright is not installed, default fetch_text must fall back to fetch_html."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fail_on_playwright(name, *args, **kwargs):
-        if name.startswith("playwright"):
-            raise ImportError("no playwright")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fail_on_playwright)
-
+def test_linkedin_fetch_text_uses_html_fallback() -> None:
+    """Unauthenticated fetch_text always goes through fetch_html (no Playwright)."""
     with patch(
         "hunter.sources.html_fallback.fetch_html",
         return_value="fallback ok",
@@ -68,20 +57,52 @@ def test_linkedin_fetch_text_falls_back_when_no_playwright(monkeypatch) -> None:
     m.assert_called_once()
 
 
-def test_linkedin_fetch_text_falls_back_when_no_storage_state(monkeypatch) -> None:
-    """If LINKEDIN_STORAGE_STATE is not set, fall back to fetch_html."""
+def test_linkedin_fetch_text_with_session_calls_playwright_when_storage_present(
+    tmp_path, monkeypatch
+) -> None:
+    """With LINKEDIN_STORAGE_STATE set, session fetch uses _playwright_fetch."""
+    storage = tmp_path / "storage_state.json"
+    storage.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LINKEDIN_STORAGE_STATE", str(storage))
+
+    src = LinkedInSource()
+    with patch.object(src, "_playwright_fetch", return_value="session body") as m_pw:
+        out = src.fetch_text_with_session("https://www.linkedin.com/jobs/view/123/")
+    assert out == "session body"
+    m_pw.assert_called_once()
+    assert m_pw.call_args.args[0] == "https://www.linkedin.com/jobs/view/123/"
+    assert m_pw.call_args.args[1] == storage
+
+
+def test_linkedin_fetch_text_with_session_falls_back_without_storage(
+    monkeypatch,
+) -> None:
+    """No storage_state → session fetch falls back to unauthenticated fetch_text."""
     monkeypatch.delenv("LINKEDIN_STORAGE_STATE", raising=False)
 
-    # Stub a fake playwright so the storage-state branch is reached
-    fake_pw = MagicMock()
-    with patch.dict("sys.modules", {"playwright": fake_pw, "playwright.sync_api": fake_pw}):
-        with patch(
-            "hunter.sources.html_fallback.fetch_html",
-            return_value="fallback ok",
-        ) as m:
-            out = LinkedInSource().fetch_text("https://www.linkedin.com/jobs/view/123/")
+    src = LinkedInSource()
+    with patch.object(src, "fetch_text", return_value="fallback ok") as m_ft:
+        with patch.object(src, "_playwright_fetch") as m_pw:
+            out = src.fetch_text_with_session("https://www.linkedin.com/jobs/view/123/")
     assert out == "fallback ok"
-    m.assert_called_once()
+    m_ft.assert_called_once()
+    m_pw.assert_not_called()
+
+
+def test_linkedin_fetch_text_with_session_falls_back_on_playwright_error(
+    tmp_path, monkeypatch
+) -> None:
+    """Playwright failure → soft fallback to fetch_text (pipeline must not break)."""
+    storage = tmp_path / "storage_state.json"
+    storage.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LINKEDIN_STORAGE_STATE", str(storage))
+
+    src = LinkedInSource()
+    with patch.object(src, "_playwright_fetch", side_effect=RuntimeError("boom")):
+        with patch.object(src, "fetch_text", return_value="fallback ok") as m_ft:
+            out = src.fetch_text_with_session("https://www.linkedin.com/jobs/view/123/")
+    assert out == "fallback ok"
+    m_ft.assert_called_once()
 
 
 # ── Inhire ──────────────────────────────────────────────────────────────────

@@ -237,17 +237,25 @@ def _fetch_roster() -> list:
     return _FETCH_ROSTER
 
 
-def fetch_job_text(url: str) -> str:
+def fetch_job_text(url: str, *, use_session: bool = False) -> str:
     """Fetch and return plain-text job posting for a URL.
 
     Resolves the URL to the first source whose ``matches_url`` returns True and
     delegates to ``source.fetch_text``. Falls back to the generic HTML extractor
     when nothing matches. Tracking/UTM params are stripped before dispatch.
+
+    When ``use_session=True`` (apply pipeline only), sources that expose
+    ``fetch_text_with_session`` are preferred — currently LinkedIn, so the
+    logged-in page reveals "No longer accepting applications" before any LLM
+    spend. Leave ``use_session=False`` for bulk callers (``/check_expired``,
+    gmail enricher, repost gate) to avoid loading the LinkedIn session.
     """
     from hunter.sources.html_fallback import clean_url, fetch_html
 
     cleaned = clean_url(url)
     for src in _fetch_roster():
         if src.matches_url(cleaned):
+            if use_session and hasattr(src, "fetch_text_with_session"):
+                return src.fetch_text_with_session(cleaned)
             return src.fetch_text(cleaned)
     return fetch_html(cleaned)

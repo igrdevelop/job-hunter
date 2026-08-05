@@ -107,3 +107,42 @@ def test_fetch_job_text_workable_uses_aggregator() -> None:
         out = fetch_job_text("https://apply.workable.com/example/j/ABCDEF/")
     assert out == "ats payload"
     m.assert_called_once()
+
+
+def test_fetch_job_text_linkedin_use_session_calls_session_fetch() -> None:
+    """use_session=True must prefer LinkedInSource.fetch_text_with_session."""
+    with (
+        patch(
+            "hunter.sources.linkedin.LinkedInSource.fetch_text_with_session",
+            return_value="session payload",
+        ) as m_session,
+        patch(
+            "hunter.sources.linkedin.LinkedInSource.fetch_text",
+            return_value="guest payload",
+        ) as m_guest,
+    ):
+        out = fetch_job_text(
+            "https://www.linkedin.com/jobs/view/12345/",
+            use_session=True,
+        )
+    assert out == "session payload"
+    m_session.assert_called_once()
+    m_guest.assert_not_called()
+
+
+def test_fetch_job_text_linkedin_default_uses_guest_fetch() -> None:
+    """Without use_session, LinkedIn stays on unauthenticated fetch_text."""
+    with (
+        patch(
+            "hunter.sources.linkedin.LinkedInSource.fetch_text_with_session",
+            return_value="session payload",
+        ) as m_session,
+        patch(
+            "hunter.sources.linkedin.LinkedInSource.fetch_text",
+            return_value="guest payload",
+        ) as m_guest,
+    ):
+        out = fetch_job_text("https://www.linkedin.com/jobs/view/12345/")
+    assert out == "guest payload"
+    m_guest.assert_called_once()
+    m_session.assert_not_called()

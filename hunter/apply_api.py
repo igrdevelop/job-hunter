@@ -223,7 +223,7 @@ def _run_main_api(
         try:
             from hunter.sources import fetch_job_text
 
-            job_text = fetch_job_text(url)
+            job_text = fetch_job_text(url, use_session=True)
             print(f"[apply_agent] Fetched {len(job_text)} chars of job text")
         except Exception as e:
             if "jobleads.com" in url.lower():

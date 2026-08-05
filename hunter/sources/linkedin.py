@@ -4,8 +4,13 @@ LinkedIn source — search jobs via LinkedIn's public guest API.
 No authentication required for search. Uses HTML fragments from:
   https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search
 
-For fetching full job text (in apply_agent), storage_state.json is still used
-via job_fetch/linkedin.py — but the search itself works without login.
+Detail-page fetch has two paths:
+  * ``fetch_text`` — unauthenticated HTML fallback (requests). Used by
+    ``/check_expired``, gmail enricher, etc. Guest HTML omits the
+    "No longer accepting applications" marker.
+  * ``fetch_text_with_session`` — Playwright + ``LINKEDIN_STORAGE_STATE``.
+    Used only by the apply pipeline (via ``fetch_job_text(..., use_session=True)``)
+    so expired LinkedIn postings are detected before any LLM spend.
 """
 
 import logging
@@ -35,10 +40,11 @@ HEADERS = {
 }
 RESULTS_PER_PAGE = 25
 
-# ── Detail-page fetch settings (ported from job_fetch/linkedin.py) ──────────
+# ── Detail-page fetch settings ──────────────────────────────────────────────
 _STORAGE_STATE_ENV = "LINKEDIN_STORAGE_STATE"
-_DETAIL_TIMEOUT_MS = 20_000
+_DETAIL_TIMEOUT_MS = 15_000
 _DETAIL_MAX_TEXT_LEN = 15_000
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
 
 
 def _storage_state_path() -> Optional[Path]:
@@ -125,75 +131,98 @@ class LinkedInSource(BaseSource):
         return "linkedin.com" in host
 
     def fetch_text(self, url: str) -> str:
-        """Fetch a LinkedIn job posting via Playwright + saved session.
+        """Fetch a LinkedIn job posting without a logged-in session.
 
-        Falls back to generic html_fallback when:
-          * playwright is not installed
-          * LINKEDIN_STORAGE_STATE is not configured
-
-        Raises RuntimeError when LinkedIn redirects to login (session expired)
-        or when the page times out / returns near-empty text.
+        Guest HTML is enough for title/description extraction used by
+        ``/check_expired`` and enrichers, but it does NOT include the
+        "No longer accepting applications" marker. Apply pipeline must use
+        ``fetch_text_with_session`` instead.
         """
         from hunter.sources.html_fallback import fetch_html
 
-        try:
-            from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-        except ImportError:
-            logger.warning(
-                "[linkedin] playwright not installed — falling back to HTML fetch. "
-                "Install with: pip install playwright && playwright install chromium"
-            )
-            return fetch_html(url)
+        return fetch_html(url)
 
+    def fetch_text_with_session(self, url: str) -> str:
+        """Fetch via Playwright + ``LINKEDIN_STORAGE_STATE`` (apply pipeline).
+
+        Falls back to ``fetch_text`` (unauthenticated) when the session file
+        is missing, Playwright is unavailable, or the session fetch fails —
+        best-effort so a flaky browser never breaks the apply pipeline.
+        """
         storage_state = _storage_state_path()
         if not storage_state:
             logger.warning(
-                f"[linkedin] {_STORAGE_STATE_ENV} not set — falling back to HTML fetch. "
-                f"Run python tools/linkedin_login.py to enable full session fetch."
+                "[linkedin] %s not set — falling back to HTML fetch. "
+                "Run python tools/linkedin_login.py to enable session fetch "
+                "(needed to detect expired LinkedIn postings).",
+                _STORAGE_STATE_ENV,
             )
-            return fetch_html(url)
+            return self.fetch_text(url)
+        try:
+            return self._playwright_fetch(url, storage_state)
+        except Exception as e:
+            logger.warning("[linkedin] Session fetch failed: %s, falling back", e)
+            return self.fetch_text(url)
 
-        logger.info(f"[linkedin] Fetching {url} with session from {storage_state}")
+    def _playwright_fetch(self, url: str, storage_state: Path) -> str:
+        """Load a job page with the saved LinkedIn session; return body text."""
+        try:
+            from playwright.sync_api import TimeoutError as PWTimeout
+            from playwright.sync_api import sync_playwright
+        except ImportError as e:
+            raise RuntimeError(
+                "playwright not installed — "
+                "Install with: pip install playwright && playwright install chromium"
+            ) from e
+
+        logger.info("[linkedin] Fetching %s with session from %s", url, storage_state)
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            ctx = browser.new_context(
-                storage_state=str(storage_state),
-                user_agent=HEADERS["User-Agent"],
-            )
-            page = ctx.new_page()
-
             try:
-                page.goto(url, timeout=_DETAIL_TIMEOUT_MS, wait_until="domcontentloaded")
-            except PWTimeout as e:
-                browser.close()
-                raise RuntimeError(f"LinkedIn page timed out: {url}") from e
-
-            current = page.url
-            if "linkedin.com/login" in current or "linkedin.com/checkpoint" in current:
-                browser.close()
-                raise RuntimeError(
-                    "LinkedIn redirected to login page — session expired.\n"
-                    "Re-run: python tools/linkedin_login.py  to refresh storage_state."
+                ctx = browser.new_context(
+                    storage_state=str(storage_state),
+                    user_agent=HEADERS["User-Agent"],
+                )
+                page = ctx.new_page()
+                page.route(
+                    "**/*",
+                    lambda route: (
+                        route.abort()
+                        if route.request.resource_type in _BLOCKED_RESOURCE_TYPES
+                        else route.continue_()
+                    ),
                 )
 
-            try:
-                page.wait_for_selector(
-                    ".jobs-description, .job-view-layout, .description__text",
-                    timeout=10_000,
+                try:
+                    page.goto(url, timeout=_DETAIL_TIMEOUT_MS, wait_until="domcontentloaded")
+                except PWTimeout as e:
+                    raise RuntimeError(f"LinkedIn page timed out: {url}") from e
+
+                current = page.url
+                if "linkedin.com/login" in current or "linkedin.com/checkpoint" in current:
+                    raise RuntimeError(
+                        "LinkedIn redirected to login page — session expired.\n"
+                        "Re-run: python tools/linkedin_login.py  to refresh storage_state."
+                    )
+
+                try:
+                    page.wait_for_selector(
+                        ".jobs-description, .job-view-layout, .description__text",
+                        timeout=10_000,
+                    )
+                except PWTimeout:
+                    pass
+
+                text = page.evaluate(
+                    """() => {
+                        const remove = ['script','style','nav','footer','header','noscript'];
+                        remove.forEach(t => document.querySelectorAll(t).forEach(e => e.remove()));
+                        return document.body ? document.body.innerText : '';
+                    }"""
                 )
-            except PWTimeout:
-                pass
-
-            text = page.evaluate(
-                """() => {
-                    const remove = ['script','style','nav','footer','header','noscript'];
-                    remove.forEach(t => document.querySelectorAll(t).forEach(e => e.remove()));
-                    return document.body ? document.body.innerText : '';
-                }"""
-            )
-
-            browser.close()
+            finally:
+                browser.close()
 
         text = _clean_detail_text(text)
         if len(text) < 100:
@@ -203,7 +232,7 @@ class LinkedInSource(BaseSource):
         if len(text) > _DETAIL_MAX_TEXT_LEN:
             text = text[:_DETAIL_MAX_TEXT_LEN] + "\n\n[... truncated ...]"
 
-        logger.info(f"[linkedin] Got {len(text)} chars")
+        logger.info("[linkedin] Got %d chars", len(text))
         return text
 
     def search(self) -> list[Job]:
