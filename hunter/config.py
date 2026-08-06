@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+# ── Multi-user ────────────────────────────────────────────────────────────────
+# Owner's user id (matches users.id in the API's app.sqlite). Required for B1
+# so every tracker write is stamped and dedup is scoped correctly. Until Phase
+# B3 (full multi-user runtime), this is the only user the bot knows about.
+# Leave unset only in single-user dev setups; the bot degrades gracefully
+# (stamps user_id='' everywhere, still functions for one user).
+DEFAULT_USER_ID: str = os.getenv("DEFAULT_USER_ID", "")
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: int = int(os.getenv("TELEGRAM_CHAT_ID", "0"))

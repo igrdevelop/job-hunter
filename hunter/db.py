@@ -35,12 +35,13 @@ serialised writers via context-manager commit/rollback.
 """
 
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
+from hunter.config import DEFAULT_USER_ID, TRACKER_DB_PATH, TRACKER_PATH
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ _DDL = """
 CREATE TABLE IF NOT EXISTS applications (
     id            TEXT    PRIMARY KEY,
     date          TEXT    NOT NULL DEFAULT '',
+    user_id       TEXT    NOT NULL DEFAULT '',
     company       TEXT    NOT NULL DEFAULT '',
     title         TEXT    NOT NULL DEFAULT '',
     stack         TEXT    NOT NULL DEFAULT '',
@@ -69,15 +71,36 @@ CREATE TABLE IF NOT EXISTS applications (
     cost_usd      REAL
 );
 
-CREATE INDEX IF NOT EXISTS idx_url_norm
-    ON applications(url_norm)
-    WHERE url_norm != '';
-
 CREATE INDEX IF NOT EXISTS idx_ats
     ON applications(ats_status);
 
 CREATE INDEX IF NOT EXISTS idx_company
     ON applications(company);
+"""
+
+# Multi-user support tables (B1). The API owns the authoritative schema;
+# this repo mirrors it idempotently so the bot can read/write these tables
+# even when running without the API (e.g. dev checkout, bare VPS).
+_MULTI_USER_DDL = """
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id    TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL DEFAULT '',
+    updated_at TEXT,
+    PRIMARY KEY (user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS telegram_links (
+    chat_id    INTEGER PRIMARY KEY,
+    user_id    TEXT    UNIQUE NOT NULL,
+    linked_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS telegram_link_codes (
+    code       TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
 """
 
 # Backs hunter.best_effort — consecutive-failure counters for best-effort
@@ -147,6 +170,10 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 
     Called during init_db() after CREATE TABLE IF NOT EXISTS so that
     existing databases gain new columns without needing a full rebuild.
+    Also handles index migration for multi-user support (B1): drops the old
+    global idx_url_norm, creates per-user idx_user_ats.  The unique
+    idx_user_url_norm is created separately by _ensure_user_url_index()
+    AFTER _dedup_url_norm() so no unique constraint is violated.
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
     migrations = [
@@ -177,15 +204,49 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # once by the worker after claim_pending(); NULL outside PENDING/
         # IN_PROGRESS rows.
         ("pending_meta", "TEXT"),
+        # B1 (docs/MULTI_USER_UPDATE.md): every row is scoped to one user.
+        # Existing rows are backfilled with DEFAULT_USER_ID below.
+        ("user_id", "TEXT NOT NULL DEFAULT ''"),
     ]
     for col, definition in migrations:
         if col not in existing:
             conn.execute(f"ALTER TABLE applications ADD COLUMN {col} {definition}")
             log.info("db: added missing column '%s' to applications", col)
 
+    # Backfill user_id on pre-B1 rows using the owner's id from env.
+    # A no-op on new DBs (no rows yet) and on rows already stamped.
+    owner_id = DEFAULT_USER_ID or os.getenv("DEFAULT_USER_ID", "")
+    if owner_id:
+        conn.execute(
+            "UPDATE applications SET user_id=? WHERE user_id=''",
+            (owner_id,),
+        )
+
+    # Index migration: the old global idx_url_norm (non-unique, unscoped) is
+    # replaced by per-user indexes. The unique idx_user_url_norm is created
+    # separately after _dedup_url_norm() to avoid constraint violations.
+    conn.execute("DROP INDEX IF EXISTS idx_url_norm")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_ats "
+        "ON applications(user_id, ats_status)"
+    )
+
+
+def _ensure_user_url_index(conn: sqlite3.Connection) -> None:
+    """Create the per-user unique URL index after deduplication.
+
+    Called by init_db() AFTER _dedup_url_norm() so no unique constraint is
+    violated by pre-existing duplicate rows.  IF NOT EXISTS makes it a no-op
+    on subsequent restarts once the index is in place.
+    """
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_url_norm "
+        "ON applications(user_id, url_norm) WHERE url_norm != ''"
+    )
+
 
 def _dedup_url_norm(conn: sqlite3.Connection) -> int:
-    """Remove duplicate url_norm rows keeping the best entry per URL.
+    """Remove duplicate (user_id, url_norm) rows keeping the best entry per user+URL.
 
     Priority for 'best': successful ATS score > MANUAL > FAIL > SKIP > empty.
     Returns number of rows deleted.
@@ -208,20 +269,21 @@ def _dedup_url_norm(conn: sqlite3.Connection) -> int:
 
     dups = conn.execute(
         """
-        SELECT url_norm, COUNT(*) as cnt
+        SELECT user_id, url_norm, COUNT(*) as cnt
         FROM applications
         WHERE url_norm != ''
-        GROUP BY url_norm
+        GROUP BY user_id, url_norm
         HAVING cnt > 1
         """
     ).fetchall()
 
     deleted = 0
     for dup in dups:
+        uid = dup["user_id"]
         url_norm = dup["url_norm"]
         rows = conn.execute(
-            "SELECT id, ats_status, date FROM applications WHERE url_norm=?",
-            (url_norm,),
+            "SELECT id, ats_status, date FROM applications WHERE user_id=? AND url_norm=?",
+            (uid, url_norm),
         ).fetchall()
         # Sort: best status first, then latest date
         rows_sorted = sorted(
@@ -239,8 +301,9 @@ def _dedup_url_norm(conn: sqlite3.Connection) -> int:
             )
             deleted += len(ids_to_delete)
             log.info(
-                "db.dedup: removed %d duplicate(s) for url_norm=%s (kept %s)",
+                "db.dedup: removed %d duplicate(s) for user=%s url_norm=%s (kept %s)",
                 len(ids_to_delete),
+                uid or "(empty)",
                 url_norm[:60],
                 keep_id,
             )
@@ -272,10 +335,13 @@ def init_db(
         conn.executescript(_DDL)
         _ensure_columns(conn)
         ensure_subsystem_health_table(conn)
-        # Deduplicate existing rows before applying any unique constraints
+        conn.executescript(_MULTI_USER_DDL)
+        # Deduplicate existing rows before applying the unique (user_id, url_norm)
+        # constraint — _ensure_user_url_index must run AFTER this.
         n_dedup = _dedup_url_norm(conn)
         if n_dedup:
             log.info("db.init_db: removed %d duplicate url_norm rows", n_dedup)
+        _ensure_user_url_index(conn)
 
     if need_migration:
         n = migrate_from_excel(_xlsx, path)
@@ -345,6 +411,7 @@ def migrate_from_excel(
             {
                 "id": row_id,
                 "date": cell(1),
+                "user_id": DEFAULT_USER_ID,
                 "company": cell(COMPANY_COL_INDEX),
                 "title": cell(TITLE_COL_INDEX),
                 "stack": cell(4),
@@ -371,11 +438,11 @@ def migrate_from_excel(
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO applications
-                    (id, date, company, title, stack, ats_status, url, url_norm,
+                    (id, date, user_id, company, title, stack, ats_status, url, url_norm,
                      folder, sent, reapplication, to_learn, drive_url,
                      confirmation, answer, sheets_row, sheets_dirty)
                     VALUES
-                    (:id, :date, :company, :title, :stack, :ats_status, :url, :url_norm,
+                    (:id, :date, :user_id, :company, :title, :stack, :ats_status, :url, :url_norm,
                      :folder, :sent, :reapplication, :to_learn, :drive_url,
                      :confirmation, :answer, :sheets_row, :sheets_dirty)
                     """,
