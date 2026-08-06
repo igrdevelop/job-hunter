@@ -1,7 +1,7 @@
 """candidate.py — loader for candidate.yaml, the single source of truth for the
 candidate's identity, location, languages and employer history.
 
-candidate/candidate.yaml is the tracked config file. If it is absent,
+candidate/candidate.yaml is gitignored (personal data). If it is absent,
 load() degrades gracefully —
 every caller reads through get(dotpath, default) with an explicit fallback
 that reproduces the project owner's original hardcoded behavior, so a missing

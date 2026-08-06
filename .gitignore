@@ -94,5 +94,12 @@ tracker_broken.xlsx
 # Local machine config (personal paths)
 .mcp.json
 
+# Personal candidate data — never commit (see candidate/README.md)
+candidate/candidate.yaml
+candidate/candidate_profile.md
+candidate/base_cv_*.md
+!candidate/*.example.md
+!candidate/*.example
+
 # Private interview notes (not read by code)
 candidate/notes/

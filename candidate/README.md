@@ -20,12 +20,21 @@ needed for CV generation.
 
 ## How to set up
 
-1. Open `candidate.yaml` and fill in your name, city, languages and employers.
-2. Open `candidate_profile.md` and replace the example experience with yours.
-3. Open `base_cv_angular.md` (or whichever track you target) and write your
+1. Copy the `.example` templates to their real filenames:
+   ```bash
+   cp candidate.yaml.example candidate.yaml
+   cp candidate_profile.example.md candidate_profile.md
+   cp base_cv_angular.example.md base_cv_angular.md
+   ```
+2. Open `candidate.yaml` and fill in your name, city, languages and employers.
+3. Open `candidate_profile.md` and replace the example experience with yours.
+4. Open `base_cv_angular.md` (or whichever track you target) and write your
    real pre-polished bullets. Dates and companies must match
    `candidate_profile.md` — the sanitizer cross-checks them.
-4. (Optional) Add cover letter examples to `examples/`.
+5. (Optional) Add cover letter examples to `examples/`.
+
+The real files are **gitignored** — they stay on disk but never enter git.
+Only the `.example` templates are tracked.
 
 ## Notes
 
