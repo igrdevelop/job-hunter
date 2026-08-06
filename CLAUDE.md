@@ -711,9 +711,10 @@ requirements.lock            GENERATED (`uv pip compile pyproject.toml --all-ext
                             prod and CI always run the exact same transitive versions. Replaces
                             the old hand-maintained, mostly-unpinned `requirements.txt`.
 candidate/                  All candidate-personal files (see candidate/README.md):
-                            candidate.yaml (identity/location/languages/employers),
-                            candidate_profile.md (career narrative for LLM),
-                            base_cv_*.md (pre-polished bullets per stack),
+                            candidate.yaml (identity/location/languages/employers, gitignored),
+                            candidate_profile.md (career narrative for LLM, gitignored),
+                            base_cv_*.md (pre-polished bullets per stack, gitignored),
+                            *.example.md / *.example (placeholder templates, tracked),
                             examples/ (few-shot cover letters / about-me),
                             notes/ (private interview notes, gitignored)
 tracker.xlsx                Main data store (never commit)
