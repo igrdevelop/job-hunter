@@ -29,6 +29,7 @@ def test_is_oauth_error_message_markers():
     assert oauth_alert.is_oauth_error(Exception("invalid_grant"))
     assert oauth_alert.is_oauth_error(Exception("Token has been expired or revoked."))
     assert oauth_alert.is_oauth_error(RuntimeError("gsheets_token.json is missing or invalid"))
+    assert oauth_alert.is_oauth_error(Exception("('invalid_scope: Bad Request', {...})"))
 
 
 def test_is_oauth_error_false_for_transient():
@@ -51,6 +52,19 @@ def test_alert_sends_once_then_cooldown(_reset):
     assert len(sent) == 1
     assert "Gmail token expired" in sent[0]
     assert "tools/gmail_auth.py" in sent[0]
+
+
+def test_alert_invalid_scope_names_scope_mismatch(_reset):
+    """invalid_scope is a scope upgrade without re-auth, not a dead token —
+    the alert must not claim the token was revoked/expired (2026-08-06 incident)."""
+    sent = _reset
+    assert oauth_alert.alert_oauth_expired(
+        "Gmail",
+        Exception("('invalid_scope: Bad Request', {'error': 'invalid_scope'})"),
+        reauth_cmd="python tools/gmail_auth.py",
+    )
+    assert "scope" in sent[0].lower()
+    assert "revoked/expired" not in sent[0]
 
 
 def test_alert_per_service_independent(_reset):
