@@ -27,13 +27,23 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
+from hunter.config import DEFAULT_USER_ID, TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
 from hunter.models import Job
 from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
 
 # ── Module-level DB path — override in tests via monkeypatch ──────────────────
 DB_PATH: Path = TRACKER_DB_PATH
+
+
+def _uid() -> str:
+    """Active user id for single-user mode (Phase B1).
+
+    Returns DEFAULT_USER_ID from config (env var). Phase B3 replaces call
+    sites with an explicit user_id parameter threaded from the request
+    context; until then this shim keeps all queries scoped correctly.
+    """
+    return DEFAULT_USER_ID
 
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─
 TRACKER_HEADERS = [
@@ -301,7 +311,10 @@ def _parse_cost_cell(value) -> float | None:
 def get_known_urls() -> set[str]:
     """Return all normalised URLs stored in tracker — used for deduplication."""
     with get_db(DB_PATH) as conn:
-        rows = conn.execute("SELECT url_norm FROM applications WHERE url_norm != ''").fetchall()
+        rows = conn.execute(
+            "SELECT url_norm FROM applications WHERE url_norm != '' AND user_id=?",
+            (_uid(),),
+        ).fetchall()
         return {r["url_norm"] for r in rows}
 
 
@@ -309,7 +322,9 @@ def get_known_company_titles() -> set[str]:
     """Return dedup_key(company, title) for all rows in tracker."""
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT company, title FROM applications WHERE company != '' AND title != ''"
+            "SELECT company, title FROM applications "
+            "WHERE company != '' AND title != '' AND user_id=?",
+            (_uid(),),
         ).fetchall()
         return {dedup_key(r["company"], r["title"]) for r in rows}
 
@@ -348,18 +363,22 @@ def is_known(url: str, company: str = "", title: str = "") -> bool:
     hunt cycle.
     """
     norm = normalize_url(url)
+    uid = _uid()
     with get_db(DB_PATH) as conn:
         if (
             norm
             and conn.execute(
-                "SELECT 1 FROM applications WHERE url_norm=? LIMIT 1", (norm,)
+                "SELECT 1 FROM applications WHERE url_norm=? AND user_id=? LIMIT 1",
+                (norm, uid),
             ).fetchone()
         ):
             return True
         if company and title:
             key = dedup_key(company, title)
             rows = conn.execute(
-                "SELECT company, title FROM applications WHERE company != '' AND title != ''"
+                "SELECT company, title FROM applications "
+                "WHERE company != '' AND title != '' AND user_id=?",
+                (uid,),
             ).fetchall()
             for r in rows:
                 if dedup_key(r["company"], r["title"]) == key:
@@ -381,10 +400,12 @@ def _is_known_terminal(url: str, company: str = "", title: str = "") -> bool:
     is_known() — zero behavior change for the non-queue path.
     """
     norm = normalize_url(url)
+    uid = _uid()
     with get_db(DB_PATH) as conn:
         if norm:
             rows = conn.execute(
-                "SELECT ats_status FROM applications WHERE url_norm=?", (norm,)
+                "SELECT ats_status FROM applications WHERE url_norm=? AND user_id=?",
+                (norm, uid),
             ).fetchall()
             if any((r["ats_status"] or "") not in (PENDING_ATS, IN_PROGRESS_ATS) for r in rows):
                 return True
@@ -392,7 +413,8 @@ def _is_known_terminal(url: str, company: str = "", title: str = "") -> bool:
             key = dedup_key(company, title)
             rows = conn.execute(
                 "SELECT company, title, ats_status FROM applications "
-                "WHERE company != '' AND title != ''"
+                "WHERE company != '' AND title != '' AND user_id=?",
+                (uid,),
             ).fetchall()
             for r in rows:
                 if dedup_key(r["company"], r["title"]) == key and (r["ats_status"] or "") not in (
@@ -416,8 +438,9 @@ def _clear_own_placeholder(conn, url: str) -> None:
     if not norm:
         return
     conn.execute(
-        f"DELETE FROM applications WHERE url_norm=? AND ats_status IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')",  # noqa: S608
-        (norm,),
+        f"DELETE FROM applications WHERE url_norm=? AND user_id=? "  # noqa: S608
+        f"AND ats_status IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')",
+        (norm, _uid()),
     )
 
 
@@ -759,12 +782,13 @@ def add_manual_jobleads_pending(
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm, folder, to_learn)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, folder, to_learn)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
                 today,
+                _uid(),
                 company.strip() or "Unknown",
                 title.strip() or "Unknown",
                 MANUAL_PENDING_ATS,
@@ -884,13 +908,14 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, stack, ats_status, url, url_norm,
+            (id, date, user_id, company, title, stack, ats_status, url, url_norm,
              folder, sent, reapplication, to_learn, cost_usd)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
             """,
             (
                 _new_row_id(),
                 today,
+                _uid(),
                 company,
                 job_title,
                 stack,
@@ -920,10 +945,10 @@ def add_skipped(job: Job) -> dict | None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm)
-            VALUES (?, ?, ?, ?, 'SKIP', ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?)
             """,
-            (row_id, today, job.company, job.title, norm, norm),
+            (row_id, today, _uid(), job.company, job.title, norm, norm),
         )
 
     return {
@@ -959,12 +984,13 @@ def add_react_skipped(content: dict, url: str) -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, stack, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
+            (id, date, user_id, company, title, stack, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
             """,
             (
                 _new_row_id(),
                 today,
+                _uid(),
                 company,
                 title,
                 content.get("stack", ""),
@@ -993,10 +1019,10 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, 'SKIP', ?, ?, 'EXPIRED')
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, 'EXPIRED')
             """,
-            (_new_row_id(), today, company, title, norm, norm),
+            (_new_row_id(), today, _uid(), company, title, norm, norm),
         )
 
 
@@ -1017,10 +1043,10 @@ def add_failed(job: Job) -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm)
-            VALUES (?, ?, ?, ?, 'FAIL', ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm)
+            VALUES (?, ?, ?, ?, ?, 'FAIL', ?, ?)
             """,
-            (_new_row_id(), today, job.company, job.title, norm, norm),
+            (_new_row_id(), today, _uid(), job.company, job.title, norm, norm),
         )
 
 
@@ -1076,12 +1102,13 @@ def add_pending(job: Job) -> str:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, company, title, ats_status, url, url_norm, pending_meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, pending_meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
                 today,
+                _uid(),
                 job.company,
                 job.title,
                 PENDING_ATS,
@@ -1407,17 +1434,18 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO applications
-                (id, date, company, title, stack, ats_status, url, url_norm,
+                (id, date, user_id, company, title, stack, ats_status, url, url_norm,
                  folder, sent, reapplication, to_learn, drive_url,
                  confirmation, answer, sheets_row, sheets_dirty, cost_usd)
                 VALUES
-                (:id, :date, :company, :title, :stack, :ats_status, :url, :url_norm,
+                (:id, :date, :user_id, :company, :title, :stack, :ats_status, :url, :url_norm,
                  :folder, :sent, :reapplication, :to_learn, :drive_url,
                  :confirmation, :answer, :sheets_row, :sheets_dirty, :cost_usd)
                 """,
                 {
                     "id": row_id,
                     "date": row.get("Date", ""),
+                    "user_id": _uid(),
                     "company": row.get("Company", ""),
                     "title": row.get("Job Title", ""),
                     "stack": row.get("Stack", ""),
