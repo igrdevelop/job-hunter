@@ -82,9 +82,23 @@ def test_set_drive_url_is_idempotent(tracker_db):
 
 
 def test_set_drive_url_updates_all_matching_rows(tracker_db):
-    """set_drive_url updates all rows with matching url_norm (re-apply scenario)."""
+    """set_drive_url updates all rows with matching url_norm across all users.
+
+    Two rows for the same URL require different user_ids under the unique
+    (user_id, url_norm) constraint. set_drive_url uses WHERE url_norm=? with no
+    user_id filter so it touches every user's row for the URL (admin semantics,
+    mirroring delete_all_by_url).
+    """
     _insert_row(tracker_db, url="https://example.com/jobs/1", row_id="aaa11111")
-    _insert_row(tracker_db, url="https://example.com/jobs/1", row_id="bbb22222")
+    # Second row with user_id='u2' — valid since user differs
+    norm = tracker.normalize_url("https://example.com/jobs/1")
+    with get_db(tracker_db) as conn:
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, ats_status, url, url_norm, user_id, drive_url) "
+            "VALUES ('bbb22222', '2026-05-22', 'Acme', 'Dev', '85%', ?, ?, 'u2', '')",
+            ("https://example.com/jobs/1", norm),
+        )
     drive = "https://drive.google.com/drive/folders/first"
     tracker.set_drive_url("https://example.com/jobs/1", drive)
 

@@ -19,8 +19,12 @@ def funnel_db(tracker_db, monkeypatch):
     return tracker_db
 
 
-def _insert(db, *, url="https://x.com/j", ats="", sent="", answer="", confirmation="", d=None):
+def _insert(db, *, url=None, ats="", sent="", answer="", confirmation="", d=None):
     d = d if d is not None else date.today().isoformat()
+    # Each call that doesn't specify a URL gets its own unique URL so multiple
+    # inserts don't collide on the (user_id, url_norm) unique constraint.
+    if url is None:
+        url = f"https://x.com/{uuid.uuid4().hex[:8]}"
     with get_db(db) as conn:
         conn.execute(
             "INSERT INTO applications (id, date, company, title, ats_status, url, "
