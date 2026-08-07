@@ -298,19 +298,17 @@ def build_application() -> Application:
     from hunter.commands.scoutfound import cmd_scoutfound
     from hunter.commands.link import cmd_link, cmd_unlink
     from hunter.commands.url_message import cmd_url, button_callback
-    from hunter.bot.auth import require_owner
+    from hunter.bot.auth import require_owner, require_user
     from hunter.schedules import register as _register_schedules
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # Command handlers. Authorization (multi-user B3, hunter/bot/auth.py):
     # /start, /link and /unlink are open to any chat — linking is exactly what
-    # an unbound chat must be able to do. EVERYTHING else is owner-gated for
-    # now: the operational commands act on global state (hunts, queues,
-    # Sheets/Drive, LLM profiles) and stay admin-only by design; the tailoring
-    # entry points (URL paste, Apply/Skip buttons) are owner-gated only until
-    # B3.5b teaches them per-user identity injection — they switch to
-    # require_user then.
+    # an unbound chat must be able to do. The operational commands act on
+    # global state (hunts, queues, Sheets/Drive, LLM profiles) and are
+    # owner-gated by design. URL paste (cmd_url below) takes any linked user
+    # — the manual-tailoring flow (B3.5b).
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("hunt", require_owner(cmd_hunt)))
     app.add_handler(CommandHandler("force", require_owner(cmd_force)))
@@ -344,11 +342,14 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("link", cmd_link))
     app.add_handler(CommandHandler("unlink", cmd_unlink))
 
-    # Button callbacks (owner-gated until B3.5b — see comment above)
+    # Button callbacks stay owner-gated: Apply/Skip cards only come from the
+    # owner-only hunt loop (B3.5 fan-out will revisit this).
     app.add_handler(CallbackQueryHandler(require_owner(button_callback)))
 
-    # Plain URL messages → auto-apply (owner-gated until B3.5b)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, require_owner(cmd_url)))
+    # Plain URL messages → manual tailoring. Any linked user may paste a
+    # vacancy (B3.5b) — cmd_url itself routes non-owner callers through
+    # their per-user identity env and blocks owner-only branches.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, require_user(cmd_url)))
 
     # Register all scheduled jobs via hunter.schedules
     tz = pytz.timezone(TIMEZONE)

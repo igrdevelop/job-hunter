@@ -120,6 +120,29 @@ def user_paths(user_id: str) -> UserPaths:
     return UserPaths(user_id)
 
 
+def user_env(user_id: str, chat_id: int | None = None) -> dict[str, str]:
+    """Env overrides for a per-user apply subprocess (Phase B3 seam).
+
+    - CANDIDATE_YAML_PATH / APPLICATIONS_DIR point the pipeline at the
+      user's own identity and output tree;
+    - JOB_HUNTER_USER_ID makes every tracker write/dedup check in the child
+      stamp/scope this user (hunter.tracker._uid);
+    - TELEGRAM_CHAT_ID (when chat_id given) redirects the pipeline's own
+      notifications (docs-ready message, PDF uploads) to the user's chat —
+      hunter.config reads it from the environment at import time, so the
+      injection needs no pipeline code changes.
+    """
+    paths = user_paths(user_id)
+    env = {
+        "CANDIDATE_YAML_PATH": str(paths.candidate_yaml),
+        "APPLICATIONS_DIR": str(paths.applications_dir),
+        "JOB_HUNTER_USER_ID": user_id,
+    }
+    if chat_id is not None:
+        env["TELEGRAM_CHAT_ID"] = str(chat_id)
+    return env
+
+
 def list_active_users() -> list[str]:
     """User ids eligible for the hunt fan-out.
 

@@ -37,13 +37,16 @@ DB_PATH: Path = TRACKER_DB_PATH
 
 
 def _uid() -> str:
-    """Active user id for single-user mode (Phase B1).
+    """Active user id for the current process.
 
-    Returns DEFAULT_USER_ID from config (env var). Phase B3 replaces call
-    sites with an explicit user_id parameter threaded from the request
-    context; until then this shim keeps all queries scoped correctly.
+    JOB_HUNTER_USER_ID (injected into per-user apply subprocesses by
+    hunter.users.user_env — Phase B3) wins over DEFAULT_USER_ID (env, the
+    owner). In the bot process the env var is absent, so every read/write
+    stays owner-scoped exactly as in Phase B1.
     """
-    return DEFAULT_USER_ID
+    import os
+
+    return os.environ.get("JOB_HUNTER_USER_ID") or DEFAULT_USER_ID
 
 
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─

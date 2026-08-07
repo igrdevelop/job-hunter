@@ -53,13 +53,18 @@ async def send_job_cards(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) ->
 _TAG_RE = re.compile(r"</?(?:b|i|u|s|a|code|pre)(?:\s[^<>]*)?>")
 
 
-async def _tg_notify(text: str) -> None:
-    """Send a message to the configured chat via bot token (no context needed)."""
+async def _tg_notify(text: str, chat_id: int | None = None) -> None:
+    """Send a message via bot token (no context needed).
+
+    Default destination is the admin/owner chat (TELEGRAM_CHAT_ID); pass
+    chat_id to notify a specific linked user instead (multi-user B3).
+    """
+    target = chat_id if chat_id is not None else TELEGRAM_CHAT_ID
     try:
         async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
             try:
                 await bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
+                    chat_id=target,
                     text=text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
@@ -69,7 +74,7 @@ async def _tg_notify(text: str) -> None:
                 # snippet) — a plain message beats a silently lost one.
                 logger.warning("[tg_notify] HTML rejected (%s) — resending plain", e)
                 await bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
+                    chat_id=target,
                     text=_TAG_RE.sub("", text),
                     disable_web_page_preview=True,
                 )

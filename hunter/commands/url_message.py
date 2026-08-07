@@ -138,9 +138,31 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     - LinkedIn search / alert URL (/jobs/search?...) → extract job ids → batch apply
     """
     from hunter.config import MAX_JOBS_PER_RUN
+    from hunter.bot import auth as bot_auth
 
     text = (update.message.text or "").strip()
     chat_id = update.effective_chat.id
+
+    # Multi-user B3.5b: a linked NON-OWNER gets the manual-tailoring flow —
+    # their paste/URL runs with THEIR identity env (candidate.yaml, output
+    # tree, tracker scope, notifications). caller_id stays None for the
+    # owner/admin, which keeps every legacy path byte-for-byte unchanged.
+    caller_id: Optional[str] = None
+    if not bot_auth.is_owner(update):
+        caller_id = bot_auth.authorized_user(update)
+        if not caller_id:
+            # Unreachable behind require_user, but never fall through to the
+            # owner path for an unauthorized chat.
+            return
+        from hunter import users as users_module
+
+        if not users_module.user_paths(caller_id).candidate_yaml.is_file():
+            await update.message.reply_text(
+                "📄 Your candidate profile is not set up yet.\n"
+                "Upload candidate.yaml (and your CV files) on the website first, "
+                "then send the vacancy URL again."
+            )
+            return
 
     # Force two-step: user replied after bare /force
     if chat_id in _force_waiting:
@@ -157,7 +179,12 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        await _handle_paste(update, text)
+        await _handle_paste(
+            update,
+            text,
+            user_id=caller_id,
+            user_chat_id=chat_id if caller_id else None,
+        )
         return
 
     if not text.startswith("http"):
@@ -178,6 +205,25 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
     text = normalize_linkedin_url(text)
+
+    if caller_id:
+        # Non-owner manual tailoring: no bot-process tracker pre-check (it
+        # reads the OWNER's rows here — the user's own dedup runs inside
+        # their subprocess), no LinkedIn batch (owner-only machinery).
+        if is_linkedin_search(text):
+            await update.message.reply_text(
+                "⚠️ LinkedIn alert/search URLs are not supported for linked "
+                "accounts yet — send a direct link to a specific vacancy."
+            )
+            return
+        await update.message.reply_text(
+            f"⏳ <b>Starting generation…</b>\n🔗 {text}\n\nEstimated 1–2 minutes.",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        logger.info(f"[URL handler] Launching apply_agent for user {caller_id}: {text}")
+        asyncio.create_task(_run_apply_agent(text, user_id=caller_id, user_chat_id=chat_id))
+        return
 
     if is_linkedin_search(text):
         job_ids = parse_linkedin_job_ids(text)
