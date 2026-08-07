@@ -212,6 +212,24 @@ def test_senior_frontend_not_affected_by_lead_patterns() -> None:
     assert len(result) == 1
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        # RU spellings of "tech lead" (owner request 2026-08-06: block in
+        # every spelling, EN + RU).
+        "Техлид Angular",
+        "Тех-лид Angular",
+        "Тех лид Angular",
+        "Технический лидер (Angular)",
+        "Angular Техлид",
+    ],
+)
+def test_tech_lead_ru_blocked(title: str) -> None:
+    job = _gmail(title=title)
+    result = apply_filters([job])
+    assert result == [], f"{title!r} should be blocked"
+
+
 # ---------------------------------------------------------------------------
 # P-9.1 — German-speaking title patterns
 # ---------------------------------------------------------------------------
