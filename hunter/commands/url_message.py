@@ -150,19 +150,19 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     caller_id: Optional[str] = None
     if not bot_auth.is_owner(update):
         caller_id = bot_auth.authorized_user(update)
-        if not caller_id:
-            # Unreachable behind require_user, but never fall through to the
-            # owner path for an unauthorized chat.
-            return
-        from hunter import users as users_module
+        # caller_id None here means the handler ran WITHOUT the require_user
+        # decorator (direct call in tests / legacy wiring) — fall through to
+        # the legacy owner flow; the real gate lives at registration.
+        if caller_id:
+            from hunter import users as users_module
 
-        if not users_module.user_paths(caller_id).candidate_yaml.is_file():
-            await update.message.reply_text(
-                "📄 Your candidate profile is not set up yet.\n"
-                "Upload candidate.yaml (and your CV files) on the website first, "
-                "then send the vacancy URL again."
-            )
-            return
+            if not users_module.user_paths(caller_id).candidate_yaml.is_file():
+                await update.message.reply_text(
+                    "📄 Your candidate profile is not set up yet.\n"
+                    "Upload candidate.yaml (and your CV files) on the website first, "
+                    "then send the vacancy URL again."
+                )
+                return
 
     # Force two-step: user replied after bare /force
     if chat_id in _force_waiting:

@@ -78,21 +78,34 @@ def link_chat(chat_id: int, code: str) -> str | None:
 
 
 def resolve_user(chat_id: int) -> str | None:
-    """Return the user_id linked to chat_id, or None for an unbound chat."""
-    with get_db(_db_path()) as conn:
-        row = conn.execute(
-            "SELECT user_id FROM telegram_links WHERE chat_id = ?", (chat_id,)
-        ).fetchone()
-    return row["user_id"] if row is not None else None
+    """Return the user_id linked to chat_id, or None for an unbound chat.
+
+    Best-effort: a DB without the telegram_links table yet (pre-migration
+    checkout) resolves to None instead of raising — the admin-chat fallback
+    in hunter/bot/auth.py keeps the owner functional either way.
+    """
+    try:
+        with get_db(_db_path()) as conn:
+            row = conn.execute(
+                "SELECT user_id FROM telegram_links WHERE chat_id = ?", (chat_id,)
+            ).fetchone()
+        return row["user_id"] if row is not None else None
+    except Exception as e:  # noqa: BLE001
+        log.warning("resolve_user(%s) failed: %s", chat_id, e)
+        return None
 
 
 def resolve_chat(user_id: str) -> int | None:
     """Return the chat_id linked to user_id, or None if the user never linked."""
-    with get_db(_db_path()) as conn:
-        row = conn.execute(
-            "SELECT chat_id FROM telegram_links WHERE user_id = ?", (user_id,)
-        ).fetchone()
-    return row["chat_id"] if row is not None else None
+    try:
+        with get_db(_db_path()) as conn:
+            row = conn.execute(
+                "SELECT chat_id FROM telegram_links WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return row["chat_id"] if row is not None else None
+    except Exception as e:  # noqa: BLE001
+        log.warning("resolve_chat(%s) failed: %s", user_id, e)
+        return None
 
 
 class UserPaths:
