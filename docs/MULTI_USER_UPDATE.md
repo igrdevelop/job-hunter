@@ -170,7 +170,24 @@ Sheets/Drive/Gmail guard) until B3.5 lifts it.
    `dual_*` move to `user_settings` per user.
 8. **Owner-only integrations:** Sheets/Drive/Gmail-source guarded by
    `user_id == owner`.
-9. Seed the owner's `telegram_links` row manually (their existing chat_id).
+9. Seed the owner's `telegram_links` row manually (their existing chat_id):
+
+   ```sql
+   -- on the VPS: sqlite3 /home/deploy/job-hunter/db/tracker.db
+   INSERT OR REPLACE INTO telegram_links (chat_id, user_id, linked_at)
+   VALUES (<TELEGRAM_CHAT_ID from .env>, '<ownerId>', datetime('now'));
+   ```
+
+   Not strictly load-bearing — hunter/bot/auth.py keeps treating the admin
+   chat (`TELEGRAM_CHAT_ID`) as the owner even without a link row, so a
+   deploy before the seed never bricks the bot — but the explicit row is
+   the documented end state.
+
+**Status (2026-08-07, branch feat/multi-user-b3):** items 1–4, 5 (tracker
+plumbing), 5b, 6 (per-user env spawn via the paste flow; queue worker rows
+are owner-only in B3 anyway), 7, 8 (auth gates + Sheets/Drive/repost reader
+scoping + hunting_enabled force-false) implemented. Item 9 is the ops step
+above, to run at deploy.
 
 ### Phase B3.5 — per-user search + hunt fan-out (after B3, before B4)
 

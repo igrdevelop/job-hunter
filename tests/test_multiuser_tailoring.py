@@ -270,6 +270,41 @@ def test_cmd_url_non_owner_linkedin_search_declined(tracker_db, monkeypatch, tmp
     assert "not supported" in text
 
 
+def _applied_content(url: str, folder: str = "Applications/x") -> dict:
+    return {
+        "company": "Acme",
+        "job_title": "Angular Dev",
+        "stack": "Angular",
+        "apply_url": url,
+        "output_folder": folder,
+        "ats_score": "90%",
+    }
+
+
+def test_owner_only_readers_scoped_by_user(tracker_db, monkeypatch):
+    """B3.8: Sheets/Drive feeds + repost donors never see other users' rows."""
+    from hunter import tracker
+
+    monkeypatch.setattr("hunter.config.DEFAULT_USER_ID", OWNER)
+    monkeypatch.setenv("JOB_HUNTER_USER_ID", OTHER)
+    assert tracker.add_applied(_applied_content("https://example.com/job/other"))
+    monkeypatch.delenv("JOB_HUNTER_USER_ID")
+    assert tracker.add_applied(_applied_content("https://example.com/job/owner"))
+
+    # Bot process (owner scope): only the owner's row feeds Sheets/Drive/expiry.
+    urls = {r["URL"] for r in tracker.read_all_tracker_rows()}
+    assert urls == {"https://example.com/job/owner"}
+    urls = {r["url"] for r in tracker.iter_unsent_rows()}
+    assert urls == {"https://example.com/job/owner"}
+    donors = {d["url"] for d in tracker.get_recent_applied_for_repost(30)}
+    assert donors == {"https://example.com/job/owner"}
+
+    # The user's own subprocess scope sees only their row as a repost donor.
+    monkeypatch.setenv("JOB_HUNTER_USER_ID", OTHER)
+    donors = {d["url"] for d in tracker.get_recent_applied_for_repost(30)}
+    assert donors == {"https://example.com/job/other"}
+
+
 def test_cmd_url_owner_path_unchanged(tracker_db, monkeypatch, tmp_path):
     """Admin chat: no user_id kwargs — the legacy owner flow."""
     from hunter.commands import url_message

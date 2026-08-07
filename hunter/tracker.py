@@ -820,9 +820,10 @@ def get_recent_applied_for_repost(window_days: int) -> list[dict]:
              WHERE folder != '' AND folder IS NOT NULL
                AND date >= ?
                AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?)
+               AND user_id = ?
              ORDER BY date DESC, id DESC
             """,
-            (cutoff, MANUAL_PENDING_ATS),
+            (cutoff, MANUAL_PENDING_ATS, _uid()),
         ).fetchall()
     return [
         {
@@ -1296,7 +1297,9 @@ def iter_unsent_rows() -> list[dict]:
               AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
               AND id != ''
               AND (sent = '' OR sent IN ('—', '–', '-'))
-            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
+              AND user_id = ?
+            """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
+            (_uid(),),
         ).fetchall()
 
     return [
@@ -1635,7 +1638,9 @@ def read_all_tracker_rows() -> list[dict]:
             FROM applications
             WHERE id != ''
               AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
-            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
+              AND user_id = ?
+            """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
+            (_uid(),),
         ).fetchall()
 
     result = []
