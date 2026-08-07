@@ -7,11 +7,18 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      # tracker.db lives in a DIRECTORY mount (./db) so its WAL sidecars
+      # (-wal/-shm) are shared with job-hunter-api. A single-file bind mount
+      # gave each container its OWN sidecars over one main file — the copies
+      # diverged and corrupted the db (2026-08-07 incident). One-time host
+      # migration: mkdir -p db && mv tracker.db* db/
+      TRACKER_DB_PATH: /app/db/tracker.db
     volumes:
-      # tracker.db must exist on the host before first run.
-      # If it doesn't exist Docker will auto-create a directory, breaking the tracker.
-      # Fix: touch ./tracker.db  (the bot will initialise the schema on first start)
-      - ./tracker.db:/app/tracker.db
+      # Holds tracker.db + its WAL sidecars; shared with job-hunter-api's
+      # compose (mounted there as /app/data/db). Create before first run:
+      #   mkdir -p db && mv tracker.db* db/
+      - ./db:/app/db
       - ./tracker.xlsx:/app/tracker.xlsx
       - ./Applications:/app/Applications
       - ./backups:/app/backups

@@ -206,7 +206,12 @@ SOURCE_HEALTH_KEEP: int = int(os.getenv("SOURCE_HEALTH_KEEP", "50"))
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
-TRACKER_DB_PATH = PROJECT_DIR / "tracker.db"
+# Env-overridable so Docker can point at a DIRECTORY-mounted db (shared WAL
+# sidecars with job-hunter-api; a single-file bind mount gives each container
+# its own -wal/-shm, which diverges and corrupts the db — 2026-08-07 incident).
+TRACKER_DB_PATH: Path = Path(
+    os.getenv("TRACKER_DB_PATH", str(PROJECT_DIR / "tracker.db"))
+).expanduser()
 # Daily snapshot of workbook(s) — see hunter/tracker_backup.py and tools/backup_tracker.py
 TRACKER_BACKUP_ENABLED: bool = os.getenv("TRACKER_BACKUP_ENABLED", "true").lower() in (
     "true",

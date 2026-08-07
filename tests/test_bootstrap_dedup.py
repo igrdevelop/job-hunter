@@ -130,6 +130,24 @@ def test_insert_pulled_rows_empty_input(tracker_db):
     assert tracker.insert_pulled_rows([]) == 0
 
 
+def test_insert_pulled_rows_skips_malformed_id(tracker_db):
+    """Garbage sheet rows (URL/number in the ID column) must never be inserted.
+
+    Live incident 2026-08-07: rows with a URL in the ID column and a bare
+    number in Date kept resurrecting into tracker.db on every bot start.
+    """
+    rows = [
+        (2, _sheet_row("https://example.com/jobs/1", "")),
+        (3, _sheet_row("990", "")),
+        (4, _sheet_row("cccccccc", "https://example.com/jobs/3")),
+    ]
+    inserted = tracker.insert_pulled_rows(rows)
+    assert inserted == 1
+    with get_db(tracker_db) as conn:
+        ids = {r["id"] for r in conn.execute("SELECT id FROM applications").fetchall()}
+    assert ids == {"cccccccc"}
+
+
 # ── pull_full_snapshot integration ────────────────────────────────────────────
 
 
