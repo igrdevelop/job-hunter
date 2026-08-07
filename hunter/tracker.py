@@ -660,7 +660,7 @@ def delete_all_by_url(url: str) -> dict:
 
     with get_db(DB_PATH) as conn:
         first = conn.execute(
-            "SELECT folder, drive_url FROM applications WHERE url_norm=? LIMIT 1",
+            "SELECT folder, drive_url FROM applications WHERE url_norm=? ORDER BY rowid LIMIT 1",
             (norm,),
         ).fetchone()
         if first:
