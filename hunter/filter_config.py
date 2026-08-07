@@ -43,6 +43,13 @@ FILTER = {
         "tech lead",
         "tech-lead",
         "techlead",
+        # RU spellings of "tech lead" (owner request 2026-08-06: block in every
+        # spelling, EN + RU — substring match, lowercased, so this also catches
+        # "технический лидер").
+        "техлид",
+        "тех-лид",
+        "тех лид",
+        "технический лид",
         "project lead",
         "engineering manager",
         "head of engineering",

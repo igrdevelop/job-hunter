@@ -87,6 +87,44 @@ def test_plain_angular_not_fullstack_kept() -> None:
     assert not _is_unwanted_fullstack(_job(title="Senior Angular Developer"))
 
 
+# ── 1b. Fullstack — RU spellings (owner request 2026-08-06: block in every
+# spelling, EN + RU; same Angular+Node/Nuxt exception applies) ────────────────
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Фулстек-разработчик",
+        "Фуллстек разработчик",
+        "Фул стек инженер",
+        "Фулл-стек Developer",
+        "Фулстэк программист",
+    ],
+)
+def test_fullstack_ru_without_angular_blocked(title: str) -> None:
+    assert _is_unwanted_fullstack(_job(title=title))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Фул-стек Java + Angular разработчик",
+        "Фуллстек .NET + Angular",
+    ],
+)
+def test_fullstack_ru_backend_in_title_blocked(title: str) -> None:
+    assert _is_unwanted_fullstack(_job(title=title))
+
+
+def test_fullstack_ru_angular_node_kept() -> None:
+    """Same Angular+Node/Nuxt exception applies to RU-titled fullstack roles."""
+    job = _job(
+        title="Фуллстек разработчик (Angular + Node.js)",
+        body="Frontend in Angular, backend in Node.js / NestJS.",
+    )
+    assert not _is_unwanted_fullstack(job)
+
+
 # ── 2. C# regex actually matches now ──────────────────────────────────────────
 
 
