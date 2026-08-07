@@ -226,6 +226,10 @@ TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
 APPLICATIONS_DIR: Path = Path(
     os.getenv("APPLICATIONS_DIR", str(PROJECT_DIR / "Applications"))
 ).expanduser()
+# Per-user storage root (multi-user, docs/MULTI_USER_UPDATE.md shared
+# contract): users/{userId}/{candidate,Applications,templates}. Shared with
+# job-hunter-api via the ./users volume mount.
+USERS_ROOT: Path = Path(os.getenv("USERS_ROOT", str(PROJECT_DIR / "users")))
 APPLY_AGENT_PATH = PROJECT_DIR / "apply_agent.py"
 GENERATE_DOCS_PATH = PROJECT_DIR / "generate_docs.py"
 APPLY_MD_PATH = PROJECT_DIR / ".claude" / "commands" / "apply.md"

@@ -77,6 +77,79 @@ def link_chat(chat_id: int, code: str) -> str | None:
     return user_id
 
 
+def resolve_user(chat_id: int) -> str | None:
+    """Return the user_id linked to chat_id, or None for an unbound chat."""
+    with get_db(_db_path()) as conn:
+        row = conn.execute(
+            "SELECT user_id FROM telegram_links WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+    return row["user_id"] if row is not None else None
+
+
+def resolve_chat(user_id: str) -> int | None:
+    """Return the chat_id linked to user_id, or None if the user never linked."""
+    with get_db(_db_path()) as conn:
+        row = conn.execute(
+            "SELECT chat_id FROM telegram_links WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    return row["chat_id"] if row is not None else None
+
+
+class UserPaths:
+    """Per-user storage layout under USERS_ROOT (shared contract).
+
+    users/{userId}/
+      candidate/            candidate.yaml, candidate_profile.md, base_cv_*.md
+      Applications/         generated docs, {YYYY-MM-DD}/{Company}[_N]/
+      templates/            resume/cover-letter templates + manifest.json
+    """
+
+    def __init__(self, user_id: str):
+        from hunter.config import USERS_ROOT
+
+        self.user_id = user_id
+        self.root = USERS_ROOT / user_id
+        self.candidate_dir = self.root / "candidate"
+        self.candidate_yaml = self.candidate_dir / "candidate.yaml"
+        self.applications_dir = self.root / "Applications"
+        self.templates_dir = self.root / "templates"
+
+
+def user_paths(user_id: str) -> UserPaths:
+    """Storage paths for user_id (pure computation — creates nothing)."""
+    return UserPaths(user_id)
+
+
+def list_active_users() -> list[str]:
+    """User ids eligible for the hunt fan-out.
+
+    Active = Telegram-linked + candidate.yaml present + `hunting_enabled`
+    per-user setting truthy. NOTE (B3 scope decision, docs/
+    MULTI_USER_UPDATE.md): hunting is owner-only until B3.5 —
+    `hunting_enabled` is treated as false for any user other than
+    DEFAULT_USER_ID regardless of what user_settings says.
+    """
+    from hunter.config import DEFAULT_USER_ID, user_setting
+
+    with get_db(_db_path()) as conn:
+        linked = [r["user_id"] for r in conn.execute("SELECT user_id FROM telegram_links")]
+    active: list[str] = []
+    for uid in linked:
+        if DEFAULT_USER_ID and uid != DEFAULT_USER_ID:
+            continue  # B3: hunting owner-only; lifted in B3.5
+        if not user_paths(uid).candidate_yaml.is_file():
+            continue
+        if user_setting(uid, "hunting_enabled", "true").strip().lower() not in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            continue
+        active.append(uid)
+    return active
+
+
 def unlink_chat(chat_id: int) -> bool:
     """Remove the link for chat_id. Returns True if a link existed."""
     with get_db(_db_path()) as conn:
