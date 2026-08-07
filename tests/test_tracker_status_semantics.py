@@ -40,10 +40,17 @@ def test_get_url_status_flags_detects_react_skip(tracker_db) -> None:
     assert flags == {"has_success": False, "is_react_skip": True}
 
 
-def test_get_url_status_flags_ignores_fail_and_plain_skip(tracker_db) -> None:
+def test_get_url_status_flags_ignores_fail(tracker_db) -> None:
+    # Under the unique (user_id, url_norm) constraint a URL can only have one
+    # terminal row. Test FAIL and plain SKIP separately.
     _add_row_direct(tracker_db, url="https://example.com/jobs/3", ats="FAIL")
-    _add_row_direct(tracker_db, url="https://example.com/jobs/3", ats="SKIP", sent="")
     flags = tracker.get_url_status_flags("https://example.com/jobs/3")
+    assert flags == {"has_success": False, "is_react_skip": False}
+
+
+def test_get_url_status_flags_ignores_plain_skip(tracker_db) -> None:
+    _add_row_direct(tracker_db, url="https://example.com/jobs/3b", ats="SKIP", sent="")
+    flags = tracker.get_url_status_flags("https://example.com/jobs/3b")
     assert flags == {"has_success": False, "is_react_skip": False}
 
 

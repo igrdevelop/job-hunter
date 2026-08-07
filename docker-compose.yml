@@ -37,6 +37,11 @@ services:
       - ./logs:/app/logs
       # Candidate data — all personal files live in candidate/ (see candidate/README.md).
       - ./candidate:/app/candidate:ro
+      # Per-user storage root (multi-user, docs/MULTI_USER_UPDATE.md). After the
+      # owner-data migration, CANDIDATE_YAML_PATH / APPLICATIONS_DIR in .env
+      # point inside /app/users/{userId}/. Shared with job-hunter-api (its
+      # compose mounts the same host dir at /app/data/users).
+      - ./users:/app/users
     logging:
       driver: "json-file"
       options:

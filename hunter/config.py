@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+# ── Multi-user ────────────────────────────────────────────────────────────────
+# Owner's user id (matches users.id in the API's app.sqlite). Required for B1
+# so every tracker write is stamped and dedup is scoped correctly. Until Phase
+# B3 (full multi-user runtime), this is the only user the bot knows about.
+# Leave unset only in single-user dev setups; the bot degrades gracefully
+# (stamps user_id='' everywhere, still functions for one user).
+DEFAULT_USER_ID: str = os.getenv("DEFAULT_USER_ID", "")
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: int = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
@@ -558,3 +566,24 @@ JUSTJOIN_MARKER_ICONS = [
     "javascript",
     "html",
 ]
+
+
+# ── Per-user settings helper (Phase B2) ──────────────────────────────────────
+def user_setting(user_id: str, key: str, default: str = "") -> str:
+    """Read one key from user_settings for user_id; return default if absent.
+
+    Reads directly from the DB on every call — caching per hunt cycle is the
+    caller's responsibility if needed. Never raises (DB access is best-effort).
+    Not yet wired into flow control; that happens in Phase B3.
+    """
+    try:
+        from hunter.db import get_db
+
+        with get_db(TRACKER_DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT value FROM user_settings WHERE user_id=? AND key=? LIMIT 1",
+                (user_id, key),
+            ).fetchone()
+        return row["value"] if row else default
+    except Exception:
+        return default

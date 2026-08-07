@@ -15,7 +15,12 @@ def run(coro):
 
 
 def test_delete_all_by_url_removes_all_statuses(tracker_db):
-    """delete_all_by_url should delete FAIL, SKIP, MANUAL, and success rows."""
+    """delete_all_by_url deletes every row for the URL regardless of ats_status or user_id.
+
+    Under the unique (user_id, url_norm) constraint, two rows for the same URL can
+    coexist only when they belong to different users. delete_all_by_url is an admin
+    operation (/force) that clears ALL rows for a URL across every user.
+    """
     from hunter.tracker import delete_all_by_url, normalize_url
     from hunter.db import get_db
 
@@ -25,6 +30,7 @@ def test_delete_all_by_url_removes_all_statuses(tracker_db):
     norm2 = normalize_url(url2)
 
     with get_db(tracker_db) as conn:
+        # user '' — applied successfully, has folder + drive_url
         conn.execute(
             "INSERT INTO applications "
             "(id, date, company, title, stack, ats_status, url, url_norm, folder, drive_url) "
@@ -36,17 +42,19 @@ def test_delete_all_by_url_removes_all_statuses(tracker_db):
                 "https://drive.google.com/drive/folders/FOLDER1",
             ),
         )
+        # user 'u2' — same URL, different user (FAIL row); valid under unique constraint
+        conn.execute(
+            "INSERT INTO applications "
+            "(id, date, company, title, stack, ats_status, url, url_norm, user_id, folder) "
+            "VALUES ('ccc33333', '2026-05-12', 'AcmeCorp', 'Dev', 'Angular', 'FAIL', ?, ?, 'u2', '')",
+            (url1, norm1),
+        )
+        # control row — different URL, must survive
         conn.execute(
             "INSERT INTO applications "
             "(id, date, company, title, stack, ats_status, url, url_norm, folder, drive_url) "
             "VALUES ('bbb22222', '2026-05-11', 'OtherCo', 'Dev', 'React', '87', ?, ?, ?, '')",
             (url2, norm2, "Applications/2026-05-11/OtherCo"),
-        )
-        conn.execute(
-            "INSERT INTO applications "
-            "(id, date, company, title, stack, ats_status, url, url_norm, folder) "
-            "VALUES ('ccc33333', '2026-05-12', 'AcmeCorp', 'Dev', 'Angular', 'FAIL', ?, ?, '')",
-            (url1, norm1),
         )
 
     result = delete_all_by_url(url1)
