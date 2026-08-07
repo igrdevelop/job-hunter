@@ -49,6 +49,7 @@ def test_init_db_has_all_columns(db_path: Path) -> None:
     expected = {
         "id",
         "date",
+        "user_id",
         "company",
         "title",
         "stack",
@@ -106,8 +107,18 @@ def test_init_db_creates_indexes(db_path: Path) -> None:
                 "SELECT * FROM sqlite_master WHERE type='index' AND tbl_name='applications'"
             )
         }
-    assert "idx_url_norm" in indexes
+    assert "idx_user_url_norm" in indexes
+    assert "idx_user_ats" in indexes
     assert "idx_ats" in indexes
+    assert "idx_url_norm" not in indexes
+
+
+def test_init_db_creates_multi_user_tables(db_path: Path) -> None:
+    with get_db(db_path) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "user_settings" in tables
+    assert "telegram_links" in tables
+    assert "telegram_link_codes" in tables
 
 
 # ── get_db context manager ───────────────────────────────────────────────────
