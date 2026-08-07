@@ -226,10 +226,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     # replaced by per-user indexes. The unique idx_user_url_norm is created
     # separately after _dedup_url_norm() to avoid constraint violations.
     conn.execute("DROP INDEX IF EXISTS idx_url_norm")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_user_ats "
-        "ON applications(user_id, ats_status)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_ats ON applications(user_id, ats_status)")
 
 
 def _ensure_user_url_index(conn: sqlite3.Connection) -> None:

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from hunter.apply_shared import CANDIDATE_DIR as _CANDIDATE_DIR

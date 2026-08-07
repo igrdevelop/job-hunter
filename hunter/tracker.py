@@ -45,6 +45,7 @@ def _uid() -> str:
     """
     return DEFAULT_USER_ID
 
+
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─
 TRACKER_HEADERS = [
     "Date",

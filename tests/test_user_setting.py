@@ -42,9 +42,7 @@ def test_user_setting_scoped_by_user(setting_db):
         conn.execute(
             "INSERT INTO user_settings(user_id, key, value) VALUES('u1','TRACKS','angular')"
         )
-        conn.execute(
-            "INSERT INTO user_settings(user_id, key, value) VALUES('u2','TRACKS','react')"
-        )
+        conn.execute("INSERT INTO user_settings(user_id, key, value) VALUES('u2','TRACKS','react')")
     assert user_setting("u1", "TRACKS", "") == "angular"
     assert user_setting("u2", "TRACKS", "") == "react"
     assert user_setting("u3", "TRACKS", "both") == "both"
