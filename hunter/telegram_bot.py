@@ -98,6 +98,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_llm": ("hunter.commands.llm", "cmd_llm"),
     "cmd_dual": ("hunter.commands.dual", "cmd_dual"),
     "cmd_tracks": ("hunter.commands.tracks", "cmd_tracks"),
+    "cmd_link": ("hunter.commands.link", "cmd_link"),
+    "cmd_unlink": ("hunter.commands.link", "cmd_unlink"),
     "cmd_url": ("hunter.commands.url_message", "cmd_url"),
     "button_callback": ("hunter.commands.url_message", "button_callback"),
     "_handle_apply": ("hunter.commands.url_message", "_handle_apply"),
@@ -170,6 +172,8 @@ async def _post_init(app: Application) -> None:
             BotCommand("tracks", "Show/switch active candidate tracks [angular|react|both]"),
             BotCommand("fails", "Last N apply failures from the audit log [N]"),
             BotCommand("queue", "Apply queue: PENDING/IN_PROGRESS jobs [limit]"),
+            BotCommand("link", "Link this chat to your web account (code from the site)"),
+            BotCommand("unlink", "Disconnect this chat from your web account"),
         ]
     )
 
@@ -292,45 +296,60 @@ def build_application() -> Application:
     from hunter.commands.dual import cmd_dual
     from hunter.commands.tracks import cmd_tracks
     from hunter.commands.scoutfound import cmd_scoutfound
+    from hunter.commands.link import cmd_link, cmd_unlink
     from hunter.commands.url_message import cmd_url, button_callback
+    from hunter.bot.auth import require_owner, require_user
     from hunter.schedules import register as _register_schedules
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
-    # Command handlers
+    # Command handlers. Authorization (multi-user B3, hunter/bot/auth.py):
+    # /start, /link and /unlink are open to any chat — linking is exactly what
+    # an unbound chat must be able to do. The operational commands act on
+    # global state (hunts, queues, Sheets/Drive, LLM profiles) and are
+    # owner-gated by design. URL paste (cmd_url below) takes any linked user
+    # — the manual-tailoring flow (B3.5b).
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("hunt", cmd_hunt))
-    app.add_handler(CommandHandler("force", cmd_force))
-    app.add_handler(CommandHandler("process_manual", cmd_process_manual))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
-    app.add_handler(CommandHandler("unsent", cmd_unsent))
-    app.add_handler(CommandHandler("sync_sent", cmd_sync_sent))
-    app.add_handler(CommandHandler("check_expired", cmd_check_expired))
-    app.add_handler(CommandHandler("debug_url", cmd_debug_url))
-    app.add_handler(CommandHandler("about_me", cmd_about_me))
-    app.add_handler(CommandHandler("gsheets_status", cmd_gsheets_status))
-    app.add_handler(CommandHandler("gsheets_push_missing", cmd_gsheets_push_missing))
-    app.add_handler(CommandHandler("gsheets_push_sent", cmd_gsheets_push_sent))
-    app.add_handler(CommandHandler("gdrive_upload_missing", cmd_gdrive_upload_missing))
-    app.add_handler(CommandHandler("check_responses", cmd_check_responses))
-    app.add_handler(CommandHandler("export", cmd_export))
-    app.add_handler(CommandHandler("normalize", cmd_normalize))
-    app.add_handler(CommandHandler("funnel", cmd_funnel))
-    app.add_handler(CommandHandler("retry_reset", cmd_retry_reset))
-    app.add_handler(CommandHandler("fails", cmd_fails))
-    app.add_handler(CommandHandler("queue", cmd_queue))
-    app.add_handler(CommandHandler("health", cmd_health))
-    app.add_handler(CommandHandler("llm", cmd_llm))
-    app.add_handler(CommandHandler("dual", cmd_dual))
-    app.add_handler(CommandHandler("tracks", cmd_tracks))
-    app.add_handler(CommandHandler("scoutfound", cmd_scoutfound))
+    app.add_handler(CommandHandler("hunt", require_owner(cmd_hunt)))
+    app.add_handler(CommandHandler("force", require_owner(cmd_force)))
+    app.add_handler(CommandHandler("process_manual", require_owner(cmd_process_manual)))
+    app.add_handler(CommandHandler("status", require_owner(cmd_status)))
+    app.add_handler(CommandHandler("schedule", require_owner(cmd_schedule)))
+    app.add_handler(CommandHandler("unsent", require_owner(cmd_unsent)))
+    app.add_handler(CommandHandler("sync_sent", require_owner(cmd_sync_sent)))
+    app.add_handler(CommandHandler("check_expired", require_owner(cmd_check_expired)))
+    app.add_handler(CommandHandler("debug_url", require_owner(cmd_debug_url)))
+    app.add_handler(CommandHandler("about_me", require_owner(cmd_about_me)))
+    app.add_handler(CommandHandler("gsheets_status", require_owner(cmd_gsheets_status)))
+    app.add_handler(CommandHandler("gsheets_push_missing", require_owner(cmd_gsheets_push_missing)))
+    app.add_handler(CommandHandler("gsheets_push_sent", require_owner(cmd_gsheets_push_sent)))
+    app.add_handler(
+        CommandHandler("gdrive_upload_missing", require_owner(cmd_gdrive_upload_missing))
+    )
+    app.add_handler(CommandHandler("check_responses", require_owner(cmd_check_responses)))
+    app.add_handler(CommandHandler("export", require_owner(cmd_export)))
+    app.add_handler(CommandHandler("normalize", require_owner(cmd_normalize)))
+    app.add_handler(CommandHandler("funnel", require_owner(cmd_funnel)))
+    app.add_handler(CommandHandler("retry_reset", require_owner(cmd_retry_reset)))
+    app.add_handler(CommandHandler("fails", require_owner(cmd_fails)))
+    app.add_handler(CommandHandler("queue", require_owner(cmd_queue)))
+    app.add_handler(CommandHandler("health", require_owner(cmd_health)))
+    app.add_handler(CommandHandler("llm", require_owner(cmd_llm)))
+    app.add_handler(CommandHandler("dual", require_owner(cmd_dual)))
+    app.add_handler(CommandHandler("tracks", require_owner(cmd_tracks)))
+    # scoutfound keeps its own internal TELEGRAM_CHAT_ID check as defense in depth
+    app.add_handler(CommandHandler("scoutfound", require_owner(cmd_scoutfound)))
+    app.add_handler(CommandHandler("link", cmd_link))
+    app.add_handler(CommandHandler("unlink", cmd_unlink))
 
-    # Button callbacks
-    app.add_handler(CallbackQueryHandler(button_callback))
+    # Button callbacks stay owner-gated: Apply/Skip cards only come from the
+    # owner-only hunt loop (B3.5 fan-out will revisit this).
+    app.add_handler(CallbackQueryHandler(require_owner(button_callback)))
 
-    # Plain URL messages → auto-apply
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_url))
+    # Plain URL messages → manual tailoring. Any linked user may paste a
+    # vacancy (B3.5b) — cmd_url itself routes non-owner callers through
+    # their per-user identity env and blocks owner-only branches.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, require_user(cmd_url)))
 
     # Register all scheduled jobs via hunter.schedules
     tz = pytz.timezone(TIMEZONE)

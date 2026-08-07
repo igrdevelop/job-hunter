@@ -35,6 +35,8 @@ async def _run_apply_agent(
     force: bool = False,
     paste_file: Optional[str] = None,
     permalink: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_chat_id: Optional[int] = None,
 ) -> None:
     """Run apply_agent.py via apply_service, don't block the event loop.
 
@@ -42,8 +44,34 @@ async def _run_apply_agent(
     pasted text instead of fetching the URL. ``permalink``, when given, is
     the real clickable link behind a synthetic ``url`` (e.g. a captured
     LinkedIn Scout post permalink).
+
+    ``user_id``/``user_chat_id`` (multi-user B3.5b): a NON-OWNER caller's
+    identity — the subprocess gets their env (hunter.users.user_env: their
+    candidate.yaml, their users/{uid}/Applications tree, their tracker
+    scope, their chat for the pipeline's own notifications), this wrapper's
+    status messages go to their chat, and the owner-only Sheets/Drive
+    delivery is skipped (their docs are served by the website instead).
+    Owner/legacy callers pass neither — behavior is unchanged.
     """
     from hunter.services.apply_service import run_apply_agent_for_url
+
+    extra_env = None
+    if user_id:
+        from hunter import users
+
+        extra_env = users.user_env(user_id, chat_id=user_chat_id)
+        try:
+            users.user_paths(user_id).applications_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning("[apply_agent] could not ensure Applications dir for %s: %s", user_id, e)
+
+    async def _notify(text: str) -> None:
+        # Positional legacy call when no user chat — keeps existing
+        # monkeypatched single-arg fakes (and the old contract) intact.
+        if user_chat_id is None:
+            await _tg_notify(text)
+        else:
+            await _tg_notify(text, chat_id=user_chat_id)
 
     label = url or "(pasted text)"
     if url and not try_mark_apply_active(url):
@@ -51,7 +79,7 @@ async def _run_apply_agent(
             "[apply_agent] duplicate request for %s — already generating elsewhere, skipping",
             label,
         )
-        await _tg_notify(
+        await _notify(
             f"⏭ <b>Already generating</b> for this vacancy — skipping duplicate.\n🔗 {label}"
         )
         if paste_file:
@@ -73,19 +101,20 @@ async def _run_apply_agent(
             force=force,
             paste_file=paste_file,
             permalink=permalink,
+            extra_env=extra_env,
         )
         if outcome == "fail":
             logger.error("[apply_agent] failed for %s", label)
             # error_detail is a raw stderr/stdout tail — escape it or a stray
             # `<` makes Telegram reject the whole failure message (HTML parse).
             err_block = f"\n\n<pre>{html.escape(error_detail[:800])}</pre>" if error_detail else ""
-            await _tg_notify(f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}")
+            await _notify(f"❌ <b>apply_agent failed</b>\n🔗 {label}{err_block}")
         elif outcome == "llm_outage":
             # Account-level LLM failure — nothing was generated, so no delivery.
             # No tracker row was written: re-send the URL once the account is
             # topped up (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
             logger.error("[apply_agent] LLM outage for %s", label)
-            await _tg_notify(
+            await _notify(
                 f"💳 <b>LLM outage (billing/auth)</b> — no docs generated.\n"
                 f"🔗 {label}\n"
                 "Check the provider account/key, then send the URL again."
@@ -96,22 +125,28 @@ async def _run_apply_agent(
             # (this flow never wrote one for plain "fail" either), the URL
             # can simply be re-sent.
             logger.error("[apply_agent] CLI timeout for %s", label)
-            await _tg_notify(
+            await _notify(
                 f"⏰ <b>CLI timed out</b> — no docs generated.\n🔗 {label}\nSend the URL again."
             )
         else:
             logger.info("[apply_agent] done (%s) for %s", outcome, label)
-            # Instant Sheets mirror + Drive upload. deliver_apply_now also
-            # covers the paste-without-URL case (url="") via its backfill
-            # fallback — those rows used to wait for the periodic jobs.
-            from hunter.delivery import deliver_apply_now
+            if user_id:
+                # Owner-only integrations (docs/MULTI_USER_UPDATE.md): no
+                # Sheets mirror / Drive upload for non-owner users — their
+                # docs live in users/{uid}/Applications, served by the site.
+                logger.info("[apply_agent] non-owner run (%s) — skipping Sheets/Drive", user_id)
+            else:
+                # Instant Sheets mirror + Drive upload. deliver_apply_now also
+                # covers the paste-without-URL case (url="") via its backfill
+                # fallback — those rows used to wait for the periodic jobs.
+                from hunter.delivery import deliver_apply_now
 
-            drive_url = await deliver_apply_now(url or None)
-            if drive_url:
-                await _tg_notify(f'📁 <a href="{drive_url}">Open folder on Drive</a>')
+                drive_url = await deliver_apply_now(url or None)
+                if drive_url:
+                    await _notify(f'📁 <a href="{drive_url}">Open folder on Drive</a>')
     except Exception as e:
         logger.error("[apply_agent] exception: %s", e)
-        await _tg_notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
+        await _notify(f"❌ <b>apply_agent exception</b>\n{e}\n🔗 {label}")
     finally:
         if url:
             mark_apply_done(url)
@@ -222,13 +257,24 @@ async def _run_linkedin_batch(job_ids: list[str], update: Update) -> None:
         pass
 
 
-async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
+async def _handle_paste(
+    update: Update,
+    text: str,
+    force: bool = False,
+    user_id: Optional[str] = None,
+    user_chat_id: Optional[int] = None,
+) -> None:
     """Save pasted job text to a temp file and run apply_agent in paste mode.
 
     The URL (if found inside the text) is passed to apply_agent so it ends up
     in the tracker. If no URL — apply_agent runs without one.
 
     ``force=True`` passes ``--force`` (bypasses tracker dedup and React-only skip).
+
+    ``user_id`` (multi-user B3.5b): a NON-OWNER caller — the bot-process
+    tracker pre-checks are skipped (lookup_url/the MANUAL-JobLeads flow are
+    scoped to the owner's rows here; the subprocess does its own dedup in
+    the user's scope) and the run is spawned with their identity env.
     """
     from telegram.constants import ParseMode
     from hunter.sources.jobleads import JOBLEADS_PASTE_MARKER
@@ -238,8 +284,11 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
     url_inferred = False
 
     # Block if URL already tracked — unless it's a MANUAL-pending row or force mode.
+    # Owner-only: the bot process reads the tracker in the OWNER's scope, so
+    # for a non-owner caller this pre-check would consult the wrong user's
+    # rows — their dedup happens inside their own subprocess instead.
     manual_pending = False
-    if url:
+    if url and not user_id:
         entries = await asyncio.to_thread(lookup_url, url)
         manual_pending = any(str(e.get("ats") or "").strip().upper() == "MANUAL" for e in entries)
         if entries and not manual_pending and not force:
@@ -258,7 +307,7 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
             return
 
     # MANUAL JobLeads row: write text into the existing job_posting.txt and rerun.
-    if manual_pending and url and "jobleads.com" in url.lower():
+    if manual_pending and url and not user_id and "jobleads.com" in url.lower():
         jp = await asyncio.to_thread(manual_jobleads_job_posting_path, url)
         if jp and jp.is_file():
             try:
@@ -328,9 +377,18 @@ async def _handle_paste(update: Update, text: str, force: bool = False) -> None:
         disable_web_page_preview=True,
     )
     logger.info(
-        "[paste handler] Launching apply_agent paste mode (%d chars) url=%s force=%s",
+        "[paste handler] Launching apply_agent paste mode (%d chars) url=%s force=%s user=%s",
         chars,
         url or "—",
         force,
+        user_id or "owner",
     )
-    asyncio.create_task(_run_apply_agent(url, force=force, paste_file=paste_path))
+    asyncio.create_task(
+        _run_apply_agent(
+            url,
+            force=force,
+            paste_file=paste_path,
+            user_id=user_id,
+            user_chat_id=user_chat_id,
+        )
+    )

@@ -6,6 +6,12 @@ load() degrades gracefully —
 every caller reads through get(dotpath, default) with an explicit fallback
 that reproduces the project owner's original hardcoded behavior, so a missing
 file never crashes the bot. One warning is logged the first time it's missing.
+
+Multi-user (Phase B3): the cache is keyed by the resolved yaml path — one
+process can serve several users' identities (the bot process reading
+different users' filters, a future fan-out). The default resolution order is
+unchanged: explicit argument > _set_path() test override > CANDIDATE_YAML_PATH
+env (per-user apply subprocesses inject this) > repo-local candidate/.
 """
 
 import logging
@@ -33,7 +39,7 @@ def _set_path(path) -> None:
     """Test helper: point the loader at a different file and drop the cache."""
     global _path_override
     _path_override = Path(path) if path else None
-    load.cache_clear()
+    _load_file.cache_clear()
 
 
 def _resolve_path() -> Path:
@@ -45,11 +51,10 @@ def _resolve_path() -> Path:
     return _DEFAULT_PATH
 
 
-@lru_cache(maxsize=1)
-def load() -> dict:
-    """Load and cache candidate.yaml as a dict. Returns {} if the file is
-    absent — callers must supply a default via get() for every field."""
-    path = _resolve_path()
+@lru_cache(maxsize=32)
+def _load_file(path: Path) -> dict:
+    """Read one candidate.yaml, cached per path (missing-file warning fires
+    once per path for the cache's lifetime)."""
     if not path.exists():
         logger.warning(
             "candidate.yaml not found at %s — using built-in defaults. "
@@ -62,9 +67,20 @@ def load() -> dict:
     return data or {}
 
 
-def get(dotpath: str, default=None):
+def load(path: str | Path | None = None) -> dict:
+    """Load and cache candidate.yaml as a dict. Returns {} if the file is
+    absent — callers must supply a default via get() for every field.
+
+    `path` selects a specific user's yaml explicitly (multi-user callers);
+    omitted, the process-default resolution applies (env override / repo file).
+    """
+    resolved = Path(path) if path is not None else _resolve_path()
+    return _load_file(resolved)
+
+
+def get(dotpath: str, default=None, *, path: str | Path | None = None):
     """Read a nested key with dot notation, e.g. get("identity.full_name")."""
-    node = load()
+    node = load(path)
     for part in dotpath.split("."):
         if not isinstance(node, dict) or part not in node:
             return default

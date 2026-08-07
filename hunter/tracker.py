@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-from hunter.config import DEFAULT_USER_ID, TRACKER_DB_PATH, TRACKER_PATH
+from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
 from hunter.models import Job
 from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
@@ -37,13 +37,16 @@ DB_PATH: Path = TRACKER_DB_PATH
 
 
 def _uid() -> str:
-    """Active user id for single-user mode (Phase B1).
+    """Active user id for the current process.
 
-    Returns DEFAULT_USER_ID from config (env var). Phase B3 replaces call
-    sites with an explicit user_id parameter threaded from the request
-    context; until then this shim keeps all queries scoped correctly.
+    Delegates to config.current_user_id(): JOB_HUNTER_USER_ID (injected into
+    per-user apply subprocesses by hunter.users.user_env — Phase B3) wins
+    over DEFAULT_USER_ID (env, the owner). In the bot process the env var is
+    absent, so every read/write stays owner-scoped exactly as in Phase B1.
     """
-    return DEFAULT_USER_ID
+    from hunter.config import current_user_id
+
+    return current_user_id()
 
 
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─
@@ -817,9 +820,10 @@ def get_recent_applied_for_repost(window_days: int) -> list[dict]:
              WHERE folder != '' AND folder IS NOT NULL
                AND date >= ?
                AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?)
+               AND user_id = ?
              ORDER BY date DESC, id DESC
             """,
-            (cutoff, MANUAL_PENDING_ATS),
+            (cutoff, MANUAL_PENDING_ATS, _uid()),
         ).fetchall()
     return [
         {
@@ -1293,7 +1297,9 @@ def iter_unsent_rows() -> list[dict]:
               AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
               AND id != ''
               AND (sent = '' OR sent IN ('—', '–', '-'))
-            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
+              AND user_id = ?
+            """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
+            (_uid(),),
         ).fetchall()
 
     return [
@@ -1632,7 +1638,9 @@ def read_all_tracker_rows() -> list[dict]:
             FROM applications
             WHERE id != ''
               AND ats_status NOT IN ('{PENDING_ATS}', '{IN_PROGRESS_ATS}')
-            """  # noqa: S608 — no interpolated user input, both constants are module-level literals
+              AND user_id = ?
+            """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
+            (_uid(),),
         ).fetchall()
 
     result = []

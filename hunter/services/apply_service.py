@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import subprocess
 import tempfile
 import time
@@ -250,6 +251,7 @@ async def run_apply_agent_for_url(
     force: bool = False,
     paste_file: Optional[str] = None,
     permalink: Optional[str] = None,
+    extra_env: Optional[dict[str, str]] = None,
 ) -> ApplyResult:
     """URL-based variant of run_apply_agent_subprocess for manual Telegram triggers.
 
@@ -259,6 +261,11 @@ async def run_apply_agent_for_url(
     `permalink`, when given, is the real clickable link behind a synthetic
     `url` (e.g. a captured LinkedIn Scout post permalink) — see
     run_apply_agent_subprocess's matching docstring note.
+
+    `extra_env` (multi-user B3, hunter.users.user_env) overlays the child's
+    environment — CANDIDATE_YAML_PATH / APPLICATIONS_DIR /
+    JOB_HUNTER_USER_ID / TELEGRAM_CHAT_ID — so the pipeline runs with a
+    specific user's identity, output tree, tracker scope and chat.
 
     Returns (outcome, error_detail):
       outcome    — "ok" | "fail" | "manual" | "llm_outage" | "cli_timeout"
@@ -278,11 +285,13 @@ async def run_apply_agent_for_url(
     # Signal apply_agent.py to send an early Telegram notification confirming start
     cmd.append("--notify-start")
 
+    env = {**os.environ, **extra_env} if extra_env else None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError) as e:
         logger.error(f"[apply_agent] failed to start subprocess for {label}: {e}")
