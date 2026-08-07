@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-from hunter.config import DEFAULT_USER_ID, TRACKER_DB_PATH, TRACKER_PATH
+from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
 from hunter.models import Job
 from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
@@ -39,14 +39,14 @@ DB_PATH: Path = TRACKER_DB_PATH
 def _uid() -> str:
     """Active user id for the current process.
 
-    JOB_HUNTER_USER_ID (injected into per-user apply subprocesses by
-    hunter.users.user_env — Phase B3) wins over DEFAULT_USER_ID (env, the
-    owner). In the bot process the env var is absent, so every read/write
-    stays owner-scoped exactly as in Phase B1.
+    Delegates to config.current_user_id(): JOB_HUNTER_USER_ID (injected into
+    per-user apply subprocesses by hunter.users.user_env — Phase B3) wins
+    over DEFAULT_USER_ID (env, the owner). In the bot process the env var is
+    absent, so every read/write stays owner-scoped exactly as in Phase B1.
     """
-    import os
+    from hunter.config import current_user_id
 
-    return os.environ.get("JOB_HUNTER_USER_ID") or DEFAULT_USER_ID
+    return current_user_id()
 
 
 # ── Schema / header constants (kept for backward compat with tracker_cache, db) ─

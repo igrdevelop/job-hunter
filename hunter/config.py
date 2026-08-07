@@ -313,13 +313,22 @@ _TRACKS_DB_KEY = "tracks_enabled"
 
 
 def active_tracks() -> frozenset[str]:
-    """Active candidate tracks: a DB-persisted `/tracks` choice wins over the
-    CANDIDATE_TRACKS env var (same DB-key-wins-over-env pattern as
-    hunter.llm_profiles's dual_shadow_profile), so switching tracks via
-    Telegram takes effect without a bot restart.
+    """Active candidate tracks for the CURRENT user.
+
+    Resolution (multi-user B3.7): per-user `user_settings` row
+    (`tracks_enabled` for current_user_id()) → legacy global `config` KV row
+    (pre-B3 data written by /tracks) → CANDIDATE_TRACKS env. DB choices win
+    over env so switching via Telegram takes effect without a restart.
     """
     import sqlite3
 
+    uid = current_user_id()
+    if uid:
+        value = user_setting(uid, _TRACKS_DB_KEY, "")
+        if value.strip():
+            parsed = _parse_tracks(value)
+            if parsed:
+                return parsed
     try:
         with sqlite3.connect(TRACKER_DB_PATH) as conn:
             conn.execute(
@@ -338,11 +347,16 @@ def active_tracks() -> frozenset[str]:
 
 
 def set_active_tracks(tracks: frozenset[str] | set[str]) -> None:
-    """Persist a `/tracks` choice to the DB (wins over CANDIDATE_TRACKS until
-    the row is cleared or the value is set back to the env default)."""
+    """Persist a `/tracks` choice for the CURRENT user (wins over
+    CANDIDATE_TRACKS until changed). Falls back to the legacy global config
+    row only when no user id is configured (single-user dev setup)."""
     import sqlite3
 
     value = ",".join(sorted(t.strip().lower() for t in tracks if t.strip()))
+    uid = current_user_id()
+    if uid:
+        set_user_setting(uid, _TRACKS_DB_KEY, value)
+        return
     with sqlite3.connect(TRACKER_DB_PATH) as conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
@@ -577,7 +591,17 @@ JUSTJOIN_MARKER_ICONS = [
 ]
 
 
-# ── Per-user settings helper (Phase B2) ──────────────────────────────────────
+# ── Per-user settings helpers (Phase B2/B3) ──────────────────────────────────
+def current_user_id() -> str:
+    """User id the current PROCESS acts for.
+
+    JOB_HUNTER_USER_ID (injected into per-user apply subprocesses by
+    hunter.users.user_env) wins over DEFAULT_USER_ID (the owner). Empty
+    string = single-user dev setup with no user configured.
+    """
+    return os.environ.get("JOB_HUNTER_USER_ID") or DEFAULT_USER_ID
+
+
 def user_setting(user_id: str, key: str, default: str = "") -> str:
     """Read one key from user_settings for user_id; return default if absent.
 
@@ -596,3 +620,28 @@ def user_setting(user_id: str, key: str, default: str = "") -> str:
         return row["value"] if row else default
     except Exception:
         return default
+
+
+def set_user_setting(user_id: str, key: str, value: str) -> None:
+    """Upsert one per-user setting (B3.7 — /tracks, /dual live here now).
+
+    Best-effort like user_setting: a DB failure logs and returns rather than
+    breaking the calling Telegram command.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        from hunter.db import get_db
+
+        with get_db(TRACKER_DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO user_settings (user_id, key, value, updated_at)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(user_id, key) DO UPDATE SET"
+                " value = excluded.value, updated_at = excluded.updated_at",
+                (user_id, key, value, datetime.now(timezone.utc).isoformat()),
+            )
+    except Exception as e:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("set_user_setting(%s, %s) failed: %s", user_id, key, e)

@@ -261,26 +261,53 @@ def set_active(name: str) -> Profile:
 # (see hunter.dual_apply). Toggled at runtime via the /dual Telegram command.
 
 
+def _user_scoped_get(key: str) -> str | None:
+    """Per-user value of a dual-apply key (B3.7), legacy global row fallback.
+
+    /tracks-style settings moved into user_settings scoped by
+    config.current_user_id(); the old global `config` KV row still answers
+    for pre-migration data and single-user dev setups.
+    """
+    from hunter.config import current_user_id, user_setting
+
+    uid = current_user_id()
+    if uid:
+        value = user_setting(uid, key, "")
+        if value.strip():
+            return value
+    return _db_get(key)
+
+
+def _user_scoped_set(key: str, value: str) -> None:
+    from hunter.config import current_user_id, set_user_setting
+
+    uid = current_user_id()
+    if uid:
+        set_user_setting(uid, key, value)
+    else:
+        _db_set(key, value)
+
+
 def dual_enabled() -> bool:
-    """True if dual-apply (shadow comparison) mode is on."""
-    return _db_get(_DUAL_KEY) == "1"
+    """True if dual-apply (shadow comparison) mode is on for the current user."""
+    return _user_scoped_get(_DUAL_KEY) == "1"
 
 
 def set_dual(enabled: bool) -> None:
-    """Persist dual-apply mode on/off in tracker.db."""
-    _db_set(_DUAL_KEY, "1" if enabled else "0")
+    """Persist dual-apply mode on/off for the current user (B3.7)."""
+    _user_scoped_set(_DUAL_KEY, "1" if enabled else "0")
     logger.info("[llm_profiles] dual-apply mode → %s", "on" if enabled else "off")
 
 
 def set_shadow(name: str) -> Profile:
-    """Persist `name` as the dual-apply shadow profile (DB key wins over the
-    DUAL_SHADOW_PROFILE env var). Returns the profile.
+    """Persist `name` as the current user's dual-apply shadow profile (DB key
+    wins over the DUAL_SHADOW_PROFILE env var). Returns the profile.
 
     Raises ValueError if the name is unknown or the profile is unavailable
     (missing API key) — same contract as set_active().
     """
     profile = _validate_profile(name)
-    _db_set(_DUAL_SHADOW_KEY, name)
+    _user_scoped_set(_DUAL_SHADOW_KEY, name)
     logger.info("[llm_profiles] shadow profile → %s (%s)", name, profile.model)
     return profile
 
@@ -288,12 +315,15 @@ def set_shadow(name: str) -> Profile:
 def shadow_profile() -> Profile | None:
     """The profile used for the shadow generation.
 
-    Resolution: DB (dual_shadow_profile) → DUAL_SHADOW_PROFILE env → default
-    ("deepseek-v3"). Returns None if the resolved profile is unknown or its API
-    key is missing, so the shadow run quietly no-ops rather than crashing.
+    Resolution: per-user setting → legacy global DB row (dual_shadow_profile)
+    → DUAL_SHADOW_PROFILE env → default ("deepseek-v3"). Returns None if the
+    resolved profile is unknown or its API key is missing, so the shadow run
+    quietly no-ops rather than crashing.
     """
     name = (
-        _db_get(_DUAL_SHADOW_KEY) or os.getenv("DUAL_SHADOW_PROFILE", "").strip() or _DEFAULT_SHADOW
+        _user_scoped_get(_DUAL_SHADOW_KEY)
+        or os.getenv("DUAL_SHADOW_PROFILE", "").strip()
+        or _DEFAULT_SHADOW
     )
     prof = PROFILES.get(name)
     return prof if (prof is not None and prof.is_available()) else None

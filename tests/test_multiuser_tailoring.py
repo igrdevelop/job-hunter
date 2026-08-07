@@ -57,7 +57,7 @@ def _make_candidate_yaml(users_root, user_id: str) -> None:
 def test_uid_env_var_wins_over_default(tracker_db, monkeypatch):
     from hunter import tracker
 
-    monkeypatch.setattr("hunter.tracker.DEFAULT_USER_ID", "the-owner")
+    monkeypatch.setattr("hunter.config.DEFAULT_USER_ID", "the-owner")
     monkeypatch.setenv("JOB_HUNTER_USER_ID", "subprocess-user")
     assert tracker._uid() == "subprocess-user"
     monkeypatch.delenv("JOB_HUNTER_USER_ID")
