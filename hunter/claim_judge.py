@@ -39,8 +39,9 @@ from hunter.config import (
     LLM_PROVIDER,
 )
 
+from hunter.apply_shared import CANDIDATE_DIR
+
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-CANDIDATE_DIR = Path(__file__).parent.parent / "candidate"
 
 # Severities that justify a repair / block. `style` is report-only — the
 # deterministic gloss-dedup owns it.

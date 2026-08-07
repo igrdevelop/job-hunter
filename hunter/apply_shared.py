@@ -17,6 +17,8 @@ from pathlib import Path
 import requests
 
 from hunter import candidate
+import os
+
 from hunter.config import (
     APPLICATIONS_DIR,
     GENERATE_PL_RESUME,
@@ -58,7 +60,8 @@ def _translate_p():
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROMPTS_DIR = PROJECT_DIR / "prompts"
-CANDIDATE_DIR = PROJECT_DIR / "candidate"
+_cyz = os.getenv("CANDIDATE_YAML_PATH")
+CANDIDATE_DIR = Path(_cyz).parent if _cyz else PROJECT_DIR / "candidate"
 
 REQUIRED_JSON_KEYS: list[str] = [
     "company_name",

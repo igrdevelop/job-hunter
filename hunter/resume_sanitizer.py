@@ -24,6 +24,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from hunter.apply_shared import CANDIDATE_DIR as _CANDIDATE_DIR
+
 # Polish diacritics / function words that should never appear in an EN resume.
 # Note: "jest" excluded — it matches the Jest testing framework (false positive).
 _PL_IN_EN_RESUME_RE = re.compile(
@@ -49,7 +51,6 @@ _IT_TERMS_STRIP_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-_CANDIDATE_DIR = Path(__file__).parent.parent / "candidate"
 _PROFILE_PATH = _CANDIDATE_DIR / "candidate_profile.md"
 
 
