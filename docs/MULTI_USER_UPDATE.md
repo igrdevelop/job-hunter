@@ -123,6 +123,18 @@ expiry); the user sends `/link CODE` to the bot; the bot validates, writes
 
 ### Phase B3 — multi-user runtime (the big one)
 
+**Scope decision (owner, 2026-08-07): in B3 hunting stays OWNER-ONLY.**
+Non-owner users get Telegram linking + **manual tailoring only**: they paste a
+vacancy URL (or job text) to the bot and the apply pipeline runs with THEIR
+candidate.yaml, THEIR output folder, THEIR notifications. The hunt fan-out for
+everyone ships in Phase B3.5 together with per-user search specs — today's
+scrape queries are shaped by the owner's profile (keywords angular/frontend/
+react; Wrocław city slugs in pracuj/theprotocol listing URLs), so fanning
+results out to a user with a different stack/city would silently find almost
+nothing for them. Enforcement: `hunting_enabled` is force-`false` for any
+`user_id` other than the owner's (same pattern as the owner-only
+Sheets/Drive/Gmail guard) until B3.5 lifts it.
+
 1. **Linking:** `hunter/commands/link.py` — `/link CODE` (validate against
    `telegram_link_codes`, write `telegram_links`, delete code), `/unlink`.
 2. **User registry:** new `hunter/users.py` — `resolve_user(chat_id)`,
@@ -139,11 +151,17 @@ expiry); the user sends `/link CODE` to the bot; the bot validates, writes
    (not `maxsize=1`); current-user path supplied explicitly or via contextvar.
    Sweep the 16 modules from `docs/quality/08-multi-user-configurability.md` to
    ensure identity flows from candidate.yaml, not constants.
-5. **Hunt loop:** scrape once per cycle → for each user from `list_active_users()`:
-   apply THEIR filters (their candidate.yaml), THEIR dedup
-   (`is_known(user_id, …)`), enqueue PENDING with their `user_id`. `_hunt_lock`
-   stays global (protects the scrape). `tracker.py`: every read/write gains
-   `user_id`; per-user tracker cache or indexed SQL.
+5. **Hunt loop:** stays owner-only in B3 — keeps stamping `DEFAULT_USER_ID`
+   exactly as in B1 (no fan-out yet; that's B3.5). What DOES land here:
+   `tracker.py` reads/writes gain explicit `user_id` plumbing (not just the
+   implicit `_uid()` default) so the manual-tailoring path can write rows for
+   a non-owner user; per-user tracker cache or indexed SQL.
+5b. **Manual tailoring for non-owners:** the paste/URL flow
+   (`bot/apply_runner.py`, `commands/url_message.py`) resolves the sender via
+   `resolve_user`, spawns the apply subprocess with THEIR env
+   (`CANDIDATE_YAML_PATH`, `APPLICATIONS_DIR=users/{uid}/Applications`,
+   `JOB_HUNTER_USER_ID`), stamps THEIR `user_id` on the tracker row, and
+   notifies THEIR chat. This is the only pipeline non-owner users get in B3.
 6. **Apply worker:** `claim_pending()` returns `user_id`; subprocess spawn injects
    `CANDIDATE_YAML_PATH`, `APPLICATIONS_DIR=users/{uid}/Applications`,
    `JOB_HUNTER_USER_ID=uid`; child stamps `user_id` on all tracker writes.
@@ -153,6 +171,33 @@ expiry); the user sends `/link CODE` to the bot; the bot validates, writes
 8. **Owner-only integrations:** Sheets/Drive/Gmail-source guarded by
    `user_id == owner`.
 9. Seed the owner's `telegram_links` row manually (their existing chat_id).
+
+### Phase B3.5 — per-user search + hunt fan-out (after B3, before B4)
+
+Lifts the owner-only hunting restriction. Rationale: "each user's own search"
+does NOT mean per-user HTTP requests — it means per-user search *specs*
+compiled into one shared fetch plan.
+
+1. **Per-user search specs:** keywords / cities / remote-preference read from
+   the user's candidate.yaml (+ `user_settings` overrides where runtime-
+   togglable). A `SearchSpec` dataclass carries them.
+2. **Union fetch plan:** once per hunt cycle, union the specs of all
+   `list_active_users()` → dedupe keywords/cities → the QUERY-DRIVEN sources
+   (linkedin, findmyremote, thesmartjobs, nofluffjobs, pracuj, theprotocol,
+   builtin) run one request per unique keyword/city instead of the owner's
+   hardcoded set. Fetch-all sources (RSS / "all recent" JSON APIs / ATS
+   aggregator / telegram channels) ignore the spec — their per-user search IS
+   the fan-out filter. `BaseSource.search()` gains an optional spec parameter;
+   results are deduped globally (same job found via two keywords = one Job).
+3. **Per-source query budget:** cap unique queries per source per cycle so a
+   user with exotic keywords can't balloon the scrape into anti-bot territory;
+   overflow logged + surfaced in `/health`.
+4. **Hunt fan-out** (moved here from B3): for each active user apply THEIR
+   filters (their candidate.yaml), THEIR dedup (`is_known(user_id, …)`),
+   enqueue PENDING with their `user_id`. `_hunt_lock` stays global (protects
+   the scrape).
+5. Flip the B3 force-`false` guard: `hunting_enabled` becomes a real per-user
+   setting for everyone.
 
 ### Phase B4 — fairness & quotas (later, small)
 
@@ -165,11 +210,16 @@ the apply queue (`ORDER BY` last-served), per-user cost reporting
 - B1: hunt cycle green with stamped user_id; existing tests pass
   (`pytest`); no rows with empty user_id.
 - B3 end-to-end: a second user links Telegram, uploads candidate files via the
-  site, enables hunting → hunt produces rows only for them; their docs carry THEIR
-  name (`cv_filename_prefix`); notifications go only to their chat; the owner's
-  flow is unchanged; the same vacancy URL for two users produces two rows
-  (no dedup collision). Use `mutation-verify` skill for regression tests where
+  site, pastes a vacancy URL to the bot → tailored docs carry THEIR name
+  (`cv_filename_prefix`), land in `users/{uid}/Applications/`, notifications go
+  only to their chat, the tracker row carries their `user_id`; hunting stays
+  owner-only (`hunting_enabled` force-false for non-owners); the owner's flow
+  is unchanged. Use `mutation-verify` skill for regression tests where
   applicable.
+- B3.5 end-to-end: the second user enables hunting → the union fetch plan
+  includes their keywords/city, hunt produces rows only matching their filters,
+  the same vacancy URL for two users produces two rows (no dedup collision);
+  scrape request count grows by unique keywords/cities, not by user count.
 
 ## Coordination notes
 
