@@ -98,6 +98,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "cmd_llm": ("hunter.commands.llm", "cmd_llm"),
     "cmd_dual": ("hunter.commands.dual", "cmd_dual"),
     "cmd_tracks": ("hunter.commands.tracks", "cmd_tracks"),
+    "cmd_link": ("hunter.commands.link", "cmd_link"),
+    "cmd_unlink": ("hunter.commands.link", "cmd_unlink"),
     "cmd_url": ("hunter.commands.url_message", "cmd_url"),
     "button_callback": ("hunter.commands.url_message", "button_callback"),
     "_handle_apply": ("hunter.commands.url_message", "_handle_apply"),
@@ -170,6 +172,8 @@ async def _post_init(app: Application) -> None:
             BotCommand("tracks", "Show/switch active candidate tracks [angular|react|both]"),
             BotCommand("fails", "Last N apply failures from the audit log [N]"),
             BotCommand("queue", "Apply queue: PENDING/IN_PROGRESS jobs [limit]"),
+            BotCommand("link", "Link this chat to your web account (code from the site)"),
+            BotCommand("unlink", "Disconnect this chat from your web account"),
         ]
     )
 
@@ -292,6 +296,7 @@ def build_application() -> Application:
     from hunter.commands.dual import cmd_dual
     from hunter.commands.tracks import cmd_tracks
     from hunter.commands.scoutfound import cmd_scoutfound
+    from hunter.commands.link import cmd_link, cmd_unlink
     from hunter.commands.url_message import cmd_url, button_callback
     from hunter.schedules import register as _register_schedules
 
@@ -325,6 +330,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("dual", cmd_dual))
     app.add_handler(CommandHandler("tracks", cmd_tracks))
     app.add_handler(CommandHandler("scoutfound", cmd_scoutfound))
+    app.add_handler(CommandHandler("link", cmd_link))
+    app.add_handler(CommandHandler("unlink", cmd_unlink))
 
     # Button callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
