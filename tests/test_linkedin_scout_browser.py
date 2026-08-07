@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import linkedin_scout.browser as browser
 from linkedin_scout.browser import (
     FEED_URL,
@@ -25,6 +27,21 @@ from linkedin_scout.browser import (
     seed_profile_cookies,
 )
 from linkedin_scout.state import ScoutState
+
+
+@pytest.fixture(autouse=True)
+def _no_real_telegram(monkeypatch):
+    """Never let a test in this file hit the real Telegram API.
+
+    linkedin_scout.config reads the real TELEGRAM_BOT_TOKEN from .env, so any
+    test that trips the circuit breaker without patching
+    _send_circuit_breaker_alert would send a live alert to the owner's chat
+    (happened 2026-08-07: spurious "LinkedIn flagged the scout session" alerts
+    from local pytest runs). Blanking the token makes the alert helper a no-op;
+    tests that exercise the alert itself set their own fake token + fake
+    requests.post, which override this fixture.
+    """
+    monkeypatch.setattr(browser, "TELEGRAM_BOT_TOKEN", "")
 
 
 # --- is_blocked_url / looks_like_anti_bot ------------------------------------
@@ -461,6 +478,7 @@ def test_run_feed_once_filters_through_m1_and_labels_candidates_feed(tmp_path, m
 
 def test_feed_and_keyword_tracks_use_independent_state(tmp_path, monkeypatch):
     """A trip on the feed track must not silence the keyword-search track."""
+    monkeypatch.setattr(browser, "_send_circuit_breaker_alert", lambda reason: None)
     feed_state = ScoutState(tmp_path / "feed_state.json")
     search_state = ScoutState(tmp_path / "search_state.json")
 
