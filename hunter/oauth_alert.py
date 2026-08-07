@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 _AUTH_MARKERS = (
     "invalid_grant",
     "invalid_rapt",
+    "invalid_scope",
     "token has been expired or revoked",
     "expired or revoked",
     "invalid_token",
@@ -79,10 +80,23 @@ def alert_oauth_expired(service: str, exc: BaseException, *, reauth_cmd: str) ->
     if now - _last_alert.get(service, 0.0) < _ALERT_COOLDOWN_SEC:
         return False
     _last_alert[service] = now
+    if "invalid_scope" in str(exc).lower():
+        # Not a dead token: the code requests scopes the stored token was never
+        # granted (a scope upgrade shipped without re-auth). Same remedy, but
+        # "revoked/expired" would send the owner down the wrong path.
+        reason = (
+            "Google rejected the token refresh: the stored token was granted "
+            "different scopes than the code now requests (scope upgrade "
+            "without re-auth). Re-authorize to grant the new scopes:\n"
+        )
+    else:
+        reason = (
+            f"Google rejected the refresh token (likely revoked/expired), so "
+            f"{service} stopped working. Re-authorize:\n"
+        )
     sent = _send_telegram(
         f"🔑 <b>{service} token expired</b>\n"
-        f"Google rejected the refresh token (likely revoked/expired), so "
-        f"{service} stopped working. Re-authorize:\n"
+        f"{reason}"
         f"<code>{reauth_cmd}</code>\n\n"
         f"<i>{str(exc)[:200]}</i>"
     )
