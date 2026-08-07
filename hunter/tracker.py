@@ -1425,6 +1425,11 @@ def insert_pulled_rows(rows: list[tuple[int, dict]]) -> int:
             row_id = (row.get("ID") or "").strip()
             if not row_id:
                 continue  # non-syncable row — skip (counted by caller via len delta)
+            if not re.fullmatch(r"[0-9a-zA-Z]{8}", row_id):
+                # Garbage sheet row (e.g. a URL or bare number in the ID column
+                # from an old column-shift incident) — never resurrect it into
+                # the DB. Real IDs are 8-char uuid hex.
+                continue
             if row_id in existing_ids:
                 continue
             raw_url = (row.get("URL") or "").strip()
