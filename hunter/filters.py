@@ -157,14 +157,18 @@ def _is_node_only_title(title: str) -> bool:
     return any(re.search(p, t, re.IGNORECASE) for p in node_patterns)
 
 
-_FULLSTACK_RE = re.compile(r"\bfull[-\s]?stack\b", re.IGNORECASE)
+# EN "full stack"/"fullstack"/"full-stack" + RU "фулстек"/"фуллстек"/
+# "фулстэк"/"фуллстэк" incl. spaced/hyphenated forms (owner request 2026-08-06:
+# block in every spelling, EN + RU).
+_FULLSTACK_RE = re.compile(r"\bfull[-\s]?stack\b|\bфул{1,2}[-\s]?ст[еэ]к\b", re.IGNORECASE)
 
 
 def _is_unwanted_fullstack(job: Job) -> bool:
     """Return True when a 'Full Stack / Fullstack' role should be blocked.
 
-    Policy (owner's preference):
-      - "Fullstack Developer"            → no Angular        → True (blocked).
+    Policy (owner's preference), same for EN and RU title spellings
+    (_FULLSTACK_RE matches "full stack"/"fullstack"/"фулстек"/"фуллстек"/…):
+      - "Fullstack Developer" / "Фулстек-разработчик" → no Angular → True (blocked).
       - "Full Stack Node.js"             → no Angular        → True (blocked).
       - "Fullstack (Angular + Node.js)"  → Angular + Node    → False (kept) —
             Node/Nuxt are intentionally absent from fullstack_backend_stacks.

@@ -18,7 +18,14 @@ def get_gmail_service():
     if not TOKEN_PATH.exists():
         raise FileNotFoundError(f"{TOKEN_PATH} not found. Run: python tools/gmail_auth.py")
 
-    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    # Load with the token's OWN granted scopes, not the code's SCOPES: forcing
+    # SCOPES onto a token minted under the old gmail.readonly scope makes the
+    # refresh request a scope the refresh token was never granted — Google
+    # rejects it with `invalid_scope: Bad Request` and the whole Gmail source
+    # dies (live incident 2026-08-06, after the labeling feature upgraded the
+    # scope). With its own scopes the token refreshes fine; only labeling
+    # degrades (best-effort 403) until the owner re-runs gmail_auth.py.
+    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
 
     if creds.expired and creds.refresh_token:
         from hunter.oauth_alert import refresh_or_alert
@@ -29,6 +36,14 @@ def get_gmail_service():
             TOKEN_PATH,
             service="Gmail",
             reauth_cmd="python tools/gmail_auth.py",
+        )
+
+    missing = [s for s in SCOPES if s not in (creds.scopes or [])]
+    if missing:
+        logger.warning(
+            "[gmail] token lacks scope(s) %s — labeling disabled until re-auth: "
+            "python tools/gmail_auth.py",
+            ", ".join(missing),
         )
 
     return build("gmail", "v1", credentials=creds)
