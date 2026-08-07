@@ -566,3 +566,24 @@ JUSTJOIN_MARKER_ICONS = [
     "javascript",
     "html",
 ]
+
+
+# ── Per-user settings helper (Phase B2) ──────────────────────────────────────
+def user_setting(user_id: str, key: str, default: str = "") -> str:
+    """Read one key from user_settings for user_id; return default if absent.
+
+    Reads directly from the DB on every call — caching per hunt cycle is the
+    caller's responsibility if needed. Never raises (DB access is best-effort).
+    Not yet wired into flow control; that happens in Phase B3.
+    """
+    try:
+        from hunter.db import get_db
+
+        with get_db(TRACKER_DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT value FROM user_settings WHERE user_id=? AND key=? LIMIT 1",
+                (user_id, key),
+            ).fetchone()
+        return row["value"] if row else default
+    except Exception:
+        return default
