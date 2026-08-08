@@ -8,8 +8,9 @@ any path for tests / M4). Merged on top per the knob table's replace /
 extend_only strategies. Missing file ⇒ Layer 1 as-is (owner behavior today,
 byte-for-byte).
 
-Cache is keyed by ``(resolved path, mtime_ns)`` — NOT a plain ``@lru_cache``
-on path alone — so an external writer (API ``PUT /filters``, M5) is picked
+Cache is keyed by ``(filters path, filters mtime, candidate path, candidate
+mtime)`` — NOT a plain ``@lru_cache`` on path alone — so an external writer
+(API ``PUT /filters``, M5) or a ``candidate.yaml`` home-city edit is picked
 up without a bot restart. A missing file caches on ``(path, None)``.
 
 ``hunter.filter_config.FILTER = load_profile()`` keeps every existing
@@ -102,13 +103,22 @@ _LIST_KEYS = frozenset(
 )
 # exclude_stacks_without is dict | None — checked specially in _type_ok.
 
-# (resolved_path_str | None, mtime_ns | None) → merged profile
-_cache: dict[tuple[str | None, int | None], dict[str, Any]] = {}
+# (filters_path, filters_mtime, candidate_path, candidate_mtime) → profile
+_cache: dict[tuple[str | None, int | None, str | None, int | None], dict[str, Any]] = {}
 
 
 def clear_profile_cache() -> None:
     """Drop the load_profile cache (tests / forced reload)."""
     _cache.clear()
+
+
+def _mtime_ns(path: Path | None) -> int | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def builtin_defaults() -> dict[str, Any]:
@@ -595,22 +605,27 @@ def _build_profile(path: Path | None) -> dict[str, Any]:
 
 
 def load_profile(path: str | Path | None = None) -> dict[str, Any]:
-    """Deep-copy Layer 1, merge user YAML (if any), cache by (path, mtime_ns).
+    """Deep-copy Layer 1, merge user YAML (if any), cache by path+mtime keys.
 
-    ``path=None`` resolves ``FILTERS_YAML_PATH`` when set; otherwise returns
-    builtins only (the ``filter_config.FILTER`` shim path).
+    Cache key includes ``candidate.yaml`` mtime so home-city / location aliases
+    refresh when that file changes (even if filters.yaml is untouched). On a
+    cache miss we clear ``candidate``'s path-only LRU so ``candidate.get``
+    sees the current file.
+
+    ``path=None`` resolves ``FILTERS_YAML_PATH`` / default ``candidate/filters.yaml``.
     """
     resolved = _resolve_path(path)
-    mtime: int | None = None
-    if resolved is not None and resolved.exists():
-        try:
-            mtime = resolved.stat().st_mtime_ns
-        except OSError:
-            mtime = None
-    key = (str(resolved.resolve()) if resolved is not None else None, mtime)
+    filters_key = str(resolved.resolve()) if resolved is not None else None
+    filters_mtime = _mtime_ns(resolved)
+    cand_path = candidate._resolve_path()
+    cand_key = str(cand_path.resolve())
+    cand_mtime = _mtime_ns(cand_path)
+    key = (filters_key, filters_mtime, cand_key, cand_mtime)
     cached = _cache.get(key)
     if cached is not None:
         return copy.deepcopy(cached)
+    # Path-only candidate LRU would otherwise keep stale home_city_aliases.
+    candidate._load_file.cache_clear()
     profile = _build_profile(resolved)
     _cache[key] = profile
     return copy.deepcopy(profile)

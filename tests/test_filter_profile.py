@@ -163,6 +163,37 @@ def test_mtime_cache_invalidation(tmp_path):
     assert "poison" not in third["title_keywords"]
 
 
+def test_candidate_yaml_mtime_refreshes_locations(tmp_path):
+    """Editing candidate.yaml alone must invalidate the profile cache."""
+    from hunter import candidate
+
+    cand = tmp_path / "candidate.yaml"
+    cand.write_text(
+        "location:\n  home_city: Kraków\n  home_city_aliases: [kraków, krakow]\n",
+        encoding="utf-8",
+    )
+    candidate._set_path(cand)
+    try:
+        clear_profile_cache()
+        filters = tmp_path / "filters.yaml"
+        _write_filters(filters, {})
+        first = load_profile(filters)
+        assert "kraków" in [a.lower() for a in first["locations"]]
+
+        time.sleep(0.02)
+        cand.write_text(
+            "location:\n  home_city: Gdańsk\n  home_city_aliases: [gdańsk, gdansk]\n",
+            encoding="utf-8",
+        )
+        second = load_profile(filters)
+        locs = [a.lower() for a in second["locations"]]
+        assert "gdańsk" in locs or "gdansk" in locs
+        assert "kraków" not in locs
+    finally:
+        candidate._set_path(None)
+        clear_profile_cache()
+
+
 def test_wrong_type_keeps_default(tmp_path, caplog):
     path = tmp_path / "filters.yaml"
     _write_filters(path, {"exclude_ai_training": "yes", "title_keywords": "angular"})
