@@ -227,19 +227,20 @@ async def _run_hunt_impl(
     # (docs/FILTERS_YAML_PLAN.md M3 — mtime-keyed load_profile cache).
     from hunter.filter_profile import load_profile
 
-    filtered, filter_reasons = apply_filters_with_stats(all_jobs, flt=load_profile())
+    flt = load_profile()
+    filtered, filter_reasons = apply_filters_with_stats(all_jobs, flt=flt)
     filtered_out = len(all_jobs) - len(filtered)
     logger.info(f"[Hunt] After filter: {len(filtered)} jobs")
 
     # Per-email report bookkeeping: record the fate of every Gmail-sourced job.
     # Filtered-out gmail jobs are tagged here with their exact filter reason
-    # (classify_job is the same per-job core apply_filters used above); taken /
-    # deduplicated ones are tagged in the dedup loop below.
+    # (classify_job must use the SAME flt as apply_filters above — import-time
+    # FILTER would diverge after a filters.yaml edit without restart).
     gmail_outcomes: list[JobOutcome] = []
     filtered_ids = {id(j) for j in filtered}
     for j in all_jobs:
         if j.source.startswith("gmail_") and id(j) not in filtered_ids:
-            gmail_outcomes.append(JobOutcome.from_job(j, "filtered", classify_job(j)))
+            gmail_outcomes.append(JobOutcome.from_job(j, "filtered", classify_job(j, flt=flt)))
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple
