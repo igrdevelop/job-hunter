@@ -352,11 +352,20 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
     Intended to be called via asyncio.to_thread.
 
     Conflict matrix:
-      Sent:              EXPIRED (DB) + empty (Sheets)  → keep EXPIRED (Sheets will be fixed by resync)
+      Sent:              bot marker (EXPIRED / '—' skip-fail dash) in DB
+                         + empty (Sheets)                → keep DB (Sheets will be fixed by resync)
                          anything else differs           → trust Sheets
       To Learn:          always trust Sheets
       Re-application:    always trust Sheets
     """
+    from hunter.tracker import REACT_SKIP_SENT_MARKERS
+
+    # Sent values the BOT writes as terminal markers: an empty Sheets cell for
+    # such a row means the marker just hasn't been pushed yet (mirror failed /
+    # pending resync), not that the user cleared it — never let a blank cell
+    # wipe the marker and resurface the row in the send-queue filter.
+    bot_markers = {"EXPIRED"} | REACT_SKIP_SENT_MARKERS
+
     tracker_rows = {r["ID"]: r for r in read_all_tracker_rows() if r.get("ID")}
     sheets_by_id = {r.get("ID", ""): (idx, r) for idx, r in sheets_rows if r.get("ID")}
 
@@ -375,7 +384,7 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
         db_sent = db_row.get("Sent", "").strip()
         sheet_sent = sheet_row.get("Sent", "").strip()
 
-        if db_sent != sheet_sent and not (db_sent == "EXPIRED" and not sheet_sent):
+        if db_sent != sheet_sent and not (db_sent in bot_markers and not sheet_sent):
             updated["Sent"] = sheet_sent
             changed = True
 
