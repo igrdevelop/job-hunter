@@ -6,6 +6,7 @@
     "javascript",
     "typescript"
   ],
+  "require_title_terms": [],
   "require_angular": false,
   "exclude_levels": [
     "junior",
@@ -102,6 +103,12 @@
     "\\bdata\\s+annotat\\w*\\b",
     "\\bdata\\s+label(?:l)?ing\\b"
   ],
+  "exclude_stacks_without": {
+    "unless": "angular",
+    "block": [
+      "react"
+    ]
+  },
   "exclude_react_without_angular": true,
   "exclude_fullstack_with_backend": true,
   "fullstack_backend_stacks": [

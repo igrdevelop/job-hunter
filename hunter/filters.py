@@ -1,12 +1,55 @@
 import html
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from hunter import candidate
 from hunter.models import Job
 from hunter.config import FILTER, active_tracks
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
+
+
+def _resolve_flt(flt: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Resolve the filter profile at call time (not def time).
+
+    Default-arg ``flt=FILTER`` would freeze the module object and break tests
+    that monkeypatch ``filters.FILTER``. ``None`` → live ``FILTER``.
+    """
+    return FILTER if flt is None else flt
+
+
+def _required_title_terms(flt: Mapping[str, Any]) -> list[str]:
+    """Canonical ``require_title_terms``; legacy ``require_angular`` if absent."""
+    if "require_title_terms" in flt:
+        return [str(t) for t in (flt.get("require_title_terms") or [])]
+    if flt.get("require_angular", False):
+        return ["angular"]
+    return []
+
+
+def _stacks_without_rule(flt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return ``{unless, block}`` or None when the stacks-without rule is off.
+
+    Canonical key is ``exclude_stacks_without``. Legacy
+    ``exclude_react_without_angular: true`` maps to the Angular/React default.
+    """
+    if "exclude_stacks_without" in flt:
+        rule = flt.get("exclude_stacks_without")
+        if not isinstance(rule, dict):
+            return None
+        block = rule.get("block") or []
+        if not block:
+            return None
+        return {
+            "unless": str(rule.get("unless") or "").lower(),
+            "block": [str(b).lower() for b in block],
+        }
+    if flt.get("exclude_react_without_angular", False):
+        return {"unless": "angular", "block": ["react"]}
+    return None
+
 
 # Candidate's home city (candidate.yaml location.home_city), used both for the
 # short substring check ("wroc" catches "Wrocław"/"Wroclaw") and for reason
@@ -67,26 +110,35 @@ _GERMAN_NOT_REQUIRED_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _matches_title_keywords(title: str) -> bool:
+def _matches_title_keywords(title: str, flt: Mapping[str, Any] | None = None) -> bool:
+    f = _resolve_flt(flt)
     t = title.lower()
-    return any(kw in t for kw in FILTER["title_keywords"])
+    return any(kw in t for kw in f["title_keywords"])
 
 
-def _requires_angular_check(title: str) -> bool:
-    """If require_angular is on, title MUST contain 'angular' (case-insensitive)."""
-    if not FILTER.get("require_angular", False):
+def _requires_angular_check(title: str, flt: Mapping[str, Any] | None = None) -> bool:
+    """True if title satisfies require_title_terms (all must appear).
+
+    Empty list / require_angular off → always True. Reason string stays
+    ``require_angular`` for FILTER_REASONS stability.
+    """
+    terms = _required_title_terms(_resolve_flt(flt))
+    if not terms:
         return True
-    return "angular" in title.lower()
-
-
-def _is_excluded_level(title: str) -> bool:
     t = title.lower()
-    return any(lvl in t for lvl in FILTER["exclude_levels"])
+    return all(term.lower() in t for term in terms)
 
 
-def _matches_exclude_pattern(title: str) -> bool:
+def _is_excluded_level(title: str, flt: Mapping[str, Any] | None = None) -> bool:
+    f = _resolve_flt(flt)
+    t = title.lower()
+    return any(lvl in t for lvl in f["exclude_levels"])
+
+
+def _matches_exclude_pattern(title: str, flt: Mapping[str, Any] | None = None) -> bool:
     """Regex-based exclusion: \\bjava\\b matches 'Java' but NOT 'JavaScript'."""
-    patterns = FILTER.get("exclude_patterns", [])
+    f = _resolve_flt(flt)
+    patterns = f.get("exclude_patterns", [])
     return any(re.search(p, title, re.IGNORECASE) for p in patterns)
 
 
@@ -119,7 +171,7 @@ def _append_technology_field(tech_texts: list[str], technology) -> None:
                 tech_texts.append(_lower_text_fragment(item))
 
 
-def _is_node_only_title(title: str) -> bool:
+def _is_node_only_title(title: str, flt: Mapping[str, Any] | None = None) -> bool:
     """Return True when the title signals a Node.js backend role with no FE signal.
 
     Catches "TypeScript/Node.js Developer", "Node.js Backend Engineer", etc.
@@ -129,8 +181,9 @@ def _is_node_only_title(title: str) -> bool:
     Does NOT fire when the title also contains a front-end signal (angular,
     frontend, react, ui, spa, ux) — those are full-stack roles we want to see.
     """
-    if not FILTER.get("exclude_react_without_angular", False):
-        # Re-use the same enable flag; Node filtering is part of "FE-only" mode
+    if _stacks_without_rule(_resolve_flt(flt)) is None:
+        # Re-use the stacks-without enable flag; Node filtering is part of
+        # "FE-only" mode (same as the old exclude_react_without_angular gate).
         return False
 
     t = title.lower()
@@ -163,7 +216,7 @@ def _is_node_only_title(title: str) -> bool:
 _FULLSTACK_RE = re.compile(r"\bfull[-\s]?stack\b|\bфул{1,2}[-\s]?ст[еэ]к\b", re.IGNORECASE)
 
 
-def _is_unwanted_fullstack(job: Job) -> bool:
+def _is_unwanted_fullstack(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """Return True when a 'Full Stack / Fullstack' role should be blocked.
 
     Policy (owner's preference), same for EN and RU title spellings
@@ -179,6 +232,7 @@ def _is_unwanted_fullstack(job: Job) -> bool:
     title that hides the backend ("FullStack Developer with Angular", Java in body)
     is still caught.
     """
+    f = _resolve_flt(flt)
     title = job.title or ""
     if not _FULLSTACK_RE.search(title):
         return False
@@ -188,9 +242,9 @@ def _is_unwanted_fullstack(job: Job) -> bool:
         return True
 
     # Angular present: block only when paired with a heavy backend stack.
-    if not FILTER.get("exclude_fullstack_with_backend", False):
+    if not f.get("exclude_fullstack_with_backend", False):
         return False
-    stacks = FILTER.get("fullstack_backend_stacks", [])
+    stacks = f.get("fullstack_backend_stacks", [])
     if not stacks:
         return False
     haystack = f"{title}\n{_job_plain_text_blob(job)}"
@@ -209,46 +263,60 @@ def _react_track_active() -> bool:
     return "react" in active_tracks()
 
 
-def _is_react_only_title(title: str) -> bool:
+def _is_react_only_title(title: str, flt: Mapping[str, Any] | None = None) -> bool:
     """Return True when the job title signals React-only with no Angular involvement.
 
     Title-only check that runs for ALL sources (including gmail_*) before the
     more expensive raw-data check.  Catches "React Developer", "React Native
     Engineer", "Frontend (React)" etc. that slip through the Gmail bypass.
 
-    Only triggers when 'angular' is absent from the title.
+    Only triggers when the stacks-without ``unless`` term is absent from the title.
+    Gated by ``exclude_stacks_without`` (legacy: exclude_react_without_angular)
+    and by ``_react_track_active()`` when \"react\" is in the block list.
     """
-    if not FILTER.get("exclude_react_without_angular", False):
+    rule = _stacks_without_rule(_resolve_flt(flt))
+    if rule is None:
         return False
-    if _react_track_active():
+    if "react" in rule["block"] and _react_track_active():
         return False
     t = title.lower()
-    if "angular" in t:
+    unless = rule["unless"]
+    if unless and unless in t:
         return False
-    # Plain React role in title — must have a role word to avoid false positives
-    # on descriptions like "React + Angular Developer"
-    react_title_patterns = (
-        r"\breact\s+developer\b",
-        r"\breact\s+engineer\b",
-        r"\breact\s+native\b",
-        r"\breact\.js\s+developer\b",
-        r"\breact\.js\s+engineer\b",
-        r"\bfrontend\s+(?:developer|engineer)\s*[\(\[\{]?\s*react\b",
-        r"\bsoftware\s+engineer\s+react\b",
-        r"(?:^|\s)react\s*(?:developer|engineer|programm)",
-    )
-    return any(re.search(p, t, re.IGNORECASE) for p in react_title_patterns)
+    # Only the React-pattern path when react is in the block list (today's
+    # behavior). Other block terms use a simple whole-word check.
+    if "react" in rule["block"]:
+        react_title_patterns = (
+            r"\breact\s+developer\b",
+            r"\breact\s+engineer\b",
+            r"\breact\s+native\b",
+            r"\breact\.js\s+developer\b",
+            r"\breact\.js\s+engineer\b",
+            r"\bfrontend\s+(?:developer|engineer)\s*[\(\[\{]?\s*react\b",
+            r"\bsoftware\s+engineer\s+react\b",
+            r"(?:^|\s)react\s*(?:developer|engineer|programm)",
+        )
+        if any(re.search(p, t, re.IGNORECASE) for p in react_title_patterns):
+            return True
+    for term in rule["block"]:
+        if term == "react":
+            continue
+        if re.search(rf"\b{re.escape(term)}\b", t, re.IGNORECASE):
+            return True
+    return False
 
 
-def _is_react_without_angular(job: Job) -> bool:
+def _is_react_without_angular(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """Skip React-only jobs: check title AND raw skills/tech data from API."""
-    if not FILTER.get("exclude_react_without_angular", False):
+    rule = _stacks_without_rule(_resolve_flt(flt))
+    if rule is None:
         return False
-    if _react_track_active():
+    if "react" in rule["block"] and _react_track_active():
         return False
 
     title = job.title.lower()
     raw = job.raw or {}
+    unless = rule["unless"]
 
     # Collect all tech-related text from raw API data
     tech_texts = [title]
@@ -306,9 +374,20 @@ def _is_react_without_angular(job: Job) -> bool:
         tech_texts.append(_lower_text_fragment(cat.get("name")))
 
     combined = " ".join(tech_texts)
-    has_react = bool(re.search(r"\breact\b", combined))
-    has_angular = "angular" in combined
-    return has_react and not has_angular
+    if unless and unless in combined:
+        return False
+    # Default (and common) shape: block react without angular — keep the
+    # word-boundary React check so "reactive" doesn't trip it.
+    if "react" in rule["block"]:
+        has_react = bool(re.search(r"\breact\b", combined))
+        if has_react:
+            return True
+    for term in rule["block"]:
+        if term == "react":
+            continue
+        if re.search(rf"\b{re.escape(term)}\b", combined, re.IGNORECASE):
+            return True
+    return False
 
 
 def _strip_html_fragment(s: str) -> str:
@@ -376,9 +455,10 @@ def _is_optional_context(blob: str, pos: int, window: int = 150) -> bool:
     return any(p.search(blob[max(0, pos - window) : pos]) for p in _OPTIONAL_CONTEXT_RES)
 
 
-def _is_german_language_required(job: Job) -> bool:
+def _is_german_language_required(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip job (German appears to be a hard requirement)."""
-    if not FILTER.get("exclude_german_language_required", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_german_language_required", False):
         return False
     if "de" not in candidate.get("languages.disqualify_required", ["de", "fr", "nl"]):
         return False
@@ -474,11 +554,26 @@ _PL_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
 )
 
 # Full anti-hybrid set: Polish cities + extra (non-Polish) cities from
-# FILTER["extra_anti_hybrid_cities"] (config), merged at module load time so
-# the set is computed once and stays O(1) per lookup.
-_ANTI_HYBRID_CITIES: frozenset[str] = _PL_ANTI_HYBRID_CITIES | frozenset(
-    c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])
-)
+# flt["extra_anti_hybrid_cities"], cached per extras tuple so each profile's
+# set is computed once (docs/FILTERS_YAML_PLAN.md M2).
+_anti_hybrid_cache: dict[tuple[str, ...], frozenset[str]] = {}
+
+
+def _anti_hybrid_cities(flt: Mapping[str, Any] | None = None) -> frozenset[str]:
+    """Per-profile anti-hybrid city set (PL base + extra_anti_hybrid_cities)."""
+    f = _resolve_flt(flt)
+    extras = tuple(sorted(str(c).lower() for c in (f.get("extra_anti_hybrid_cities") or [])))
+    cached = _anti_hybrid_cache.get(extras)
+    if cached is not None:
+        return cached
+    result = _PL_ANTI_HYBRID_CITIES | frozenset(extras)
+    _anti_hybrid_cache[extras] = result
+    return result
+
+
+# Backward-compat module constant for tests that import ``_ANTI_HYBRID_CITIES``
+# (default owner profile at import). Prefer ``_anti_hybrid_cities(flt)`` in code.
+_ANTI_HYBRID_CITIES: frozenset[str] = _anti_hybrid_cities(FILTER)
 
 # ── Contract / part-time patterns (checked against full job text blob) ────────
 # Catches "part-time" buried in the description rather than the title.
@@ -514,13 +609,13 @@ _RELOCATION_REQUIRED_RES: tuple[re.Pattern, ...] = tuple(
 )
 
 
-def _is_unacceptable_contract(job: Job) -> bool:
+def _is_unacceptable_contract(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip (part-time or very short contract detected in full job text).
 
     Catches cases where "part-time" appears in the description but not the title
     — title-only exclude_levels / exclude_patterns miss these.
     """
-    if not FILTER.get("exclude_unacceptable_contract", False):
+    if not _resolve_flt(flt).get("exclude_unacceptable_contract", False):
         return False
     blob = _job_plain_text_blob(job)
     if not blob.strip():
@@ -528,15 +623,15 @@ def _is_unacceptable_contract(job: Job) -> bool:
     return any(p.search(blob) for p in _CONTRACT_EXCLUDED_RES)
 
 
-def _requires_relocation(job: Job) -> bool:
+def _requires_relocation(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip (job explicitly requires relocation).
 
     Catches offers that show location='remote' or 'Poland' in the listing field
     but state in the description that the candidate must relocate.
-    Works in tandem with _ANTI_HYBRID_CITIES (which blocks city mentions in
+    Works in tandem with _anti_hybrid_cities (which blocks city mentions in
     location/title); this catches the rarer explicit relocation-required phrasing.
     """
-    if not FILTER.get("exclude_relocation_required", False):
+    if not _resolve_flt(flt).get("exclude_relocation_required", False):
         return False
     blob = _job_plain_text_blob(job)
     if not blob.strip():
@@ -545,16 +640,17 @@ def _requires_relocation(job: Job) -> bool:
 
 
 # ── Body disqualifiers (title looks like clean FE, body says otherwise) ───────
-def _has_body_disqualifier(job: Job) -> bool:
+def _has_body_disqualifier(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip (a body_exclude_patterns token found in the full job text).
 
     Catches roles whose title is a clean "Frontend Developer" but whose body
     reveals a backend/CMS/low-code stack (Blazor, Mendix, WordPress, …) the
     candidate doesn't want — these slip past the title-only exclude_patterns.
     """
-    if not FILTER.get("exclude_body_disqualifiers", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_body_disqualifiers", False):
         return False
-    pats = FILTER.get("body_exclude_patterns", [])
+    pats = f.get("body_exclude_patterns", [])
     if not pats:
         return False
     blob = _job_plain_text_blob(job)
@@ -674,7 +770,7 @@ _LOW_FREQ_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _is_acceptable_low_freq_hybrid(job: Job) -> bool:
+def _is_acceptable_low_freq_hybrid(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → keep despite a Polish-city hybrid, because office visits are rare.
 
     Owner accepts a hybrid role anywhere in Poland when the office is needed
@@ -685,18 +781,19 @@ def _is_acceptable_low_freq_hybrid(job: Job) -> bool:
     feasible), and (c) a low-frequency signal (_LOW_FREQ_HYBRID_RES) is
     present. An unspecified or higher frequency does NOT qualify.
     """
-    if not FILTER.get("allow_low_frequency_hybrid", False):
+    f = _resolve_flt(flt)
+    if not f.get("allow_low_frequency_hybrid", False):
         return False
     blob = f"{job.title or ''} {job.location or ''} {_job_plain_text_blob(job)}".lower()
     if not any(c in blob for c in _PL_ANTI_HYBRID_CITIES):
         return False
-    foreign_cities = _ANTI_HYBRID_CITIES - _PL_ANTI_HYBRID_CITIES
+    foreign_cities = _anti_hybrid_cities(f) - _PL_ANTI_HYBRID_CITIES
     if any(c in blob for c in foreign_cities):
         return False
     return any(p.search(blob) for p in _LOW_FREQ_HYBRID_RES)
 
 
-def _is_unwanted_onsite_location(job: Job) -> bool:
+def _is_unwanted_onsite_location(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip (body couples an on-site/hybrid signal with a far-away city).
 
     Complements _matches_location (which only sees title + location field): many
@@ -706,7 +803,8 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
     that merely mention a head-office city in passing. A strong fully-remote signal,
     a Wrocław location, or an acceptable low-frequency Polish-city hybrid vetoes it.
     """
-    if not FILTER.get("exclude_body_onsite_city", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_body_onsite_city", False):
         return False
     loc = (job.location or "").lower()
     if _HOME_CITY_SUBSTR in loc:  # explicitly a home-city role — hybrid there is fine
@@ -720,7 +818,7 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
     if not onsite_pos:
         return False
     city_pos: list[int] = []
-    for city in _ANTI_HYBRID_CITIES:
+    for city in _anti_hybrid_cities(f):
         idx = blob.find(city)
         while idx != -1:
             city_pos.append(idx)
@@ -730,22 +828,23 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
     if not any(abs(o - c) <= 120 for o in onsite_pos for c in city_pos):
         return False
     # Office visits ~once a week or rarer in a Polish city → acceptable.
-    return not _is_acceptable_low_freq_hybrid(job)
+    return not _is_acceptable_low_freq_hybrid(job, flt=f)
 
 
-def _is_ai_training_or_mill(job: Job) -> bool:
+def _is_ai_training_or_mill(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """True → skip (known AI-data-labeling / staffing-mill company).
 
     Title-based "AI Training"/"data annotation" roles are already caught by
     exclude_patterns; this adds a company-name check for mills whose titles look
     like clean "Angular Developer" (micro1 fronts: QuikHireStaffing, HireFeed …).
     """
-    if not FILTER.get("exclude_ai_training", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_ai_training", False):
         return False
     company = (job.company or "").lower()
     if not company:
         return False
-    return any(c in company for c in FILTER.get("exclude_companies", []))
+    return any(c in company for c in f.get("exclude_companies", []))
 
 
 # Owner decision 2026-07-12: skip Russia-tied roles outright, even remote ones
@@ -780,15 +879,16 @@ def _is_russia_market(job: Job) -> bool:
     return any(tok in blob for tok in _RUSSIA_MARKET_LOCATION_TOKENS)
 
 
-def _matches_location(job: Job) -> bool:
+def _matches_location(job: Job, flt: Mapping[str, Any] | None = None) -> bool:
     """Check if job location matches allowed locations.
 
     Anti-hybrid-city logic (P-6.1): if the location or title contains a city
-    in _ANTI_HYBRID_CITIES with no allowed location token (remote/wroclaw), the
+    in the anti-hybrid set with no allowed location token (remote/wroclaw), the
     job is rejected even if the top-level location field says just 'Poland'.
     This catches LinkedIn listings where city appears only in the title.
     """
-    locations = FILTER.get("locations", [])
+    f = _resolve_flt(flt)
+    locations = f.get("locations", [])
     if not locations:
         return True
 
@@ -804,7 +904,8 @@ def _matches_location(job: Job) -> bool:
     blob = f"{loc} {title_lower}"
 
     # If blob contains an anti-city but NO allowed token → reject
-    has_anti_city = any(city in blob for city in _ANTI_HYBRID_CITIES)
+    anti = _anti_hybrid_cities(f)
+    has_anti_city = any(city in blob for city in anti)
     has_allowed = any(token in blob for token in locations)
 
     if has_anti_city and not has_allowed:
@@ -839,15 +940,20 @@ FILTER_REASONS: tuple[str, ...] = (
 )
 
 
-def classify_job(job: Job) -> str | None:
+def classify_job(job: Job, *, flt: Mapping[str, Any] | None = None) -> str | None:
     """Return the reason a single job is filtered out, or None if it passes.
 
     The reason string is one of FILTER_REASONS. This is the per-job core that
     apply_filters_with_stats() aggregates; callers that need the reason for one
     specific job (the Gmail per-email report) reuse it directly so the report and
     the filter pipeline can never disagree.
+
+    ``flt`` defaults to the module ``FILTER`` (owner profile). Pass a
+    non-default profile to evaluate against another user's settings
+    (docs/FILTERS_YAML_PLAN.md M2).
     """
-    # title_keywords and require_angular enforced for ALL sources, including
+    f = _resolve_flt(flt)
+    # title_keywords and require_title_terms enforced for ALL sources, including
     # gmail_*. Recommendation-style alert digests (rekomendacje@wysylka.pracuj.pl,
     # NoFluffJobs "similar offers" blocks, LinkedIn "New jobs similar to ...")
     # pack 10–20 unrelated roles (.NET, PHP, database, DevOps, embedded …)
@@ -856,27 +962,27 @@ def classify_job(job: Job) -> str | None:
     # roles. The cost of a false-negative (missing one ambiguous title like
     # "Software Engineer III") is much lower than the cost of a false-positive
     # (CV generated for a database/Go/PHP role we'd never apply to).
-    if not _matches_title_keywords(job.title):
+    if not _matches_title_keywords(job.title, flt=f):
         return "title_kw"
-    if not _requires_angular_check(job.title):
+    if not _requires_angular_check(job.title, flt=f):
         return "require_angular"
 
     # Hard filters — apply to ALL sources including gmail_*
-    if _is_excluded_level(job.title):
+    if _is_excluded_level(job.title, flt=f):
         return "level"
-    if _is_react_only_title(job.title):
+    if _is_react_only_title(job.title, flt=f):
         return "react_no_angular"
-    if _is_node_only_title(job.title):
+    if _is_node_only_title(job.title, flt=f):
         return "exclude_pattern"
-    if _is_unwanted_fullstack(job):
+    if _is_unwanted_fullstack(job, flt=f):
         return "exclude_pattern"
-    if _matches_exclude_pattern(job.title):
+    if _matches_exclude_pattern(job.title, flt=f):
         return "exclude_pattern"
-    if _is_ai_training_or_mill(job):
+    if _is_ai_training_or_mill(job, flt=f):
         return "exclude_pattern"
-    if _is_react_without_angular(job):
+    if _is_react_without_angular(job, flt=f):
         return "react_no_angular"
-    if _has_body_disqualifier(job):
+    if _has_body_disqualifier(job, flt=f):
         return "exclude_pattern"
     if _is_russia_market(job):
         return "russia"
@@ -884,25 +990,27 @@ def classify_job(job: Job) -> str | None:
     # low-frequency Polish-city hybrid (office ~once a week or rarer). The body
     # on-site/city gate (which honours the same exception) catches far cities
     # hidden in the text.
-    if not _matches_location(job) and not _is_acceptable_low_freq_hybrid(job):
+    if not _matches_location(job, flt=f) and not _is_acceptable_low_freq_hybrid(job, flt=f):
         return "location"
-    if _is_unwanted_onsite_location(job):
+    if _is_unwanted_onsite_location(job, flt=f):
         return "location"
-    if _is_german_language_required(job):
+    if _is_german_language_required(job, flt=f):
         return "german"
-    if _is_unacceptable_contract(job):
+    if _is_unacceptable_contract(job, flt=f):
         return "contract"
-    if _requires_relocation(job):
+    if _requires_relocation(job, flt=f):
         return "relocation"
     return None
 
 
-def apply_filters(jobs: list[Job]) -> list[Job]:
+def apply_filters(jobs: list[Job], *, flt: Mapping[str, Any] | None = None) -> list[Job]:
     """Filter jobs — returns passing jobs only. See apply_filters_with_stats for breakdown."""
-    return apply_filters_with_stats(jobs)[0]
+    return apply_filters_with_stats(jobs, flt=flt)[0]
 
 
-def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]]:
+def apply_filters_with_stats(
+    jobs: list[Job], *, flt: Mapping[str, Any] | None = None
+) -> tuple[list[Job], dict[str, int]]:
     """Filter jobs and return (passing_jobs, reason_counts).
 
     All filters run uniformly for every source, including gmail_*. The gmail
@@ -923,11 +1031,12 @@ def apply_filters_with_stats(jobs: list[Job]) -> tuple[list[Job], dict[str, int]
                         react_no_angular, location, russia, german, contract,
                         relocation
     """
+    f = _resolve_flt(flt)
     result = []
     reasons: dict[str, int] = dict.fromkeys(FILTER_REASONS, 0)
 
     for job in jobs:
-        reason = classify_job(job)
+        reason = classify_job(job, flt=f)
         if reason is None:
             result.append(job)
         else:
@@ -1025,7 +1134,9 @@ _FOREIGN_LOCATION_RE = re.compile(
 )
 
 
-def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
+def _assess_foreign_onsite(
+    job: Job, blob: str, flt: Mapping[str, Any] | None = None
+) -> "GateFinding | None":
     """HARD (a): on-site/hybrid signal sitting near a non-Poland location.
 
     Mirrors _is_unwanted_onsite_location's windowing (~120 chars) but against a
@@ -1037,7 +1148,7 @@ def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
         return None
     if _HOME_CITY_SUBSTR in blob:
         return None
-    if _is_acceptable_low_freq_hybrid(job):
+    if _is_acceptable_low_freq_hybrid(job, flt=flt):
         return None
     onsite_pos = _onsite_signal_positions(blob)
     if not onsite_pos:
@@ -1082,7 +1193,9 @@ _STRICT_ONSITE_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _assess_pl_onsite_hybrid(job: Job, blob: str) -> "GateFinding | None":
+def _assess_pl_onsite_hybrid(
+    job: Job, blob: str, flt: Mapping[str, Any] | None = None
+) -> "GateFinding | None":
     """HARD: frequent office presence required in a Polish city outside Wrocław.
 
     The reused _is_unwanted_onsite_location check stays SOFT in the gate (M4
@@ -1096,13 +1209,14 @@ def _assess_pl_onsite_hybrid(job: Job, blob: str) -> "GateFinding | None":
     low-frequency exception — the description's rare-visit phrasing wins over
     a "hybrid" header (owner decision 2026-08-08).
     """
-    if not FILTER.get("exclude_body_onsite_city", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_body_onsite_city", False):
         return None
     if any(p.search(blob) for p in _FULLY_REMOTE_RES):
         return None
     if _HOME_CITY_SUBSTR in blob:
         return None
-    if _is_acceptable_low_freq_hybrid(job):
+    if _is_acceptable_low_freq_hybrid(job, flt=f):
         return None
     city_pos: list[int] = []
     for city in _PL_ANTI_HYBRID_CITIES:
@@ -1342,9 +1456,11 @@ _FOREIGN_STACK_HARD_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _assess_foreign_stack_no_framework(blob: str) -> "GateFinding | None":
+def _assess_foreign_stack_no_framework(
+    blob: str, flt: Mapping[str, Any] | None = None
+) -> "GateFinding | None":
     """HARD — foreign stack required and neither Angular nor React anywhere."""
-    if not FILTER.get("exclude_body_disqualifiers", False):
+    if not _resolve_flt(flt).get("exclude_body_disqualifiers", False):
         return None
     if _CANDIDATE_FRAMEWORK_RE.search(blob):
         return None
@@ -1360,7 +1476,7 @@ def _assess_foreign_stack_no_framework(blob: str) -> "GateFinding | None":
     return None
 
 
-def _assess_mill_body(blob: str) -> "GateFinding | None":
+def _assess_mill_body(blob: str, flt: Mapping[str, Any] | None = None) -> "GateFinding | None":
     """HARD — a known AI-training / staffing-mill name in the job BODY.
 
     `_is_ai_training_or_mill` only sees `job.company`, which is blank for
@@ -1372,9 +1488,10 @@ def _assess_mill_body(blob: str) -> "GateFinding | None":
     `exclude_companies` entry. "micro1" also matches "micro1.com" (the
     trailing lookahead only rejects word characters).
     """
-    if not FILTER.get("exclude_ai_training", False):
+    f = _resolve_flt(flt)
+    if not f.get("exclude_ai_training", False):
         return None
-    for name in FILTER.get("exclude_companies", []):
+    for name in f.get("exclude_companies", []):
         pattern = re.compile(
             r"(?<!\w)" + re.escape(name.lower()).replace(r"\ ", r"\s+") + r"(?!\w)"
         )
@@ -1540,7 +1657,9 @@ def _guess_title_from_text(job_text: str) -> str:
     return ""
 
 
-def _assess_title_exclude_pattern(effective_title: str) -> "GateFinding | None":
+def _assess_title_exclude_pattern(
+    effective_title: str, flt: Mapping[str, Any] | None = None
+) -> "GateFinding | None":
     """HARD — the (explicit or guessed) title names an excluded backend/CMS
     stack (.NET/Java/C#/PHP/Vue/Magento/…), same list as the listing-level
     _matches_exclude_pattern. Real calibration case: Santander ".NET Developer
@@ -1549,7 +1668,7 @@ def _assess_title_exclude_pattern(effective_title: str) -> "GateFinding | None":
     have caught had this not been a manual paste."""
     if not effective_title:
         return None
-    if _matches_exclude_pattern(effective_title):
+    if _matches_exclude_pattern(effective_title, flt=flt):
         return GateFinding(
             rule="title_exclude_pattern",
             severity="hard",
@@ -1558,7 +1677,9 @@ def _assess_title_exclude_pattern(effective_title: str) -> "GateFinding | None":
     return None
 
 
-def _assess_off_domain_title(effective_title: str, *, was_guessed: bool) -> "GateFinding | None":
+def _assess_off_domain_title(
+    effective_title: str, *, was_guessed: bool, flt: Mapping[str, Any] | None = None
+) -> "GateFinding | None":
     """SOFT — the (explicit or guessed) title doesn't match the frontend
     title-keyword whitelist. SOFT rather than HARD: a GUESSED title is
     inherently less reliable than a known one (wrong-line risk), so an
@@ -1567,7 +1688,7 @@ def _assess_off_domain_title(effective_title: str, *, was_guessed: bool) -> "Gat
     QuantumBlack, AI by McKinsey" — a full stack/AI role, not a frontend one."""
     if not effective_title:
         return None
-    if not _matches_title_keywords(effective_title):
+    if not _matches_title_keywords(effective_title, flt=flt):
         return GateFinding(
             rule="off_domain_title",
             severity="soft",
@@ -1588,7 +1709,13 @@ def _assess_off_domain_title(effective_title: str, *, was_guessed: bool) -> "Gat
 # rather than shipped as noise on good jobs (docs/DOOMED_GATE_PASTE_PLAN.md).
 
 
-def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> list[GateFinding]:
+def assess_job_text(
+    job_text: str,
+    *,
+    title: str = "",
+    company: str = "",
+    flt: Mapping[str, Any] | None = None,
+) -> list[GateFinding]:
     """Deterministic, zero-LLM doomed-vacancy gate over the full fetched job text.
 
     Returns every finding (hard + soft, in check order); callers decide what to
@@ -1602,7 +1729,10 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
     (docs/DOOMED_GATE_PASTE_PLAN.md) use the explicit `title` when known,
     otherwise a best-effort guess from the raw text — see
     `_guess_title_from_text`. No network calls, no LLM calls — pure regex.
+
+    ``flt`` defaults to the module ``FILTER`` (owner profile).
     """
+    f = _resolve_flt(flt)
     job_text = _strip_recommendation_tail(job_text or "")
     job = Job(
         title=title or "",
@@ -1623,7 +1753,7 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
         for fn_name, label in checks:
             fn = globals().get(fn_name)
             try:
-                if fn and fn(job):
+                if fn and fn(job, flt=f):
                     findings.append(
                         GateFinding(rule=fn_name.strip("_"), severity=severity, evidence=label)
                     )
@@ -1632,7 +1762,7 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
 
     for assess in (_assess_foreign_onsite, _assess_pl_onsite_hybrid):
         try:
-            finding = assess(job, blob)
+            finding = assess(job, blob, flt=f)
             if finding:
                 findings.append(finding)
         except Exception:  # noqa: BLE001
@@ -1647,13 +1777,22 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
 
     for assess_blob in (
         _assess_work_authorization,
-        _assess_mill_body,
         _assess_russia_market,
         _assess_stack_mismatch,
-        _assess_foreign_stack_no_framework,
     ):
         try:
             finding = assess_blob(blob)
+            if finding:
+                findings.append(finding)
+        except Exception:  # noqa: BLE001
+            pass
+
+    for assess_blob_flt in (
+        _assess_mill_body,
+        _assess_foreign_stack_no_framework,
+    ):
+        try:
+            finding = assess_blob_flt(blob, flt=f)
             if finding:
                 findings.append(finding)
         except Exception:  # noqa: BLE001
@@ -1666,13 +1805,13 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
     was_guessed = not bool(title)
     effective_title = title or _guess_title_from_text(job_text)
     try:
-        finding = _assess_title_exclude_pattern(effective_title)
+        finding = _assess_title_exclude_pattern(effective_title, flt=f)
         if finding:
             findings.append(finding)
     except Exception:  # noqa: BLE001
         pass
     try:
-        finding = _assess_off_domain_title(effective_title, was_guessed=was_guessed)
+        finding = _assess_off_domain_title(effective_title, was_guessed=was_guessed, flt=f)
         if finding:
             findings.append(finding)
     except Exception:  # noqa: BLE001
@@ -1687,6 +1826,7 @@ def screen_job_text(
     title: str = "",
     company: str = "",
     location: str = "",
+    flt: Mapping[str, Any] | None = None,
 ) -> str | None:
     """Body-level screen for the manual URL/paste 'warn but allow' path.
 
@@ -1708,5 +1848,5 @@ def screen_job_text(
     compatibility but unused (no call site has ever passed a meaningful value;
     assess_job_text derives geography from the body text itself).
     """
-    findings = assess_job_text(job_text, title=title, company=company)
+    findings = assess_job_text(job_text, title=title, company=company, flt=flt)
     return findings[0].evidence if findings else None

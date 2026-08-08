@@ -1,6 +1,6 @@
 # FILTERS_YAML Plan — per-user job-filter settings as data files
 
-**Status:** M1 done (2026-08-08); M2–M5 pending
+**Status:** M1+M2 done (2026-08-08); M3–M5 pending
 **Date:** 2026-08-08
 **Motivation:** owner request (chat, 2026-08-08): "надо бы вынести это в отдельные
 файлы с настройками, чтобы потом другие люди могли свои настройки юзать".
@@ -227,7 +227,7 @@ Problem — they become part of M2's scope.
   carve-out, mtime-based cache invalidation (write file, assert reload).
 - Rollback: revert the commit — the re-export restores the literal dict.
 
-## M2 — Thread the profile through filters.py + generalize (one commit)
+## M2 — Thread the profile through filters.py + generalize (one commit) ✅ done 2026-08-08
 
 - `classify_job`, `apply_filters_with_stats`, `screen_job_text`,
   `assess_job_text` + helpers gain `flt: Mapping = FILTER` (default = owner

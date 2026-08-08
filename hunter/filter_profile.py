@@ -38,10 +38,12 @@ _DEFAULT_HOME_ALIASES = ["wrocław", "wroclaw"]
 _REPLACE_KEYS = frozenset(
     {
         "title_keywords",
-        "require_angular",
+        "require_title_terms",
+        "require_angular",  # legacy alias → require_title_terms
         "exclude_levels",
         "exclude_patterns",
-        "exclude_react_without_angular",
+        "exclude_stacks_without",
+        "exclude_react_without_angular",  # legacy alias → exclude_stacks_without
         "exclude_fullstack_with_backend",
         "fullstack_backend_stacks",
         "exclude_body_disqualifiers",
@@ -89,6 +91,7 @@ _BOOL_KEYS = frozenset(
 _LIST_KEYS = frozenset(
     {
         "title_keywords",
+        "require_title_terms",
         "exclude_levels",
         "exclude_patterns",
         "fullstack_backend_stacks",
@@ -97,6 +100,7 @@ _LIST_KEYS = frozenset(
         "extra_anti_hybrid_cities",
     }
 )
+# exclude_stacks_without is dict | None — checked specially in _type_ok.
 
 # (resolved_path_str | None, mtime_ns | None) → merged profile
 _cache: dict[tuple[str | None, int | None], dict[str, Any]] = {}
@@ -126,8 +130,11 @@ def builtin_defaults() -> dict[str, Any]:
             "javascript",
             "typescript",
         ],
-        # Angular not required in title — many Angular jobs are titled just
-        # "Frontend Developer"
+        # Terms that MUST appear in every title (AND). Empty = off. Generalizes
+        # the old require_angular bool (docs/FILTERS_YAML_PLAN.md M2).
+        "require_title_terms": [],
+        # Legacy alias — kept in sync by _sync_legacy_aliases for source modules
+        # that still read FILTER["require_angular"].
         "require_angular": False,
         "exclude_levels": [
             "junior",
@@ -250,7 +257,11 @@ def builtin_defaults() -> dict[str, Any]:
             r"\bdata\s+annotat\w*\b",
             r"\bdata\s+label(?:l)?ing\b",
         ],
-        # Skip jobs that mention React but NOT Angular (React-only roles)
+        # Skip jobs that mention a blocked stack without the "unless" term
+        # (default: React without Angular). Generalizes exclude_react_without_angular
+        # (docs/FILTERS_YAML_PLAN.md M2). null disables the rule.
+        "exclude_stacks_without": {"unless": "angular", "block": ["react"]},
+        # Legacy alias — kept in sync by _sync_legacy_aliases for source modules.
         "exclude_react_without_angular": True,
         # Fullstack policy: a "Full Stack / Fullstack" title with NO Angular is
         # always blocked (handled in filters._is_unwanted_fullstack). When
@@ -435,11 +446,52 @@ def _validate_patterns(profile: dict[str, Any], *, source: str) -> None:
 
 
 def _type_ok(key: str, value: Any) -> bool:
+    if key == "exclude_stacks_without":
+        return value is None or (isinstance(value, dict) and "block" in value)
     if key in _BOOL_KEYS:
         return isinstance(value, bool)
     if key in _LIST_KEYS:
         return isinstance(value, list)
     return True
+
+
+def _apply_legacy_user_aliases(user: dict[str, Any]) -> dict[str, Any]:
+    """Translate legacy keys in a user file into the canonical M2 knobs.
+
+    - ``require_angular: true`` → ``require_title_terms: ["angular"]``
+      (only when the user did not also set ``require_title_terms``).
+    - ``exclude_react_without_angular: true/false`` → ``exclude_stacks_without``
+      dict / null (only when ``exclude_stacks_without`` absent).
+    Canonical keys always win over legacy when both are present.
+    """
+    out = dict(user)
+    if "require_title_terms" not in out and "require_angular" in out:
+        out["require_title_terms"] = ["angular"] if out.get("require_angular") else []
+    if "exclude_stacks_without" not in out and "exclude_react_without_angular" in out:
+        out["exclude_stacks_without"] = (
+            {"unless": "angular", "block": ["react"]}
+            if out.get("exclude_react_without_angular")
+            else None
+        )
+    return out
+
+
+def _sync_legacy_aliases(profile: dict[str, Any]) -> None:
+    """Keep legacy bools in sync so source modules reading old keys still work."""
+    terms = profile.get("require_title_terms")
+    if not isinstance(terms, list):
+        terms = []
+        profile["require_title_terms"] = terms
+    profile["require_angular"] = bool(terms)
+
+    rule = profile.get("exclude_stacks_without")
+    if isinstance(rule, dict):
+        unless = str(rule.get("unless") or "").lower()
+        block = [str(b).lower() for b in (rule.get("block") or [])]
+        profile["exclude_react_without_angular"] = unless == "angular" and "react" in block
+    else:
+        profile["exclude_stacks_without"] = None
+        profile["exclude_react_without_angular"] = False
 
 
 def _extend_list(base: list, extra: list) -> list:
@@ -514,7 +566,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _build_profile(path: Path | None) -> dict[str, Any]:
     profile = builtin_defaults()
     if path is not None and path.exists():
-        user = _load_yaml(path)
+        user = _apply_legacy_user_aliases(_load_yaml(path))
         if user:
             _merge_user(profile, user, source=str(path))
         _validate_patterns(profile, source=str(path))
@@ -522,6 +574,7 @@ def _build_profile(path: Path | None) -> dict[str, Any]:
         # Builtin patterns are code-reviewed; still validate so a typo in
         # builtin_defaults surfaces as a warning rather than a hunt crash.
         _validate_patterns(profile, source="<builtin>")
+    _sync_legacy_aliases(profile)
     _carve_home_city(profile)
     # locations always re-derived after merge (user file cannot set them)
     profile["locations"] = ["remote", "zdalnie", "zdalna"] + list(
