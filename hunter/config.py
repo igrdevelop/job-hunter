@@ -286,9 +286,9 @@ GDRIVE_UPLOAD_MISSING_INTERVAL_MIN: int = int(os.getenv("GDRIVE_UPLOAD_MISSING_I
 LLM_OUTAGE_PAUSE_MIN: int = int(os.getenv("LLM_OUTAGE_PAUSE_MIN", "60"))
 
 # ── Job filters ───────────────────────────────────────────────────────────────
-# Moved to hunter/filter_config.py (2026-07-12, pure organizational split —
-# it was ~210 lines of regex/policy, a third of this file). Re-imported here
-# so every existing `from hunter.config import FILTER` keeps working.
+# Values live in hunter/filter_profile.builtin_defaults(); filter_config.py is a
+# shim (`FILTER = load_profile()`). Re-imported here so every existing
+# `from hunter.config import FILTER` keeps working. See docs/FILTERS_YAML_PLAN.md.
 from hunter.filter_config import FILTER  # noqa: E402,F401
 
 

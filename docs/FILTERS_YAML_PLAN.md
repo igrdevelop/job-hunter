@@ -1,6 +1,6 @@
 # FILTERS_YAML Plan — per-user job-filter settings as data files
 
-**Status:** draft
+**Status:** M1 done (2026-08-08); M2–M5 pending
 **Date:** 2026-08-08
 **Motivation:** owner request (chat, 2026-08-08): "надо бы вынести это в отдельные
 файлы с настройками, чтобы потом другие люди могли свои настройки юзать".
@@ -176,7 +176,7 @@ separate `filters.yaml` next to candidate.yaml is justified. Additionally the
 audit surfaced the three owner-hardcoded generalization targets listed in
 Problem — they become part of M2's scope.
 
-## M1 — Loader + builtin profile (one commit)
+## M1 — Loader + builtin profile (one commit) ✅ done 2026-08-08
 
 **Migration mapping (what moves where):**
 
