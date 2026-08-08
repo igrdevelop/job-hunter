@@ -762,6 +762,25 @@ class TestApplyPullDeltaDB:
         assert len(to_write) == 1
         assert to_write[0]["Sent"] == ""
 
+    def test_bot_skip_dash_wins_over_empty_sheets(self):
+        """DB Sent='—' (SKIP/FAIL marker), Sheets empty → keep the dash, no write.
+
+        A blank Sheets cell for a dash-marked row means the marker just wasn't
+        pushed yet — wiping it would resurface the row in the send-queue filter.
+        """
+        row = _db_row(Sent="—")
+        sheet_row = {**row, "Sent": ""}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert to_write == []
+
+    def test_user_sent_beats_skip_dash(self):
+        """DB Sent='—', Sheets has a user date → trust Sheets."""
+        row = _db_row(Sent="—")
+        sheet_row = {**row, "Sent": "2026-05-10"}
+        to_write = self._run([row], [(2, sheet_row)])
+        assert len(to_write) == 1
+        assert to_write[0]["Sent"] == "2026-05-10"
+
     def test_user_updates_to_learn(self):
         row = _db_row()
         sheet_row = {**row, "To Learn": "RxJS"}

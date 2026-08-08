@@ -228,6 +228,20 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     conn.execute("DROP INDEX IF EXISTS idx_url_norm")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_ats ON applications(user_id, ats_status)")
 
+    # Data backfill (2026-08-08): SKIP/FAIL rows used to be written with a
+    # blank Sent, which made them show up in the owner's Sheets "Sent is
+    # empty" send-queue filter. New rows get Sent='—' at insert (tracker.
+    # add_skipped/add_failed); this stamps the dash onto pre-existing rows.
+    # sheets_dirty=1 makes the scheduled resync push the dash to the Sheet
+    # without a manual /gsheets_push_sent. Idempotent: once stamped, the
+    # WHERE clause never matches the row again.
+    stamped = conn.execute(
+        "UPDATE applications SET sent='—', sheets_dirty=1 "
+        "WHERE ats_status IN ('SKIP', 'FAIL') AND TRIM(COALESCE(sent, ''))=''"
+    ).rowcount
+    if stamped:
+        log.info("db: stamped Sent='—' on %d blank-Sent SKIP/FAIL row(s)", stamped)
+
 
 def _ensure_user_url_index(conn: sqlite3.Connection) -> None:
     """Create the per-user unique URL index after deduplication.

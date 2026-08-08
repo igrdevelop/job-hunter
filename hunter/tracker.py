@@ -79,6 +79,13 @@ COL_CONFIRMATION = 13
 COL_ANSWER = 14
 COL_COST_USD = 15
 
+# Dash markers in the Sent column. Historically written only by react-skips;
+# since 2026-08-08 EVERY SKIP/FAIL row gets '—' at insert (add_skipped/
+# add_failed) so skipped/failed rows never appear in the owner's Sheets
+# "Sent is empty" send-queue filter. On a SKIP row a dash still doubles as
+# the "permanently decided" marker (see get_url_status_flags) — a plain
+# re-paste is refused, /force regenerates. On a FAIL row it means nothing
+# beyond "not awaiting send": retries key on ats_status='FAIL' alone.
 REACT_SKIP_SENT_MARKERS = {"—", "–", "-"}
 MANUAL_PENDING_ATS = "MANUAL"
 PENDING_ATS = "PENDING"
@@ -457,7 +464,13 @@ def has_successful_entry(url: str) -> bool:
 
 
 def get_url_status_flags(url: str) -> dict[str, bool]:
-    """Return status flags for URL: successful entry and React-only skip marker."""
+    """Return status flags for URL: successful entry and skip-dash marker.
+
+    ``is_react_skip`` is True for any SKIP row whose Sent carries a dash
+    marker. Since 2026-08-08 every SKIP row gets the dash at insert (not just
+    react-skips), so the flag effectively reads "deliberately skipped —
+    don't regenerate on a plain paste"; /force (skip_dedup) bypasses it.
+    """
     norm = normalize_url(url)
     if not norm:
         return {"has_success": False, "is_react_skip": False}
@@ -937,7 +950,15 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
 
 
 def add_skipped(job: Job) -> dict | None:
-    """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known."""
+    """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known.
+
+    Sent is stamped '—' so the row never shows up in the owner's Sheets
+    "Sent is empty" send-queue filter view — a skipped vacancy is a decision,
+    not a pending application. Side effect (accepted): '—' on a SKIP row is
+    the react-skip marker, so a plain re-paste of the URL is refused by
+    ``_already_processed``; ``/force`` still regenerates (and for doomed-gate
+    skips a plain paste would just re-hit the gate anyway).
+    """
     if _is_known_terminal(job.url, job.company, job.title):
         return None
 
@@ -950,8 +971,8 @@ def add_skipped(job: Job) -> dict | None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm)
-            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
             """,
             (row_id, today, _uid(), job.company, job.title, norm, norm),
         )
@@ -964,7 +985,7 @@ def add_skipped(job: Job) -> dict | None:
         "ATS %": "SKIP",
         "URL": norm,
         "Folder": "",
-        "Sent": "",
+        "Sent": "—",
         "Re-application": "",
         "To Learn": "",
         "ID": row_id,
@@ -1036,6 +1057,13 @@ def add_failed(job: Job) -> None:
 
     A PENDING/IN_PROGRESS placeholder for this same URL (M1, queue mode) is
     replaced in place rather than blocking the write — see _is_known_terminal.
+
+    Sent is stamped '—' to keep the row out of the owner's Sheets send-queue
+    filter (blank Sent = "waiting to be sent", which a FAIL row never is).
+    Harmless for retries: the retry loop selects by ats_status='FAIL' only,
+    and the react-skip check requires ats_status='SKIP', so a dash on a FAIL
+    row blocks nothing. On a successful retry the row is deleted and replaced
+    by a normal applied row anyway (delete_failed_row).
     """
     if _is_known_terminal(job.url, job.company, job.title):
         return
@@ -1048,8 +1076,8 @@ def add_failed(job: Job) -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm)
-            VALUES (?, ?, ?, ?, ?, 'FAIL', ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
+            VALUES (?, ?, ?, ?, ?, 'FAIL', ?, ?, '—')
             """,
             (_new_row_id(), today, _uid(), job.company, job.title, norm, norm),
         )
