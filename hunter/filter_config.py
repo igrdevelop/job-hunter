@@ -50,6 +50,21 @@ FILTER = {
         "тех-лид",
         "тех лид",
         "технический лид",
+        # Team-lead roles (owner request 2026-08-08, from Sent-notes audit:
+        # "тимлид" rejections were never filtered — only "tech lead" was).
+        # Substring match also catches "Team Leader" / "тимлидер".
+        "team lead",
+        "teamlead",
+        "team-lead",
+        "тимлид",
+        "тим-лид",
+        "тим лид",
+        # RU spellings of intern/trainee (RU-market Telegram channels relay
+        # titles like "Стажер Frontend developer" — the EN/PL intern entries
+        # above can't see them). "стажиров" catches "стажировка"/"стажировки".
+        "стажер",
+        "стажёр",
+        "стажиров",
         "project lead",
         "engineering manager",
         "head of engineering",
@@ -171,11 +186,16 @@ FILTER = {
     # Wrocław area (the listing's location field frequently says "remote"/"Poland"
     # while the description demands N days/week in a Kraków/Warsaw/foreign office).
     "exclude_body_onsite_city": True,
-    # Exception to the two location gates above: KEEP a hybrid role that only needs
-    # the office ~1 day/week, but ONLY for Warsaw / Kraków (commutable from Wrocław
-    # once a week). Detected from the body frequency phrasing. More than 1 day/week,
-    # an unspecified frequency, or any other far city → still rejected.
-    "allow_weekly_hybrid_warsaw_krakow": True,
+    # Exception to the two location gates above: KEEP a hybrid role in a Polish
+    # city outside Wrocław when the office visits are LOW-FREQUENCY — about once
+    # a week or less (a couple of times a month, monthly, quarterly, occasional
+    # visits). Owner decision 2026-08-08 (Sent-notes audit): the header often
+    # says just "hybrid" while the description clarifies the visits are rare —
+    # the frequency phrasing in the body wins. More than 1 day/week, an
+    # unspecified frequency, or a non-Polish city → still rejected.
+    # (Broadened from the old Warsaw/Kraków-only 1-day/week exception,
+    # config key renamed from allow_weekly_hybrid_warsaw_krakow.)
+    "allow_low_frequency_hybrid": True,
     # Reject AI-data-labeling / staffing-mill roles by company name (titles are often
     # clean "Angular Developer" so only the company gives them away — micro1 fronts).
     "exclude_ai_training": True,

@@ -214,7 +214,7 @@ def test_city_mention_without_onsite_signal_not_blocked() -> None:
     assert not _is_unwanted_onsite_location(job)
 
 
-# ── 4b. Weekly-hybrid exception (Warsaw / Kraków, ~1 day a week) ───────────────
+# ── 4b. Low-frequency-hybrid exception (Polish city, ~1 day a week or less) ───
 
 
 @pytest.mark.parametrize(
@@ -248,7 +248,7 @@ def test_non_weekly_or_far_hybrid_rejected(location: str, body: str) -> None:
 def test_weekly_hybrid_disabled_by_config(monkeypatch) -> None:
     from hunter import filters
 
-    patched = {**filters.FILTER, "allow_weekly_hybrid_warsaw_krakow": False}
+    patched = {**filters.FILTER, "allow_low_frequency_hybrid": False}
     monkeypatch.setattr(filters, "FILTER", patched)
     job = _job(
         title="Angular Developer",

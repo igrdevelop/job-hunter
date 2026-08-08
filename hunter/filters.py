@@ -394,14 +394,16 @@ def _is_german_language_required(job: Job) -> bool:
     return False
 
 
-# Cities where hybrid work is NOT acceptable (too far from Wrocław).
+# Polish cities where hybrid work is NOT acceptable (too far from Wrocław).
 # A job whose location or title contains one of these AND doesn't contain an
 # allowed location token (remote/wroclaw) is rejected.
 # LinkedIn often returns "Poland" as location with the city in the title (e.g.
 # "Jlabs Angular Dev Kraków - Zabłocie"), so we check BOTH location and title.
-# Extra cities from FILTER["extra_anti_hybrid_cities"] (config.py) are merged in
-# at module load time so the set is computed once and stays O(1) per lookup.
-_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
+# Kept as its own set (separate from the foreign extras below) because the
+# low-frequency-hybrid exception (_is_acceptable_low_freq_hybrid) applies to
+# Polish cities only — a rare office visit within Poland is feasible, one
+# abroad is not.
+_PL_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
     {
         "kraków",
         "krakow",
@@ -430,8 +432,52 @@ _ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
         "torun",
         "białystok",
         "bialystok",
+        # Added 2026-08-08 (Sent-notes audit): "praca stacjonarna Opole"
+        # reached generation because Opole wasn't in this set.
+        "opole",
+        "kielce",
+        "olsztyn",
+        "częstochowa",
+        "czestochowa",
+        "gliwice",
+        "zielona góra",
+        "zielona gora",
+        "bielsko-biała",
+        "bielsko-biala",
+        # Polish locative/genitive declensions ("praca w Warszawie/Opolu…") —
+        # the nominative forms above are substring-matched and miss most of
+        # these ("warszawa" is NOT a substring of "warszawie"). Only forms
+        # that are safe as substrings are listed (no "opol" stem — it would
+        # match "metropolia").
+        "warszawie",
+        "warszawy",
+        "opolu",
+        "poznaniu",
+        "toruniu",
+        "katowicach",
+        "gdańsku",
+        "gdansku",
+        "szczecinie",
+        "lublinie",
+        "łodzi",
+        "lodzi",
+        "kielcach",
+        "olsztynie",
+        "gliwicach",
+        "częstochowie",
+        "czestochowie",
+        "białymstoku",
+        "bialymstoku",
+        "bydgoszczy",
+        "rzeszowie",
     }
-    | {c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])}
+)
+
+# Full anti-hybrid set: Polish cities + extra (non-Polish) cities from
+# FILTER["extra_anti_hybrid_cities"] (config), merged at module load time so
+# the set is computed once and stays O(1) per lookup.
+_ANTI_HYBRID_CITIES: frozenset[str] = _PL_ANTI_HYBRID_CITIES | frozenset(
+    c.lower() for c in FILTER.get("extra_anti_hybrid_cities", [])
 )
 
 # ── Contract / part-time patterns (checked against full job text blob) ────────
@@ -589,43 +635,65 @@ _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-# Cities for which a ~1-day/week hybrid is acceptable (commutable from Wrocław).
-_WEEKLY_HYBRID_CITIES: frozenset[str] = frozenset(
-    {"warszawa", "warsaw", "kraków", "krakow", "cracow"}
-)
-
-# Low-frequency hybrid phrasing (≈ once a week) — English + Polish.
-_WEEKLY_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
+# Low-frequency office-visit phrasing — about once a week or LESS (a couple of
+# times a month, monthly, quarterly, occasional visits) — English + Polish.
+# Owner decision 2026-08-08 (Sent-notes audit): a hybrid role in a Polish city
+# outside Wrocław is acceptable when the visits are this rare; the header often
+# says just "hybrid" while the description clarifies the real frequency, so
+# these run against the full text blob.
+_LOW_FREQ_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
+        # ~once a week
         r"\bonce\s+(?:a|per)\s+week\b",
         r"\bone\s+day\s+(?:a|per|in\s+the)\s+week\b",
         r"\b1\s*(?:day|dni|dzień)\s*(?:a|per|/|in|w)\s*(?:week|tydz)\w*",
         r"\b1\s*x\s*(?:/|\s)*(?:a\s+)?(?:week|tydz\w*|wk)\b",
         r"\braz\s+w\s+tygodniu\b",
         r"\bjeden\s+dzień\s+w\s+tygodniu\b",
+        # every other week / twice a month
+        r"\bonce\s+every\s+(?:two|2)\s+weeks\b",
+        r"\bevery\s+other\s+week\b",
+        r"\braz\s+na\s+(?:dwa|2)\s+tygodnie\b",
+        r"\bco\s+(?:dwa|drugi)\s+tygodni\w*\b",
+        r"\btwice\s+(?:a|per)\s+month\b",
+        r"\b(?:1|2|two)\s*(?:x|times|razy?)\s*(?:a|per|w|na)\s*(?:month|miesiąc\w*|mies\.?)\b",
+        r"\bdwa\s+razy\s+w\s+miesiącu\b",
+        # ~once a month or rarer
+        r"\bonce\s+(?:a|per)\s+month\b",
+        r"\braz\s+(?:w|na)\s+miesiąc\w*\b",
+        r"\b(?:a\s+)?(?:few|couple(?:\s+of)?)\s+times\s+(?:a|per)\s+(?:month|year)\b",
+        r"\bkilka\s+razy\s+(?:w|na)\s+(?:miesiąc\w*|rok\w*)\b",
+        r"\bonce\s+(?:a|per)\s+quarter\b",
+        r"\braz\s+na\s+kwartał\b",
+        r"\bquarterly\s+(?:meet|visit|onsite)\w*\b",
+        # occasional / sporadic visits
+        r"\boccasional(?:ly)?\s+(?:office\s+)?(?:visits?|trips?|travel|meet\w*|in\s+the\s+office)\b",
+        r"\b(?:sporadyczn|okazjonaln)\w+\s+(?:wizyt|spotka[nń]|wyjazd|obecno[śs])\w*\b",
     )
 )
 
 
-def _is_acceptable_weekly_hybrid(job: Job) -> bool:
-    """True → keep despite a Warsaw/Kraków hybrid, because it is only ~1 day/week.
+def _is_acceptable_low_freq_hybrid(job: Job) -> bool:
+    """True → keep despite a Polish-city hybrid, because office visits are rare.
 
-    Owner accepts a once-a-week office commute to Warsaw or Kraków (reachable from
-    Wrocław). Grants the exception only when (a) the text mentions Warsaw/Kraków,
-    (b) NO other anti-hybrid city is mentioned (so a multi-office role abroad still
-    fails), and (c) a low-frequency ("1 day a week" / "raz w tygodniu") signal is
+    Owner accepts a hybrid role anywhere in Poland when the office is needed
+    about once a week or less (once/twice a month, quarterly, occasional
+    visits). Grants the exception only when (a) the text mentions a Polish
+    anti-hybrid city, (b) NO foreign anti-hybrid city is mentioned (a
+    multi-office role abroad still fails — a rare visit abroad is not
+    feasible), and (c) a low-frequency signal (_LOW_FREQ_HYBRID_RES) is
     present. An unspecified or higher frequency does NOT qualify.
     """
-    if not FILTER.get("allow_weekly_hybrid_warsaw_krakow", False):
+    if not FILTER.get("allow_low_frequency_hybrid", False):
         return False
     blob = f"{job.title or ''} {job.location or ''} {_job_plain_text_blob(job)}".lower()
-    if not any(c in blob for c in _WEEKLY_HYBRID_CITIES):
+    if not any(c in blob for c in _PL_ANTI_HYBRID_CITIES):
         return False
-    other_cities = _ANTI_HYBRID_CITIES - _WEEKLY_HYBRID_CITIES
-    if any(c in blob for c in other_cities):
+    foreign_cities = _ANTI_HYBRID_CITIES - _PL_ANTI_HYBRID_CITIES
+    if any(c in blob for c in foreign_cities):
         return False
-    return any(p.search(blob) for p in _WEEKLY_HYBRID_RES)
+    return any(p.search(blob) for p in _LOW_FREQ_HYBRID_RES)
 
 
 def _is_unwanted_onsite_location(job: Job) -> bool:
@@ -636,7 +704,7 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
     week in a Kraków/Warsaw/Cyprus office. Requires the on-site signal and the city
     to sit within a short window of each other to avoid false positives on jobs
     that merely mention a head-office city in passing. A strong fully-remote signal,
-    a Wrocław location, or an acceptable ~1-day/week Warsaw/Kraków hybrid vetoes it.
+    a Wrocław location, or an acceptable low-frequency Polish-city hybrid vetoes it.
     """
     if not FILTER.get("exclude_body_onsite_city", False):
         return False
@@ -661,8 +729,8 @@ def _is_unwanted_onsite_location(job: Job) -> bool:
         return False
     if not any(abs(o - c) <= 120 for o in onsite_pos for c in city_pos):
         return False
-    # Office only ~1 day/week in Warsaw/Kraków → acceptable, do not block.
-    return not _is_acceptable_weekly_hybrid(job)
+    # Office visits ~once a week or rarer in a Polish city → acceptable.
+    return not _is_acceptable_low_freq_hybrid(job)
 
 
 def _is_ai_training_or_mill(job: Job) -> bool:
@@ -693,6 +761,16 @@ _RUSSIA_MARKET_LOCATION_TOKENS = (
     "рф",
     "россия",
     "российская федерация",
+    # RU cities in the location/title field are just as decisive as the country
+    # name (Sent-notes audit 2026-08-08: MTS/OZON postings relayed by RU
+    # Telegram channels carried no "Russia" token, only the city).
+    "москва",
+    "moscow",
+    "санкт-петербург",
+    "saint petersburg",
+    "st. petersburg",
+    "новосибирск",
+    "екатеринбург",
 )
 
 
@@ -803,9 +881,10 @@ def classify_job(job: Job) -> str | None:
     if _is_russia_market(job):
         return "russia"
     # Location: a non-whitelisted location is rejected UNLESS it's an acceptable
-    # ~1-day/week Warsaw/Kraków hybrid. The body on-site/city gate (which already
-    # honours the same weekly exception) catches far cities hidden in the text.
-    if not _matches_location(job) and not _is_acceptable_weekly_hybrid(job):
+    # low-frequency Polish-city hybrid (office ~once a week or rarer). The body
+    # on-site/city gate (which honours the same exception) catches far cities
+    # hidden in the text.
+    if not _matches_location(job) and not _is_acceptable_low_freq_hybrid(job):
         return "location"
     if _is_unwanted_onsite_location(job):
         return "location"
@@ -952,13 +1031,13 @@ def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
     Mirrors _is_unwanted_onsite_location's windowing (~120 chars) but against a
     location OUTSIDE Poland instead of the PL anti-hybrid city set. Vetoed by a
     strong fully-remote signal, any Wrocław mention (candidate's own city), or
-    the acceptable ~1-day/week Warsaw/Kraków hybrid exception.
+    the acceptable low-frequency Polish-city hybrid exception.
     """
     if any(p.search(blob) for p in _FULLY_REMOTE_RES):
         return None
     if _HOME_CITY_SUBSTR in blob:
         return None
-    if _is_acceptable_weekly_hybrid(job):
+    if _is_acceptable_low_freq_hybrid(job):
         return None
     onsite_pos = _onsite_signal_positions(blob)
     if not onsite_pos:
@@ -970,6 +1049,91 @@ def _assess_foreign_onsite(job: Job, blob: str) -> "GateFinding | None":
                 severity="hard",
                 evidence=_context_snippet(blob, m.start(), m.end()),
             )
+    return None
+
+
+# Explicit multi-day-per-week office phrasing (≥2 days) — EN + PL (+ RU, for
+# Telegram-channel posts). The opposite of the low-frequency exception above:
+# near a Polish anti-hybrid city this is a high-confidence "frequent hybrid"
+# signal that the candidate always rejected (Sent-notes audit 2026-08-08:
+# "hybrid Warsaw 3 days", "4 days in Warsaw").
+_MULTI_DAY_OFFICE_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\b[2-6]\+?\s*days?\s+(?:a|per|each)\s+week\b",
+        r"\b[2-6]\+?\s*days?\s+(?:in|at|from)\s+(?:the\s+)?office\b",
+        r"\b[2-6]\s*x\s*(?:/|\s)*(?:a\s+)?(?:week|tydz\w*|wk)\b",
+        r"\b[2-6]\s*(?:dni|razy)\s+w\s+tygodniu\b",
+        r"\bmin(?:imum|\.)?\s*[2-6]\s*dni\b",
+        r"\b[2-6]\s*дн(?:я|ей)\s+в\s+неделю\b",
+    )
+)
+
+# Strict on-site wording (no hybrid ambiguity): the role is office-based.
+_STRICT_ONSITE_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bon[-\s]?site\b",
+        r"\bstacjonarn\w*",
+        r"\boffice[-\s]based\b",
+        r"\b100\s*%\s*(?:office|on[-\s]?site|z\s+biura|w\s+biurze)\b",
+        r"\bpraca\s+z\s+biura\b",
+    )
+)
+
+
+def _assess_pl_onsite_hybrid(job: Job, blob: str) -> "GateFinding | None":
+    """HARD: frequent office presence required in a Polish city outside Wrocław.
+
+    The reused _is_unwanted_onsite_location check stays SOFT in the gate (M4
+    calibration: bare "hybrid" near a PL city hard-blocked real sent rows —
+    Bayer, Codest, PeopleVibe). This rule fires only on the HIGH-CONFIDENCE
+    subset — an explicit ≥2-days/week phrasing anywhere in the text, or strict
+    on-site wording sitting near a Polish anti-hybrid city — where the
+    Sent-notes audit (2026-08-08) showed generation was always wasted
+    ("praca stacjonarna Opole", "hybrid Warsaw 3 days each week", "onsite
+    Toruń"). Vetoed by fully-remote signals, a home-city mention, or the
+    low-frequency exception — the description's rare-visit phrasing wins over
+    a "hybrid" header (owner decision 2026-08-08).
+    """
+    if not FILTER.get("exclude_body_onsite_city", False):
+        return None
+    if any(p.search(blob) for p in _FULLY_REMOTE_RES):
+        return None
+    if _HOME_CITY_SUBSTR in blob:
+        return None
+    if _is_acceptable_low_freq_hybrid(job):
+        return None
+    city_pos: list[int] = []
+    for city in _PL_ANTI_HYBRID_CITIES:
+        idx = blob.find(city)
+        while idx != -1:
+            city_pos.append(idx)
+            idx = blob.find(city, idx + 1)
+    if not city_pos:
+        return None
+    # Explicit ≥2-days/week phrasing: high confidence on its own — no proximity
+    # window (frequency and location routinely live in different sections).
+    for p in _MULTI_DAY_OFFICE_RES:
+        m = p.search(blob)
+        if m:
+            return GateFinding(
+                rule="pl_onsite_or_frequent_hybrid",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    # Strict on-site wording: context-sensitive ("onsite interview", perks
+    # bullets), so require it near the city, same window as the other gates.
+    for p in _STRICT_ONSITE_RES:
+        for m in p.finditer(blob):
+            if _ONSITE_PERKS_CONTEXT_RE.search(blob[m.start() : m.start() + 100]):
+                continue
+            if any(abs(m.start() - c) <= 120 for c in city_pos):
+                return GateFinding(
+                    rule="pl_onsite_or_frequent_hybrid",
+                    severity="hard",
+                    evidence=_context_snippet(blob, m.start(), m.end()),
+                )
     return None
 
 
@@ -1146,6 +1310,56 @@ def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
     return None
 
 
+# HARD — an unambiguous foreign-stack technology (PHP/WordPress/.NET/Blazor/
+# Mendix/…) in a posting that never mentions Angular or React at all. Owner
+# decision 2026-08-08 (Sent-notes audit): generic-title postings ("Web
+# developer") whose body reveals a PHP/WordPress/.NET stack reached generation
+# because the reused body-disqualifier check is SOFT in the gate (M4: a
+# nice-to-have "Mile widziane: WordPress" on a real Angular job misfired).
+# Guards that remove that ambiguity here: (a) the no-candidate-framework
+# check — nothing in the text is for the candidate's stack, so generation is
+# always wasted; (b) the optional-context guard — a nice-to-have mention alone
+# never fires. ".net" requires a preceding space/paren so bare domain names
+# ("company.net" links) can't trip it. "c#" is deliberately NOT here: game-dev
+# roles (Unity/PixiJS/Haxe) routinely list C# and must stay SOFT (warn-only,
+# see _assess_stack_mismatch's game-engine rule + test_doomed_gate.py); a real
+# .NET job names ".NET" explicitly anyway.
+_FOREIGN_STACK_HARD_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bphp\b",
+        r"\bwordpress\b",
+        r"\bjoomla\b",
+        r"\bdrupal\b",
+        r"(?:^|[\s(/,])\.net\b",
+        r"\basp\.net\b",
+        r"\bblazor\b",
+        r"\bmendix\b",
+        r"\boutsystems\b",
+        r"\bmagento\b",
+        r"\bsharepoint\b",
+    )
+)
+
+
+def _assess_foreign_stack_no_framework(blob: str) -> "GateFinding | None":
+    """HARD — foreign stack required and neither Angular nor React anywhere."""
+    if not FILTER.get("exclude_body_disqualifiers", False):
+        return None
+    if _CANDIDATE_FRAMEWORK_RE.search(blob):
+        return None
+    for p in _FOREIGN_STACK_HARD_RES:
+        for m in p.finditer(blob):
+            if _is_optional_context(blob, m.start()):
+                continue
+            return GateFinding(
+                rule="foreign_stack_no_angular",
+                severity="hard",
+                evidence=_context_snippet(blob, m.start(), m.end()),
+            )
+    return None
+
+
 def _assess_mill_body(blob: str) -> "GateFinding | None":
     """HARD — a known AI-training / staffing-mill name in the job BODY.
 
@@ -1199,6 +1413,16 @@ _RUSSIA_MARKET_RES: tuple[re.Pattern[str], ...] = tuple(
         # "Оформление в штат компании ... по ТК РФ") — near-zero false-positive
         # risk, this abbreviation has no other meaning in a job posting.
         r"\bтк\s+рф\b",
+        # RU-city location tags (Sent-notes audit 2026-08-08: MTS/OZON postings
+        # named only the city, never the country). Same tag-adjacent shape as
+        # the Russia patterns above — a bare city mention in prose is not enough.
+        r"\bremote\s*[·•\-–—:]\s*(?:москва|moscow|санкт-петербург|питер)\b",
+        r"\b(?:локация|location|город|city|офис|office)\s*:?\s*"
+        r"(?:москва|moscow|санкт-петербург|saint\s+petersburg|питер)\b",
+        # Salary quoted in rubles — an unambiguous RU-market signal, wherever
+        # it appears in the text.
+        r"\d\s*₽",
+        r"\d[\d\s]{0,12}\s*руб(?:\.|лей|ля)?(?![а-яa-z])",
     )
 )
 
@@ -1406,7 +1630,7 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
             except Exception:  # noqa: BLE001 — one bad check must not sink the others
                 continue
 
-    for assess in (_assess_foreign_onsite,):
+    for assess in (_assess_foreign_onsite, _assess_pl_onsite_hybrid):
         try:
             finding = assess(job, blob)
             if finding:
@@ -1426,6 +1650,7 @@ def assess_job_text(job_text: str, *, title: str = "", company: str = "") -> lis
         _assess_mill_body,
         _assess_russia_market,
         _assess_stack_mismatch,
+        _assess_foreign_stack_no_framework,
     ):
         try:
             finding = assess_blob(blob)

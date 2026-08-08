@@ -18,21 +18,21 @@ why simplification and copy-drift are both acceptable here in a way they
 would not be for the bot-side filters themselves.
 
 Provenance: ported from `hunter/filters.py::_is_unwanted_onsite_location`
-(+ `_onsite_signal_positions`, `_is_acceptable_weekly_hybrid`,
+(+ `_onsite_signal_positions`, `_is_acceptable_low_freq_hybrid`,
 `_ANTI_HYBRID_CITIES` incl. `config.py`'s `extra_anti_hybrid_cities`) as of
-2026-07-08. Re-sync opportunistically, not automatically — this module
+2026-08-08. Re-sync opportunistically, not automatically — this module
 operates on plain text (no `Job` object, no `FILTER` config dict, no
 config-flag gating — the checks below are unconditionally active since the
 scout has no equivalent of `exclude_body_onsite_city`/
-`allow_weekly_hybrid_warsaw_krakow` toggles).
+`allow_low_frequency_hybrid` toggles).
 
 Ported: the anti-hybrid city list (incl. the non-Polish cities from
 `extra_anti_hybrid_cities`), the fully-remote veto regexes, the ~120-char
 onsite-signal/city proximity window, the perks-context veto ("onsite
-dining"-style false positives), the Wrocław veto, and the ~1-day/week
-Warsaw/Kraków hybrid acceptance (it ported cleanly to plain text — no
-`Job.title`/`Job.location` split was needed, since the scout only ever has
-one blob of post text to check).
+dining"-style false positives), the Wrocław veto, and the low-frequency
+Polish-city hybrid acceptance (office ~once a week or rarer; it ported
+cleanly to plain text — no `Job.title`/`Job.location` split was needed,
+since the scout only ever has one blob of post text to check).
 
 NOT ported: `_matches_location`'s title/location-field checks (the scout has
 no separate title/location fields — it's a single wall of post text), and the
@@ -46,8 +46,10 @@ import re
 
 # Cities where hybrid work is NOT acceptable (too far from Wrocław).
 # Mirrors hunter/filters.py::_ANTI_HYBRID_CITIES merged with
-# hunter/config.py's FILTER["extra_anti_hybrid_cities"] as of 2026-07-08.
-_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
+# hunter/config.py's FILTER["extra_anti_hybrid_cities"] as of 2026-08-08.
+# Polish cities kept as their own set: the low-frequency-hybrid exception
+# below applies to Polish cities only (mirrors _PL_ANTI_HYBRID_CITIES).
+_PL_ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
     {
         "kraków",
         "krakow",
@@ -76,6 +78,44 @@ _ANTI_HYBRID_CITIES: frozenset[str] = frozenset(
         "torun",
         "białystok",
         "bialystok",
+        "opole",
+        "kielce",
+        "olsztyn",
+        "częstochowa",
+        "czestochowa",
+        "gliwice",
+        "zielona góra",
+        "zielona gora",
+        "bielsko-biała",
+        "bielsko-biala",
+        # Polish locative/genitive declensions ("praca w Warszawie/Opolu…") —
+        # mirrors hunter/filters.py; only substring-safe forms listed.
+        "warszawie",
+        "warszawy",
+        "opolu",
+        "poznaniu",
+        "toruniu",
+        "katowicach",
+        "gdańsku",
+        "gdansku",
+        "szczecinie",
+        "lublinie",
+        "łodzi",
+        "lodzi",
+        "kielcach",
+        "olsztynie",
+        "gliwicach",
+        "częstochowie",
+        "czestochowie",
+        "białymstoku",
+        "bialymstoku",
+        "bydgoszczy",
+        "rzeszowie",
+    }
+)
+
+_ANTI_HYBRID_CITIES: frozenset[str] = _PL_ANTI_HYBRID_CITIES | frozenset(
+    {
         # Non-Polish cities (config.py extra_anti_hybrid_cities)
         "helsinki",
         "helsingfors",
@@ -172,38 +212,56 @@ _FULLY_REMOTE_RES: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
-# Cities for which a ~1-day/week hybrid is acceptable (commutable from Wrocław).
-_WEEKLY_HYBRID_CITIES: frozenset[str] = frozenset(
-    {"warszawa", "warsaw", "kraków", "krakow", "cracow"}
-)
-
-# Low-frequency hybrid phrasing (≈ once a week) — English + Polish.
-_WEEKLY_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
+# Low-frequency office-visit phrasing — about once a week or LESS (a couple of
+# times a month, monthly, quarterly, occasional visits) — English + Polish.
+# Mirrors hunter/filters.py::_LOW_FREQ_HYBRID_RES as of 2026-08-08.
+_LOW_FREQ_HYBRID_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
+        # ~once a week
         r"\bonce\s+(?:a|per)\s+week\b",
         r"\bone\s+day\s+(?:a|per|in\s+the)\s+week\b",
         r"\b1\s*(?:day|dni|dzień)\s*(?:a|per|/|in|w)\s*(?:week|tydz)\w*",
         r"\b1\s*x\s*(?:/|\s)*(?:a\s+)?(?:week|tydz\w*|wk)\b",
         r"\braz\s+w\s+tygodniu\b",
         r"\bjeden\s+dzień\s+w\s+tygodniu\b",
+        # every other week / twice a month
+        r"\bonce\s+every\s+(?:two|2)\s+weeks\b",
+        r"\bevery\s+other\s+week\b",
+        r"\braz\s+na\s+(?:dwa|2)\s+tygodnie\b",
+        r"\bco\s+(?:dwa|drugi)\s+tygodni\w*\b",
+        r"\btwice\s+(?:a|per)\s+month\b",
+        r"\b(?:1|2|two)\s*(?:x|times|razy?)\s*(?:a|per|w|na)\s*(?:month|miesiąc\w*|mies\.?)\b",
+        r"\bdwa\s+razy\s+w\s+miesiącu\b",
+        # ~once a month or rarer
+        r"\bonce\s+(?:a|per)\s+month\b",
+        r"\braz\s+(?:w|na)\s+miesiąc\w*\b",
+        r"\b(?:a\s+)?(?:few|couple(?:\s+of)?)\s+times\s+(?:a|per)\s+(?:month|year)\b",
+        r"\bkilka\s+razy\s+(?:w|na)\s+(?:miesiąc\w*|rok\w*)\b",
+        r"\bonce\s+(?:a|per)\s+quarter\b",
+        r"\braz\s+na\s+kwartał\b",
+        r"\bquarterly\s+(?:meet|visit|onsite)\w*\b",
+        # occasional / sporadic visits
+        r"\boccasional(?:ly)?\s+(?:office\s+)?(?:visits?|trips?|travel|meet\w*|in\s+the\s+office)\b",
+        r"\b(?:sporadyczn|okazjonaln)\w+\s+(?:wizyt|spotka[nń]|wyjazd|obecno[śs])\w*\b",
     )
 )
 
 
-def _is_acceptable_weekly_hybrid(blob: str) -> bool:
-    """True → keep despite a Warsaw/Kraków hybrid, because it is only ~1 day/week.
+def _is_acceptable_low_freq_hybrid(blob: str) -> bool:
+    """True → keep despite a Polish-city hybrid, because office visits are rare.
 
-    Ported from hunter/filters.py::_is_acceptable_weekly_hybrid; unconditionally
-    active here (the bot's `allow_weekly_hybrid_warsaw_krakow` config flag has
-    no scout-side equivalent — this is a noise filter, not a policy gate).
+    Ported from hunter/filters.py::_is_acceptable_low_freq_hybrid;
+    unconditionally active here (the bot's `allow_low_frequency_hybrid` config
+    flag has no scout-side equivalent — this is a noise filter, not a policy
+    gate).
     """
-    if not any(c in blob for c in _WEEKLY_HYBRID_CITIES):
+    if not any(c in blob for c in _PL_ANTI_HYBRID_CITIES):
         return False
-    other_cities = _ANTI_HYBRID_CITIES - _WEEKLY_HYBRID_CITIES
-    if any(c in blob for c in other_cities):
+    foreign_cities = _ANTI_HYBRID_CITIES - _PL_ANTI_HYBRID_CITIES
+    if any(c in blob for c in foreign_cities):
         return False
-    return any(p.search(blob) for p in _WEEKLY_HYBRID_RES)
+    return any(p.search(blob) for p in _LOW_FREQ_HYBRID_RES)
 
 
 def is_unwanted_onsite_location(text: str) -> bool:
@@ -213,8 +271,8 @@ def is_unwanted_onsite_location(text: str) -> bool:
     plain text instead of a Job object. Requires the on-site signal and the
     city to sit within a short window of each other to avoid false positives
     on posts that merely mention a head-office city in passing. A strong
-    fully-remote signal, a Wrocław mention, or an acceptable ~1-day/week
-    Warsaw/Kraków hybrid vetoes it.
+    fully-remote signal, a Wrocław mention, or an acceptable low-frequency
+    Polish-city hybrid vetoes it.
     """
     blob = text.lower()
     if not blob.strip():
@@ -236,4 +294,4 @@ def is_unwanted_onsite_location(text: str) -> bool:
         return False
     if not any(abs(o - c) <= 120 for o in onsite_pos for c in city_pos):
         return False
-    return not _is_acceptable_weekly_hybrid(blob)
+    return not _is_acceptable_low_freq_hybrid(blob)
