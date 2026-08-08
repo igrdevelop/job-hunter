@@ -482,12 +482,18 @@ def _apply_legacy_user_aliases(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sync_legacy_aliases(profile: dict[str, Any]) -> None:
-    """Keep legacy bools in sync so source modules reading old keys still work."""
+    """Keep legacy bools in sync so source modules reading old keys still work.
+
+    ``require_angular`` means "slug/title must contain angular" for scrapers
+    (JustJoin/Bulldogjob). It must be True only when ``angular`` is among
+    ``require_title_terms`` — a React-seeker profile with terms ``[react]``
+    must NOT flip scrapers into an angular-only slug gate.
+    """
     terms = profile.get("require_title_terms")
     if not isinstance(terms, list):
         terms = []
         profile["require_title_terms"] = terms
-    profile["require_angular"] = bool(terms)
+    profile["require_angular"] = any(str(t).lower() == "angular" for t in terms)
 
     rule = profile.get("exclude_stacks_without")
     if isinstance(rule, dict):

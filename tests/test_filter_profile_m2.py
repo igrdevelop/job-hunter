@@ -73,7 +73,18 @@ def test_canonical_require_title_terms_wins_over_legacy(tmp_path):
     )
     profile = load_profile(path)
     assert profile["require_title_terms"] == ["react"]
-    assert profile["require_angular"] is True  # synced from non-empty terms
+    # Scrapers gate on require_angular ≡ "angular" in terms — not "any term".
+    assert profile["require_angular"] is False
+
+
+def test_require_angular_true_only_when_angular_in_terms(tmp_path):
+    path = tmp_path / "filters.yaml"
+    path.write_text(
+        yaml.safe_dump({"require_title_terms": ["angular", "rxjs"]}),
+        encoding="utf-8",
+    )
+    profile = load_profile(path)
+    assert profile["require_angular"] is True
 
 
 def test_nondefault_flt_flips_classify_verdict():
