@@ -10,6 +10,8 @@ needed for CV generation.
 |------|-----------|---------|
 | `candidate.yaml` | Yes | Structured identity: name, city, languages, employers. Drives filters, QA checks and LLM prompts. |
 | `candidate_profile.md` | Yes | Free-text career history: contact, stack, work experience, education. The LLM reads this + the job posting to generate your CV. |
+| `filters.yaml` | No | Job-intake policy overrides (title keywords, exclude patterns, hybrid rules, AI-mill blocklist additions…). Copy from `filters.example.yaml`. Missing = shared Layer-1 defaults (`hunter.filter_profile.builtin_defaults()`). Edit + next `/hunt` — no deploy. See [docs/FILTERS_YAML_PLAN.md](../docs/FILTERS_YAML_PLAN.md). |
+| `filters.example.yaml` | Tracked template | Today's default knobs + merge notes. Do not edit in place for personal policy — copy to `filters.yaml`. |
 | `base_cv_angular.md` | Per track | Pre-polished resume bullets for the Angular track. The LLM uses these as a starting point instead of inventing from scratch. |
 | `base_cv_react.md` | Per track | Same, for React / JS roles. |
 | `base_cv_ai.md` | Per track | Same, for AI-first roles. |
@@ -25,16 +27,23 @@ needed for CV generation.
    cp candidate.yaml.example candidate.yaml
    cp candidate_profile.example.md candidate_profile.md
    cp base_cv_angular.example.md base_cv_angular.md
+   cp filters.example.yaml filters.yaml   # optional — tune hunt policy
    ```
 2. Open `candidate.yaml` and fill in your name, city, languages and employers.
 3. Open `candidate_profile.md` and replace the example experience with yours.
 4. Open `base_cv_angular.md` (or whichever track you target) and write your
    real pre-polished bullets. Dates and companies must match
    `candidate_profile.md` — the sanitizer cross-checks them.
-5. (Optional) Add cover letter examples to `examples/`.
+5. (Optional) Edit `filters.yaml` — start from the example defaults and change
+   only what differs for you (e.g. React keywords, turn off German exclusion).
+   Omit keys you want to keep at the shared default. `exclude_companies` and
+   `extra_anti_hybrid_cities` are extend-only (you can add, not remove the
+   calibrated entries). Regenerating the example from code:
+   `python tools/gen_filters_example.py`.
+6. (Optional) Add cover letter examples to `examples/`.
 
 The real files are **gitignored** — they stay on disk but never enter git.
-Only the `.example` templates are tracked.
+Only the `.example` / `filters.example.yaml` templates are tracked.
 
 ## Notes
 

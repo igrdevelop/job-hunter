@@ -54,6 +54,9 @@ Edit the files in `candidate/` with your real data — see
 1. **`candidate/candidate.yaml`** — name, city, languages, employers
 2. **`candidate/candidate_profile.md`** — free-text career history
 3. **`candidate/base_cv_angular.md`** (or your track) — pre-polished resume bullets
+4. **(Optional) `candidate/filters.yaml`** — copy from `filters.example.yaml`
+   to tune what the bot hunts for (stack, levels, hybrid rules). No file =
+   shared defaults. Changes apply on the next `/hunt`.
 
 If you skip this step, the bot runs with example data (a warning is logged).
 
@@ -125,7 +128,7 @@ All candidate-personal files live in the `candidate/` folder. Edit them
 with your real data — see [candidate/README.md](../candidate/README.md)
 for what each file does.
 
-The three files to edit:
+The three files to edit (plus an optional fourth for hunt policy):
 
 1. **`candidate/candidate.yaml`** — structured identity: name, city,
    languages, employers. Drives filters, QA checks and LLM prompts.
@@ -134,6 +137,11 @@ The three files to edit:
 3. **`candidate/base_cv_angular.md`** (or whichever track you target) —
    pre-polished resume bullets. Dates and companies must match
    `candidate_profile.md`.
+4. **(Optional) `candidate/filters.yaml`** — job-intake policy (title
+   keywords, stack exclusions, hybrid rules, …). Copy from
+   `candidate/filters.example.yaml`. Missing file = shared defaults
+   (today's Angular/Wrocław owner behavior). Edit + `/hunt` — no
+   deploy needed. See [docs/FILTERS_YAML_PLAN.md](FILTERS_YAML_PLAN.md).
 
 If you skip this step, the bot runs using the example data that ships
 with the repo (a warning is logged once); nothing crashes.

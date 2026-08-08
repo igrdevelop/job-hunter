@@ -1,0 +1,694 @@
+{
+  "version": 1,
+  "description": "Frozen filter verdicts generated against pre-filter_profile code (docs/FILTERS_YAML_PLAN.md M1). Do not hand-edit.",
+  "cases": [
+    {
+      "id": "classify_pass_angular",
+      "kind": "classify",
+      "note": "",
+      "input": {
+        "title": "Senior Angular Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "classify_level_junior",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Junior Angular Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_intern",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Angular Intern",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_tech_lead",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Angular Tech Lead",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_team_lead",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Frontend Team Lead Angular",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_ru_techlead",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Техлид Frontend Angular",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_ru_intern",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "Стажер Frontend developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_level_cto",
+      "kind": "classify",
+      "note": "exclude_levels",
+      "input": {
+        "title": "CTO / Angular Architect",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "level"
+    },
+    {
+      "id": "classify_pattern_java",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "Java Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_pattern_csharp",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "C# Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_pattern_php",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "PHP Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_pattern_vue",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "Vue Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_pattern_wordpress",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "WordPress Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_pattern_react_native",
+      "kind": "classify",
+      "note": "exclude_patterns",
+      "input": {
+        "title": "React Native Frontend Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "react_no_angular"
+    },
+    {
+      "id": "classify_react_only",
+      "kind": "classify",
+      "note": "react_without_angular",
+      "input": {
+        "title": "Senior React Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "classify_react_with_angular",
+      "kind": "classify",
+      "note": "react_with_angular_kept",
+      "input": {
+        "title": "Senior React / Angular Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "classify_fullstack_no_angular",
+      "kind": "classify",
+      "note": "fullstack_without_angular",
+      "input": {
+        "title": "Fullstack Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "classify_fullstack_angular_java",
+      "kind": "classify",
+      "note": "fullstack_with_backend",
+      "input": {
+        "title": "Fullstack Angular / Java Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_fullstack_angular_node",
+      "kind": "classify",
+      "note": "fullstack_angular_node_kept",
+      "input": {
+        "title": "Fullstack Angular / Node Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "classify_german_title",
+      "kind": "classify",
+      "note": "german_required",
+      "input": {
+        "title": "Frontend Developer with German",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "german"
+    },
+    {
+      "id": "classify_german_body",
+      "kind": "classify",
+      "note": "german_required_body",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "Requirements: fluent in German, Angular, TypeScript.",
+        "source": "test"
+      },
+      "verdict": "german"
+    },
+    {
+      "id": "classify_german_not_required",
+      "kind": "classify",
+      "note": "german_not_required",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "English is the working language. German not required.",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "classify_hybrid_warsaw_frequent",
+      "kind": "classify",
+      "note": "onsite_city_frequent",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Warszawa (Hybrid)",
+        "body": "Hybrid, 3 days a week in our Warszawa office.",
+        "source": "test"
+      },
+      "verdict": "location"
+    },
+    {
+      "id": "classify_hybrid_warsaw_low_freq",
+      "kind": "classify",
+      "note": "low_frequency_hybrid_kept",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Warszawa (Hybrid)",
+        "body": "Hybrid model: office visits twice a month.",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "classify_hybrid_berlin",
+      "kind": "classify",
+      "note": "foreign_hybrid_rejected",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Berlin (Hybrid)",
+        "body": "Hybrid, office visits once a month in Berlin.",
+        "source": "test"
+      },
+      "verdict": "location"
+    },
+    {
+      "id": "classify_ai_mill",
+      "kind": "classify",
+      "note": "exclude_companies",
+      "input": {
+        "title": "Angular Developer",
+        "company": "micro1",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "exclude_pattern"
+    },
+    {
+      "id": "classify_russia_location",
+      "kind": "classify",
+      "note": "russia_market",
+      "input": {
+        "title": "Angular Developer",
+        "company": "Acme",
+        "location": "Remote · Russia",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "russia"
+    },
+    {
+      "id": "classify_title_kw_miss",
+      "kind": "classify",
+      "note": "",
+      "input": {
+        "title": "Plumber",
+        "company": "Acme",
+        "location": "Remote",
+        "body": "",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "screen_hybrid_warsaw_3days",
+      "kind": "screen",
+      "note": "screen_frequent_hybrid",
+      "input": {
+        "text": "Angular Developer\nHybrid, 3 days a week in our Warszawa office.\nRequirements: Angular.",
+        "title": "Angular Developer",
+        "company": ""
+      },
+      "verdict": "on-site / hybrid outside Wrocław"
+    },
+    {
+      "id": "assess_hybrid_warsaw_3days",
+      "kind": "assess",
+      "note": "pl_onsite_or_frequent_hybrid",
+      "input": {
+        "text": "Angular Developer\nHybrid, 3 days a week in our Warszawa office.\nRequirements: Angular, TypeScript.",
+        "title": "Angular Developer",
+        "company": ""
+      },
+      "verdict": [
+        {
+          "rule": "is_unwanted_onsite_location",
+          "severity": "soft",
+          "evidence": "on-site / hybrid outside Wrocław"
+        },
+        {
+          "rule": "pl_onsite_or_frequent_hybrid",
+          "severity": "hard",
+          "evidence": "ar developer angular developer hybrid, 3 days a week in our warszawa office. requirements: a"
+        }
+      ]
+    },
+    {
+      "id": "assess_hybrid_low_freq",
+      "kind": "assess",
+      "note": "low_frequency_veto",
+      "input": {
+        "text": "Angular Developer\nHybrid — Kraków office.\nIn practice we meet raz w miesiącu; otherwise fully flexible remote work.\nRequirements: Angular, TypeScript.",
+        "title": "Angular Developer",
+        "company": ""
+      },
+      "verdict": []
+    },
+    {
+      "id": "assess_german_required",
+      "kind": "assess",
+      "note": "german_hard",
+      "input": {
+        "text": "Frontend Developer\nRequirements: Angular. German C1 required.",
+        "title": "Frontend Developer",
+        "company": ""
+      },
+      "verdict": [
+        {
+          "rule": "is_german_language_required",
+          "severity": "hard",
+          "evidence": "German language required"
+        }
+      ]
+    },
+    {
+      "id": "assess_foreign_stack_php",
+      "kind": "assess",
+      "note": "foreign_stack_no_angular",
+      "input": {
+        "text": "Web developer\nRequirements: PHP, WordPress, Joomla, HTML, CSS.",
+        "title": "Web developer",
+        "company": ""
+      },
+      "verdict": [
+        {
+          "rule": "has_body_disqualifier",
+          "severity": "soft",
+          "evidence": "excluded tech/platform in the description"
+        },
+        {
+          "rule": "foreign_stack_no_angular",
+          "severity": "hard",
+          "evidence": "developer web developer requirements: php, wordpress, joomla, html, css."
+        },
+        {
+          "rule": "off_domain_title",
+          "severity": "soft",
+          "evidence": "Web developer"
+        }
+      ]
+    },
+    {
+      "id": "assess_ai_mill_body",
+      "kind": "assess",
+      "note": "ai_mill_body",
+      "input": {
+        "text": "Angular Developer\nApply via micro1.com — AI training data labeling role.\nRequirements: Angular.",
+        "title": "Angular Developer",
+        "company": "QuikHireStaffing"
+      },
+      "verdict": [
+        {
+          "rule": "is_ai_training_or_mill",
+          "severity": "hard",
+          "evidence": "AI-training / staffing-mill company"
+        },
+        {
+          "rule": "ai_mill_body",
+          "severity": "hard",
+          "evidence": "developer angular developer apply via micro1.com — ai training data labeling role. r"
+        }
+      ]
+    },
+    {
+      "id": "assess_pass_angular_remote",
+      "kind": "assess",
+      "note": "clean_pass",
+      "input": {
+        "text": "Angular Developer\nFully remote, EU-based.\nRequirements: Angular, TypeScript, RxJS.",
+        "title": "Angular Developer",
+        "company": ""
+      },
+      "verdict": []
+    },
+    {
+      "id": "sample_ai_classify",
+      "kind": "classify",
+      "note": "sample_jobs/ai.txt",
+      "input": {
+        "title": "Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)",
+        "company": "Accenture",
+        "location": "Wrocław (hybrid)",
+        "body": "URL: https://justjoin.it/job-offer/accenture-frontend-engineer---ai-solutions-ai-data-evergreen-open--wroclaw-javascript\n\nJob Title: Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)\nCompany: Accenture\nLocation: Wrocław (hybrid)\nExperience Level: mid\n\n--- Job Description ---\nJob Description\n\nWHO WE ARE\n\nAccenture is a leading global professional services company that helps the world’s leading businesses, governments, and other organizations build their digital core, optimize their operations, accelerate revenue growth, and enhance citizen services. We offer solutions and assets across Strategy & Consulting, Technology, Operations, Industry X, and Accenture Song.\n\nAt the AI&Data, we work locally and globally with over 250 Poland-based specialists. Our expertise spans data architecture and sectoral specialization. We collaborate with tech partners like Microsoft, AWS, Google, Oracle, and Snowflake to implement cutting-edge solutions. We provide comprehensive support from strategy definition to solution implementation and development, covering all aspects of Data & Analytics.\n\nTHE WORK\n\nAs a Frontend Engineer – AI Solutions, you will design and build the user-facing layer of GenAI and agentic AI solutions for leading global enterprises. You’re the person who makes powerful AI systems usable – turning complex agent interactions, streaming LLM outputs, and enterprise data into intuitive, polished product experiences.\n\nWe’re looking for someone who is React-strong, thinks in terms of user experience, and is excited about solving the unique UI/UX challenges that come with building AI-powered products.\n\nYou will:\n\n- \nBuild modern, responsive frontends for GenAI products using React and TypeScript – conversational interfaces, agent dashboards, data exploration tools, and interactive analytics views\n- \nDesign and implement AI-specific interaction patterns: streaming chat, real-time agent status, citation rendering, confidence indicators, and graceful handling of AI uncertainty\n- \nOwn the UX quality of AI products – making deliberate decisions about information architecture, component design, accessibility, and how users interact with AI outputs\n- \nIntegrate frontends with backend APIs, LLM services, and streaming endpoints – working closely with GenAI engineers to deliver seamless end-to-end experiences\n- \nCollaborate with engineers, designers, and consultants on cross-functional teams, shaping how enterprise users experience AI\n\nFlexible: The work location for this role may include a mix of working remotely (most of the time), onsite at a client or in an Accenture office – depending on specific project circumstances. With all our roles, there is some in-person time for collaboration, learning and building relationships with clients, peers, leaders, and communities. As an employer, we will be as flexible as possible to support your specific work/life needs.\n\nWHAT’S IN IT FOR YOU?\n\n- \nBuild the interface layer of cutting-edge AI: you’ll shape how users actually experience GenAI – the part that makes the difference between a demo and a product.\n- \nSolve UI/UX problems that barely exist yet: streaming agent interactions, multi-agent status views, conversational analytics – these design patterns are being invented right now, and you’ll be the one inventing them.\n- \nGrow at the intersection of frontend engineering and AI: work alongside experienced AI & Data practitioners, gaining unique product engineering expertise that very few frontend developers have today.\n\nQualification\n\nHERE’S WHAT YOU’LL NEED\n\n- \nMin. 3 years of commercial experience in frontend development\n- \nStrong proficiency in React and TypeScript\n- \nSolid understanding of modern frontend architecture – state management, component design, performance optimization, and responsive design\n- \nExperience integrating frontends with REST APIs, WebSockets, or streaming endpoints\n- \nStrong UX sensibility – ability to make deliberate design and interaction decisions, not just implement mockups\n- \nFamiliarity with AI-powered product interfaces (chatbots, conversational UIs, dashboards with AI-generated content) or a strong interest in this space\n- \nProficiency with AI-assisted development tools (e.g., Cursor, Copilot, or similar) – we expect these to be a core part of your daily workflow, not an occasional add-on\n- \nGood command of English (min. B2+)\n\nBONUS POINTS IF YOU HAVE\n\n- \nExperience building real-time or streaming UIs (e.g., Server-Sent Events, WebSocket-based interfaces)\n- \nHands-on experience with UI component libraries and design systems (e.g., Shadcn, Radix, Material UI)\n- \nFamiliarity with Next.js or similar full-stack React frameworks\n- \nBasic understanding of LLMs, prompt engineering, or how GenAI APIs work\n- \nExperience with data visualization libraries (e.g., D3.js, Recharts, Visx)\n- \nKnowledge of accessibility standards (WCAG) and inclusive design practices\n- \nExperience with frontend testing (e.g., Playwright, Cypress, React Testing Library)\n- \nBasic backend or API development experience (Node.js, Python, FastAPI)\n- \nResearch indicates that some candidates, especially the most diverse ones, may hesitate to apply for positions if they don’t meet all requirements. If you believe you possess the necessary skills, even if not meeting every requirement, we wholeheartedly encourage you to submit your application.\n\nWHAT WE OFFER?\n\n- \nA permanent employment contract\n- \nIndividual support of a People Lead and a clearly defined path of professional development, including the possibility of a session with a Coach\n- \nA comprehensive training package, including: soft skills, technical and language training, access to e-learning platforms, Gallup test, GenAI training, possibility of co-financing courses and certifications\n- \nEmployee Assistance Program offering legal, financial and psychological consultations\n- \nEmployee Share Purchase Plan – employees who own company shares are automatically eligible for quarterly dividends\n- \nPaid employee referral program\n- \nPrivate medical care and life insurance\n- \nAccess to the Worksmile benefits platform (including the Multisport card)\n\nInterview Note: We value practical skills. During the technical interview, we’ll give you a real problem to solve and debug together – using your preferred development setup, including any AI-assisted tools you work with day to day.\n\nWHAT WE BELIEVE:\n\nAccenture does not discriminate employment candidates on the basis of race, religion, color, sex, age, disability, national origin, political beliefs, trade union membership, ethnicity, denomination, sexual orientation or any other basis impermissible under Polish law. All our leaders are committed to building a better, stronger and more durable company for future generations to create positive, long-lasting change. Inclusion and diversity are fundamental to our culture and core values. Our rich diversity makes us more innovative and creative, which helps us better serve our clients and our communities. Our position as partner to many of the world’s leading businesses, organizations and governments affords us both an extraordinary opportunity and a tremendous responsibility to make a difference. Sustainability is one of our greatest responsibilities, which we embed it into everything we do and for everyone we work with. Clicking apply I hereby express my consent to process my personal data included in my job offer by Accenture Sp. z o.o. or any other entity of the Accenture group for recruitment purposes, and that it is a data controller within the meaning of GDPR. More information about Accenture (and if necessary also its representative) can be found here: https://www.accenture.com/pl-pl/privacy-policy\n\n#LI-EU",
+        "source": "test"
+      },
+      "verdict": null
+    },
+    {
+      "id": "sample_ai_screen",
+      "kind": "screen",
+      "note": "sample_jobs/ai.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/accenture-frontend-engineer---ai-solutions-ai-data-evergreen-open--wroclaw-javascript\n\nJob Title: Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)\nCompany: Accenture\nLocation: Wrocław (hybrid)\nExperience Level: mid\n\n--- Job Description ---\nJob Description\n\nWHO WE ARE\n\nAccenture is a leading global professional services company that helps the world’s leading businesses, governments, and other organizations build their digital core, optimize their operations, accelerate revenue growth, and enhance citizen services. We offer solutions and assets across Strategy & Consulting, Technology, Operations, Industry X, and Accenture Song.\n\nAt the AI&Data, we work locally and globally with over 250 Poland-based specialists. Our expertise spans data architecture and sectoral specialization. We collaborate with tech partners like Microsoft, AWS, Google, Oracle, and Snowflake to implement cutting-edge solutions. We provide comprehensive support from strategy definition to solution implementation and development, covering all aspects of Data & Analytics.\n\nTHE WORK\n\nAs a Frontend Engineer – AI Solutions, you will design and build the user-facing layer of GenAI and agentic AI solutions for leading global enterprises. You’re the person who makes powerful AI systems usable – turning complex agent interactions, streaming LLM outputs, and enterprise data into intuitive, polished product experiences.\n\nWe’re looking for someone who is React-strong, thinks in terms of user experience, and is excited about solving the unique UI/UX challenges that come with building AI-powered products.\n\nYou will:\n\n- \nBuild modern, responsive frontends for GenAI products using React and TypeScript – conversational interfaces, agent dashboards, data exploration tools, and interactive analytics views\n- \nDesign and implement AI-specific interaction patterns: streaming chat, real-time agent status, citation rendering, confidence indicators, and graceful handling of AI uncertainty\n- \nOwn the UX quality of AI products – making deliberate decisions about information architecture, component design, accessibility, and how users interact with AI outputs\n- \nIntegrate frontends with backend APIs, LLM services, and streaming endpoints – working closely with GenAI engineers to deliver seamless end-to-end experiences\n- \nCollaborate with engineers, designers, and consultants on cross-functional teams, shaping how enterprise users experience AI\n\nFlexible: The work location for this role may include a mix of working remotely (most of the time), onsite at a client or in an Accenture office – depending on specific project circumstances. With all our roles, there is some in-person time for collaboration, learning and building relationships with clients, peers, leaders, and communities. As an employer, we will be as flexible as possible to support your specific work/life needs.\n\nWHAT’S IN IT FOR YOU?\n\n- \nBuild the interface layer of cutting-edge AI: you’ll shape how users actually experience GenAI – the part that makes the difference between a demo and a product.\n- \nSolve UI/UX problems that barely exist yet: streaming agent interactions, multi-agent status views, conversational analytics – these design patterns are being invented right now, and you’ll be the one inventing them.\n- \nGrow at the intersection of frontend engineering and AI: work alongside experienced AI & Data practitioners, gaining unique product engineering expertise that very few frontend developers have today.\n\nQualification\n\nHERE’S WHAT YOU’LL NEED\n\n- \nMin. 3 years of commercial experience in frontend development\n- \nStrong proficiency in React and TypeScript\n- \nSolid understanding of modern frontend architecture – state management, component design, performance optimization, and responsive design\n- \nExperience integrating frontends with REST APIs, WebSockets, or streaming endpoints\n- \nStrong UX sensibility – ability to make deliberate design and interaction decisions, not just implement mockups\n- \nFamiliarity with AI-powered product interfaces (chatbots, conversational UIs, dashboards with AI-generated content) or a strong interest in this space\n- \nProficiency with AI-assisted development tools (e.g., Cursor, Copilot, or similar) – we expect these to be a core part of your daily workflow, not an occasional add-on\n- \nGood command of English (min. B2+)\n\nBONUS POINTS IF YOU HAVE\n\n- \nExperience building real-time or streaming UIs (e.g., Server-Sent Events, WebSocket-based interfaces)\n- \nHands-on experience with UI component libraries and design systems (e.g., Shadcn, Radix, Material UI)\n- \nFamiliarity with Next.js or similar full-stack React frameworks\n- \nBasic understanding of LLMs, prompt engineering, or how GenAI APIs work\n- \nExperience with data visualization libraries (e.g., D3.js, Recharts, Visx)\n- \nKnowledge of accessibility standards (WCAG) and inclusive design practices\n- \nExperience with frontend testing (e.g., Playwright, Cypress, React Testing Library)\n- \nBasic backend or API development experience (Node.js, Python, FastAPI)\n- \nResearch indicates that some candidates, especially the most diverse ones, may hesitate to apply for positions if they don’t meet all requirements. If you believe you possess the necessary skills, even if not meeting every requirement, we wholeheartedly encourage you to submit your application.\n\nWHAT WE OFFER?\n\n- \nA permanent employment contract\n- \nIndividual support of a People Lead and a clearly defined path of professional development, including the possibility of a session with a Coach\n- \nA comprehensive training package, including: soft skills, technical and language training, access to e-learning platforms, Gallup test, GenAI training, possibility of co-financing courses and certifications\n- \nEmployee Assistance Program offering legal, financial and psychological consultations\n- \nEmployee Share Purchase Plan – employees who own company shares are automatically eligible for quarterly dividends\n- \nPaid employee referral program\n- \nPrivate medical care and life insurance\n- \nAccess to the Worksmile benefits platform (including the Multisport card)\n\nInterview Note: We value practical skills. During the technical interview, we’ll give you a real problem to solve and debug together – using your preferred development setup, including any AI-assisted tools you work with day to day.\n\nWHAT WE BELIEVE:\n\nAccenture does not discriminate employment candidates on the basis of race, religion, color, sex, age, disability, national origin, political beliefs, trade union membership, ethnicity, denomination, sexual orientation or any other basis impermissible under Polish law. All our leaders are committed to building a better, stronger and more durable company for future generations to create positive, long-lasting change. Inclusion and diversity are fundamental to our culture and core values. Our rich diversity makes us more innovative and creative, which helps us better serve our clients and our communities. Our position as partner to many of the world’s leading businesses, organizations and governments affords us both an extraordinary opportunity and a tremendous responsibility to make a difference. Sustainability is one of our greatest responsibilities, which we embed it into everything we do and for everyone we work with. Clicking apply I hereby express my consent to process my personal data included in my job offer by Accenture Sp. z o.o. or any other entity of the Accenture group for recruitment purposes, and that it is a data controller within the meaning of GDPR. More information about Accenture (and if necessary also its representative) can be found here: https://www.accenture.com/pl-pl/privacy-policy\n\n#LI-EU",
+        "title": "Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)",
+        "company": "Accenture"
+      },
+      "verdict": null
+    },
+    {
+      "id": "sample_ai_assess",
+      "kind": "assess",
+      "note": "sample_jobs/ai.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/accenture-frontend-engineer---ai-solutions-ai-data-evergreen-open--wroclaw-javascript\n\nJob Title: Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)\nCompany: Accenture\nLocation: Wrocław (hybrid)\nExperience Level: mid\n\n--- Job Description ---\nJob Description\n\nWHO WE ARE\n\nAccenture is a leading global professional services company that helps the world’s leading businesses, governments, and other organizations build their digital core, optimize their operations, accelerate revenue growth, and enhance citizen services. We offer solutions and assets across Strategy & Consulting, Technology, Operations, Industry X, and Accenture Song.\n\nAt the AI&Data, we work locally and globally with over 250 Poland-based specialists. Our expertise spans data architecture and sectoral specialization. We collaborate with tech partners like Microsoft, AWS, Google, Oracle, and Snowflake to implement cutting-edge solutions. We provide comprehensive support from strategy definition to solution implementation and development, covering all aspects of Data & Analytics.\n\nTHE WORK\n\nAs a Frontend Engineer – AI Solutions, you will design and build the user-facing layer of GenAI and agentic AI solutions for leading global enterprises. You’re the person who makes powerful AI systems usable – turning complex agent interactions, streaming LLM outputs, and enterprise data into intuitive, polished product experiences.\n\nWe’re looking for someone who is React-strong, thinks in terms of user experience, and is excited about solving the unique UI/UX challenges that come with building AI-powered products.\n\nYou will:\n\n- \nBuild modern, responsive frontends for GenAI products using React and TypeScript – conversational interfaces, agent dashboards, data exploration tools, and interactive analytics views\n- \nDesign and implement AI-specific interaction patterns: streaming chat, real-time agent status, citation rendering, confidence indicators, and graceful handling of AI uncertainty\n- \nOwn the UX quality of AI products – making deliberate decisions about information architecture, component design, accessibility, and how users interact with AI outputs\n- \nIntegrate frontends with backend APIs, LLM services, and streaming endpoints – working closely with GenAI engineers to deliver seamless end-to-end experiences\n- \nCollaborate with engineers, designers, and consultants on cross-functional teams, shaping how enterprise users experience AI\n\nFlexible: The work location for this role may include a mix of working remotely (most of the time), onsite at a client or in an Accenture office – depending on specific project circumstances. With all our roles, there is some in-person time for collaboration, learning and building relationships with clients, peers, leaders, and communities. As an employer, we will be as flexible as possible to support your specific work/life needs.\n\nWHAT’S IN IT FOR YOU?\n\n- \nBuild the interface layer of cutting-edge AI: you’ll shape how users actually experience GenAI – the part that makes the difference between a demo and a product.\n- \nSolve UI/UX problems that barely exist yet: streaming agent interactions, multi-agent status views, conversational analytics – these design patterns are being invented right now, and you’ll be the one inventing them.\n- \nGrow at the intersection of frontend engineering and AI: work alongside experienced AI & Data practitioners, gaining unique product engineering expertise that very few frontend developers have today.\n\nQualification\n\nHERE’S WHAT YOU’LL NEED\n\n- \nMin. 3 years of commercial experience in frontend development\n- \nStrong proficiency in React and TypeScript\n- \nSolid understanding of modern frontend architecture – state management, component design, performance optimization, and responsive design\n- \nExperience integrating frontends with REST APIs, WebSockets, or streaming endpoints\n- \nStrong UX sensibility – ability to make deliberate design and interaction decisions, not just implement mockups\n- \nFamiliarity with AI-powered product interfaces (chatbots, conversational UIs, dashboards with AI-generated content) or a strong interest in this space\n- \nProficiency with AI-assisted development tools (e.g., Cursor, Copilot, or similar) – we expect these to be a core part of your daily workflow, not an occasional add-on\n- \nGood command of English (min. B2+)\n\nBONUS POINTS IF YOU HAVE\n\n- \nExperience building real-time or streaming UIs (e.g., Server-Sent Events, WebSocket-based interfaces)\n- \nHands-on experience with UI component libraries and design systems (e.g., Shadcn, Radix, Material UI)\n- \nFamiliarity with Next.js or similar full-stack React frameworks\n- \nBasic understanding of LLMs, prompt engineering, or how GenAI APIs work\n- \nExperience with data visualization libraries (e.g., D3.js, Recharts, Visx)\n- \nKnowledge of accessibility standards (WCAG) and inclusive design practices\n- \nExperience with frontend testing (e.g., Playwright, Cypress, React Testing Library)\n- \nBasic backend or API development experience (Node.js, Python, FastAPI)\n- \nResearch indicates that some candidates, especially the most diverse ones, may hesitate to apply for positions if they don’t meet all requirements. If you believe you possess the necessary skills, even if not meeting every requirement, we wholeheartedly encourage you to submit your application.\n\nWHAT WE OFFER?\n\n- \nA permanent employment contract\n- \nIndividual support of a People Lead and a clearly defined path of professional development, including the possibility of a session with a Coach\n- \nA comprehensive training package, including: soft skills, technical and language training, access to e-learning platforms, Gallup test, GenAI training, possibility of co-financing courses and certifications\n- \nEmployee Assistance Program offering legal, financial and psychological consultations\n- \nEmployee Share Purchase Plan – employees who own company shares are automatically eligible for quarterly dividends\n- \nPaid employee referral program\n- \nPrivate medical care and life insurance\n- \nAccess to the Worksmile benefits platform (including the Multisport card)\n\nInterview Note: We value practical skills. During the technical interview, we’ll give you a real problem to solve and debug together – using your preferred development setup, including any AI-assisted tools you work with day to day.\n\nWHAT WE BELIEVE:\n\nAccenture does not discriminate employment candidates on the basis of race, religion, color, sex, age, disability, national origin, political beliefs, trade union membership, ethnicity, denomination, sexual orientation or any other basis impermissible under Polish law. All our leaders are committed to building a better, stronger and more durable company for future generations to create positive, long-lasting change. Inclusion and diversity are fundamental to our culture and core values. Our rich diversity makes us more innovative and creative, which helps us better serve our clients and our communities. Our position as partner to many of the world’s leading businesses, organizations and governments affords us both an extraordinary opportunity and a tremendous responsibility to make a difference. Sustainability is one of our greatest responsibilities, which we embed it into everything we do and for everyone we work with. Clicking apply I hereby express my consent to process my personal data included in my job offer by Accenture Sp. z o.o. or any other entity of the Accenture group for recruitment purposes, and that it is a data controller within the meaning of GDPR. More information about Accenture (and if necessary also its representative) can be found here: https://www.accenture.com/pl-pl/privacy-policy\n\n#LI-EU",
+        "title": "Frontend Engineer – AI Solutions (AI&Data) (Evergreen) (Open)",
+        "company": "Accenture"
+      },
+      "verdict": []
+    },
+    {
+      "id": "sample_angular_classify",
+      "kind": "classify",
+      "note": "sample_jobs/angular.txt",
+      "input": {
+        "title": "Senior Frontend Developer",
+        "company": "Lumicode (Grupa Pentacomp)",
+        "location": "Warszawa, PL",
+        "body": "URL: https://solid.jobs/o/eubp6fwh\n\nJob Title: Senior Frontend Developer\nCompany: Lumicode (Grupa Pentacomp)\nLocation: Warszawa, PL\nSalary: 90.0-110.0 PLN\nEmployment: CONTRACTOR\n\n--- Job Description ---\nKim jesteśmy    Lumicode Sp. z o.o. należy do Grupy Pentacomp  , która jest producentem rozwiązań informatycznych i dostawcą profesjonalnych usług IT dla dużych przedsiębiorstw i sektora publicznego.    Jako   Pentacomp   tworzymy rozwiązania IT łączące innowacyjność z latami doświadczeń - a ich mamy całkiem sporo. Istniejemy na rynku prawie 30 lat i możemy pochwalić się wieloma zrealizowanymi projektami.    Aktualnie poszukujemy do projektu   Senior     Frontend  Developera -  poziom senior  .   -  Praca zdalna; -  Stawka do   110 pln/h netto + VAT B2B  ; - Skorzystanie z  karty sportowej oraz możliwość skorzystania z prywatnej opieki zdrowotnej; -  Praca od zaraz; -  Szybki proces rekrutacyjny.    Zadania:   -  Rozwój i utrzymanie aplikacji frontendowych opartych o   Angular 18+  . -  Implementacja logiki i widoków z wykorzystaniem   RxJS  ,   Signals   oraz   Signal Store  . -  Tworzenie i rozwijanie komponentów zgodnych z   design systemem   organizacji. -  Praca w środowisku   NX monorepo   - budowa, modułowanie i optymalizacja aplikacji. -  Współpraca z analitykami i zespołami   UX/UI   przy projektowaniu funkcjonalności. -  Implementacja interfejsów użytkownika zgodnie z makietami i prototypami w   Figma  . -  Integracja frontendu z backendem (REST API).  \n\n Kogo poszukujemy? \n -  Angular -  RxJS -  Signals / Signal Store - Doświadczenie z  design systemami - Doświadczenie z  NX monorepo - Praca z zespołami  analitycznymi  oraz  UX/UI - Umiejętność pracy z  Figma\n\n--- Requirements ---\nJavaScript, Angular",
+        "source": "test"
+      },
+      "verdict": "location"
+    },
+    {
+      "id": "sample_angular_screen",
+      "kind": "screen",
+      "note": "sample_jobs/angular.txt",
+      "input": {
+        "text": "URL: https://solid.jobs/o/eubp6fwh\n\nJob Title: Senior Frontend Developer\nCompany: Lumicode (Grupa Pentacomp)\nLocation: Warszawa, PL\nSalary: 90.0-110.0 PLN\nEmployment: CONTRACTOR\n\n--- Job Description ---\nKim jesteśmy    Lumicode Sp. z o.o. należy do Grupy Pentacomp  , która jest producentem rozwiązań informatycznych i dostawcą profesjonalnych usług IT dla dużych przedsiębiorstw i sektora publicznego.    Jako   Pentacomp   tworzymy rozwiązania IT łączące innowacyjność z latami doświadczeń - a ich mamy całkiem sporo. Istniejemy na rynku prawie 30 lat i możemy pochwalić się wieloma zrealizowanymi projektami.    Aktualnie poszukujemy do projektu   Senior     Frontend  Developera -  poziom senior  .   -  Praca zdalna; -  Stawka do   110 pln/h netto + VAT B2B  ; - Skorzystanie z  karty sportowej oraz możliwość skorzystania z prywatnej opieki zdrowotnej; -  Praca od zaraz; -  Szybki proces rekrutacyjny.    Zadania:   -  Rozwój i utrzymanie aplikacji frontendowych opartych o   Angular 18+  . -  Implementacja logiki i widoków z wykorzystaniem   RxJS  ,   Signals   oraz   Signal Store  . -  Tworzenie i rozwijanie komponentów zgodnych z   design systemem   organizacji. -  Praca w środowisku   NX monorepo   - budowa, modułowanie i optymalizacja aplikacji. -  Współpraca z analitykami i zespołami   UX/UI   przy projektowaniu funkcjonalności. -  Implementacja interfejsów użytkownika zgodnie z makietami i prototypami w   Figma  . -  Integracja frontendu z backendem (REST API).  \n\n Kogo poszukujemy? \n -  Angular -  RxJS -  Signals / Signal Store - Doświadczenie z  design systemami - Doświadczenie z  NX monorepo - Praca z zespołami  analitycznymi  oraz  UX/UI - Umiejętność pracy z  Figma\n\n--- Requirements ---\nJavaScript, Angular",
+        "title": "Senior Frontend Developer",
+        "company": "Lumicode (Grupa Pentacomp)"
+      },
+      "verdict": null
+    },
+    {
+      "id": "sample_angular_assess",
+      "kind": "assess",
+      "note": "sample_jobs/angular.txt",
+      "input": {
+        "text": "URL: https://solid.jobs/o/eubp6fwh\n\nJob Title: Senior Frontend Developer\nCompany: Lumicode (Grupa Pentacomp)\nLocation: Warszawa, PL\nSalary: 90.0-110.0 PLN\nEmployment: CONTRACTOR\n\n--- Job Description ---\nKim jesteśmy    Lumicode Sp. z o.o. należy do Grupy Pentacomp  , która jest producentem rozwiązań informatycznych i dostawcą profesjonalnych usług IT dla dużych przedsiębiorstw i sektora publicznego.    Jako   Pentacomp   tworzymy rozwiązania IT łączące innowacyjność z latami doświadczeń - a ich mamy całkiem sporo. Istniejemy na rynku prawie 30 lat i możemy pochwalić się wieloma zrealizowanymi projektami.    Aktualnie poszukujemy do projektu   Senior     Frontend  Developera -  poziom senior  .   -  Praca zdalna; -  Stawka do   110 pln/h netto + VAT B2B  ; - Skorzystanie z  karty sportowej oraz możliwość skorzystania z prywatnej opieki zdrowotnej; -  Praca od zaraz; -  Szybki proces rekrutacyjny.    Zadania:   -  Rozwój i utrzymanie aplikacji frontendowych opartych o   Angular 18+  . -  Implementacja logiki i widoków z wykorzystaniem   RxJS  ,   Signals   oraz   Signal Store  . -  Tworzenie i rozwijanie komponentów zgodnych z   design systemem   organizacji. -  Praca w środowisku   NX monorepo   - budowa, modułowanie i optymalizacja aplikacji. -  Współpraca z analitykami i zespołami   UX/UI   przy projektowaniu funkcjonalności. -  Implementacja interfejsów użytkownika zgodnie z makietami i prototypami w   Figma  . -  Integracja frontendu z backendem (REST API).  \n\n Kogo poszukujemy? \n -  Angular -  RxJS -  Signals / Signal Store - Doświadczenie z  design systemami - Doświadczenie z  NX monorepo - Praca z zespołami  analitycznymi  oraz  UX/UI - Umiejętność pracy z  Figma\n\n--- Requirements ---\nJavaScript, Angular",
+        "title": "Senior Frontend Developer",
+        "company": "Lumicode (Grupa Pentacomp)"
+      },
+      "verdict": []
+    },
+    {
+      "id": "sample_fullstack_angular_nest_classify",
+      "kind": "classify",
+      "note": "sample_jobs/fullstack_angular_nest.txt",
+      "input": {
+        "title": "Fullstack Developer (NestJS)",
+        "company": "Devqube Sp. z o.o.",
+        "location": "Wrocław / Remote",
+        "body": "URL: https://justjoin.it/job-offer/devqube-sp-z-o-o--fullstack-developer-angular-nestjs--wroclaw-javascript\n\nJob Title: Fullstack Developer (NestJS)\nCompany: Devqube Sp. z o.o.\nLocation: Wrocław / Remote\nExperience Level: Senior\nEmployment: B2B\nSalary: 10 000 – 18 000 PLN/month net\n\n--- Job Description ---\n\nDevqube poszukuje doświadczonych Fullstack Developerów do przebudowy systemów produkcyjnych dla klienta z Niemiec. Projekt zakłada realny wpływ na architekturę — nie rutynowe taski, ale projektowanie od podstaw.\n\nZakres obowiązków:\n- Przebudowa i modernizacja systemów produkcyjnych (klasa MES) dla klienta z Niemiec\n- Projektowanie architektury backendowej w NestJS z wykorzystaniem zaawansowanych dekoratorów i wzorców mikroserwisowych\n- Tworzenie skalowalnych REST API oraz integracja z frontendem Angular\n- Implementacja komunikacji real-time (WebSocket / Socket.io)\n- Projektowanie schematów baz danych (PostgreSQL / TypeORM)\n- Code review, dbałość o jakość kodu TypeScript\n- Praca w metodologii Scrum, bezpośredni kontakt z klientem (EN B2+)\n\nWymagania (must-have):\n- Angular – dobra znajomość, doświadczenie w budowie komponentów i state management\n- NestJS – bardzo dobra znajomość, doświadczenie z architekturą backendową\n- TypeScript – biegłość po obu stronach stacku\n- PostgreSQL / TypeORM – projektowanie i optymalizacja baz danych\n- REST API – projektowanie i implementacja\n- Git – praca w zespole z branching strategy\n- Angielski – minimum B2 (kontakt z klientem z Niemiec)\n\nMile widziane:\n- Mikroserwisy – znajomość wzorców (CQRS, Event Sourcing)\n- Advanced NestJS decorators – własne dekoratory, interceptory, guardy\n- RxJS – reactive programming w Angular\n- Docker / Kubernetes – konteneryzacja\n- Redis – caching, kolejkowanie\n- GitHub Actions / CI/CD\n- Jest – testy jednostkowe i e2e\n- Nx Monorepo\n- Podstawy języka niemieckiego\n\nCo oferujemy:\n- B2B 10 000 – 18 000 PLN/miesiąc netto\n- 100% remote lub biuro we Wrocławiu\n- Budżet szkoleniowy, lekcje angielskiego\n- Karta sportowa, opieka medyczna\n- Wpływ na decyzje techniczne\n\n--- Requirements ---\nNestJS, Angular, TypeScript, Node.js, PostgreSQL, Microservices\n",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "sample_fullstack_angular_nest_screen",
+      "kind": "screen",
+      "note": "sample_jobs/fullstack_angular_nest.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/devqube-sp-z-o-o--fullstack-developer-angular-nestjs--wroclaw-javascript\n\nJob Title: Fullstack Developer (NestJS)\nCompany: Devqube Sp. z o.o.\nLocation: Wrocław / Remote\nExperience Level: Senior\nEmployment: B2B\nSalary: 10 000 – 18 000 PLN/month net\n\n--- Job Description ---\n\nDevqube poszukuje doświadczonych Fullstack Developerów do przebudowy systemów produkcyjnych dla klienta z Niemiec. Projekt zakłada realny wpływ na architekturę — nie rutynowe taski, ale projektowanie od podstaw.\n\nZakres obowiązków:\n- Przebudowa i modernizacja systemów produkcyjnych (klasa MES) dla klienta z Niemiec\n- Projektowanie architektury backendowej w NestJS z wykorzystaniem zaawansowanych dekoratorów i wzorców mikroserwisowych\n- Tworzenie skalowalnych REST API oraz integracja z frontendem Angular\n- Implementacja komunikacji real-time (WebSocket / Socket.io)\n- Projektowanie schematów baz danych (PostgreSQL / TypeORM)\n- Code review, dbałość o jakość kodu TypeScript\n- Praca w metodologii Scrum, bezpośredni kontakt z klientem (EN B2+)\n\nWymagania (must-have):\n- Angular – dobra znajomość, doświadczenie w budowie komponentów i state management\n- NestJS – bardzo dobra znajomość, doświadczenie z architekturą backendową\n- TypeScript – biegłość po obu stronach stacku\n- PostgreSQL / TypeORM – projektowanie i optymalizacja baz danych\n- REST API – projektowanie i implementacja\n- Git – praca w zespole z branching strategy\n- Angielski – minimum B2 (kontakt z klientem z Niemiec)\n\nMile widziane:\n- Mikroserwisy – znajomość wzorców (CQRS, Event Sourcing)\n- Advanced NestJS decorators – własne dekoratory, interceptory, guardy\n- RxJS – reactive programming w Angular\n- Docker / Kubernetes – konteneryzacja\n- Redis – caching, kolejkowanie\n- GitHub Actions / CI/CD\n- Jest – testy jednostkowe i e2e\n- Nx Monorepo\n- Podstawy języka niemieckiego\n\nCo oferujemy:\n- B2B 10 000 – 18 000 PLN/miesiąc netto\n- 100% remote lub biuro we Wrocławiu\n- Budżet szkoleniowy, lekcje angielskiego\n- Karta sportowa, opieka medyczna\n- Wpływ na decyzje techniczne\n\n--- Requirements ---\nNestJS, Angular, TypeScript, Node.js, PostgreSQL, Microservices\n",
+        "title": "Fullstack Developer (NestJS)",
+        "company": "Devqube Sp. z o.o."
+      },
+      "verdict": "fullstack role paired with a backend stack"
+    },
+    {
+      "id": "sample_fullstack_angular_nest_assess",
+      "kind": "assess",
+      "note": "sample_jobs/fullstack_angular_nest.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/devqube-sp-z-o-o--fullstack-developer-angular-nestjs--wroclaw-javascript\n\nJob Title: Fullstack Developer (NestJS)\nCompany: Devqube Sp. z o.o.\nLocation: Wrocław / Remote\nExperience Level: Senior\nEmployment: B2B\nSalary: 10 000 – 18 000 PLN/month net\n\n--- Job Description ---\n\nDevqube poszukuje doświadczonych Fullstack Developerów do przebudowy systemów produkcyjnych dla klienta z Niemiec. Projekt zakłada realny wpływ na architekturę — nie rutynowe taski, ale projektowanie od podstaw.\n\nZakres obowiązków:\n- Przebudowa i modernizacja systemów produkcyjnych (klasa MES) dla klienta z Niemiec\n- Projektowanie architektury backendowej w NestJS z wykorzystaniem zaawansowanych dekoratorów i wzorców mikroserwisowych\n- Tworzenie skalowalnych REST API oraz integracja z frontendem Angular\n- Implementacja komunikacji real-time (WebSocket / Socket.io)\n- Projektowanie schematów baz danych (PostgreSQL / TypeORM)\n- Code review, dbałość o jakość kodu TypeScript\n- Praca w metodologii Scrum, bezpośredni kontakt z klientem (EN B2+)\n\nWymagania (must-have):\n- Angular – dobra znajomość, doświadczenie w budowie komponentów i state management\n- NestJS – bardzo dobra znajomość, doświadczenie z architekturą backendową\n- TypeScript – biegłość po obu stronach stacku\n- PostgreSQL / TypeORM – projektowanie i optymalizacja baz danych\n- REST API – projektowanie i implementacja\n- Git – praca w zespole z branching strategy\n- Angielski – minimum B2 (kontakt z klientem z Niemiec)\n\nMile widziane:\n- Mikroserwisy – znajomość wzorców (CQRS, Event Sourcing)\n- Advanced NestJS decorators – własne dekoratory, interceptory, guardy\n- RxJS – reactive programming w Angular\n- Docker / Kubernetes – konteneryzacja\n- Redis – caching, kolejkowanie\n- GitHub Actions / CI/CD\n- Jest – testy jednostkowe i e2e\n- Nx Monorepo\n- Podstawy języka niemieckiego\n\nCo oferujemy:\n- B2B 10 000 – 18 000 PLN/miesiąc netto\n- 100% remote lub biuro we Wrocławiu\n- Budżet szkoleniowy, lekcje angielskiego\n- Karta sportowa, opieka medyczna\n- Wpływ na decyzje techniczne\n\n--- Requirements ---\nNestJS, Angular, TypeScript, Node.js, PostgreSQL, Microservices\n",
+        "title": "Fullstack Developer (NestJS)",
+        "company": "Devqube Sp. z o.o."
+      },
+      "verdict": [
+        {
+          "rule": "is_unwanted_fullstack",
+          "severity": "hard",
+          "evidence": "fullstack role paired with a backend stack"
+        },
+        {
+          "rule": "off_domain_title",
+          "severity": "soft",
+          "evidence": "Fullstack Developer (NestJS)"
+        }
+      ]
+    },
+    {
+      "id": "sample_fullstack_react_next_classify",
+      "kind": "classify",
+      "note": "sample_jobs/fullstack_react_next.txt",
+      "input": {
+        "title": "Senior Fullstack Developer (React+Node.js))",
+        "company": "Clurgo",
+        "location": "Warszawa (remote)",
+        "body": "URL: https://justjoin.it/job-offer/clurgo-senior-fullstack-developer-react-node-js--warszawa-javascript\n\nJob Title: Senior Fullstack Developer (React+Node.js))\nCompany: Clurgo\nLocation: Warszawa (remote)\nExperience Level: senior\nSalary: 4365.0–5456.0 CHF B2B\nSalary: 4768.0–5960.0 EUR B2B\nSalary: 4120.0–5150.0 GBP B2B\nSalary: 5608.0–7010.0 USD B2B\nSalary: 20160.0–25200.0 PLN B2B\n\n--- Job Description ---\nClurgo to firma stworzona przez developerów dla developerów. Nasze zespoły łączą pełne spektrum kompetencji - od rozwoju oprogramowania i infrastruktury, przez analizę oraz testy, aż po strategiczne zarządzanie produktem i procesami. Realizujemy różnorodne projekty IT dla klientów z wielu branż, dbając o dobre praktyki programistyczne i zachowanie work-life balance. Tworzymy rozwiązania, które mają znaczenie - dla firm w Polsce i na całym świecie.\n\n✅Projekt skupia się na rozwoju oraz utrzymaniu aplikacji wspierających zarządzanie kampaniami reklamowymi i działania marketingowe w kanałach cyfrowych\n\n✅Technologie i narzędzia: React, Node.js, TypeScript, AWS Lambda, AWS CDK, Terraform, GitHub Actions, Datadog, GitHub Copilot\n\nSzukamy Ciebie, jeśli:\n\n- \nmasz minimum 6 lat doświadczenia komercyjnego jako Software Developer\n- \nposiadasz mocne doświadczenie frontendowe (ok. 80%) z React i TypeScript\n- \nostatnie 2-3 lata pracowałeś/aś w roli Fullstack Developer z przewagą frontendu\n- \nmasz doświadczenie backendowe (Node.js)\n- \npracowałeś/aś z rozwiązaniami serverless w AWS (Lambda, CDK)\n- \nznasz Terraform i rozumiesz Infrastructure as Code\n- \nmasz doświadczenie z CI/CD (GitHub Actions)\n- \npracujesz w metodykach Agile\n- \npotrafisz efektywnie komunikować się w zespole i brać ownership za rozwiązania\n- \nkomunikujesz się w języku angielskim na poziomie minimum B2 (codzienna komunikacja z zespołami z Polski i UK)\n\nMile widziane:\n\n- \ndoświadczenie z Datadog\n- \npraktyczna znajomość GitHub Copilot lub innych AI coding assistants\n- \ndoświadczenie w projektach z obszaru media / digital advertising / streaming\n\nZadania:\n\n- \nrozwój nowych funkcjonalności systemów wspierających planowanie i zarządzanie kampaniami reklamowymi\n- \nutrzymanie oraz rozbudowa istniejących aplikacji marketingowych\n- \ntworzenie skalowalnych rozwiązań frontendowych i backendowych\n- \nrozwój architektury serverless w środowisku AWS\n- \nwspółpraca z międzynarodowym zespołem produktowym i technologicznym\n- \ndbanie o jakość kodu, automatyzację oraz monitoring aplikacji\n\nCzego możesz się spodziewać:\n\n- \nwspółpracy w oparciu o kontrakt B2B\n- \npracy zdalnej\n- \n🏃‍♀️benefitów: opieka medyczna, karta multisport, lekcje języka angielskiego\n- \n🎉integracji - lubimy spędzać razem czas\n- \nprofesjonalnego procesu rekrutacyjnego – zawsze otrzymasz od nas feedback niezależnie od decyzji\n\nPoznaj nas lepiej👉 https://www.facebook.com/clurgo/",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "sample_fullstack_react_next_screen",
+      "kind": "screen",
+      "note": "sample_jobs/fullstack_react_next.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/clurgo-senior-fullstack-developer-react-node-js--warszawa-javascript\n\nJob Title: Senior Fullstack Developer (React+Node.js))\nCompany: Clurgo\nLocation: Warszawa (remote)\nExperience Level: senior\nSalary: 4365.0–5456.0 CHF B2B\nSalary: 4768.0–5960.0 EUR B2B\nSalary: 4120.0–5150.0 GBP B2B\nSalary: 5608.0–7010.0 USD B2B\nSalary: 20160.0–25200.0 PLN B2B\n\n--- Job Description ---\nClurgo to firma stworzona przez developerów dla developerów. Nasze zespoły łączą pełne spektrum kompetencji - od rozwoju oprogramowania i infrastruktury, przez analizę oraz testy, aż po strategiczne zarządzanie produktem i procesami. Realizujemy różnorodne projekty IT dla klientów z wielu branż, dbając o dobre praktyki programistyczne i zachowanie work-life balance. Tworzymy rozwiązania, które mają znaczenie - dla firm w Polsce i na całym świecie.\n\n✅Projekt skupia się na rozwoju oraz utrzymaniu aplikacji wspierających zarządzanie kampaniami reklamowymi i działania marketingowe w kanałach cyfrowych\n\n✅Technologie i narzędzia: React, Node.js, TypeScript, AWS Lambda, AWS CDK, Terraform, GitHub Actions, Datadog, GitHub Copilot\n\nSzukamy Ciebie, jeśli:\n\n- \nmasz minimum 6 lat doświadczenia komercyjnego jako Software Developer\n- \nposiadasz mocne doświadczenie frontendowe (ok. 80%) z React i TypeScript\n- \nostatnie 2-3 lata pracowałeś/aś w roli Fullstack Developer z przewagą frontendu\n- \nmasz doświadczenie backendowe (Node.js)\n- \npracowałeś/aś z rozwiązaniami serverless w AWS (Lambda, CDK)\n- \nznasz Terraform i rozumiesz Infrastructure as Code\n- \nmasz doświadczenie z CI/CD (GitHub Actions)\n- \npracujesz w metodykach Agile\n- \npotrafisz efektywnie komunikować się w zespole i brać ownership za rozwiązania\n- \nkomunikujesz się w języku angielskim na poziomie minimum B2 (codzienna komunikacja z zespołami z Polski i UK)\n\nMile widziane:\n\n- \ndoświadczenie z Datadog\n- \npraktyczna znajomość GitHub Copilot lub innych AI coding assistants\n- \ndoświadczenie w projektach z obszaru media / digital advertising / streaming\n\nZadania:\n\n- \nrozwój nowych funkcjonalności systemów wspierających planowanie i zarządzanie kampaniami reklamowymi\n- \nutrzymanie oraz rozbudowa istniejących aplikacji marketingowych\n- \ntworzenie skalowalnych rozwiązań frontendowych i backendowych\n- \nrozwój architektury serverless w środowisku AWS\n- \nwspółpraca z międzynarodowym zespołem produktowym i technologicznym\n- \ndbanie o jakość kodu, automatyzację oraz monitoring aplikacji\n\nCzego możesz się spodziewać:\n\n- \nwspółpracy w oparciu o kontrakt B2B\n- \npracy zdalnej\n- \n🏃‍♀️benefitów: opieka medyczna, karta multisport, lekcje języka angielskiego\n- \n🎉integracji - lubimy spędzać razem czas\n- \nprofesjonalnego procesu rekrutacyjnego – zawsze otrzymasz od nas feedback niezależnie od decyzji\n\nPoznaj nas lepiej👉 https://www.facebook.com/clurgo/",
+        "title": "Senior Fullstack Developer (React+Node.js))",
+        "company": "Clurgo"
+      },
+      "verdict": "fullstack role paired with a backend stack"
+    },
+    {
+      "id": "sample_fullstack_react_next_assess",
+      "kind": "assess",
+      "note": "sample_jobs/fullstack_react_next.txt",
+      "input": {
+        "text": "URL: https://justjoin.it/job-offer/clurgo-senior-fullstack-developer-react-node-js--warszawa-javascript\n\nJob Title: Senior Fullstack Developer (React+Node.js))\nCompany: Clurgo\nLocation: Warszawa (remote)\nExperience Level: senior\nSalary: 4365.0–5456.0 CHF B2B\nSalary: 4768.0–5960.0 EUR B2B\nSalary: 4120.0–5150.0 GBP B2B\nSalary: 5608.0–7010.0 USD B2B\nSalary: 20160.0–25200.0 PLN B2B\n\n--- Job Description ---\nClurgo to firma stworzona przez developerów dla developerów. Nasze zespoły łączą pełne spektrum kompetencji - od rozwoju oprogramowania i infrastruktury, przez analizę oraz testy, aż po strategiczne zarządzanie produktem i procesami. Realizujemy różnorodne projekty IT dla klientów z wielu branż, dbając o dobre praktyki programistyczne i zachowanie work-life balance. Tworzymy rozwiązania, które mają znaczenie - dla firm w Polsce i na całym świecie.\n\n✅Projekt skupia się na rozwoju oraz utrzymaniu aplikacji wspierających zarządzanie kampaniami reklamowymi i działania marketingowe w kanałach cyfrowych\n\n✅Technologie i narzędzia: React, Node.js, TypeScript, AWS Lambda, AWS CDK, Terraform, GitHub Actions, Datadog, GitHub Copilot\n\nSzukamy Ciebie, jeśli:\n\n- \nmasz minimum 6 lat doświadczenia komercyjnego jako Software Developer\n- \nposiadasz mocne doświadczenie frontendowe (ok. 80%) z React i TypeScript\n- \nostatnie 2-3 lata pracowałeś/aś w roli Fullstack Developer z przewagą frontendu\n- \nmasz doświadczenie backendowe (Node.js)\n- \npracowałeś/aś z rozwiązaniami serverless w AWS (Lambda, CDK)\n- \nznasz Terraform i rozumiesz Infrastructure as Code\n- \nmasz doświadczenie z CI/CD (GitHub Actions)\n- \npracujesz w metodykach Agile\n- \npotrafisz efektywnie komunikować się w zespole i brać ownership za rozwiązania\n- \nkomunikujesz się w języku angielskim na poziomie minimum B2 (codzienna komunikacja z zespołami z Polski i UK)\n\nMile widziane:\n\n- \ndoświadczenie z Datadog\n- \npraktyczna znajomość GitHub Copilot lub innych AI coding assistants\n- \ndoświadczenie w projektach z obszaru media / digital advertising / streaming\n\nZadania:\n\n- \nrozwój nowych funkcjonalności systemów wspierających planowanie i zarządzanie kampaniami reklamowymi\n- \nutrzymanie oraz rozbudowa istniejących aplikacji marketingowych\n- \ntworzenie skalowalnych rozwiązań frontendowych i backendowych\n- \nrozwój architektury serverless w środowisku AWS\n- \nwspółpraca z międzynarodowym zespołem produktowym i technologicznym\n- \ndbanie o jakość kodu, automatyzację oraz monitoring aplikacji\n\nCzego możesz się spodziewać:\n\n- \nwspółpracy w oparciu o kontrakt B2B\n- \npracy zdalnej\n- \n🏃‍♀️benefitów: opieka medyczna, karta multisport, lekcje języka angielskiego\n- \n🎉integracji - lubimy spędzać razem czas\n- \nprofesjonalnego procesu rekrutacyjnego – zawsze otrzymasz od nas feedback niezależnie od decyzji\n\nPoznaj nas lepiej👉 https://www.facebook.com/clurgo/",
+        "title": "Senior Fullstack Developer (React+Node.js))",
+        "company": "Clurgo"
+      },
+      "verdict": [
+        {
+          "rule": "is_unwanted_fullstack",
+          "severity": "hard",
+          "evidence": "fullstack role paired with a backend stack"
+        },
+        {
+          "rule": "off_domain_title",
+          "severity": "soft",
+          "evidence": "Senior Fullstack Developer (React+Node.js))"
+        }
+      ]
+    },
+    {
+      "id": "sample_react_classify",
+      "kind": "classify",
+      "note": "sample_jobs/react.txt",
+      "input": {
+        "title": "react",
+        "company": "Feedzai",
+        "location": "Remote OK: Portugal",
+        "body": "URL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\n\nSenior Frontend Engineer\nCompany: Feedzai\nURL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\nWork arrangement: remote\nRemote: yes\nLocation: Remote OK: Portugal\nCategory: engineering\nRole: Frontend Engineer\nLevel: senior\nSchedule: summer_fridays\nTags: Web Accessibility, Component Architecture, Service Mindset, WCAG Standards, Semantic HTML, Package Management, TypeScript, React, HTML5, CSS-in-JS, JavaScript ES6+, Jest, Cypress, Storybook, React Testing Library, npm, Chromatic\n\nFeedzai is the world’s first RiskOps platform for financial risk management, and the market leader in safeguarding global commerce with today’s most advanced cloud-based risk management platform, powered by machine learning and artificial intelligence. Feedzai is securing the transition to a cashless world while enabling digital trust in every transaction and payment type. The world’s largest banks, processors, and retailers trust Feedzai to protect trillions of dollars and manage risk while improving the customer experience for everyday users, without compromising privacy. Feedzai is a Series D company and has raised $282M to date. With a valuation of $2 billion, our technology protects 1 billion consumers and 90 billion transactions each year.\n\n**The Engineering (Tech) Team** is responsible for all Feedzai product development. Together with Product Management and Data Science, we build the next generation of tools to catch fraud in real-time with a machine learning first approach. Formed by engineers and managed by engineers, at Feedzai, you will find one of the most talented teams out there, from junior to senior engineers.\n\nWe are fast-paced and provide a safe, open, and collaborative environment that encourages us to lean in, try new things and discover our potential with continuous learning for everyone.\n\nWhile building the best value for our customers, you will work with a wide range of technical challenges. Such as building distributed systems that need to operate 24/7 and ultra-low latencies, solving UI/UX problems to help fraud analysts to fight fraud more efficiently. In addition, designing extensive databases from relational, NoSQL and graphs, validate and develop new data science techniques and algorithms.\n\n**You:** We’re looking for a Frontend Engineer to join the **Escudo team**, the team responsible for maintaining and evolving Feedzai’s Design System. Escudo is the backbone of our user interfaces, ensuring consistency, accessibility and efficiency across our entire product suite.\n\nYour mission goes beyond building features; you will be **building the building blocks**. You will treat the Design System as an internal product, focusing on scalability, adoption, and creating a world-class developer experience for your colleagues, bridging the gap between Design and Engineering.\n\n**The Escudo Team:** The Escudo Team builds the foundation that allows Feedzai to disrupt the financial crime industry with speed and consistency. We view our fellow engineers and designers as our primary customers. By providing a robust, cloud-first, and flexible design system, we enable product teams to focus on solving complex financial risk problems rather than reinventing UI components. Being part of this team means you value precision, empathy for the developer experience, and the power of shared standards. We define how Feedzai looks and feels.\n\n**Your Day to Day:**\n\n- **Architect & Build:** Develop highly reusable, accessible (WCAG), and performant React components that serve as the standard for all Feedzai products.\n- **Bridge Design & Code:** Collaborate closely with Product Designers to translate visual language into code, ensuring pixel-perfect implementation.\n- **Empower Developers:** Write clear, comprehensive documentation (using tools like Storybook) and create tooling that makes it easy for product teams to adopt and use the system.\n- **Quality Assurance:** Be the guardian of frontend standards. Implement rigorous testing strategies (unit and component testing) to ensure zero regressions in the library.\n- **Support & Advocate:** Act as a consultant for product teams, helping them implement complex UI patterns and gathering feedback to iterate on the system.\n- **Strategic Evolution:** Have an active role in decisions regarding the frontend architecture and the long-term roadmap of the Escudo library.\n\n**You Have & You Know-how:**\n\n- BSc/MSc degree in Computer Science, or a similar technical degree.\n- 4+ years of experience in modern JavaScript (ES6+), HTML5, and **advanced CSS** (Flexbox, Grid, CSS-in-JS/Modules).\n- Deep experience with **React** and its ecosystem.\n- **Strong proficiency in TypeScript** (essential for building type-safe libraries).\n- Demonstrated experience **architecting, building, or significantly contributing to a Design System** (not just using one).\n- Solid knowledge of **Web Accessibility standards (WCAG)** and semantic HTML.\n- Experience with testing frameworks (Jest, React Testing Library) and visual regression tools (e.g., Chromatic, Cypress).\n- Experience with **Storybook** or similar documentation platforms.\n- A \"Service Mindset\" or \"Platform Mindset\"—you enjoy helping other developers succeed.\n- Experience with npm package management and release lifecycles is a plus.\n\nThe **Product Team** builds our product to disrupt the financial crime industry from a data-led approach. We partner with our clients using a holistic lens and have result-driven solutions to manage financial risk with a cloud-first platform and a world-class UX interface. Being part of this team, you have a voice in planning, strategizing, and challenging the status quo. Your thoughts and ideas are valued. Our fast-paced and open environment encourages us to lean in, try new things, and  discover our potential. We define and act on what could be in tomorrow's world, not on what is today. **Join Us!**\n\n#LI-Remote #LI-MG3\n\n* * *\n\n**Your First 30-Days at Feedzai:**\n\nYou will be immersed in our brand with training, connections, and one-on-one time with your manager. You may shadow your colleagues virtually or onsite at an office depending on where you work as you are supported through your Feedzai journey. In addition, you will have access to a ton of information to give you history, context, and all the knowledge you can handle about Feedzai and the team. Finally, you will start working on projects and collaborating on work currently being done. We can't wait to have you join the team!\n\n[Life at Feedzai Instagram](https://www.instagram.com/life_at_feedzai/)\n\n[Feedzai Culture](https://careers.feedzai.com/mirabud/2023/10/Codebook.pdf)\n\n* * *\n\n**Feedzai is an Equal Opportunity Employer and we value diversity at our company. We do not discriminate on the basis of race, religion, color, national origin, gender, sexual orientation, age, marital status, veteran status, or disability status.**\n\n**Feedzai does not accept unsolicited resumes from recruiters or employment agencies.**\n\n**Feedzai will use the personal data you provide us with by filling out this form for reviewing your application and to potentially negotiate a contract with you. Your personal data will be retained by Feedzai for 24 months following your application. Please see our Privacy Notice available at https://www.feedzai.com/legal/feedzai-candidate-privacy-policy/ and https://www.feedzai.com/legal/feedzai-california-candidates-privacy-policy/ for more information on how we process your personal data.**",
+        "source": "test"
+      },
+      "verdict": "title_kw"
+    },
+    {
+      "id": "sample_react_screen",
+      "kind": "screen",
+      "note": "sample_jobs/react.txt",
+      "input": {
+        "text": "URL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\n\nSenior Frontend Engineer\nCompany: Feedzai\nURL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\nWork arrangement: remote\nRemote: yes\nLocation: Remote OK: Portugal\nCategory: engineering\nRole: Frontend Engineer\nLevel: senior\nSchedule: summer_fridays\nTags: Web Accessibility, Component Architecture, Service Mindset, WCAG Standards, Semantic HTML, Package Management, TypeScript, React, HTML5, CSS-in-JS, JavaScript ES6+, Jest, Cypress, Storybook, React Testing Library, npm, Chromatic\n\nFeedzai is the world’s first RiskOps platform for financial risk management, and the market leader in safeguarding global commerce with today’s most advanced cloud-based risk management platform, powered by machine learning and artificial intelligence. Feedzai is securing the transition to a cashless world while enabling digital trust in every transaction and payment type. The world’s largest banks, processors, and retailers trust Feedzai to protect trillions of dollars and manage risk while improving the customer experience for everyday users, without compromising privacy. Feedzai is a Series D company and has raised $282M to date. With a valuation of $2 billion, our technology protects 1 billion consumers and 90 billion transactions each year.\n\n**The Engineering (Tech) Team** is responsible for all Feedzai product development. Together with Product Management and Data Science, we build the next generation of tools to catch fraud in real-time with a machine learning first approach. Formed by engineers and managed by engineers, at Feedzai, you will find one of the most talented teams out there, from junior to senior engineers.\n\nWe are fast-paced and provide a safe, open, and collaborative environment that encourages us to lean in, try new things and discover our potential with continuous learning for everyone.\n\nWhile building the best value for our customers, you will work with a wide range of technical challenges. Such as building distributed systems that need to operate 24/7 and ultra-low latencies, solving UI/UX problems to help fraud analysts to fight fraud more efficiently. In addition, designing extensive databases from relational, NoSQL and graphs, validate and develop new data science techniques and algorithms.\n\n**You:** We’re looking for a Frontend Engineer to join the **Escudo team**, the team responsible for maintaining and evolving Feedzai’s Design System. Escudo is the backbone of our user interfaces, ensuring consistency, accessibility and efficiency across our entire product suite.\n\nYour mission goes beyond building features; you will be **building the building blocks**. You will treat the Design System as an internal product, focusing on scalability, adoption, and creating a world-class developer experience for your colleagues, bridging the gap between Design and Engineering.\n\n**The Escudo Team:** The Escudo Team builds the foundation that allows Feedzai to disrupt the financial crime industry with speed and consistency. We view our fellow engineers and designers as our primary customers. By providing a robust, cloud-first, and flexible design system, we enable product teams to focus on solving complex financial risk problems rather than reinventing UI components. Being part of this team means you value precision, empathy for the developer experience, and the power of shared standards. We define how Feedzai looks and feels.\n\n**Your Day to Day:**\n\n- **Architect & Build:** Develop highly reusable, accessible (WCAG), and performant React components that serve as the standard for all Feedzai products.\n- **Bridge Design & Code:** Collaborate closely with Product Designers to translate visual language into code, ensuring pixel-perfect implementation.\n- **Empower Developers:** Write clear, comprehensive documentation (using tools like Storybook) and create tooling that makes it easy for product teams to adopt and use the system.\n- **Quality Assurance:** Be the guardian of frontend standards. Implement rigorous testing strategies (unit and component testing) to ensure zero regressions in the library.\n- **Support & Advocate:** Act as a consultant for product teams, helping them implement complex UI patterns and gathering feedback to iterate on the system.\n- **Strategic Evolution:** Have an active role in decisions regarding the frontend architecture and the long-term roadmap of the Escudo library.\n\n**You Have & You Know-how:**\n\n- BSc/MSc degree in Computer Science, or a similar technical degree.\n- 4+ years of experience in modern JavaScript (ES6+), HTML5, and **advanced CSS** (Flexbox, Grid, CSS-in-JS/Modules).\n- Deep experience with **React** and its ecosystem.\n- **Strong proficiency in TypeScript** (essential for building type-safe libraries).\n- Demonstrated experience **architecting, building, or significantly contributing to a Design System** (not just using one).\n- Solid knowledge of **Web Accessibility standards (WCAG)** and semantic HTML.\n- Experience with testing frameworks (Jest, React Testing Library) and visual regression tools (e.g., Chromatic, Cypress).\n- Experience with **Storybook** or similar documentation platforms.\n- A \"Service Mindset\" or \"Platform Mindset\"—you enjoy helping other developers succeed.\n- Experience with npm package management and release lifecycles is a plus.\n\nThe **Product Team** builds our product to disrupt the financial crime industry from a data-led approach. We partner with our clients using a holistic lens and have result-driven solutions to manage financial risk with a cloud-first platform and a world-class UX interface. Being part of this team, you have a voice in planning, strategizing, and challenging the status quo. Your thoughts and ideas are valued. Our fast-paced and open environment encourages us to lean in, try new things, and  discover our potential. We define and act on what could be in tomorrow's world, not on what is today. **Join Us!**\n\n#LI-Remote #LI-MG3\n\n* * *\n\n**Your First 30-Days at Feedzai:**\n\nYou will be immersed in our brand with training, connections, and one-on-one time with your manager. You may shadow your colleagues virtually or onsite at an office depending on where you work as you are supported through your Feedzai journey. In addition, you will have access to a ton of information to give you history, context, and all the knowledge you can handle about Feedzai and the team. Finally, you will start working on projects and collaborating on work currently being done. We can't wait to have you join the team!\n\n[Life at Feedzai Instagram](https://www.instagram.com/life_at_feedzai/)\n\n[Feedzai Culture](https://careers.feedzai.com/mirabud/2023/10/Codebook.pdf)\n\n* * *\n\n**Feedzai is an Equal Opportunity Employer and we value diversity at our company. We do not discriminate on the basis of race, religion, color, national origin, gender, sexual orientation, age, marital status, veteran status, or disability status.**\n\n**Feedzai does not accept unsolicited resumes from recruiters or employment agencies.**\n\n**Feedzai will use the personal data you provide us with by filling out this form for reviewing your application and to potentially negotiate a contract with you. Your personal data will be retained by Feedzai for 24 months following your application. Please see our Privacy Notice available at https://www.feedzai.com/legal/feedzai-candidate-privacy-policy/ and https://www.feedzai.com/legal/feedzai-california-candidates-privacy-policy/ for more information on how we process your personal data.**",
+        "title": "react",
+        "company": "Feedzai"
+      },
+      "verdict": "react"
+    },
+    {
+      "id": "sample_react_assess",
+      "kind": "assess",
+      "note": "sample_jobs/react.txt",
+      "input": {
+        "text": "URL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\n\nSenior Frontend Engineer\nCompany: Feedzai\nURL: https://4dayweek.io/job/senior-frontend-engineer-at-feedzai-63625e69\nWork arrangement: remote\nRemote: yes\nLocation: Remote OK: Portugal\nCategory: engineering\nRole: Frontend Engineer\nLevel: senior\nSchedule: summer_fridays\nTags: Web Accessibility, Component Architecture, Service Mindset, WCAG Standards, Semantic HTML, Package Management, TypeScript, React, HTML5, CSS-in-JS, JavaScript ES6+, Jest, Cypress, Storybook, React Testing Library, npm, Chromatic\n\nFeedzai is the world’s first RiskOps platform for financial risk management, and the market leader in safeguarding global commerce with today’s most advanced cloud-based risk management platform, powered by machine learning and artificial intelligence. Feedzai is securing the transition to a cashless world while enabling digital trust in every transaction and payment type. The world’s largest banks, processors, and retailers trust Feedzai to protect trillions of dollars and manage risk while improving the customer experience for everyday users, without compromising privacy. Feedzai is a Series D company and has raised $282M to date. With a valuation of $2 billion, our technology protects 1 billion consumers and 90 billion transactions each year.\n\n**The Engineering (Tech) Team** is responsible for all Feedzai product development. Together with Product Management and Data Science, we build the next generation of tools to catch fraud in real-time with a machine learning first approach. Formed by engineers and managed by engineers, at Feedzai, you will find one of the most talented teams out there, from junior to senior engineers.\n\nWe are fast-paced and provide a safe, open, and collaborative environment that encourages us to lean in, try new things and discover our potential with continuous learning for everyone.\n\nWhile building the best value for our customers, you will work with a wide range of technical challenges. Such as building distributed systems that need to operate 24/7 and ultra-low latencies, solving UI/UX problems to help fraud analysts to fight fraud more efficiently. In addition, designing extensive databases from relational, NoSQL and graphs, validate and develop new data science techniques and algorithms.\n\n**You:** We’re looking for a Frontend Engineer to join the **Escudo team**, the team responsible for maintaining and evolving Feedzai’s Design System. Escudo is the backbone of our user interfaces, ensuring consistency, accessibility and efficiency across our entire product suite.\n\nYour mission goes beyond building features; you will be **building the building blocks**. You will treat the Design System as an internal product, focusing on scalability, adoption, and creating a world-class developer experience for your colleagues, bridging the gap between Design and Engineering.\n\n**The Escudo Team:** The Escudo Team builds the foundation that allows Feedzai to disrupt the financial crime industry with speed and consistency. We view our fellow engineers and designers as our primary customers. By providing a robust, cloud-first, and flexible design system, we enable product teams to focus on solving complex financial risk problems rather than reinventing UI components. Being part of this team means you value precision, empathy for the developer experience, and the power of shared standards. We define how Feedzai looks and feels.\n\n**Your Day to Day:**\n\n- **Architect & Build:** Develop highly reusable, accessible (WCAG), and performant React components that serve as the standard for all Feedzai products.\n- **Bridge Design & Code:** Collaborate closely with Product Designers to translate visual language into code, ensuring pixel-perfect implementation.\n- **Empower Developers:** Write clear, comprehensive documentation (using tools like Storybook) and create tooling that makes it easy for product teams to adopt and use the system.\n- **Quality Assurance:** Be the guardian of frontend standards. Implement rigorous testing strategies (unit and component testing) to ensure zero regressions in the library.\n- **Support & Advocate:** Act as a consultant for product teams, helping them implement complex UI patterns and gathering feedback to iterate on the system.\n- **Strategic Evolution:** Have an active role in decisions regarding the frontend architecture and the long-term roadmap of the Escudo library.\n\n**You Have & You Know-how:**\n\n- BSc/MSc degree in Computer Science, or a similar technical degree.\n- 4+ years of experience in modern JavaScript (ES6+), HTML5, and **advanced CSS** (Flexbox, Grid, CSS-in-JS/Modules).\n- Deep experience with **React** and its ecosystem.\n- **Strong proficiency in TypeScript** (essential for building type-safe libraries).\n- Demonstrated experience **architecting, building, or significantly contributing to a Design System** (not just using one).\n- Solid knowledge of **Web Accessibility standards (WCAG)** and semantic HTML.\n- Experience with testing frameworks (Jest, React Testing Library) and visual regression tools (e.g., Chromatic, Cypress).\n- Experience with **Storybook** or similar documentation platforms.\n- A \"Service Mindset\" or \"Platform Mindset\"—you enjoy helping other developers succeed.\n- Experience with npm package management and release lifecycles is a plus.\n\nThe **Product Team** builds our product to disrupt the financial crime industry from a data-led approach. We partner with our clients using a holistic lens and have result-driven solutions to manage financial risk with a cloud-first platform and a world-class UX interface. Being part of this team, you have a voice in planning, strategizing, and challenging the status quo. Your thoughts and ideas are valued. Our fast-paced and open environment encourages us to lean in, try new things, and  discover our potential. We define and act on what could be in tomorrow's world, not on what is today. **Join Us!**\n\n#LI-Remote #LI-MG3\n\n* * *\n\n**Your First 30-Days at Feedzai:**\n\nYou will be immersed in our brand with training, connections, and one-on-one time with your manager. You may shadow your colleagues virtually or onsite at an office depending on where you work as you are supported through your Feedzai journey. In addition, you will have access to a ton of information to give you history, context, and all the knowledge you can handle about Feedzai and the team. Finally, you will start working on projects and collaborating on work currently being done. We can't wait to have you join the team!\n\n[Life at Feedzai Instagram](https://www.instagram.com/life_at_feedzai/)\n\n[Feedzai Culture](https://careers.feedzai.com/mirabud/2023/10/Codebook.pdf)\n\n* * *\n\n**Feedzai is an Equal Opportunity Employer and we value diversity at our company. We do not discriminate on the basis of race, religion, color, national origin, gender, sexual orientation, age, marital status, veteran status, or disability status.**\n\n**Feedzai does not accept unsolicited resumes from recruiters or employment agencies.**\n\n**Feedzai will use the personal data you provide us with by filling out this form for reviewing your application and to potentially negotiate a contract with you. Your personal data will be retained by Feedzai for 24 months following your application. Please see our Privacy Notice available at https://www.feedzai.com/legal/feedzai-candidate-privacy-policy/ and https://www.feedzai.com/legal/feedzai-california-candidates-privacy-policy/ for more information on how we process your personal data.**",
+        "title": "react",
+        "company": "Feedzai"
+      },
+      "verdict": [
+        {
+          "rule": "off_domain_title",
+          "severity": "soft",
+          "evidence": "react"
+        }
+      ]
+    }
+  ]
+}
