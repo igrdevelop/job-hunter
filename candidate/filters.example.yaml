@@ -1,0 +1,192 @@
+# filters.example.yaml — copy to filters.yaml next to candidate.yaml
+# (or users/{uid}/candidate/filters.yaml once multi-user B3.5 is live).
+#
+# Docs: docs/FILTERS_YAML_PLAN.md
+# Every key below is optional — omit a key to keep the shared Layer-1 default.
+# Missing file entirely = today's owner behavior byte-for-byte.
+#
+# Merge strategies:
+#   replace  — your value fully replaces the default (most keys)
+#   extend   — you can only ADD entries (exclude_companies, extra_anti_hybrid_cities)
+#
+# Derived (NOT set here — come from candidate.yaml):
+#   locations = remote/zdalnie + location.home_city_aliases
+#
+# Legacy aliases still accepted if you prefer them:
+#   require_angular: true  -> require_title_terms: [angular]
+#   exclude_react_without_angular: false -> exclude_stacks_without: null
+#
+# After editing: the next /hunt picks the change up (mtime cache). No deploy.
+#
+# --- defaults below match hunter.filter_profile.builtin_defaults() ---
+
+title_keywords:
+- angular
+- frontend
+- front-end
+- javascript
+- typescript
+require_title_terms: []
+exclude_levels:
+- junior
+- intern
+- internship
+- trainee
+- stażysta
+- praktykant
+- staz
+- tech lead
+- tech-lead
+- techlead
+- техлид
+- тех-лид
+- тех лид
+- технический лид
+- team lead
+- teamlead
+- team-lead
+- тимлид
+- тим-лид
+- тим лид
+- стажер
+- стажёр
+- стажиров
+- project lead
+- engineering manager
+- head of engineering
+- vp of engineering
+- cto
+- part-time
+- part time
+- parttime
+exclude_patterns:
+- \bjava\b
+- \.net
+- \bc#
+- \bphp\b
+- \bqa\b
+- \bsdet\b
+- quality\s+assurance
+- test\s+automation
+- \bbackend\b
+- \bback-end\b
+- \bvue\b
+- \bnuxt\b
+- \bmagento\b
+- \bruby\b
+- \breact\s+native\b
+- \breact[- ]native\b
+- \bhyv[äa]\b
+- \badobe\s+commerce\b
+- \bpwa\s+studio\b
+- \bshopware\b
+- \bshopify\b
+- \bbigcommerce\b
+- \bwoocommerce\b
+- \bdrupal\b
+- \bwordpress\b
+- \bsharepoint\b
+- \bsap\b
+- \bsalesforce\b
+- \bdevops\b
+- \bdev-ops\b
+- \bsre\b
+- \bplatform\s+engineer\b
+- \bcloud\s+engineer\b
+- \binfrastructure\s+engineer\b
+- \bandroid\b
+- \bios\s+developer\b
+- \bswift\s+developer\b
+- \bkotlin\s+developer\b
+- \bflutter\b
+- \bautomation\s+engineer\b
+- \btesting\s+engineer\b
+- \btech\s+lead\b
+- \bproject\s+lead\b
+- \bpart[- ]?time\b
+- \bmendix\b
+- \boutsystems\b
+- \blow[-\s]?code\b
+- \bemail\s+developer\b
+- \bui\s+designer\b
+- \bai\s+train(?:ing|er)\b
+- \bai\s+tutor\b
+- \bdata\s+annotat\w*\b
+- \bdata\s+label(?:l)?ing\b
+exclude_stacks_without:
+  unless: angular
+  block:
+  - react
+exclude_fullstack_with_backend: true
+fullstack_backend_stacks:
+- \bjava\b
+- \bspring(?:\s+boot)?\b
+- \.net\b
+- \basp\.net\b
+- \bc#
+- \bpython\b
+- \bdjango\b
+- \bgolang\b
+- \bphp\b
+- \bruby\s+on\s+rails\b
+exclude_body_disqualifiers: true
+body_exclude_patterns:
+- \bblazor\b
+- \bmendix\b
+- \boutsystems\b
+- \blow[-\s]?code\b
+- \bwordpress\b
+- \bdrupal\b
+- \bmagento\b
+- \bsharepoint\b
+exclude_body_onsite_city: true
+allow_low_frequency_hybrid: true
+exclude_ai_training: true
+exclude_companies:
+- micro1
+- alignerr
+- quikhire
+- hirefeed
+- mercor
+- outlier ai
+exclude_german_language_required: true
+exclude_unacceptable_contract: true
+exclude_relocation_required: true
+extra_anti_hybrid_cities:
+- helsinki
+- helsingfors
+- barcelona
+- madrid
+- lisbon
+- lisboa
+- berlin
+- munich
+- münchen
+- hamburg
+- frankfurt
+- amsterdam
+- rotterdam
+- prague
+- brno
+- bratislava
+- budapest
+- bucharest
+- sofia
+- zagreb
+- limassol
+- nicosia
+- larnaca
+- larnaka
+- paphos
+- pafos
+- islamabad
+- karachi
+- lahore
+- bangalore
+- mumbai
+- delhi
+- singapore
+- dubai
+- abu dhabi
+- hong kong
+- tokyo

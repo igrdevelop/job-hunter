@@ -15,7 +15,10 @@ def _resolve_flt(flt: Mapping[str, Any] | None) -> Mapping[str, Any]:
     """Resolve the filter profile at call time (not def time).
 
     Default-arg ``flt=FILTER`` would freeze the module object and break tests
-    that monkeypatch ``filters.FILTER``. ``None`` → live ``FILTER``.
+    that monkeypatch ``filters.FILTER`` (setattr or setitem). ``None`` → live
+    ``FILTER``. The hunt loop refreshes ``FILTER`` from ``load_profile()`` at
+    the start of each cycle so ``candidate/filters.yaml`` edits apply without
+    a bot restart (M3).
     """
     return FILTER if flt is None else flt
 

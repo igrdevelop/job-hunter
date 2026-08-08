@@ -223,7 +223,11 @@ async def _run_hunt_impl(
         )
 
     # ── Step 2: Filter ───────────────────────────────────────────────────────
-    filtered, filter_reasons = apply_filters_with_stats(all_jobs)
+    # Reload filters.yaml each hunt so edits apply without a bot restart
+    # (docs/FILTERS_YAML_PLAN.md M3 — mtime-keyed load_profile cache).
+    from hunter.filter_profile import load_profile
+
+    filtered, filter_reasons = apply_filters_with_stats(all_jobs, flt=load_profile())
     filtered_out = len(all_jobs) - len(filtered)
     logger.info(f"[Hunt] After filter: {len(filtered)} jobs")
 

@@ -391,7 +391,12 @@ def _resolve_path(path: str | Path | None) -> Path | None:
     env = os.environ.get("FILTERS_YAML_PATH")
     if env:
         return Path(env)
-    return None
+    # Single-user default: filters.yaml next to candidate.yaml (M3).
+    # M4 will pass an explicit per-user path via users.user_paths().
+    cand_env = os.environ.get("CANDIDATE_YAML_PATH")
+    if cand_env:
+        return Path(cand_env).expanduser().resolve().parent / "filters.yaml"
+    return Path(__file__).resolve().parent.parent / "candidate" / "filters.yaml"
 
 
 def _home_city_aliases() -> set[str]:

@@ -1,6 +1,6 @@
 # FILTERS_YAML Plan — per-user job-filter settings as data files
 
-**Status:** M1+M2 done (2026-08-08); M3–M5 pending
+**Status:** M1–M3 done (2026-08-08); M4–M5 pending
 **Date:** 2026-08-08
 **Motivation:** owner request (chat, 2026-08-08): "надо бы вынести это в отдельные
 файлы с настройками, чтобы потом другие люди могли свои настройки юзать".
@@ -248,7 +248,7 @@ Problem — they become part of M2's scope.
   tested; one test proves a non-default `flt` flips a classify_job verdict
   (mutation-verify).
 
-## M3 — User file template + docs (one commit)
+## M3 — User file template + docs (one commit) ✅ done 2026-08-08
 
 - `candidate/filters.example.yaml` (tracked): every personal knob, today's
   default value, calibration comments carried over.

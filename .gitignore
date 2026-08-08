@@ -98,8 +98,10 @@ tracker_broken.xlsx
 candidate/candidate.yaml
 candidate/candidate_profile.md
 candidate/base_cv_*.md
+candidate/filters.yaml
 !candidate/*.example.md
 !candidate/*.example
+!candidate/filters.example.yaml
 
 # Private interview notes (not read by code)
 candidate/notes/
