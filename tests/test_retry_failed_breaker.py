@@ -23,6 +23,7 @@ def _wire(monkeypatch, jobs, outcomes):
     monkeypatch.setattr(main, "get_failed_jobs", lambda: list(jobs))
     monkeypatch.setattr(main, "increment_fail_count", lambda url: 1)
     monkeypatch.setattr(main, "remove_failed", lambda url: None)
+    monkeypatch.setattr(main, "classify_retry_outcome", lambda url: "applied")
     monkeypatch.setattr(main, "APPLY_DELAY_SEC", 0)
     monkeypatch.setattr(main, "send_text", AsyncMock())
     monkeypatch.setattr(main, "_deliver_now", AsyncMock())

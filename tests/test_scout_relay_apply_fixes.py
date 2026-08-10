@@ -77,7 +77,11 @@ def test_marker_stays_consistent_with_relay_url_prefix() -> None:
     assert SCOUT_POSTS_URL_MARKER in URL_PREFIX
 
 
-# ── #143: apply_api wiring (Step 1.5a) ────────────────────────────────────────
+# ── #143: apply_api wiring (length gate, Step 1.5b since the 2026-08-10 reorder) ──
+
+
+class _PassedLengthGate(Exception):
+    """Sentinel raised from Step 1.5c — the first stage AFTER the length gate."""
 
 
 def _run_main_api(url: str, paste_text: str):
@@ -86,16 +90,23 @@ def _run_main_api(url: str, paste_text: str):
     with (
         patch("hunter.apply_api._already_processed", return_value=False),
         patch("hunter.apply_api.notify"),
-        patch("hunter.expired_check.is_job_expired", return_value=True),
-        patch("hunter.tracker.add_expired"),
+        # The expired check runs BEFORE the length gate now (deleted postings
+        # arrive as a short synthetic marker) — keep it quiet so these tests
+        # still probe the length gate itself.
+        patch("hunter.expired_check.is_job_expired", return_value=False),
+        # Sentinel at Step 1.5c (react-only text check) — reaching it proves
+        # the text cleared the length gate.
+        patch("hunter.apply_api.is_react_only_job_text", side_effect=_PassedLengthGate),
+        patch("hunter.filters._react_track_active", return_value=False),
     ):
-        return main_api(url, paste_text=paste_text, skip_dedup=True)
+        return main_api(url, paste_text=paste_text)
 
 
 def test_apply_api_short_scout_paste_passes_length_gate() -> None:
-    """A short scout post must clear Step 1.5a and reach the expired check
-    (patched to True → main_api returns None instead of sys.exit at 1.5a)."""
-    assert _run_main_api(SCOUT_URL, SHORT_POST) is None
+    """A short scout post must clear the length gate (lower scout floor) and
+    reach the next pipeline stage (the sentinel)."""
+    with pytest.raises(_PassedLengthGate):
+        _run_main_api(SCOUT_URL, SHORT_POST)
 
 
 def test_apply_api_short_text_on_normal_url_still_aborts() -> None:

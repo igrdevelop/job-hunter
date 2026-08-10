@@ -243,7 +243,26 @@ def _run_main_api(
             print(f"[apply_agent] FETCH ERROR: {e}")
             sys.exit(1)
 
-    # Step 1.5a — Abort if fetched text is too short. Scout relay posts get a
+    # Step 1.5a — Check for expired offer. MUST run before the too-short
+    # abort: deleted postings are often served as a short synthetic marker
+    # ("This job posting has expired." — 29 chars, findmyremote / Lever /
+    # thesmartjobs fetchers), and with the length floor first that marker
+    # never reached this check, so the clean $0 EXPIRED skip never happened
+    # (retry log 2026-08-10: four dead postings reported as "too short").
+    from hunter.expired_check import is_job_expired
+
+    if is_job_expired(job_text):
+        notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
+        print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
+        try:
+            from hunter.tracker import add_expired
+
+            add_expired(url)
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+        return
+
+    # Step 1.5b — Abort if fetched text is too short. Scout relay posts get a
     # lower floor: a real LinkedIn hiring post is often <300 chars and already
     # passed is_hiring_post() heuristics (min_job_text_len_for dispatches on
     # the synthetic scout URL).
@@ -259,20 +278,6 @@ def _run_main_api(
             f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}"
         )
         sys.exit(0)
-
-    # Step 1.5b — Check for expired offer
-    from hunter.expired_check import is_job_expired
-
-    if is_job_expired(job_text):
-        notify(f"⏭ <b>Expired — skipped</b>\n🔗 {url}")
-        print(f"[apply_agent] EXPIRED — offer no longer active: {url}")
-        try:
-            from hunter.tracker import add_expired
-
-            add_expired(url)
-        except Exception as e:
-            print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
-        return
 
     # Step 1.5c — Pre-LLM React-only text check (saves LLM call for obvious React jobs)
     # Skip only when skip_dedup is False (force mode bypasses all stack filters)

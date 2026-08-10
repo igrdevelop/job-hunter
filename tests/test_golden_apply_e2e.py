@@ -351,7 +351,6 @@ def test_golden_expired_job_no_llm_call(golden_env, fake_llm, monkeypatch):
         "this job posting has expired. This position is no longer accepting applications. "
         "The offer has been closed and is no longer active. Thank you for your interest."
     )
-    assert len(expired_text) >= 300, "must clear MIN_JOB_TEXT_LEN or Step 1.5a fires first"
     monkeypatch.setattr(
         "hunter.sources.fetch_job_text", lambda url, **_kw: expired_text, raising=False
     )
@@ -370,6 +369,35 @@ def test_golden_expired_job_no_llm_call(golden_env, fake_llm, monkeypatch):
     assert rows
     assert rows[0]["sent"].strip().upper() == "EXPIRED"
     assert any("Expired" in n for n in golden_env.notifications)
+
+
+def test_golden_short_expired_marker_writes_expired(golden_env, fake_llm, monkeypatch):
+    """A deleted posting served as the short synthetic marker (29 chars —
+    findmyremote/Lever/thesmartjobs fetchers) must reach the expired check
+    and write an EXPIRED row. The too-short abort (min 300 chars) used to
+    run FIRST and swallow the marker, so the pipeline exited 0 with no
+    tracker write at all (retry log 2026-08-10)."""
+    from hunter.sources.findmyremote import _EXPIRED_TEXT
+
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: _EXPIRED_TEXT, raising=False
+    )
+
+    from hunter.apply_api import main_api
+
+    url = "https://jobs.lever.co/jobgether/deleted-posting"
+    result = main_api(url)
+
+    assert result is None
+    assert fake_llm.calls == [], "a deleted posting must never reach the LLM"
+
+    from hunter import tracker
+
+    rows = tracker.lookup_url(url)
+    assert rows, "expected an EXPIRED tracker row for the deleted posting"
+    assert rows[0]["sent"].strip().upper() == "EXPIRED"
+    assert any("Expired" in n for n in golden_env.notifications)
+    assert not any("too short" in n for n in golden_env.notifications)
 
 
 # ── Negative path: doomed-gate HARD finding — SKIP row, no LLM call ─────────

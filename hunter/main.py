@@ -41,6 +41,7 @@ from hunter.tracker import (
     normalize_url,
     add_failed,
     add_pending,
+    classify_retry_outcome,
     get_failed_jobs,
     remove_failed,
     increment_fail_count,
@@ -620,6 +621,8 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     ok = 0
     manual = 0
+    expired_n = 0
+    skipped_n = 0
     consecutive_fails = 0
     processed = 0
     for i, job in enumerate(capped, 1):
@@ -631,11 +634,48 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         outcome = await _run_apply_agent(job)
         if outcome == "ok":
-            ok += 1
+            # Exit 0 ≠ applied: the pipeline also exits 0 for EXPIRED, a
+            # doomed-gate SKIP and the too-short abort — look at what it
+            # actually wrote before celebrating (2026-08-10: six dead
+            # postings reported as "Retry OK" and their FAIL rows deleted
+            # without any terminal marker left behind).
+            resolution = await asyncio.to_thread(classify_retry_outcome, job.url)
             consecutive_fails = 0
-            await asyncio.to_thread(remove_failed, job.url)
-            await _deliver_now(job.url)
-            await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
+            if resolution == "applied":
+                ok += 1
+                await asyncio.to_thread(remove_failed, job.url)
+                await _deliver_now(job.url)
+                await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
+            elif resolution == "expired":
+                # add_expired converted the FAIL row to SKIP/EXPIRED in
+                # place — nothing to remove, dedup memory kept.
+                expired_n += 1
+                await send_text(
+                    context,
+                    f"⏭ Retry → EXPIRED: {job.company} — {job.title} "
+                    "(offer is dead — won't retry).",
+                )
+            elif resolution == "skipped":
+                skipped_n += 1
+                await send_text(
+                    context,
+                    f"⏭ Retry → SKIP: {job.company} — {job.title} (gate skip — won't retry).",
+                )
+            else:
+                # "noop" — the pipeline exited 0 without writing anything
+                # (e.g. genuinely-too-short fetched text). The FAIL row is
+                # still there; escalate its count so it eventually gives up
+                # instead of retrying forever.
+                new_count = await asyncio.to_thread(increment_fail_count, job.url)
+                suffix = (
+                    " — giving up (won't retry again)."
+                    if new_count >= MAX_FAIL_RETRIES
+                    else f" — will retry ({new_count}/{MAX_FAIL_RETRIES})."
+                )
+                await send_text(
+                    context,
+                    f"⚠️ Retry skipped without result: {job.company} — {job.title}{suffix}",
+                )
         elif outcome == "manual":
             manual += 1
             consecutive_fails = 0
@@ -743,10 +783,11 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
         if APPLY_DELAY_SEC > 0:
             await asyncio.sleep(APPLY_DELAY_SEC)
 
-    still_failed = processed - ok - manual
+    still_failed = processed - ok - manual - expired_n - skipped_n
     await send_text(
         context,
-        f"🔄 <b>Retry done</b>: ✅ {ok} fixed / 📋 {manual} manual / ❌ {still_failed} still failing",
+        f"🔄 <b>Retry done</b>: ✅ {ok} fixed / 📋 {manual} manual / "
+        f"⏭ {expired_n + skipped_n} expired/skipped / ❌ {still_failed} still failing",
     )
 
 

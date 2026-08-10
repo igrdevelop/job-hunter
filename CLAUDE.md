@@ -302,7 +302,19 @@ hunter/
                             `expired_marker` + Sheets/Drive sync) all exclude PENDING/
                             IN_PROGRESS — a queued-but-not-yet-applied job isn't a real
                             application yet and must stay invisible to every downstream
-                            consumer until the worker resolves it
+                            consumer until the worker resolves it.
+                            Retry-vs-dead-postings (2026-08-10): `_convert_own_fail_row`
+                            lets add_expired/add_skipped CONVERT this user's live FAIL row
+                            to SKIP/EXPIRED (resp. SKIP/'—') in place — same id/sheets_row,
+                            sheets_dirty=1 — instead of no-op'ing via _is_known_terminal;
+                            add_applied deletes the user's own FAIL/SKIP/blank row before
+                            its INSERT (the unique (user_id, url_norm) index otherwise made
+                            a successful RETRY crash at the tracker write with
+                            IntegrityError); `classify_retry_outcome(url)` tells the retry
+                            loop what an exit-0 subprocess actually wrote
+                            ("applied"/"expired"/"skipped"/"noop") — see hunter/main.py
+                            _retry_failed, which no longer reports "Retry OK" for a dead
+                            posting and escalates fail_count on a no-write exit 0
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
   lang_guard.py             Language routing + contamination guard: detect_posting_language()
@@ -857,7 +869,13 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
 1. `sources.fetch_job_text(url, use_session=True)` — fetch full job description
    (LinkedIn uses Playwright + `LINKEDIN_STORAGE_STATE` so expired markers are visible)
 2. Save `job_posting.txt` to output folder
-3. `expired_check.is_job_expired(text)` — skip if expired
+3. `expired_check.is_job_expired(text)` — skip if expired. Runs BEFORE the
+   too-short abort (Step 1.5a vs 1.5b since 2026-08-10): deleted postings are
+   often served as a short synthetic marker ("This job posting has expired.",
+   29 chars — findmyremote/Lever/thesmartjobs fetchers), and the old order let
+   the 300-char floor swallow the marker, so the clean $0 EXPIRED skip never
+   happened. An existing FAIL row for the same URL is converted in place to
+   SKIP/EXPIRED (`tracker._convert_own_fail_row`), not silently dropped.
 3a. **Manual-apply "warn but allow" screen** (`filters.screen_job_text`, Step 1.5e):
    re-runs the listing-level body gates against the fetched full text and warns
    (never blocks) if a manually-pasted URL would normally have been filtered —
@@ -1682,8 +1700,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-10 | fable | **Retry loop vs dead postings** (owner report: "6 jobs → 6× ✅ Retry OK", all links dead). Four fixes: (1) apply_api expired check moved BEFORE the too-short abort — the 29-char synthetic deleted-posting marker ("This job posting has expired.", findmyremote/Lever/thesmartjobs) was swallowed by the 300-char floor, so the designed $0 EXPIRED skip never fired; (2) `tracker._convert_own_fail_row`: add_expired/add_skipped convert a live FAIL row for the same URL in place (same id, sheets_dirty=1) instead of no-op'ing via `_is_known_terminal`; (3) `tracker.classify_retry_outcome(url)` — `_retry_failed` no longer treats exit 0 as success: applied/expired/skipped/noop branches, honest Telegram messages, noop escalates fail_count, FAIL rows no longer deleted for non-applies; (4) latent B1 bug — add_applied's bare INSERT hit the unique (user_id,url_norm) index whenever a FAIL row was still live (every successful RETRY crashed at the tracker write after rendering docs); it now deletes the user's own FAIL/SKIP/blank row in-transaction. 13 new tests + golden short-marker E2E (2 mutation-verified); scout-relay/cli_timeout/breaker tests updated. Full detail in docs/AGENT_LOG.md. |
 | 2026-08-10 | fable | **ATS verdict drop under CLI subscription — model pinning + 5 refine rounds** (owner report: ATS % fell since prod moved onto the `claude -p` outage fallback ~2026-08-07; live DB: CLI-served verdicts avg 86.3 vs 89.2 API, outliers to 42). Root cause: `llm_client._call_cli_fallback` passed no `--model`, so the verdict judge stopped being Haiku (scale shift) and refine rewrites left the profile model. Fixes: fallback now pins `--model <requested>` (one unpinned retry if the subscription rejects it; none on missing binary/timeout/garbage output; dual-shadow exclusion untouched); `ATS_VERDICT_MAX_REFINES` 3→5 + `STRETCH_FROM_ROUND` 3→4 (rounds 1–3 honest, 4–5 stretch — subscription rounds ~free); timeouts raised across the CLI chain (owner: "время есть"): per-call 300→600, CLI generation attempt 600→1200, `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700→10800, `DUAL_SHADOW_TIMEOUT_SEC` 1800→3600. Keyless `apply_cli` refine skip deliberately untouched (not the active mode). 2 mutation-verified regression tests (`--model` pinning; three-round-never-stretches) + retry-matrix tests; full detail in docs/AGENT_LOG.md. |
 | 2026-08-08 | grok | **FILTERS_YAML M3 — filters.example.yaml + docs** (docs/FILTERS_YAML_PLAN.md). Tracked `candidate/filters.example.yaml` (regen via `tools/gen_filters_example.py`); `candidate/filters.yaml` gitignored. SETUP_NEW_USER + candidate/README sections. Default path for `load_profile()` is `candidate/filters.yaml` (or next to `CANDIDATE_YAML_PATH`); hunt loop passes `flt=load_profile()` into `apply_filters_with_stats` so edit+`/hunt` works without restart. |
 | 2026-08-08 | grok | **FILTERS_YAML M2 — thread flt + generalizations** (docs/FILTERS_YAML_PLAN.md). `classify_job` / `apply_filters(_with_stats)` / `screen_job_text` / `assess_job_text` + helpers take optional `flt=` (runtime `_resolve_flt`, monkeypatch-safe). `_anti_hybrid_cities(flt)` cached per extras tuple; module `_ANTI_HYBRID_CITIES` kept for test imports. `require_title_terms` / `exclude_stacks_without` are canonical; loader honors legacy `require_angular` / `exclude_react_without_angular` and syncs both shapes. React-track gating preserved. 5 new tests (`test_filter_profile_m2.py`); non-default-flt verdict flip mutation-verified. Existing filter suite unchanged/green. |
 | 2026-08-08 | grok | **FILTERS_YAML M1 — loader + builtin profile** (docs/FILTERS_YAML_PLAN.md; branch feat/filters-yaml). Moved today's FILTER dict (+ WHY-comments) into `hunter/filter_profile.builtin_defaults()`; `filter_config.py` is now a shim `FILTER = load_profile()`. `load_profile(path=None)` deep-copies Layer 1, merges user YAML (replace / extend_only), caches by `(resolved path, mtime_ns)`, validates regex patterns (drop+warn), ignores unknown keys, carves home-city aliases out of `extra_anti_hybrid_cities`. Quality guards (frozen BEFORE the move): `builtin_expected.json` dict equality + `golden_verdicts.json` classify/screen/assess parity over sample_jobs + synthetic rule-family cases; equality test mutation-verified (`require_angular` flip). 13 new tests. M2 (thread profile through filters.py / generalize keys) not in this commit. |
-| 2026-08-08 | fable | **Sent-notes audit → filter hardening** (owner-approved scope from an analysis of the last 600 tracker rows — 250 non-date Sent notes categorized; fullstack #188 and ai_mill confirmed already closed, 0 new cases after their fix dates). (1) Low-frequency-hybrid exception broadened: `allow_low_frequency_hybrid` (renamed from `allow_weekly_hybrid_warsaw_krakow`) now keeps a hybrid role in ANY Polish city when office visits are ~once a week or LESS (twice a month, monthly, quarterly, occasional — `filters._LOW_FREQ_HYBRID_RES`, EN+PL); body frequency phrasing wins over a bare "hybrid" header. (2) New doomed-gate HARD `pl_onsite_or_frequent_hybrid`: ≥2-days/week phrasing (windowless) or strict on-site wording near a PL anti-hybrid city; bare hybrid+city stays SOFT (M4). PL city set: +Opole/Kielce/Olsztyn/Częstochowa/Gliwice/… + locative declensions ("w Warszawie/Opolu" — nominatives are substring-matched and missed these). (3) RU market: Moscow/SPb tokens at listing level, city location-tags + ruble-salary patterns in `_RUSSIA_MARKET_RES`, RU intern titles (стажер) in exclude_levels. (4) New doomed-gate HARD `foreign_stack_no_angular`: PHP/WordPress/.NET/Blazor/Mendix/… with neither Angular nor React anywhere; optional-context guard; C# deliberately excluded (game-dev SOFT rule owns it — full-suite run caught that collision). (5) exclude_levels += team lead/тимлид variants. `linkedin_scout/location_gate.py` re-synced. 24 new tests (tests/test_filters_sent_audit_2026_08.py); full suite green. Owner explicitly REJECTED: fuzzy company+title listing dedup and former-employer skip (repost-gate misses stay as-is). |
