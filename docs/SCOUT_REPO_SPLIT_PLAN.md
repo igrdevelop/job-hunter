@@ -179,21 +179,25 @@ drift silently. Mitigation, done in Phase 0 while still atomic:
       confirm the bot logs `/scoutfound` receipt and the next hunt cycle drains
       the queue.
 
-### Phase 3 — cleanup in this repo (1 PR, only after Phase 2 verified)
-- [ ] Delete `linkedin_scout/`, the 7 scout test files,
+### Phase 3 — cleanup in this repo (1 PR, only after Phase 2 verified) — DONE 2026-08-11
+
+Phases 1-2 were completed by the owner (private repo `igrdevelop/linkedin-scout`
+exists, desktop Task Scheduler runs it since ~2026-07-08, runtime state carried
+over). Phase 3 verified against that live setup and executed 2026-08-11:
+- [x] Delete `linkedin_scout/`, the 7 scout test files,
       `tests/fixtures/linkedin_scout/`, `tools/telegram_user_login.py`.
-- [ ] Remove `telethon` from requirements **iff** nothing else imports it
+- [x] Remove `telethon` from requirements **iff** nothing else imports it
       (`grep -r telethon hunter/ tools/ tests/`).
-- [ ] `.env.example`: drop scout-only vars (`LINKEDIN_SCOUT_KEYWORDS`,
+- [x] `.env.example`: drop scout-only vars (`LINKEDIN_SCOUT_KEYWORDS`,
       `TELEGRAM_API_ID/HASH/USER_SESSION/BOT_USERNAME`, skip/jitter); **keep**
       `LINKEDIN_STORAGE_STATE` (the bot's own LinkedIn fetches use it).
-- [ ] CLAUDE.md: replace the "LinkedIn Posts Scout" section with a short
+- [x] CLAUDE.md: replace the "LinkedIn Posts Scout" section with a short
       "external private component" paragraph (repo link, payload contract v1,
       pointer to the golden fixture); keep the relay-source rows in the source
       table / config table; fix the stale `docs/LINKEDIN_POSTS_SCOUT_TASK.md`
       references (that file does not exist in this repo — referenced from
       CLAUDE.md and `heuristics.py`'s docstring but never committed).
-- [ ] `pytest`, `ruff check .`, `compileall` — relay/scoutfound/contract tests
+- [x] `pytest`, `ruff check .`, `compileall` — relay/scoutfound/contract tests
       must still pass untouched.
 
 ### Phase 4 (optional) — history scrub

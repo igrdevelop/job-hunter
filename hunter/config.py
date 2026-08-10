@@ -495,11 +495,12 @@ ATS_AGGREGATOR_ENABLED: bool = os.getenv("ATS_AGGREGATOR_ENABLED", "true").lower
     "yes",
 )
 
-# ── LinkedIn Scout relay (standalone linkedin_scout/ script -> bot pipeline) ──
-# Drains linkedin_scout/pending_candidates.json (written by the standalone
-# scout script on its own Windows Task Scheduler cadence) into normal Job
-# cards on the bot's own hunt schedule. No scraping happens here — see
-# hunter/sources/linkedin_scout_relay.py + linkedin_scout/README.md.
+# ── LinkedIn Scout relay (standalone scout, external private repo -> bot) ──
+# Drains the pending-candidates queue file (fed by /scoutfound commands from
+# the standalone LinkedIn posts scout — separate PRIVATE repo, owner's
+# desktop, own Task Scheduler cadence) into normal Job cards on the bot's own
+# hunt schedule. No scraping happens here — see
+# hunter/sources/linkedin_scout_relay.py.
 LINKEDIN_SCOUT_RELAY_ENABLED: bool = os.getenv("LINKEDIN_SCOUT_RELAY_ENABLED", "true").lower() in (
     "true",
     "1",

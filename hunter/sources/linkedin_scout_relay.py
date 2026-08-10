@@ -1,11 +1,11 @@
 """LinkedIn Scout relay — no scraping here.
 
-The actual LinkedIn scraping happens in the standalone `linkedin_scout/`
-script (separate process, owner's own Windows desktop, own Task Scheduler
-cadence — see linkedin_scout/README.md). That script does NOT share a
+The actual LinkedIn scraping happens in the standalone LinkedIn posts scout
+(separate PRIVATE repo `linkedin-scout`, own process on the owner's Windows
+desktop, own Task Scheduler cadence). That script does NOT share a
 filesystem with the bot (the bot auto-deploys to its own server/container),
 so a candidate it finds is relayed over Telegram instead of a shared file:
-`linkedin_scout/telegram_relay.py` sends a `/scoutfound <payload>` command
+the scout repo's `telegram_relay.py` sends a `/scoutfound <payload>` command
 through the OWNER'S OWN Telegram user session (not the bot's — Telegram never
 delivers a bot's own outgoing messages back to itself as an incoming update,
 so this can't work as a plain bot-to-itself message). `hunter/commands/

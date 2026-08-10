@@ -131,7 +131,7 @@ default 07:45/18:45; minutes :45 never collide with the :00/:20/:40 hunt grid).
 | JobLeads | jobleads.py | HTML scraper | Cloudflare issues; MANUAL flow |
 | ATS Aggregator | ats_aggregator.py | Per-company ATS APIs | Workable/Greenhouse/Lever/Recruitee/Ashby |
 | Gmail | gmail.py | Gmail API email alerts | Parses LinkedIn/NoFluff/JustJoin/Pracuj alerts |
-| LinkedIn Scout relay | linkedin_scout_relay.py | Drains a JSON queue file | No scraping — reads what the standalone `linkedin_scout/` script found; behaves like any other source (not `manual_only`), see below |
+| LinkedIn Scout relay | linkedin_scout_relay.py | Drains a JSON queue file | No scraping — reads what the standalone LinkedIn posts scout (external PRIVATE repo) found; behaves like any other source (not `manual_only`), see below |
 | Telegram channels | telegram_channels.py | `t.me/s/{channel}` public preview HTML | No auth/MTProto; owner-curated `telegram_channels.json`; see "Telegram Channels Source" below |
 
 ---
@@ -680,11 +680,6 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             excluded. Decides whether a warm-start/reuse gate is worth
                             building at all — run on the deploy host where the corpus lives
 
-linkedin_scout/             STANDALONE — not imported by hunter/, not in Docker, not on the bot's
-                            schedule. Runs on the owner's own desktop (residential IP, real Chrome)
-                            via Windows Task Scheduler. See "LinkedIn Posts Scout" section below +
-                            linkedin_scout/README.md.
-
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
                             slash commands in .claude/commands/*.md, hooks in .claude/hooks/*.py.
@@ -845,7 +840,8 @@ Source toggles (all default `true` except `GMAIL_ENABLED=false`):
 `THESMARTJOBS_ENABLED`, `FOURDAYWEEK_ENABLED`,
 `WEWORKREMOTELY_ENABLED`, `REMOTELEAF_ENABLED`, `ATS_AGGREGATOR_ENABLED`, `GMAIL_ENABLED`,
 `LINKEDIN_SCOUT_RELAY_ENABLED` (default `true` — no scraping, just drains a JSON queue
-file the standalone `linkedin_scout/` script writes; see "LinkedIn Posts Scout" below),
+file the standalone LinkedIn posts scout writes — external PRIVATE repo,
+see "LinkedIn Posts Scout" below),
 `TELEGRAM_CHANNELS_ENABLED` (default `true` — public `t.me/s/{channel}` preview, no
 auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FILE`
 (default `telegram_channels.json` in the repo root — owner-curated channel list) and
@@ -1253,187 +1249,47 @@ GSHEETS_ENABLED=true
 # (see docker-compose.yml)
 ```
 
-## LinkedIn Posts Scout (standalone, owner's desktop only)
+## LinkedIn Posts Scout (external private repo)
 
-**Repo-split status (docs/SCOUT_REPO_SPLIT_PLAN.md, Phase 0 done 2026-07-08):**
-`linkedin_scout/` is scheduled to move into its own **private** repo before this
-repo goes public (a LinkedIn scraper with stealth flags under the owner's name is
-a ToS/reputational liability in a public repo). Phase 0 — decoupling every
-`hunter` import out of `linkedin_scout/` while both packages still share one test
-suite — is complete: `linkedin_scout/config.py` reads `TELEGRAM_BOT_TOKEN`/
-`TELEGRAM_CHAT_ID` straight from `.env`/`os.environ` (no `hunter.config` import);
-`linkedin_scout/location_gate.py` is a vendored, plain-text copy of
-`hunter/filters.py::_is_unwanted_onsite_location` (no `hunter.filters`/
-`hunter.models` import, no `Job` object); the `/scoutfound` payload is now a
-versioned contract (`"v": 1` in `telegram_relay.build_payload()`, tolerant/
-version-checked decode in `hunter/commands/scoutfound.py`, golden fixture
-`tests/fixtures/scout_payload_v1.json` shared by both sides' contract tests) so
-schema drift after the split fails loudly instead of silently. `grep -r "from
-hunter" linkedin_scout/` now returns zero real import statements. Phases 1-4
-(new repo creation, desktop cutover, main-repo cleanup, optional history scrub)
-are still pending — see the plan for the full checklist.
+The standalone LinkedIn posts scout — a Playwright scraper of LinkedIn
+content-search + home feed for "we're hiring" posts — lives in its own
+**private** repo: `igrdevelop/linkedin-scout` (desktop checkout:
+`D:\LearningProject\linkedin-scout`, owner's Windows desktop, residential IP,
+Windows Task Scheduler; four tasks: Search hourly-ish + three Feed slots). It
+was moved out per docs/SCOUT_REPO_SPLIT_PLAN.md (Phases 0-3; this repo went
+through Phase 3 cleanup on 2026-08-11 — the in-repo `linkedin_scout/` copy,
+its 7 test files, `tests/fixtures/linkedin_scout/`, `tools/
+telegram_user_login.py` and the `scout` extra (`telethon`) are deleted). A
+scraper with stealth flags tied to the owner's own LinkedIn account must not
+be public; the scout repo stays private permanently.
 
-**What it is:** many vacancies never reach LinkedIn Jobs — recruiters post them as
-ordinary feed content ("We're hiring an Angular dev — DM me"). `linkedin_scout/` is a
-standalone script (NOT part of `hunter/`, NOT in the Docker image, NOT on the bot's
-schedule — the SCRAPING never runs inside the bot process) that scrapes LinkedIn
-content-search + the home feed for candidate hiring posts. It never sends Telegram
-directly and never runs the apply pipeline itself (owner decision 2026-07-08: "this is
-just another job source, like the other 21"). Instead it relays a match to the bot as a
-`/scoutfound <payload>` Telegram command, sent through the **owner's own Telegram user
-session** (Telethon/MTProto, NOT the bot's token — see "Why a Telegram command" below).
-`hunter/commands/scoutfound.py` receives it and queues it into `hunter/sources/
-linkedin_scout_relay.py` (a tiny, scrape-free source INSIDE the bot), which drains that
-queue on the bot's own hunt cycle — from there a candidate goes through the exact same
-pipeline as any other source: central
-filters, the doomed-vacancy gate, tracker dedup, and normal `AUTO_APPLY` handling — NOT
-`manual_only` (owner decision 2026-07-08: "we dropped confirmation cards long ago, I
-never wait for them — there's already a full check pipeline other job-board postings
-go through, I want these to go through it too"). A HARD doomed-gate finding still
-aborts generation for $0.00 exactly like any other source; paste-mode does NOT
-downgrade HARD findings (only genuine `/force` does), so a bad heuristic match is
-still caught downstream, just not by a human looking at a card first. Apply routes
-through the paste flow (the URL used for dedup/routing stays a synthetic key — see
-below) in BOTH the AUTO_APPLY and manual-card code paths, using the saved post text
-automatically — no manual re-paste needed either way. Separately, when a post's DOM
-exposes a real permalink (see "Post permalinks" below), it's carried along (never
-used for dedup/fetch/routing — the synthetic `url` stays the tracker key) but IS the
-link the owner actually needs to go apply/message on, so it's surfaced everywhere
-that matters: the Telegram cards/notifications, `job_posting.txt`, and durably in
-`content.json["source_permalink"]` / `outreach.md`.
+**What stays in THIS repo** (zero scraping, runs in Docker):
+- `hunter/commands/scoutfound.py` — receives `/scoutfound <base64(json)>`
+  sent through the owner's own Telegram USER session (Telethon/MTProto on the
+  desktop side; a bot never receives its own outgoing messages, and the two
+  machines share no filesystem).
+- `hunter/sources/linkedin_scout_relay.py` — drains the queue file
+  `scoutfound` writes into normal `Job` objects on the hunt cycle (synthetic
+  dedup URL `https://linkedin.com/scout-posts/p...`; real post permalink in
+  `job.raw["permalink"]`, post text in `job.raw["post_text"]` → paste-flow
+  apply). Behaves like any other source — central filters, doomed gate,
+  tracker dedup, normal AUTO_APPLY.
+- **Payload contract v1** (`"v": 1`): tolerant, version-checked decode in
+  `scoutfound.py`; golden fixture `tests/fixtures/scout_payload_v1.json` is
+  shared by both repos' contract tests, so schema drift fails loudly. Bump
+  the version on any payload change and update both sides + the fixture.
 
-**Why standalone:** an earlier design ran this inside the bot's Docker container
-(`docs/LINKEDIN_POSTS_SOURCE_PLAN.md`, branch `feat/linkedin-posts-source`, PR #114).
-Rejected: a datacenter IP + no display + a bare container fingerprint are exactly what
-gets a LinkedIn session flagged — and a flagged session also breaks the bot's own
-`LINKEDIN_STORAGE_STATE`-based detail-page fetches. This version runs on the owner's
-own Windows desktop, on his residential IP, via Task Scheduler, while he's away from
-the keyboard — see `docs/LINKEDIN_POSTS_SCOUT_TASK.md` for the full spec.
+Scout-side runtime notes (sessions, circuit breaker, `--reset`, off-screen
+search window, Task Scheduler setup) live in the scout repo's own README.
+Ops incident 2026-08-10: the scout was silently dead for a month — both
+tracks' circuit breakers tripped on anti-bot interstitials (2026-07-09/12,
+the one-shot Telegram alert was missed) and its `.env` pointed at a deleted
+secrets folder; fixed by repointing `LINKEDIN_STORAGE_STATE` /
+`TELEGRAM_USER_SESSION` to `D:\Projects\job-hunterot\.secrets\` and a
+manual re-login + `--reset`. If relay yield is 0 for days, check the
+breaker state files and session paths on the desktop first.
 
-**Why a Telegram command instead of a shared file** (owner discovery 2026-07-08,
-post-deploy): the bot auto-deploys to its own server — it does NOT share a filesystem
-with this script's Windows desktop, so an earlier local-queue-file design (the scout
-writing `pending_candidates.json` directly) could never actually reach the bot. Telegram
-bridges the two machines instead. **Why the owner's own Telegram USER session and not
-the bot's own token:** Telegram never delivers a bot's own outgoing `sendMessage` calls
-back to that same bot as an incoming update — there is no way to make the bot's polling
-`Application` react to something it sent to itself. The command has to come from a
-genuinely different account (the owner's), which requires a real Telegram user login
-(Telethon/MTProto — `tools/telegram_user_login.py`), not just the existing bot token.
 
-**Two independent tracks** (owner decision 2026-07-07, after M2 shipped):
-- `--track search`: content-search by keyword, rotating one keyword per run
-  (`LINKEDIN_SCOUT_KEYWORDS`).
-- `--track feed`: scrolls the plain home feed, no keyword — relies on the same
-  `is_hiring_post()` gate (which already requires "angular" to be prominent) to narrow
-  results.
-
-Each track owns its own persistent Chrome profile + circuit-breaker state file, so a
-trip on one never silences the other.
-
-**Modules** (`linkedin_scout/`):
-| File | Role |
-|---|---|
-| `heuristics.py` | `is_hiring_post()` (stack + hiring-signal + candidate-side/spam/US-staffing/India-staffing negatives + Angular-prominence gate), `check_location()` (three-way gate, reuses `hunter.filters._is_unwanted_onsite_location` — not duplicated) |
-| `parser.py` | `parse_posts()` — splits captured `innerText` into (author, body) blocks on "Feed post" markers |
-| `seen_store.py` | `dedup_key()` + `SeenStore` — plain JSON, atomic write, independent of `tracker.db` |
-| `state.py` | `ScoutState` — circuit-breaker trip flag + round-robin keyword rotation, one JSON file per track |
-| `browser.py` | Playwright mechanics: persistent Chrome profile, cookie re-seeding, shadow-DOM-aware extraction JS (incl. `LI_PERMALINK::` marker capture — both the older `/feed/update/` share form and the newer `/posts/...-activity-...` vanity form), `...`-menu permalink capture for M1 candidates — live-verified 2026-07-08 (`_fetch_menu_permalinks`/`_copy_link_via_menu`, author-aria-label-first with a container-probe fallback), blocks image/media/font resource loading (memory — a long feed scroll OOM-crashed the tab; the crash surfaced as a generic Playwright "Execution context was destroyed" error, now also caught defensively instead of crashing the whole run), `scout_keyword()` (off-screen window) / `scout_feed()` (long randomized scroll + plateau stop), `run_once()`/`run_feed_once()` (circuit breaker + M1 filter wiring) |
-| `telegram_relay.py` | `send_candidates()` — only relays a candidate that has a captured `permalink` (owner decision 2026-07-08: a candidate with no real clickable link is held back, NOT marked seen, so a later run gets another shot at it instead of the post being lost silently), then dedup-before-send (reuses `seen_store.dedup_key`), builds a base64(JSON) payload per candidate (`build_payload`, capped ~3000 raw chars to stay under Telegram's 4096-char command limit) and sends `/scoutfound <payload>` via Telethon, using the OWNER'S OWN Telegram user session (`TELEGRAM_API_ID`/`_HASH`/`TELEGRAM_USER_SESSION`/`TELEGRAM_BOT_USERNAME`) — NOT the bot's token |
-| `notify.py` | Direct Telegram `sendMessage` via the bot's own token (no `Application`/polling) — only used for `--dry-run` console preview formatting now; real runs go through `telegram_relay.py` instead |
-| `run.py` | CLI entry point + Task Scheduler glue: `--track`, `--reset`, `--dry-run`, skip-chance + jitter |
-
-**Bot-side relay** (`hunter/commands/scoutfound.py` + `hunter/sources/
-linkedin_scout_relay.py`, inside the main repo — this piece IS in Docker/the bot
-process, since it does zero scraping): the `/scoutfound` command handler
-(`cmd_scoutfound`) only accepts the command from the configured `TELEGRAM_CHAT_ID` (the
-owner's own chat — this ultimately feeds `AUTO_APPLY`, real LLM spend, so it must not
-be triggerable by anyone else), decodes the base64(JSON) payload, and calls
-`linkedin_scout_relay.append_to_queue()`, which writes into `pending_candidates.json`
-**on the bot's own filesystem** (a `threading.Lock` guards this against
-`LinkedInScoutRelaySource.search()`'s concurrent read+clear on the hunt cycle — both
-run inside this one process's thread pool now, so no cross-machine race is possible).
-`search()` reads+drains that same, now-local, file into normal `Job` objects (synthetic
-dedup-key URL `https://linkedin.com/scout-posts/p...`, deliberately never a real
-LinkedIn URL — that would collide with `LinkedInSource.matches_url`'s host-based, not
-path-based, dispatch), registered in `ALL_SOURCES` behind `LINKEDIN_SCOUT_RELAY_ENABLED`
-(default true) and in the fetch-dispatch roster.
-
-**Post permalinks** (owner discovery 2026-07-08, live-verified — an earlier probe found
-none reachable, which was wrong): some posts (LinkedIn "share"-type, at least) wrap
-their body text in a real `<a href="https://www.linkedin.com/feed/update/urn:li:
-share:...">` already present in the DOM, no click needed. `browser.py`'s `_EXTRACT_JS`
-emits a `LI_PERMALINK::<url>` marker line right where that anchor sits in the
-document-order text stream; `parser.py::parse_posts()` detects and strips it into
-`ParsedPost.permalink` (best-effort, `None` when absent, keeps the first marker per
-post block). LinkedIn also exposes a `Copy link to post` item in every post's `...`
-menu (works on every post, unlike the DOM-anchor which is share-type-only, per a second
-owner discovery the same day) — `browser._fetch_menu_permalinks()` runs right before
-the persistent Chrome context closes (same page still open, one call per `scout_keyword`/
-`scout_feed` invocation via a `permalink_sink` out-parameter on `_open_scroll_extract`,
-kept as an out-param specifically so `scout_keyword()`/`scout_feed()`'s existing `str`
-return type — and every test that monkeypatches them — didn't have to change) and,
-for each M1 candidate that didn't already get a DOM-marker permalink, best-effort
-clicks `...` → `Copy link to post` and reads the clipboard (`_copy_link_via_menu()`,
-capped at `_MAX_MENU_PERMALINK_ATTEMPTS`/run — clicking is slower and adds anti-bot
-surface, so it's spent only on posts that already passed `is_hiring_post()`/
-`check_location()`, never on every post on the page). Either source threads through
-`ScoutCandidate.permalink` → `telegram_relay.build_payload()` → `job.raw["permalink"]`
-on the bot side (the synthetic `job.url` above is untouched — never used for dedup/
-fetch/routing, `tracker.add_applied`'s dedup key must stay stable regardless of link
-rot) → shown wherever the owner needs to actually click through and go apply/message
-on the post (2026-07-11 fix, owner report: "как я вообще смогу податься через такой
-синтетический пайплайн" — the permalink used to flash ONCE, pre-generation, in the
-AUTO_APPLY hunt loop's ping, then was lost): `Job.telegram_text()` (the manual-mode
-Apply/Skip card, `hunter/models.py`), the pre-apply ping AND the post-generation
-"✅ Docs ready" success message (`hunter/main.py::_auto_apply_all` +
-`hunter/apply_api.py` Step 8), `job_posting.txt`'s header ("Post: ..." line, both
-pipelines), and — durably — `content.json["source_permalink"]` (set in
-`apply_api.py`/`apply_cli.py` Step 6 from a new `--permalink URL` CLI flag threaded
-through `apply_agent.main()` → `main_api`/`main_cli`, plumbed from `job.raw["permalink"]`
-by `apply_service.run_apply_agent_subprocess`/`run_apply_agent_for_url` and
-`commands/url_message.py::_handle_apply`), which `hunter/outreach.py`'s `_render()`
-now prefers over the synthetic `url` for the "**Posting:**" line in `outreach.md` —
-otherwise the one artifact meant for going back and messaging the recruiter pointed
-at an unopenable fake link. `notify.py`'s `--dry-run` preview also shows it. The `...`-menu
-selectors (`_POST_CONTAINER_SELECTORS`/`_MENU_BUTTON_SELECTORS`) are best-effort and
-UNVERIFIED against a live session, same caveat as every other DOM-shape assumption in
-this module — a failed lookup just skips that candidate's permalink, never blocks the
-run. It is NOT `manual_only` (new
-`BaseSource.manual_only: bool = False` attribute, added for any future source that DOES
-want to force a card — `hunter/main.py`'s ACT step partitions `new_jobs` on it before
-the `AUTO_APPLY` branch, currently a no-op since nothing sets it True). Paste-flow
-wiring exists on BOTH code paths since either could run depending on
-`AUTO_APPLY`: `hunter.services.apply_service.run_apply_agent_subprocess` (the
-`AUTO_APPLY=true` path) detects `job.raw["post_text"]`, writes it to a temp file,
-passes `--paste-file` (cleaned up in a `finally`); `hunter/commands/url_message.py::
-_handle_apply` (the manual Telegram-card path, used when `AUTO_APPLY=false`) does the
-same via `_run_apply_agent(url, paste_file=...)`.
-
-**Safety rails:** circuit breaker (any login/checkpoint/authwall/captcha signal aborts
-immediately, trips state, sends exactly one Telegram alert, every later run no-ops
-until `--reset`); ~30% skip-chance + 0-45min jitter per invocation; headed real Chrome
-with stealth flags (never headless — that got flagged within 2-3 loads in the original
-live probe). Search track originally did ONE rotation-keyword per run (full coverage
-over several days); owner decision 2026-07-08 changed `run_once()` to search the
-ENTIRE `LINKEDIN_SCOUT_KEYWORDS` list every invocation instead, in a freshly
-randomized order each call (`random.shuffle`, same owner decision) with a
-10-30s jittered pause between keywords, circuit breaker still aborting the
-whole run immediately on a trip — no further keywords attempted. See
-`linkedin_scout/README.md` for the Task Scheduler setup and the full
-safety-rail rationale.
-
-**Verification status (as of 2026-07-07):** the full launch → cookie-seed →
-navigate → scroll → extract pipeline has been run end-to-end against a REAL Chrome
-browser using local `file://` HTML fixtures with actual open shadow DOM (zero network,
-no LinkedIn contact) — see `tests/test_linkedin_scout_extract_integration.py`. This
-caught and fixed two real bugs a mocked unit test couldn't have: (1) the original plan
-claimed `document.body.innerText` renders shadow DOM content — verified FALSE against
-real Chrome; (2) cookies injected via Playwright's `add_cookies()` on a persistent
-context do NOT survive to the next process launch (checked the on-disk SQLite cookie
-store directly) — fixed by re-seeding every run instead of "once ever". What is still
-NOT verified: the actual live LinkedIn DOM shape and its anti-bot behavior — that
-requires a real run on the owner's own machine, which this repo cannot do.
 
 ## Telegram Channels Source (`hunter/sources/telegram_channels.py`)
 
@@ -1694,14 +1550,14 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 > **Full history (all entries) lives in `docs/AGENT_LOG.md`** — moved there
 > 2026-07-12 to keep this file small; only the 5 most recent entries stay here.
 > Check the full log before touching a module with a non-trivial history (e.g.
-> linkedin_scout/, dual_apply, verdict_refine, doomed gate, gsheets sync) —
+> scout relay, dual_apply, verdict_refine, doomed gate, gsheets sync) —
 > it documents rejected alternatives and live-verification findings that
 > aren't visible in git log alone.
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-11 | fable | **Scout repo split Phase 3 — main-repo cleanup** (docs/SCOUT_REPO_SPLIT_PLAN.md; owner: "скаут должен лежать в отдельном репозитории"). Verified Phases 1-2 live first: private `igrdevelop/linkedin-scout` exists and the desktop Task Scheduler tasks run THAT checkout (`D:\LearningProject\linkedin-scout`), so the in-repo copy was dead weight. Deleted `linkedin_scout/` (14 files), the 7 scout test files, `tests/fixtures/linkedin_scout/`, `tools/telegram_user_login.py`; removed the `scout` extra (`telethon`) from pyproject + regenerated requirements.lock (uv; diff = telethon+pyaes only); `.env.example` scout vars dropped (kept `LINKEDIN_STORAGE_STATE`); `.gitignore` keeps ONLY `linkedin_scout/pending_candidates.json` (relay QUEUE_PATH still writes there at runtime; writer mkdirs the parent, search() tolerates absence); sonar-project.properties sources pruned; CLAUDE.md scout section replaced with an external-repo pointer + payload-contract-v1 note (golden fixture `tests/fixtures/scout_payload_v1.json` and all bot-side relay/scoutfound tests kept, they import only `hunter.*`). Same day, ops: scout was silently dead for a month — both breakers tripped 2026-07-09/12 on anti-bot interstitials AND its `.env` pointed at a deleted `D:\LearningProject\Claude\.secrets\`; repointed both session paths to `bot\.secrets\`, owner re-logged LinkedIn, feed track live again (posts visible: 3). |
 | 2026-08-10 | fable | **Source yield audit — JustJoin pagination + Jobspresso keyword feeds** (owner report: "часть источников перестала приносить вакансии"; live source_runs audit over 19 days on the VPS). Findings: JustJoin API silently changed — `perPage` ignored (server-fixed 10/page) AND the `cursor` param ignored, so every "page" returned the same 10 promoted offers → yield 1-2/run for ~3 weeks; fixed by sending the offset as `from` (meta.next.cursor still carries it) with the loop budget counted in offers (PER_PAGE×MAX_PAGES) so a server page-size change can't shrink coverage again (live: 18 jobs/run, was 1-2). Jobspresso: feed alive but its unfiltered top-10 held zero frontend roles for 19 straight days; now queries `search_keywords=` feeds (frontend/angular/react/javascript) + plain feed and merges (live: 0 → 21). Also diagnosed, no code change: JustRemote alive but its ~11-item dev feed is all backend/fullstack (legit dry trickle); Inhire Playwright yields 0 on the 15:40/21:41 UTC slots but 10-15 on the 10:40 slot every day — load-correlated (13:00/19:00 cycles overlap apply batches), not a selector break; linkedin_scout_relay 0 = desktop scout not relaying (owner-side Task Scheduler check). 5 new tests; `from`-param pagination mutation-verified. |
 | 2026-08-10 | fable | **Retry loop vs dead postings** (owner report: "6 jobs → 6× ✅ Retry OK", all links dead). Four fixes: (1) apply_api expired check moved BEFORE the too-short abort — the 29-char synthetic deleted-posting marker ("This job posting has expired.", findmyremote/Lever/thesmartjobs) was swallowed by the 300-char floor, so the designed $0 EXPIRED skip never fired; (2) `tracker._convert_own_fail_row`: add_expired/add_skipped convert a live FAIL row for the same URL in place (same id, sheets_dirty=1) instead of no-op'ing via `_is_known_terminal`; (3) `tracker.classify_retry_outcome(url)` — `_retry_failed` no longer treats exit 0 as success: applied/expired/skipped/noop branches, honest Telegram messages, noop escalates fail_count, FAIL rows no longer deleted for non-applies; (4) latent B1 bug — add_applied's bare INSERT hit the unique (user_id,url_norm) index whenever a FAIL row was still live (every successful RETRY crashed at the tracker write after rendering docs); it now deletes the user's own FAIL/SKIP/blank row in-transaction. 13 new tests + golden short-marker E2E (2 mutation-verified); scout-relay/cli_timeout/breaker tests updated. Full detail in docs/AGENT_LOG.md. |
 | 2026-08-10 | fable | **ATS verdict drop under CLI subscription — model pinning + 5 refine rounds** (owner report: ATS % fell since prod moved onto the `claude -p` outage fallback ~2026-08-07; live DB: CLI-served verdicts avg 86.3 vs 89.2 API, outliers to 42). Root cause: `llm_client._call_cli_fallback` passed no `--model`, so the verdict judge stopped being Haiku (scale shift) and refine rewrites left the profile model. Fixes: fallback now pins `--model <requested>` (one unpinned retry if the subscription rejects it; none on missing binary/timeout/garbage output; dual-shadow exclusion untouched); `ATS_VERDICT_MAX_REFINES` 3→5 + `STRETCH_FROM_ROUND` 3→4 (rounds 1–3 honest, 4–5 stretch — subscription rounds ~free); timeouts raised across the CLI chain (owner: "время есть"): per-call 300→600, CLI generation attempt 600→1200, `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700→10800, `DUAL_SHADOW_TIMEOUT_SEC` 1800→3600. Keyless `apply_cli` refine skip deliberately untouched (not the active mode). 2 mutation-verified regression tests (`--model` pinning; three-round-never-stretches) + retry-matrix tests; full detail in docs/AGENT_LOG.md. |
 | 2026-08-08 | grok | **FILTERS_YAML M3 — filters.example.yaml + docs** (docs/FILTERS_YAML_PLAN.md). Tracked `candidate/filters.example.yaml` (regen via `tools/gen_filters_example.py`); `candidate/filters.yaml` gitignored. SETUP_NEW_USER + candidate/README sections. Default path for `load_profile()` is `candidate/filters.yaml` (or next to `CANDIDATE_YAML_PATH`); hunt loop passes `flt=load_profile()` into `apply_filters_with_stats` so edit+`/hunt` works without restart. |
-| 2026-08-08 | grok | **FILTERS_YAML M2 — thread flt + generalizations** (docs/FILTERS_YAML_PLAN.md). `classify_job` / `apply_filters(_with_stats)` / `screen_job_text` / `assess_job_text` + helpers take optional `flt=` (runtime `_resolve_flt`, monkeypatch-safe). `_anti_hybrid_cities(flt)` cached per extras tuple; module `_ANTI_HYBRID_CITIES` kept for test imports. `require_title_terms` / `exclude_stacks_without` are canonical; loader honors legacy `require_angular` / `exclude_react_without_angular` and syncs both shapes. React-track gating preserved. 5 new tests (`test_filter_profile_m2.py`); non-default-flt verdict flip mutation-verified. Existing filter suite unchanged/green. |
