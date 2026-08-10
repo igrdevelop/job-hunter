@@ -248,5 +248,9 @@ Changes (owner decisions 2026-08-10):
 - `ATS_VERDICT_MAX_REFINES` default 3 → **5**, `STRETCH_FROM_ROUND` 3 → **4**:
   three honest passes + two stretch rounds ("+1 честный и +1 stretch" —
   CLI-subscription rounds are ~free).
-- `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700 → 5400, `DUAL_SHADOW_TIMEOUT_SEC`
-  1800 → 2700 (the 5-round loop's worst case no longer fits the old caps).
+- Timeouts raised across the CLI chain (owner: "время есть, пускай
+  ковыряется"): per-`claude -p` call 300 → 600 (`llm_client.
+  CLI_CALL_TIMEOUT_SEC`), CLI-pipeline generation attempt 600 → 1200
+  (`apply_cli`), `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700 → 10800,
+  `DUAL_SHADOW_TIMEOUT_SEC` 1800 → 3600 (the 5-round loop's worst case
+  no longer fits the old caps).

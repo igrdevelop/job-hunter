@@ -164,20 +164,22 @@ APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 # 15-minute API budget; killing it at 900s would turn a slow-but-WORKING
 # subscription apply into the very FAIL row the outage work eliminates.
 # apply_service picks max(APPLY_AGENT_TIMEOUT_SEC, this) in that case.
-# Default 5400 (was 2700): the 5-round refine loop alone can burn
-# 5 × (rewrite ≤300s + re-render + re-verdict ≤300s) ≈ 60 min of CLI calls
-# on top of generation. The trade-off — a genuinely hung run holds _hunt_lock
-# up to 90 min instead of 15 — is bounded by the FIFO hunt queue (waiting
-# slots run late, never skip).
-APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", "5400"))
+# Default 10800 (was 2700, then 5400): the 5-round refine loop alone can burn
+# 5 × (rewrite ≤600s + re-render + re-verdict ≤600s) ≈ 110 min of CLI calls
+# on top of generation (per-call cap llm_client.CLI_CALL_TIMEOUT_SEC=600).
+# Owner decision 2026-08-10: "время есть, пускай ковыряется" — a slow
+# subscription-served run is fine. The trade-off — a genuinely hung run holds
+# _hunt_lock up to 3 h instead of 15 min — is bounded by the FIFO hunt queue
+# (waiting slots run late, never skip).
+APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", "10800"))
 # Hard wall-clock cap for the detached dual-apply shadow run (its own budget,
 # independent of the primary's APPLY_AGENT_TIMEOUT_SEC). A watchdog force-exits
-# the detached shadow process after this many seconds. Default 2700 (was 1800,
+# the detached shadow process after this many seconds. Default 3600 (was 1800,
 # before that 900): the shadow mirrors the full boevoy pipeline incl. the
 # verdict refine loop (up to ATS_VERDICT_MAX_REFINES rewrite+render+re-verdict
 # rounds — 5 since 2026-08-10, was 3), which can legitimately push a slow
 # OpenRouter model past the old budget.
-DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "2700"))
+DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "3600"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 

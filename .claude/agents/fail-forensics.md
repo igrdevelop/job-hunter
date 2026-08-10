@@ -71,7 +71,7 @@ signatures:
 | Doomed gate (1.5f) | row is `SKIP`, cost $0.00, log names the rule | Working as designed — non-PL onsite, non-EU authorization, unsupported language, or an AI-mill name in the body |
 | Re-post gate (1.5g) | folder named `{Company}_reused_{date}`, cost $0.00 | Reused an existing CV on purpose, not a failure |
 | LLM call | `LLMOutageError`, exit code 46, outcome `llm_outage` | Account-level outage (drained balance / bad key). **No FAIL row is written and `fail_count` is NOT incremented** — a billing outage is global state, not this vacancy's fault. Check `/llm outage` |
-| LLM call | timeout, exit 124-ish, or the subprocess killed at `APPLY_AGENT_TIMEOUT_SEC` | If the run may have gone through the Claude CLI, the effective cap is `APPLY_AGENT_CLI_TIMEOUT_SEC` (5400s) — a CLI-served vacancy spawns 10–20 sequential calls |
+| LLM call | timeout, exit 124-ish, or the subprocess killed at `APPLY_AGENT_TIMEOUT_SEC` | If the run may have gone through the Claude CLI, the effective cap is `APPLY_AGENT_CLI_TIMEOUT_SEC` (10800s) — a CLI-served vacancy spawns 10–20 sequential calls |
 | Claim judge | `judge_report.json` with surviving `fabrication` under `JUDGE_MODE=block` | Delivery deliberately aborted |
 | Language gate | log says strong Polish survived in an `_en` field | Delivery blocked, docs deleted — by design, no broken CV is ever sent |
 | generate_docs | LibreOffice error, missing PDF | Rendering, not content |

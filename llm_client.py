@@ -158,6 +158,12 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 # fallback. To disable on the deploy host: remove the ./.claude-cli volume
 # contents (or `claude /logout` in the container).
 
+# Per-call wall-clock cap for one `claude -p` invocation. Raised 300 → 600
+# (owner decision 2026-08-10: "время есть, пускай ковыряется" — a big
+# generation prompt served by the subscription is worth waiting for; the
+# outer APPLY_AGENT_CLI_TIMEOUT_SEC still bounds the whole run).
+CLI_CALL_TIMEOUT_SEC = 600
+
 
 def cli_credentials_present() -> bool:
     """True if a Claude CLI login exists on disk.
@@ -240,7 +246,7 @@ def _call_cli_fallback(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=300,
+                timeout=CLI_CALL_TIMEOUT_SEC,
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
             logger.warning("[LLM] CLI fallback unavailable/failed: %s", e)
