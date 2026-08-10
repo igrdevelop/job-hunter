@@ -93,3 +93,56 @@ def test_matches_url() -> None:
     assert src.matches_url("https://jobspresso.co/job/abc/") is True
     assert src.matches_url("https://www.jobspresso.co/job/abc/") is True
     assert src.matches_url("https://example.com/x") is False
+
+
+def test_feed_urls_include_keyword_feeds() -> None:
+    from hunter.sources.jobspresso import FEED_KEYWORDS, RSS_URL, _feed_urls
+
+    urls = _feed_urls()
+    assert urls[0] == RSS_URL
+    assert len(urls) == 1 + len(FEED_KEYWORDS)
+    for kw in FEED_KEYWORDS:
+        assert f"{RSS_URL}&search_keywords={kw}" in urls
+
+
+def test_search_merges_keyword_feeds_and_dedups(monkeypatch) -> None:
+    """search() queries every feed URL and drops duplicate job URLs across feeds."""
+    from unittest.mock import patch
+
+    from hunter.sources import jobspresso as jp
+
+    frontend_item = {
+        "title": "Senior Frontend Developer",
+        "url": "https://jobspresso.co/job/senior-frontend-developer/",
+        "company": "Acme Corp",
+        "location": "Worldwide",
+        "job_type": "Developer",
+        "job_category": "Full Time",
+        "description_html": "Angular and TypeScript.",
+    }
+    js_item = {
+        "title": "JavaScript Engineer",
+        "url": "https://jobspresso.co/job/javascript-engineer/",
+        "company": "Other Corp",
+        "location": "Remote",
+        "job_type": "Developer",
+        "job_category": "Full Time",
+        "description_html": "Modern JavaScript stack.",
+    }
+
+    def fake_fetch(self, url=jp.RSS_URL):
+        if "search_keywords=frontend" in url:
+            return [frontend_item]
+        if "search_keywords=javascript" in url:
+            return [js_item, frontend_item]  # frontend_item duplicated across feeds
+        return []
+
+    with (
+        patch.object(jp.JobspressoSource, "_fetch_rss", fake_fetch),
+        patch.object(jp.time, "sleep"),
+    ):
+        jobs = jp.JobspressoSource().search()
+
+    urls = [j.url for j in jobs]
+    assert urls.count("https://jobspresso.co/job/senior-frontend-developer/") == 1
+    assert "https://jobspresso.co/job/javascript-engineer/" in urls

@@ -3,15 +3,21 @@ Jobspresso — curated remote jobs (WP Job Manager site), public RSS feed.
 
 Feed: https://jobspresso.co/?feed=job_feed
 
-The feed returns only the ~10 most recent listings (no server-side category
-filter or pagination), so this is a low-volume trickle source. Each <item>
-carries WP Job Manager custom fields (company, location, job_type) in addition
-to the standard title/link/description. We pre-filter on title + those fields.
+Each feed returns only the ~10 most recent listings (no pagination), and the
+unfiltered feed spans ALL categories — live data 2026-07/08 showed 19 straight
+days of zero frontend roles in that top-10, i.e. the source was effectively
+dead. WP Job Manager does honor ``search_keywords`` on the feed URL, so we
+query one feed per keyword (frontend/angular/react/javascript) plus the plain
+feed, and merge (~10 relevant items per keyword instead of 10 random ones).
+Each <item> carries WP Job Manager custom fields (company, location, job_type)
+in addition to the standard title/link/description. We pre-filter on title +
+those fields.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from html import unescape
 from typing import Optional
 from urllib.parse import urlparse
@@ -26,6 +32,10 @@ from hunter.sources.text_utils import REMOTE_ANY, ensure_remote_token, strip_htm
 logger = logging.getLogger(__name__)
 
 RSS_URL = "https://jobspresso.co/?feed=job_feed"
+# One extra feed request per keyword (each returns its own ~10 newest matches;
+# WP Job Manager matches title + body, so the coarse prefilter still applies).
+FEED_KEYWORDS = ("frontend", "angular", "react", "javascript")
+FEED_DELAY = 0.5  # seconds between feed requests
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -44,8 +54,12 @@ class JobspressoSource(BaseSource):
         return "jobspresso.co" in host
 
     def search(self) -> list[Job]:
-        raw_items = self._fetch_rss()
-        logger.info(f"[jobspresso] RSS returned {len(raw_items)} total items")
+        raw_items: list[dict] = []
+        for i, url in enumerate(_feed_urls()):
+            if i:
+                time.sleep(FEED_DELAY)
+            raw_items.extend(self._fetch_rss(url))
+        logger.info(f"[jobspresso] feeds returned {len(raw_items)} total items")
 
         seen_urls: set[str] = set()
         jobs: list[Job] = []
@@ -61,12 +75,12 @@ class JobspressoSource(BaseSource):
         logger.info(f"[jobspresso] {len(jobs)} jobs after pre-filter")
         return jobs
 
-    def _fetch_rss(self) -> list[dict]:
+    def _fetch_rss(self, url: str = RSS_URL) -> list[dict]:
         try:
-            resp = requests.get(RSS_URL, headers=HEADERS, timeout=TIMEOUT)
+            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
         except Exception as e:
-            logger.error(f"[jobspresso] RSS fetch failed: {e}")
+            logger.error(f"[jobspresso] RSS fetch failed ({url}): {e}")
             return []
         return parse_jobspresso_rss_xml(resp.text)
 
@@ -85,6 +99,12 @@ class JobspressoSource(BaseSource):
             source=self.name,
             raw=raw,
         )
+
+
+def _feed_urls() -> list[str]:
+    """Plain feed first (backward-compatible), then one keyword-filtered feed
+    per FEED_KEYWORDS entry."""
+    return [RSS_URL] + [f"{RSS_URL}&search_keywords={kw}" for kw in FEED_KEYWORDS]
 
 
 def _local(tag: str) -> str:
