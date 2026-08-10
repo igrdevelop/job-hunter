@@ -610,6 +610,44 @@ def increment_fail_count(url: str) -> int:
     return int(row["fail_count"]) if row else 0
 
 
+def classify_retry_outcome(url: str) -> str:
+    """After a retry subprocess exited 0, report what the pipeline actually did.
+
+    Exit code 0 covers four very different endings — a real application,
+    EXPIRED, a gate SKIP, and the too-short abort that writes nothing — and
+    the parent can't tell them apart from the exit code alone (retry log
+    2026-08-10: six dead postings all reported as "✅ Retry OK").
+    Returns "applied" | "expired" | "skipped" | "noop".
+    """
+    norm = normalize_url(url)
+    if not norm:
+        return "noop"
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status, sent FROM applications WHERE url_norm=?",
+            (norm,),
+        ).fetchall()
+    non_applied = {
+        "FAIL",
+        "SKIP",
+        "?",
+        "",
+        MANUAL_PENDING_ATS,
+        PENDING_ATS,
+        IN_PROGRESS_ATS,
+    }
+    statuses = [
+        ((r["ats_status"] or "").strip().upper(), (r["sent"] or "").strip().upper()) for r in rows
+    ]
+    if any(ats not in non_applied for ats, _sent in statuses):
+        return "applied"
+    if any(sent == "EXPIRED" for _ats, sent in statuses):
+        return "expired"
+    if any(ats == "SKIP" for ats, _sent in statuses):
+        return "skipped"
+    return "noop"
+
+
 def remove_failed(url: str) -> None:
     """Remove a FAIL row from tracker (so it can be re-added as a proper entry)."""
     norm = normalize_url(url)
@@ -922,6 +960,18 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
             # (M1) — leaving it would duplicate the row once the real one
             # below is inserted.
             _clear_own_placeholder(conn, apply_url)
+            # Same for this user's own FAIL/SKIP/blank row: the dedup check
+            # above deliberately lets a successful apply through past those
+            # statuses, but the unique (user_id, url_norm) index (B1) allows
+            # only ONE row per URL — without this delete the INSERT below
+            # raises IntegrityError, which is how a genuinely successful
+            # RETRY crashed at the tracker write (the retry loop removes the
+            # FAIL row only AFTER the subprocess exits — too late).
+            conn.execute(
+                "DELETE FROM applications WHERE url_norm=? AND user_id=? "
+                "AND ats_status IN ('FAIL', 'SKIP', '?', '')",
+                (norm_url, _uid()),
+            )
 
         conn.execute(
             """
@@ -958,7 +1008,13 @@ def add_skipped(job: Job) -> dict | None:
     the react-skip marker, so a plain re-paste of the URL is refused by
     ``_already_processed``; ``/force`` still regenerates (and for doomed-gate
     skips a plain paste would just re-hit the gate anyway).
+
+    An existing FAIL row for the same URL is converted to SKIP in place
+    (returns None — the row is already mirrored, resync pushes the change);
+    see _convert_own_fail_row.
     """
+    if _convert_own_fail_row(job.url, sent="—"):
+        return None
     if _is_known_terminal(job.url, job.company, job.title):
         return None
 
@@ -1026,6 +1082,29 @@ def add_react_skipped(content: dict, url: str) -> None:
         )
 
 
+def _convert_own_fail_row(url: str, sent: str) -> bool:
+    """Convert this user's FAIL row for `url` into a terminal SKIP row in place.
+
+    Retry context: the vacancy died (or hit a gate) between the original FAIL
+    and the retry. Updating the existing row keeps its id/sheets_row and marks
+    it sheets_dirty, so the next resync pushes the new status onto the
+    already-mirrored Sheet row instead of appending a duplicate. Returns True
+    when a row was converted. Without this, _is_known_terminal() saw the FAIL
+    row and silently dropped the terminal write, so a retried-then-expired
+    vacancy left no marker at all (retry log 2026-08-10).
+    """
+    norm = normalize_url(url) if url else ""
+    if not norm:
+        return False
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            "UPDATE applications SET ats_status='SKIP', sent=?, sheets_dirty=1 "
+            "WHERE url_norm=? AND user_id=? AND ats_status='FAIL'",
+            (sent, norm, _uid()),
+        )
+        return bool(cur.rowcount)
+
+
 def add_expired(url: str, company: str = "", title: str = "") -> None:
     """Write an expired row — offer was no longer active when fetched.
 
@@ -1033,7 +1112,12 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
     marker lives in the ``Sent`` column; the ATS column gets ``SKIP`` (no CV was
     generated). Both ``SKIP`` and a non-blank ``sent`` keep the row out of future
     hunts via the dedup/cooldown path.
+
+    An existing FAIL row for the same URL is converted in place instead of
+    blocking the write — see _convert_own_fail_row.
     """
+    if _convert_own_fail_row(url, sent="EXPIRED"):
+        return
     if _is_known_terminal(url, company, title):
         return
 
