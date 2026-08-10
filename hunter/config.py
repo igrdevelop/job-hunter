@@ -93,14 +93,17 @@ ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in 
 
 # Verdict refine loop (hunter.verdict_refine): when the independent verdict
 # score is below ATS_VERDICT_TARGET, rewrite resume_en against the verdict's
-# own feedback (up to ATS_VERDICT_MAX_REFINES escalating rounds — rounds 1-2
-# honest visibility passes, round 3+ stretch: openly adds posting tech absent
+# own feedback (up to ATS_VERDICT_MAX_REFINES escalating rounds — rounds 1-3
+# honest visibility passes, round 4+ stretch: openly adds posting tech absent
 # from the profile, tracked in To Learn), re-render, and re-verdict, keeping
 # only strict improvements. 0 = disabled (byte-for-byte the old one-shot
-# behaviour); 3 (default, owner decision 2026-07-07) = honest ×2 + stretch.
+# behaviour); 5 (default) = honest ×3 + stretch ×2 (owner decision 2026-08-10:
+# prod now serves refine calls through the flat-cost CLI subscription, so
+# extra rounds are ~free, and CLI-served runs were landing well short of
+# ATS_VERDICT_TARGET; supersedes the 3-round default of 2026-07-07).
 # See docs/VERDICT_REFINE_PLAN.md.
 ATS_VERDICT_TARGET: float = float(os.getenv("ATS_VERDICT_TARGET", "95"))
-ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "3"))
+ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "5"))
 
 # ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ───────────────────────────
 # Deterministic (regex-only, zero LLM cost) full-text screen run right after
@@ -160,17 +163,23 @@ APPLY_AGENT_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_TIMEOUT_SEC", "900"))
 # vacancy spawns ~10-20 sequential `claude -p` calls (M4b) — far past the
 # 15-minute API budget; killing it at 900s would turn a slow-but-WORKING
 # subscription apply into the very FAIL row the outage work eliminates.
-# apply_service picks max(APPLY_AGENT_TIMEOUT_SEC, this) in that case. The
-# trade-off — a genuinely hung run holds _hunt_lock up to 45 min instead of
-# 15 — is bounded by the FIFO hunt queue (waiting slots run late, never skip).
-APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", "2700"))
+# apply_service picks max(APPLY_AGENT_TIMEOUT_SEC, this) in that case.
+# Default 10800 (was 2700, then 5400): the 5-round refine loop alone can burn
+# 5 × (rewrite ≤600s + re-render + re-verdict ≤600s) ≈ 110 min of CLI calls
+# on top of generation (per-call cap llm_client.CLI_CALL_TIMEOUT_SEC=600).
+# Owner decision 2026-08-10: "время есть, пускай ковыряется" — a slow
+# subscription-served run is fine. The trade-off — a genuinely hung run holds
+# _hunt_lock up to 3 h instead of 15 min — is bounded by the FIFO hunt queue
+# (waiting slots run late, never skip).
+APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", "10800"))
 # Hard wall-clock cap for the detached dual-apply shadow run (its own budget,
 # independent of the primary's APPLY_AGENT_TIMEOUT_SEC). A watchdog force-exits
-# the detached shadow process after this many seconds. Default 1800 (was 900):
-# the shadow now mirrors the full boevoy pipeline incl. the verdict refine loop
-# (up to ATS_VERDICT_MAX_REFINES rewrite+render+re-verdict rounds), which can
-# legitimately push a slow OpenRouter model past the old 15-minute budget.
-DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "1800"))
+# the detached shadow process after this many seconds. Default 3600 (was 1800,
+# before that 900): the shadow mirrors the full boevoy pipeline incl. the
+# verdict refine loop (up to ATS_VERDICT_MAX_REFINES rewrite+render+re-verdict
+# rounds — 5 since 2026-08-10, was 3), which can legitimately push a slow
+# OpenRouter model past the old budget.
+DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "3600"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
 

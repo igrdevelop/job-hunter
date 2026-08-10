@@ -299,7 +299,10 @@ def main_cli(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=600,
+                # 1200s per attempt (was 600 — owner decision 2026-08-10:
+                # subscription runs may take their time). The outer
+                # APPLY_AGENT_CLI_TIMEOUT_SEC still caps the whole run.
+                timeout=1200,
                 env=os.environ,
             )
         except subprocess.TimeoutExpired:
@@ -312,7 +315,7 @@ def main_cli(
                 new_folder_timeout = new_folder_on_timeout
                 break
             else:
-                notify(f"⏱ <b>apply_agent timeout (10 min)</b>\nURL: {url}")
+                notify(f"⏱ <b>apply_agent timeout (20 min)</b>\nURL: {url}")
                 print("\n[apply_agent] Timeout — no folder created.")
                 raise ApplyError("CLI timeout — no folder created") from None
 

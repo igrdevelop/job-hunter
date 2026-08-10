@@ -144,7 +144,10 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 # ── CLI (Pro subscription) fallback for account outages ───────────────────────
 # docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4b: an LLMOutageError from ANY provider
 # retries the same prompt ONCE through `claude -p` (subscription — separate
-# billing pool). Living here, at the one choke point every LLM call goes
+# billing pool), pinning `--model` to the model the API call asked for (one
+# unpinned retry if the subscription rejects it) so the judge/verdict stay on
+# JUDGE_MODEL's scoring scale and generation stays on the profile model.
+# Living here, at the one choke point every LLM call goes
 # through, it covers the cheap stages too (claim judge, PDF verdict, refine
 # rewrites, translate, outreach) — the pipeline-level fallback in
 # apply_agent.main() only covered the main generation call; the Haiku-tier
@@ -154,6 +157,12 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 # the ON/OFF switch is the LOGIN itself — no `claude` credentials on disk, no
 # fallback. To disable on the deploy host: remove the ./.claude-cli volume
 # contents (or `claude /logout` in the container).
+
+# Per-call wall-clock cap for one `claude -p` invocation. Raised 300 → 600
+# (owner decision 2026-08-10: "время есть, пускай ковыряется" — a big
+# generation prompt served by the subscription is worth waiting for; the
+# outer APPLY_AGENT_CLI_TIMEOUT_SEC still bounds the whole run).
+CLI_CALL_TIMEOUT_SEC = 600
 
 
 def cli_credentials_present() -> bool:
@@ -199,11 +208,23 @@ def _cli_fallback_enabled() -> bool:
     return True
 
 
-def _call_cli_fallback(system_prompt: str, user_message: str) -> dict | None:
+def _call_cli_fallback(
+    system_prompt: str, user_message: str, model: str | None = None
+) -> dict | None:
     """One `claude -p` run for an outage-hit prompt. Returns the parsed JSON
     dict, or None on ANY failure (no CLI, not logged in, timeout, non-JSON) —
     the caller then re-raises the original LLMOutageError, so a broken fallback
     can never masquerade as a different error class.
+
+    `model` pins the CLI to the SAME model the API call asked for
+    (`--model`). Without it, every outage-window call — including the ATS
+    verdict judge (Haiku) — was silently served by the subscription's default
+    model, shifting the verdict scoring scale (live incident 2026-08-07..10:
+    CLI-served verdicts averaged ~3 points below API-served ones). If the
+    pinned model is rejected by the CLI (a subscription may not offer every
+    dated model ID), ONE retry runs unpinned — a default-model answer still
+    beats re-raising the outage. No unpinned retry on a missing binary
+    (retrying can't help) or a timeout (the call already burned its budget).
 
     The prompt goes through STDIN, not argv: judge/verdict prompts carry the
     full job text + resume JSON, well past the Windows ~32K argv limit. Plain
@@ -215,19 +236,36 @@ def _call_cli_fallback(system_prompt: str, user_message: str) -> dict | None:
     import subprocess
 
     prompt = f"{system_prompt}\n\n---\n\n{user_message}"
-    try:
-        result = subprocess.run(
-            ["claude", "-p"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=300,
-        )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
-        logger.warning("[LLM] CLI fallback unavailable/failed: %s", e)
+
+    def _run(cmd: list[str]) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=CLI_CALL_TIMEOUT_SEC,
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            logger.warning("[LLM] CLI fallback unavailable/failed: %s", e)
+            return None
+
+    result = _run(["claude", "-p", *(["--model", model] if model else [])])
+    if result is None:
         return None
+    if result.returncode != 0 and model:
+        logger.warning(
+            "[LLM] CLI fallback with pinned model %s exited %d — retrying with "
+            "subscription default: %s",
+            model,
+            result.returncode,
+            (result.stderr or result.stdout or "")[-300:],
+        )
+        result = _run(["claude", "-p"])
+        if result is None:
+            return None
     if result.returncode != 0:
         logger.warning(
             "[LLM] CLI fallback exited %d: %s",
@@ -329,7 +367,7 @@ def call_llm(
             # when the fallback is enabled (M4b). None → re-raise the ORIGINAL
             # outage so exit-46 semantics (stop batch, no FAIL row, pause) hold.
             if _cli_fallback_enabled():
-                parsed = _call_cli_fallback(system_prompt, user_message)
+                parsed = _call_cli_fallback(system_prompt, user_message, model=active_model)
                 if parsed is not None:
                     logger.warning(
                         f"[LLM] outage on {active_model} — served via Claude CLI fallback"

@@ -262,14 +262,16 @@ def test_cli_pipeline_refine_regen_uses_no_tracker_not_force() -> None:
     assert "build_generate_docs_cmd(" in regen_block
 
 
-# ── Default is 3 (honest ×2 + stretch), owner decision 2026-07-07 ───────────
+# ── Default is 5 (honest ×3 + stretch ×2), owner decision 2026-08-10 ─────────
 
 
-def test_ats_verdict_max_refines_default_is_three() -> None:
-    """Owner decision 2026-07-07: max 3 rounds — two honest visibility passes,
-    stretch (openly add posting skills) only on the third."""
+def test_ats_verdict_max_refines_default_is_five() -> None:
+    """Owner decision 2026-08-10: max 5 rounds — three honest visibility
+    passes, stretch (openly add posting skills) on rounds 4-5. Supersedes the
+    3-round default of 2026-07-07: prod now serves refine calls through the
+    flat-cost CLI subscription, so extra rounds are ~free."""
     src = _source_of("hunter.config")
-    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "3")' in src
+    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "5")' in src
 
 
 # ── Cost re-stamp: tracker row must get the post-refine total ────────────────
