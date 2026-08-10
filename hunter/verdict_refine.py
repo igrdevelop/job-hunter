@@ -45,7 +45,10 @@ _DROP_RE = re.compile(
 
 # First round that runs as STRETCH (may add posting tech absent from the
 # profile). Rounds below this are HONEST (visibility-only rewrites).
-STRETCH_FROM_ROUND = 3
+# Rounds 1-3 honest, 4+ stretch (owner decision 2026-08-10, together with the
+# ATS_VERDICT_MAX_REFINES 3→5 raise: one more honest pass AND one more
+# stretch pass, since CLI-subscription-served rounds are ~free).
+STRETCH_FROM_ROUND = 4
 
 # Recent, verifiable employers — never touched by a stretch-round addition.
 # Read from candidate.yaml (employers.protected); falls back to the project
@@ -291,9 +294,11 @@ def refine_loop(
     target: float = 95.0,
     max_rounds: int = 1,
 ) -> tuple[dict, dict]:
-    """Round N (1-based): rounds below STRETCH_FROM_ROUND (3) = HONEST,
-    round 3+ = STRETCH (owner decision 2026-07-07: two honest visibility
-    passes first; only the final round may add skills to score points).
+    """Round N (1-based): rounds below STRETCH_FROM_ROUND (4) = HONEST,
+    round 4+ = STRETCH (owner decision 2026-07-07: honest visibility passes
+    first, only the last rounds may add skills to score points; extended
+    2026-08-10 to three honest + two stretch rounds — CLI-subscription-served
+    rounds are ~free).
 
     Keep-best guard: a round is accepted only if the new verdict score is
     STRICTLY greater than the current best; otherwise content.json + the

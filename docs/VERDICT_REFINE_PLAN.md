@@ -231,3 +231,22 @@ verdict-вызовов раундов включаются в `content["cost"]` 
       (кроме M4-косметики).
 - [ ] Регресс вердикта невозможен: в тестах явная проверка rollback-ветки.
 - [ ] В Telegram-карточке только независимый вердикт, self-score отсутствует.
+
+## Addendum 2026-08-10 — 5 rounds + CLI model pinning
+
+Prod ran on the CLI-subscription outage fallback from 2026-08-07 (drained
+Anthropic balance): every call — including the verdict judge — was served by
+`claude -p` WITHOUT `--model`, i.e. by the subscription's default model
+instead of Haiku. Live data (tracker.db, 2026-07-01..08-10): CLI-served
+verdicts averaged 86.3 vs 89.2 API-served, with outliers down to 42.
+
+Changes (owner decisions 2026-08-10):
+- `llm_client._call_cli_fallback` now pins `--model <requested>` (one
+  unpinned retry if the subscription rejects the model; no retry on missing
+  binary/timeout) — the judge stays on Haiku's scoring scale, generation
+  stays on the profile model.
+- `ATS_VERDICT_MAX_REFINES` default 3 → **5**, `STRETCH_FROM_ROUND` 3 → **4**:
+  three honest passes + two stretch rounds ("+1 честный и +1 stretch" —
+  CLI-subscription rounds are ~free).
+- `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700 → 5400, `DUAL_SHADOW_TIMEOUT_SEC`
+  1800 → 2700 (the 5-round loop's worst case no longer fits the old caps).

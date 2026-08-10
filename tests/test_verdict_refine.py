@@ -424,7 +424,7 @@ def test_stretch_round_prompt_has_stretch_permission_and_protected_employers(mon
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
     verdict_refine._rewrite_round(
-        _base_content(), "job text", "feedback", round_num=3, kind="stretch"
+        _base_content(), "job text", "feedback", round_num=4, kind="stretch"
     )
     msg = captured["user_message"]
     assert "STRETCH ESCALATION" in msg
@@ -435,7 +435,9 @@ def test_stretch_round_prompt_has_stretch_permission_and_protected_employers(mon
     assert "E-commerce" in msg
 
 
-def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypatch):
+def test_full_loop_round4_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypatch):
+    """Rounds 1-3 honest, round 4 stretch (STRETCH_FROM_ROUND=4 since the
+    2026-08-10 owner decision: three honest passes before skills are added)."""
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
 
@@ -449,7 +451,14 @@ def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
 
-    verdict_sequence = iter([_v(80, missing=["Docker"]), _v(85, missing=["Docker"]), _v(90)])
+    verdict_sequence = iter(
+        [
+            _v(80, missing=["Docker"]),
+            _v(85, missing=["Docker"]),
+            _v(87, missing=["Docker"]),
+            _v(90),
+        ]
+    )
     monkeypatch.setattr(
         ats_pdf_roundtrip,
         "run_llm_verdict",
@@ -466,20 +475,21 @@ def test_full_loop_round3_runs_as_stretch_and_merges_to_learn(tmp_path, monkeypa
         verdict,
         regenerate_docs=lambda f: None,
         target=95,
-        max_rounds=3,
+        max_rounds=4,
     )
 
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert "STRETCH ESCALATION" not in calls[0]
     assert "STRETCH ESCALATION" not in calls[1]
-    assert "STRETCH ESCALATION" in calls[2]
+    assert "STRETCH ESCALATION" not in calls[2]
+    assert "STRETCH ESCALATION" in calls[3]
     assert out_content["to_learn"] == "Vitest"
     assert out_verdict["score"] == 90
 
 
-def test_two_round_loop_never_stretches(tmp_path, monkeypatch):
-    """With max_rounds=2 the loop stays honest — stretch only ever runs from
-    round STRETCH_FROM_ROUND (3), the owner's 'openly add skills' round."""
+def test_three_round_loop_never_stretches(tmp_path, monkeypatch):
+    """With max_rounds=3 the loop stays honest — stretch only ever runs from
+    round STRETCH_FROM_ROUND (4), the owner's 'openly add skills' rounds."""
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
 
@@ -491,7 +501,13 @@ def test_two_round_loop_never_stretches(tmp_path, monkeypatch):
 
     monkeypatch.setattr(llm_client, "call_llm", _fake_llm)
 
-    verdict_sequence = iter([_v(80, missing=["Docker"]), _v(85, missing=["Docker"])])
+    verdict_sequence = iter(
+        [
+            _v(80, missing=["Docker"]),
+            _v(85, missing=["Docker"]),
+            _v(88, missing=["Docker"]),
+        ]
+    )
     monkeypatch.setattr(
         ats_pdf_roundtrip,
         "run_llm_verdict",
@@ -508,9 +524,9 @@ def test_two_round_loop_never_stretches(tmp_path, monkeypatch):
         verdict,
         regenerate_docs=lambda f: None,
         target=95,
-        max_rounds=2,
+        max_rounds=3,
     )
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert all("STRETCH ESCALATION" not in c for c in calls)
 
 
@@ -585,9 +601,10 @@ def test_round1_rollback_escalates_round2_to_stretch(tmp_path, monkeypatch):
 
 
 def test_round2_accepted_resets_escalation_round3_stays_honest(tmp_path, monkeypatch):
-    """A round that ends in acceptance resets the flag: round 3 is naturally
-    stretch anyway (STRETCH_FROM_ROUND=3), but a round accepted mid-way must
-    not force an unrelated later honest round to escalate."""
+    """A round that ends in acceptance resets the flag: a round accepted
+    mid-way must not force an unrelated later honest round to escalate
+    (round 3 is naturally honest since STRETCH_FROM_ROUND=4; here it never
+    runs anyway — round 2 already reaches the target)."""
     _patch_safety_stages(monkeypatch)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
 
