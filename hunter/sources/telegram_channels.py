@@ -91,7 +91,7 @@ HIRING_SIGNAL_RES: tuple[re.Pattern[str], ...] = tuple(
 
 # Candidate-side negatives — people announcing THEY seek work, not a hiring post.
 # \bszukam\b (singular) deliberately does NOT match "szukamy" (plural, hiring) —
-# see linkedin_scout/heuristics.py, same load-bearing distinction.
+# same load-bearing distinction as the standalone scout repo's heuristics.py.
 CANDIDATE_SIDE_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (

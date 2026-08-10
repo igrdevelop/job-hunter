@@ -10,12 +10,9 @@ gsheets_state.json
 *.txt.secret
 github tokens.txt
 
-# linkedin_scout runtime artifacts (owner's desktop only — see linkedin_scout/README.md)
-linkedin_scout/.profile_search/
-linkedin_scout/.profile_feed/
-linkedin_scout/search_state.json
-linkedin_scout/feed_state.json
-linkedin_scout/seen_posts.json
+# Scout-relay queue file (hunter/sources/linkedin_scout_relay.py QUEUE_PATH —
+# runtime data written by /scoutfound; the scout itself lives in its own
+# private repo, this dir holds nothing else anymore)
 linkedin_scout/pending_candidates.json
 
 # Python

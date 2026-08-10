@@ -38,10 +38,6 @@ dependencies = [
 [project.optional-dependencies]
 # Headless browser for JS-heavy / SPA job boards (inhire.io etc.)
 browser = ["playwright"]
-# linkedin_scout/ only (owner's desktop, not deployed with the bot): sends
-# /scoutfound via the owner's own Telegram user session (MTProto), since a
-# bot's own Bot-API messages never come back to it as an incoming update.
-scout = ["telethon"]
 dev = ["pytest", "pytest-cov", "ruff", "mypy"]
 
 [project.scripts]

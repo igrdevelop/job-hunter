@@ -1,9 +1,10 @@
 """commands/scoutfound.py — /scoutfound <payload> receives one LinkedIn scout
-candidate relayed from the standalone linkedin_scout/ script.
+candidate relayed from the standalone LinkedIn posts scout (external
+PRIVATE repo `linkedin-scout`).
 
 Delivery path (owner decision 2026-07-08, after discovering the bot
 auto-deploys to its own server and does not share a filesystem with the
-scout's Windows desktop): linkedin_scout/telegram_relay.py sends this command
+scout's Windows desktop): the scout repo's telegram_relay.py sends this command
 through the OWNER'S OWN Telegram user session (Telethon, not the Bot API —
 Telegram never delivers a bot's own outgoing messages back to itself as an
 incoming update, so the scout can't just "message the bot" as the bot).
