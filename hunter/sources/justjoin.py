@@ -11,13 +11,21 @@ Working approach (updated 2026-05):
 
   Strategy:
   1. Paginate /api/candidate-api/offers for each workplaceType
-     (remote, hybrid, office) — up to MAX_PAGES pages of PER_PAGE items
+     (remote, hybrid, office), newest-first, up to PER_PAGE * MAX_PAGES
+     offers per type
   2. Pre-filter by slug keyword (same as before)
   3. Parse Job objects directly from the listing response (no detail call needed —
      the listing API returns full salary/location/skills data)
   4. City filtering is handled by the global filter (location field)
 
-Rate: 3–6 API calls per run (1–2 pages × 3 workplace types).
+Pagination (updated 2026-08): the API now ignores ``perPage`` (server-fixed
+page size of 10) and ignores the old ``cursor`` request param — every page
+came back identical, which silently shrank this source to the same ~10
+promoted offers per run (live yield fell to 1-2 jobs/run for weeks). The
+offset must be sent as ``from``; ``meta.next.cursor`` still carries the next
+offset value. ``perPage`` is still sent in case the server honors it again —
+the loop budget is counted in offers scanned, not pages, so either page size
+gives the same coverage.
 """
 
 import logging
@@ -132,12 +140,21 @@ class JustJoinSource(BaseSource):
         seen_slugs: set[str] = set()
         jobs: list[Job] = []
 
+        # Budget in offers scanned, not pages: the server fixes its own page
+        # size (10 as of 2026-08, ``perPage`` ignored), so a page count would
+        # silently shrink/grow coverage with every server-side change.
+        offer_budget = PER_PAGE * MAX_PAGES
+
         for wtype in WORKPLACE_TYPES:
-            cursor = None
-            for _ in range(MAX_PAGES):
-                params: dict = {"workplaceType": wtype, "perPage": PER_PAGE, "sortBy": "newest"}
-                if cursor:
-                    params["cursor"] = cursor
+            offset = 0
+            scanned = 0
+            while scanned < offer_budget:
+                params: dict = {
+                    "workplaceType": wtype,
+                    "perPage": PER_PAGE,
+                    "sortBy": "newest",
+                    "from": offset,
+                }
 
                 try:
                     resp = requests.get(
@@ -149,7 +166,12 @@ class JustJoinSource(BaseSource):
                     logger.error(f"[JustJoin] API fetch failed wtype={wtype}: {e}")
                     break
 
-                for offer in body.get("data") or []:
+                data = body.get("data") or []
+                if not data:
+                    break
+                scanned += len(data)
+
+                for offer in data:
                     slug = offer.get("slug", "")
                     if not slug or slug in seen_slugs:
                         continue
@@ -162,8 +184,9 @@ class JustJoinSource(BaseSource):
 
                 next_info = (body.get("meta") or {}).get("next") or {}
                 cursor = next_info.get("cursor")
-                if not cursor or next_info.get("itemsCount", 0) == 0:
+                if cursor is None or next_info.get("itemsCount", 0) == 0:
                     break
+                offset = cursor
                 time.sleep(PAGE_DELAY)
 
         logger.info(f"[JustJoin] {len(jobs)} jobs fetched")
