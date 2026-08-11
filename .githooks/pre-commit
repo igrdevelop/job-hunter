@@ -1,0 +1,63 @@
+#!/bin/sh
+# Pre-commit hook for job-hunter.
+#
+# Enable once per clone (it is NOT enabled by cloning — git never runs
+# hooks from a tracked directory by itself):
+#
+#     git config core.hooksPath .githooks
+#
+# Two guards, both cheap enough to run on every commit:
+#   1. refuse to commit files CLAUDE.md marks as never-commit (secrets, data)
+#   2. ruff check + ruff format --check on the staged Python files
+#      (CI gates on both over the whole repo — this catches it locally first)
+#
+# Bypass deliberately with `git commit --no-verify` when you know better.
+
+set -u
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+# --- 1. protected paths -----------------------------------------------------
+# Matched as path prefixes / basenames against CLAUDE.md's never-commit list.
+protected_hit=$(printf '%s\n' "$staged" | grep -E \
+  '(^|/)\.env$|(^|/)tracker\.xlsx$|(^|/)gsheets_token\.json$|(^|/)gsheets_credentials\.json$|(^|/)gmail_token\.json$|^Applications/|^backups/|^candidate/notes/' \
+  || true)
+
+if [ -n "$protected_hit" ]; then
+    echo "pre-commit: BLOCKED — these files must never be committed (see CLAUDE.md):" >&2
+    printf '  %s\n' $protected_hit >&2
+    echo "  unstage them with: git restore --staged <file>" >&2
+    fail=1
+fi
+
+# --- 2. ruff on staged Python files -----------------------------------------
+py_files=$(printf '%s\n' "$staged" | grep -E '\.py$' || true)
+
+if [ -n "$py_files" ]; then
+    if command -v ruff >/dev/null 2>&1; then
+        ruff="ruff"
+    elif python -m ruff --version >/dev/null 2>&1; then
+        ruff="python -m ruff"
+    else
+        ruff=""
+        echo "pre-commit: ruff not found — skipping lint (pip install ruff)" >&2
+    fi
+
+    if [ -n "$ruff" ]; then
+        # shellcheck disable=SC2086
+        if ! $ruff check $py_files; then
+            echo "pre-commit: ruff check failed — fix, or run: ruff check --fix ." >&2
+            fail=1
+        fi
+        # shellcheck disable=SC2086
+        if ! $ruff format --check $py_files; then
+            echo "pre-commit: formatting differs — run: ruff format ." >&2
+            fail=1
+        fi
+    fi
+fi
+
+exit $fail

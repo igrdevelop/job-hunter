@@ -1,7 +1,10 @@
 """
 Hook: PostToolUse — syntax check after Edit/Write on .py files.
 Receives tool input as JSON on stdin.
-Exits with code 1 if SyntaxError found (Claude sees the error).
+
+Exits with code 2 on SyntaxError — only that code feeds stderr back to the
+model (any other non-zero is shown to the user and silently ignored by it),
+and the whole point here is that the model sees the breakage it just wrote.
 """
 
 import sys
@@ -28,7 +31,7 @@ def main():
         print(f"[OK] Syntax OK: {os.path.basename(file_path)}")
     except py_compile.PyCompileError as e:
         print(f"[ERROR] SYNTAX ERROR in {os.path.basename(file_path)}:\n{e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

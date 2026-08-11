@@ -1,0 +1,4 @@
+# Git hooks are executed by sh — a CRLF shebang breaks them on Windows checkouts
+# (core.autocrlf=true is common here), so force LF for the hook scripts.
+.githooks/** text eol=lf
+*.sh text eol=lf

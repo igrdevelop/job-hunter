@@ -682,7 +682,10 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
 
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
-                            slash commands in .claude/commands/*.md, hooks in .claude/hooks/*.py.
+                            slash commands in .claude/commands/*.md, hooks in .claude/hooks/*.py
+                            (wired to events by .claude/settings.json — a script sitting in
+                            hooks/ runs only if that file references it; both scripts were
+                            dead config until 2026-08-11).
   agents/
     scraper-health-checker.md   Audit all enabled scrapers, PASS / NEEDS ATTENTION per source
     project-invariants-review.md Review the branch diff against THIS repo's invariants — the
@@ -718,8 +721,24 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             already-rejected version of the idea, then M0 = a free, read-only
                             measurement with its decision rule stated up front
   hooks/
-    block_protected.py      PreToolUse — refuse edits to .env / tracker.xlsx
-    syntax_check.py         PostToolUse — py_compile after every Edit/Write on a .py
+    block_protected.py      PreToolUse (Edit|Write|NotebookEdit) — refuse edits to
+                            .env / tracker.xlsx. Exits 2, not 1: only exit code 2 is a
+                            BLOCKING hook error, any other non-zero merely prints and
+                            lets the edit through (which is what it used to do)
+    syntax_check.py         PostToolUse (Edit|Write) — py_compile after every .py write;
+                            exits 2 so the SyntaxError is fed back to the model
+  settings.json             Team-scoped Claude Code settings (tracked): the `hooks` block
+                            that maps the two scripts above onto PreToolUse/PostToolUse.
+                            settings.local.json (untracked) stays for personal permissions
+
+.githooks/pre-commit        Git pre-commit hook (tracked, sh): refuses staged never-commit
+                            files (.env, tracker.xlsx, *token*.json, Applications/, backups/,
+                            candidate/notes/) and runs `ruff check` + `ruff format --check`
+                            on the staged .py files — the same two gates CI enforces.
+                            NOT active by cloning; enable once per clone with
+                            `git config core.hooksPath .githooks`. Bypass: `--no-verify`.
+                            .gitattributes forces LF here — core.autocrlf=true would
+                            otherwise hand sh a CRLF shebang on Windows checkouts
 
                             NOTE — `cost-audit` and `fail-forensics` read LIVE data that does
                             not exist in a dev checkout: `tracker.db` here is a stale 14-row
@@ -1381,6 +1400,13 @@ second `html.unescape()` pass.
 - **Never commit** `.env`, `tracker.xlsx`, `Applications/`, `backups/`, `gmail_token.json`, `gsheets_token.json`, `gsheets_credentials.json`, `candidate/notes/`
 - **Personal candidate facts (name, city, employers, languages) go through `hunter/candidate.py` only.** Don't hardcode a new name/city/employer/language string in production code — read it via `candidate.get(dotpath, default)`, with `default` reproducing today's behavior so a missing `candidate.yaml` degrades gracefully instead of crashing (see docs/CANDIDATE_YAML_PLAN.md). `candidate/candidate_profile.md` and the base-CV files in `candidate/` remain the source of truth for free-text career narrative — this rule is about short, structured facts that filters/QA/prompts compare against, not prose.
 - Always test syntax after edits: `python -m compileall .`
+- **Hooks:** a script in `.claude/hooks/` runs ONLY if `.claude/settings.json`
+  maps it to an event — dropping a file in that folder does nothing by itself.
+  A hook that must BLOCK exits with code **2** (stderr is fed back to the model);
+  any other non-zero code is a non-blocking error that just prints and lets the
+  call through. The git `pre-commit` (`.githooks/`) likewise needs a one-time
+  `git config core.hooksPath .githooks` per clone — git never runs hooks out of
+  a tracked directory on its own
 - Run `ruff check .` AND `ruff format .` before committing — CI gates on both
   (`ruff format --check`). Config in `pyproject.toml`, covers the whole repo:
   `hunter/` + entry scripts + `tests/` + `tools/`. Rule set: F/E/W + B (bugbear)
@@ -1556,8 +1582,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-11 | opus | **Hooks actually wired up — Claude Code hooks + a git pre-commit** (owner question: are hooks Claude-Code-capable at all). They are — the owner's global settings already run 11 Orca hook events. But THIS repo's own hooks were dead config: `block_protected.py`/`syntax_check.py` were documented as active while no settings file referenced them, so `.env`/`tracker.xlsx` were unprotected and no post-edit `py_compile` ran. Fixes: tracked `.claude/settings.json` wiring both scripts (PreToolUse `Edit\|Write\|NotebookEdit`, PostToolUse `Edit\|Write`, via `$CLAUDE_PROJECT_DIR`); both scripts switched from `exit(1)` to **`exit(2)`** — only 2 is a BLOCKING hook error, 1 merely prints and lets the edit through, so "BLOCKED" would have been a lie even once wired; new `.githooks/pre-commit` (staged never-commit paths + `ruff check`/`ruff format --check` on staged .py, enable per clone with `git config core.hooksPath .githooks`); `.gitattributes` forcing LF on `.githooks/**` (core.autocrlf=true would hand sh a CRLF shebang). All 7 paths verified end-to-end (4 hook payloads, 3 staged-commit states). Full detail in docs/AGENT_LOG.md. |
 | 2026-08-11 | fable | **Apply-queue wedge — leaked in-flight lock on a Telegram send failure** (owner report: "Queue paused — already generating elsewhere (e.g. Hopper)" every ~30 min, `/queue` PENDING: 11 / IN_PROGRESS: 0, no generation running). Root cause: the worker's "⚙️ Processing" Telegram ping lived ABOVE the try/finally that owns `mark_apply_done` — an httpx read timeout at 01:12 leaked the in-flight URL lock forever, and the FIFO queue wedged behind the same re-claimed row for 12+ h. Fix (`hunter/apply_worker.py`): Processing send moved inside the lock-holding try/finally AND wrapped in its own try/except (a cosmetic notify failure must neither skip the job nor escape the block); dup-alert send wrapped the same way. Also split a merged test in `tests/test_apply_worker.py` (a scenario had lost its `def` line) into `test_processing_notify_failure_runs_job_and_releases_lock` asserting subprocess-still-runs + lock-freed. Both halves mutation-verified. Ops: bot restarted to clear the leaked lock. 2519 tests green. |
 | 2026-08-11 | fable | **Scout repo split Phase 3 — main-repo cleanup** (docs/SCOUT_REPO_SPLIT_PLAN.md; owner: "скаут должен лежать в отдельном репозитории"). Verified Phases 1-2 live first: private `igrdevelop/linkedin-scout` exists and the desktop Task Scheduler tasks run THAT checkout (`D:\LearningProject\linkedin-scout`), so the in-repo copy was dead weight. Deleted `linkedin_scout/` (14 files), the 7 scout test files, `tests/fixtures/linkedin_scout/`, `tools/telegram_user_login.py`; removed the `scout` extra (`telethon`) from pyproject + regenerated requirements.lock (uv; diff = telethon+pyaes only); `.env.example` scout vars dropped (kept `LINKEDIN_STORAGE_STATE`); `.gitignore` keeps ONLY `linkedin_scout/pending_candidates.json` (relay QUEUE_PATH still writes there at runtime; writer mkdirs the parent, search() tolerates absence); sonar-project.properties sources pruned; CLAUDE.md scout section replaced with an external-repo pointer + payload-contract-v1 note (golden fixture `tests/fixtures/scout_payload_v1.json` and all bot-side relay/scoutfound tests kept, they import only `hunter.*`). Same day, ops: scout was silently dead for a month — both breakers tripped 2026-07-09/12 on anti-bot interstitials AND its `.env` pointed at a deleted `D:\LearningProject\Claude\.secrets\`; repointed both session paths to `bot\.secrets\`, owner re-logged LinkedIn, feed track live again (posts visible: 3). |
 | 2026-08-10 | fable | **Source yield audit — JustJoin pagination + Jobspresso keyword feeds** (owner report: "часть источников перестала приносить вакансии"; live source_runs audit over 19 days on the VPS). Findings: JustJoin API silently changed — `perPage` ignored (server-fixed 10/page) AND the `cursor` param ignored, so every "page" returned the same 10 promoted offers → yield 1-2/run for ~3 weeks; fixed by sending the offset as `from` (meta.next.cursor still carries it) with the loop budget counted in offers (PER_PAGE×MAX_PAGES) so a server page-size change can't shrink coverage again (live: 18 jobs/run, was 1-2). Jobspresso: feed alive but its unfiltered top-10 held zero frontend roles for 19 straight days; now queries `search_keywords=` feeds (frontend/angular/react/javascript) + plain feed and merges (live: 0 → 21). Also diagnosed, no code change: JustRemote alive but its ~11-item dev feed is all backend/fullstack (legit dry trickle); Inhire Playwright yields 0 on the 15:40/21:41 UTC slots but 10-15 on the 10:40 slot every day — load-correlated (13:00/19:00 cycles overlap apply batches), not a selector break; linkedin_scout_relay 0 = desktop scout not relaying (owner-side Task Scheduler check). 5 new tests; `from`-param pagination mutation-verified. |
 | 2026-08-10 | fable | **Retry loop vs dead postings** (owner report: "6 jobs → 6× ✅ Retry OK", all links dead). Four fixes: (1) apply_api expired check moved BEFORE the too-short abort — the 29-char synthetic deleted-posting marker ("This job posting has expired.", findmyremote/Lever/thesmartjobs) was swallowed by the 300-char floor, so the designed $0 EXPIRED skip never fired; (2) `tracker._convert_own_fail_row`: add_expired/add_skipped convert a live FAIL row for the same URL in place (same id, sheets_dirty=1) instead of no-op'ing via `_is_known_terminal`; (3) `tracker.classify_retry_outcome(url)` — `_retry_failed` no longer treats exit 0 as success: applied/expired/skipped/noop branches, honest Telegram messages, noop escalates fail_count, FAIL rows no longer deleted for non-applies; (4) latent B1 bug — add_applied's bare INSERT hit the unique (user_id,url_norm) index whenever a FAIL row was still live (every successful RETRY crashed at the tracker write after rendering docs); it now deletes the user's own FAIL/SKIP/blank row in-transaction. 13 new tests + golden short-marker E2E (2 mutation-verified); scout-relay/cli_timeout/breaker tests updated. Full detail in docs/AGENT_LOG.md. |
-| 2026-08-10 | fable | **ATS verdict drop under CLI subscription — model pinning + 5 refine rounds** (owner report: ATS % fell since prod moved onto the `claude -p` outage fallback ~2026-08-07; live DB: CLI-served verdicts avg 86.3 vs 89.2 API, outliers to 42). Root cause: `llm_client._call_cli_fallback` passed no `--model`, so the verdict judge stopped being Haiku (scale shift) and refine rewrites left the profile model. Fixes: fallback now pins `--model <requested>` (one unpinned retry if the subscription rejects it; none on missing binary/timeout/garbage output; dual-shadow exclusion untouched); `ATS_VERDICT_MAX_REFINES` 3→5 + `STRETCH_FROM_ROUND` 3→4 (rounds 1–3 honest, 4–5 stretch — subscription rounds ~free); timeouts raised across the CLI chain (owner: "время есть"): per-call 300→600, CLI generation attempt 600→1200, `APPLY_AGENT_CLI_TIMEOUT_SEC` 2700→10800, `DUAL_SHADOW_TIMEOUT_SEC` 1800→3600. Keyless `apply_cli` refine skip deliberately untouched (not the active mode). 2 mutation-verified regression tests (`--model` pinning; three-round-never-stretches) + retry-matrix tests; full detail in docs/AGENT_LOG.md. |
