@@ -10,8 +10,11 @@ You are diagnosing a broken job board scraper in the Job Hunter Bot project.
 ## Steps
 
 1. **Read the scraper files**
-   - `hunter/sources/<source>.py` — the search scraper
-   - `job_fetch/<source>.py` — the detail fetcher (if it exists)
+   - `hunter/sources/<source>.py` — the whole source: `search()` scrapes the
+     listing, `matches_url()`/`fetch_text()` handle the detail page. There is no
+     separate detail-fetcher file (the `job_fetch/` package was merged into the
+     sources in 2026-05); `hunter/sources/__init__.py` holds the registry and the
+     `fetch_job_text` dispatch roster
 
 2. **Identify the scraping strategy** (look at the code):
    - JSON API → check endpoint URL and response key names
@@ -43,7 +46,7 @@ You are diagnosing a broken job board scraper in the Job Hunter Bot project.
 6. **Propose and apply a minimal fix**
    - Change only the broken part — do not refactor unrelated code
    - Keep the same code style as the rest of the file
-   - After editing, run: `python -m compileall hunter/sources/ job_fetch/ -q`
+   - After editing, run: `python -m compileall hunter/sources/ -q`
 
 7. **Report**
    - What was broken

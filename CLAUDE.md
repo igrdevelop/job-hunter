@@ -77,7 +77,7 @@ hunter/tracker_cache.py                      In-memory cache (asyncio.Lock)
 ```
 Job Boards --scrape--> list[Job] --filter--> list[Job] --dedup--> list[Job] (new)
   --> apply_agent.py:
-        job_fetch.fetch_job_text(url)      # full job posting text
+        sources.fetch_job_text(url)        # full job posting text
         expired_check.is_job_expired()     # skip if offer expired
         llm_client.call_llm()              # -> JSON (resume, cover letter, about me)
         cover letter self-review loop      # up to 3 LLM rounds
@@ -1240,12 +1240,25 @@ dedup reflect the new state without a bot restart.
 
 ## Adding a New Job Source
 
-See `.claude/commands/add-source.md` for full guide.
+See `.claude/commands/add-source.md` for the full guide. One class owns both the
+listing scrape and the detail-page extraction — the separate `job_fetch/` package
+was merged into the sources in the Phase 3 refactor (2026-05-26) and no longer
+exists. The five registration points:
 
-1. `hunter/sources/yoursite.py` — subclass `BaseSource`, implement `search() -> list[Job]`
-2. `job_fetch/yoursite.py` — implement `fetch_yoursite(url) -> str`
-3. `YOURSITE_ENABLED` toggle in `hunter/config.py`
-4. Register in `hunter/sources/__init__.py` + `job_fetch/__init__.py`
+1. `hunter/sources/yoursite.py` — subclass `BaseSource`, implement
+   `search() -> list[Job]`, and override `matches_url(url)` + `fetch_text(url)`
+   for detail-page extraction (the base class defaults to claiming nothing and
+   falling back to generic HTML)
+2. `YOURSITE_ENABLED` toggle in `hunter/config.py`
+3. `hunter/sources/__init__.py` — the config import block **and** `ALL_SOURCES`
+   (hunt-cycle registration, gated by the toggle)
+4. `hunter/sources/__init__.py` — `_fetch_roster()`, the `fetch_job_text` dispatch
+   list. Deliberately NOT gated by the toggle: a source excluded from the hunt
+   still owns its domain's URLs for apply / expired-check / repost-gate / Gmail
+   enricher. Skipping this is the classic half-wired source — listings work, then
+   every apply for them quietly degrades to the generic HTML fallback
+5. CLAUDE.md — a row in **both** the "Job Sources" table and "Scraper Health
+   Notes" (plus the source-toggle list above and `.env.example`)
 
 ---
 
@@ -1585,7 +1598,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
-| 2026-08-11 | opus | **Hooks actually wired up — Claude Code hooks + a git pre-commit** (owner question: are hooks Claude-Code-capable at all). They are — the owner's global settings already run 11 Orca hook events. But THIS repo's own hooks were dead config: `block_protected.py`/`syntax_check.py` were documented as active while no settings file referenced them, so `.env`/`tracker.xlsx` were unprotected and no post-edit `py_compile` ran. Fixes: tracked `.claude/settings.json` wiring both scripts (PreToolUse `Edit\|Write\|NotebookEdit`, PostToolUse `Edit\|Write`, via `$CLAUDE_PROJECT_DIR`); both scripts switched from `exit(1)` to **`exit(2)`** — only 2 is a BLOCKING hook error, 1 merely prints and lets the edit through, so "BLOCKED" would have been a lie even once wired; new `.githooks/pre-commit` (staged never-commit paths + `ruff check`/`ruff format --check` on staged .py, enable per clone with `git config core.hooksPath .githooks`); `.gitattributes` forcing LF on `.githooks/**` (core.autocrlf=true would hand sh a CRLF shebang). All 7 paths verified end-to-end (4 hook payloads, 3 staged-commit states). Follow-up commit: frontmatter for the 4 slash commands (none had any — `/apply` was advertising a truncated instruction line as its description) and a repair of `/apply` itself, which read 8 paths under the long-deleted `D:/LearningProject/Claude/` tree. Full detail in docs/AGENT_LOG.md. |
+| 2026-08-11 | opus | **Hooks actually wired up — Claude Code hooks + a git pre-commit** (owner question: are hooks Claude-Code-capable at all). They are — the owner's global settings already run 11 Orca hook events. But THIS repo's own hooks were dead config: `block_protected.py`/`syntax_check.py` were documented as active while no settings file referenced them, so `.env`/`tracker.xlsx` were unprotected and no post-edit `py_compile` ran. Fixes: tracked `.claude/settings.json` wiring both scripts (PreToolUse `Edit\|Write\|NotebookEdit`, PostToolUse `Edit\|Write`, via `$CLAUDE_PROJECT_DIR`); both scripts switched from `exit(1)` to **`exit(2)`** — only 2 is a BLOCKING hook error, 1 merely prints and lets the edit through, so "BLOCKED" would have been a lie even once wired; new `.githooks/pre-commit` (staged never-commit paths + `ruff check`/`ruff format --check` on staged .py, enable per clone with `git config core.hooksPath .githooks`); `.gitattributes` forcing LF on `.githooks/**` (core.autocrlf=true would hand sh a CRLF shebang). All 7 paths verified end-to-end (4 hook payloads, 3 staged-commit states). Follow-up commit: frontmatter for the 4 slash commands (none had any — `/apply` was advertising a truncated instruction line as its description) and a repair of `/apply` itself, which read 8 paths under the long-deleted `D:/LearningProject/Claude/` tree — and that command IS the prod CLI-fallback prompt (`apply_cli.py` runs `claude -p "/apply …"` with cwd=PROJECT_DIR, and `.dockerignore` re-includes `.claude/commands/` for exactly that reason), so those Windows paths never resolved in the container. Third commit: the `/add-source` recipe and CLAUDE.md's own "Adding a New Job Source" section still told you to create `job_fetch/{site}.py`, a package deleted in the 2026-05-26 Phase 3 refactor; rewritten around the real five registration points, same rot cleared from the scraper-health-checker agent, the debug-scraper skill and the Data Flow diagram. Full detail in docs/AGENT_LOG.md. |
 | 2026-08-11 | fable | **Apply-queue wedge — leaked in-flight lock on a Telegram send failure** (owner report: "Queue paused — already generating elsewhere (e.g. Hopper)" every ~30 min, `/queue` PENDING: 11 / IN_PROGRESS: 0, no generation running). Root cause: the worker's "⚙️ Processing" Telegram ping lived ABOVE the try/finally that owns `mark_apply_done` — an httpx read timeout at 01:12 leaked the in-flight URL lock forever, and the FIFO queue wedged behind the same re-claimed row for 12+ h. Fix (`hunter/apply_worker.py`): Processing send moved inside the lock-holding try/finally AND wrapped in its own try/except (a cosmetic notify failure must neither skip the job nor escape the block); dup-alert send wrapped the same way. Also split a merged test in `tests/test_apply_worker.py` (a scenario had lost its `def` line) into `test_processing_notify_failure_runs_job_and_releases_lock` asserting subprocess-still-runs + lock-freed. Both halves mutation-verified. Ops: bot restarted to clear the leaked lock. 2519 tests green. |
 | 2026-08-11 | fable | **Scout repo split Phase 3 — main-repo cleanup** (docs/SCOUT_REPO_SPLIT_PLAN.md; owner: "скаут должен лежать в отдельном репозитории"). Verified Phases 1-2 live first: private `igrdevelop/linkedin-scout` exists and the desktop Task Scheduler tasks run THAT checkout (`D:\LearningProject\linkedin-scout`), so the in-repo copy was dead weight. Deleted `linkedin_scout/` (14 files), the 7 scout test files, `tests/fixtures/linkedin_scout/`, `tools/telegram_user_login.py`; removed the `scout` extra (`telethon`) from pyproject + regenerated requirements.lock (uv; diff = telethon+pyaes only); `.env.example` scout vars dropped (kept `LINKEDIN_STORAGE_STATE`); `.gitignore` keeps ONLY `linkedin_scout/pending_candidates.json` (relay QUEUE_PATH still writes there at runtime; writer mkdirs the parent, search() tolerates absence); sonar-project.properties sources pruned; CLAUDE.md scout section replaced with an external-repo pointer + payload-contract-v1 note (golden fixture `tests/fixtures/scout_payload_v1.json` and all bot-side relay/scoutfound tests kept, they import only `hunter.*`). Same day, ops: scout was silently dead for a month — both breakers tripped 2026-07-09/12 on anti-bot interstitials AND its `.env` pointed at a deleted `D:\LearningProject\Claude\.secrets\`; repointed both session paths to `bot\.secrets\`, owner re-logged LinkedIn, feed track live again (posts visible: 3). |
 | 2026-08-10 | fable | **Source yield audit — JustJoin pagination + Jobspresso keyword feeds** (owner report: "часть источников перестала приносить вакансии"; live source_runs audit over 19 days on the VPS). Findings: JustJoin API silently changed — `perPage` ignored (server-fixed 10/page) AND the `cursor` param ignored, so every "page" returned the same 10 promoted offers → yield 1-2/run for ~3 weeks; fixed by sending the offset as `from` (meta.next.cursor still carries it) with the loop budget counted in offers (PER_PAGE×MAX_PAGES) so a server page-size change can't shrink coverage again (live: 18 jobs/run, was 1-2). Jobspresso: feed alive but its unfiltered top-10 held zero frontend roles for 19 straight days; now queries `search_keywords=` feeds (frontend/angular/react/javascript) + plain feed and merges (live: 0 → 21). Also diagnosed, no code change: JustRemote alive but its ~11-item dev feed is all backend/fullstack (legit dry trickle); Inhire Playwright yields 0 on the 15:40/21:41 UTC slots but 10-15 on the 10:40 slot every day — load-correlated (13:00/19:00 cycles overlap apply batches), not a selector break; linkedin_scout_relay 0 = desktop scout not relaying (owner-side Task Scheduler check). 5 new tests; `from`-param pagination mutation-verified. |
