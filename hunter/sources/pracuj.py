@@ -5,8 +5,8 @@ Strategy:
   1. Fetch listing pages for frontend/angular jobs in Wroclaw + remote.
      Pracuj.pl renders __NEXT_DATA__ JSON on SSR pages with job listing data.
   2. If __NEXT_DATA__ is unavailable, fall back to BeautifulSoup DOM parsing.
-  3. Individual job text is fetched lazily by job_fetch/pracuj.py when LLM
-     processing is triggered.
+  3. Individual job text is fetched lazily by this class's own fetch_text()
+     (via hunter.sources.fetch_job_text) when LLM processing is triggered.
 
 Listing URLs:
   https://it.pracuj.pl/praca/frontend;kw/wroclaw;wp?rd=30
