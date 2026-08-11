@@ -1,3 +1,8 @@
+---
+description: Integrate a new job board into the hunter — listing scraper, detail fetcher, config toggle, every registration point, tests and CLAUDE.md rows.
+argument-hint: <site name or listing URL>
+---
+
 # Add a new job source
 
 This command documents the full recipe for integrating a new job board into the hunter system.
