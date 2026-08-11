@@ -202,24 +202,39 @@ async def apply_worker_loop(context, worker_id: int = 0) -> None:
                 now = time.monotonic()
                 if now - _last_dup_alert_at >= _READY_ALERT_COOLDOWN_SEC:
                     _last_dup_alert_at = now
-                    await send_text(
-                        context,
-                        f"⏭ [W{worker_id}] Queue paused — already generating elsewhere "
-                        f"(e.g. {job.company}). Will retry when free.",
-                    )
+                    try:
+                        await send_text(
+                            context,
+                            f"⏭ [W{worker_id}] Queue paused — already generating elsewhere "
+                            f"(e.g. {job.company}). Will retry when free.",
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("[apply_worker %d] dup alert failed — continuing", worker_id)
                 await asyncio.sleep(max(APPLY_DELAY_SEC, POLL_INTERVAL_SEC * 4, _DUP_BACKOFF_SEC))
                 continue
 
-            permalink = (job.raw or {}).get("permalink")
-            text = (
-                f"⚙️ [W{worker_id}] Processing: <b>{job.company}</b> — {job.title}\n"
-                f"📍 {job.location}\n🔗 {job.url}"
-            )
-            if permalink:
-                text += f"\n🔗 Post: {permalink}"
-            await send_text(context, text)
-
             try:
+                # Everything from here until the finally runs with the
+                # in-flight URL lock held. The Processing notify is cosmetic:
+                # it must neither skip the job nor escape this block — before
+                # 2026-08-11 it lived ABOVE the try, so one Telegram read
+                # timeout leaked the lock forever and the FIFO queue wedged
+                # behind the same claimed-and-released row ("Queue paused"
+                # every cooldown, no generation running).
+                permalink = (job.raw or {}).get("permalink")
+                text = (
+                    f"⚙️ [W{worker_id}] Processing: <b>{job.company}</b> — {job.title}\n"
+                    f"📍 {job.location}\n🔗 {job.url}"
+                )
+                if permalink:
+                    text += f"\n🔗 Post: {permalink}"
+                try:
+                    await send_text(context, text)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[apply_worker %d] Processing notify failed — continuing", worker_id
+                    )
+
                 outcome = await run_apply_agent_subprocess(
                     job=job,
                     timeout_sec=APPLY_AGENT_TIMEOUT_SEC,

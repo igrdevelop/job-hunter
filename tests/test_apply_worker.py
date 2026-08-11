@@ -440,12 +440,22 @@ def test_loop_releases_claim_when_duplicate_inflight(tracker_db, monkeypatch):
     rows = tracker.lookup_url(job.url)
     assert len(rows) == 1
     assert rows[0]["ats"] == "PENDING"
-    """Exception after claim must not leave IN_PROGRESS until the stale sweep."""
+
+
+def test_processing_notify_failure_runs_job_and_releases_lock(tracker_db, monkeypatch):
+    """A Telegram failure on the Processing ping must neither skip the job nor
+    leak the in-flight URL lock. 2026-08-11 incident: this send lived OUTSIDE
+    the try/finally that owns mark_apply_done, so one httpx read timeout leaked
+    the lock forever and the FIFO queue wedged behind the same row ("Queue
+    paused — already generating elsewhere" every cooldown, no generation)."""
     job = _job(40)
     tracker.add_pending(job)
 
-    # First send_text (Processing) blows up; claim already succeeded.
+    # Telegram is down for the whole iteration (Processing ping AND the
+    # outcome notify inside _resolve_outcome both raise).
     monkeypatch.setattr(apply_worker, "send_text", AsyncMock(side_effect=RuntimeError("tg down")))
+    subprocess_mock = AsyncMock(return_value="cli_timeout")
+    monkeypatch.setattr(apply_worker, "run_apply_agent_subprocess", subprocess_mock)
 
     real_claim = tracker.claim_pending
     calls = {"n": 0}
@@ -461,7 +471,13 @@ def test_loop_releases_claim_when_duplicate_inflight(tracker_db, monkeypatch):
     with pytest.raises(_StopLoop):
         asyncio.run(apply_worker.apply_worker_loop(None, worker_id=0))
 
+    # The notify failure must not have skipped the generation itself.
+    subprocess_mock.assert_awaited_once()
+    # cli_timeout → row back to PENDING, nothing stranded IN_PROGRESS.
     rows = tracker.lookup_url(job.url)
     assert len(rows) == 1
     assert rows[0]["ats"] == "PENDING"
     assert tracker.count_in_progress() == 0
+    # THE regression: the in-flight lock must be free again after the iteration.
+    assert bot_state.try_mark_apply_active(job.url) is True
+    bot_state.mark_apply_done(job.url)
