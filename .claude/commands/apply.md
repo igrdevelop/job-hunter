@@ -5,7 +5,7 @@ argument-hint: <job URL or pasted job text> [--full]
 
 You are helping the candidate apply for a frontend developer job. Generate a complete tailored application package.
 
-All paths below are relative to the repository root — run this command from there.
+Repo files below (`prompts/`, `generate_docs.py`) are relative to the repository root — run this command from there; the CLI pipeline does exactly that (`hunter/apply_cli.py` spawns `claude -p "/apply …"` with `cwd=PROJECT_DIR`). The candidate's personal files and the output folder are NOT in the repo — resolve them from the environment as shown in Steps 1 and 3.
 
 ## Input
 $ARGUMENTS
@@ -16,14 +16,22 @@ $ARGUMENTS
 
 Read the file `prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
 
-Also read the candidate profile from `candidate/candidate_profile.md` — use it as the single source of truth for all candidate data. That file is gitignored (personal); if it is missing, stop and tell the user — `candidate/candidate_profile.example.md` is only a placeholder template, never a substitute.
+The candidate's own files are NOT at a fixed path — since the multi-user migration they live under `users/{userId}/candidate/`, and the active user is named by `CANDIDATE_YAML_PATH` (injected per user by `hunter.users.user_env`). Resolve the directory first, in one command:
 
-After reading the job posting (Step 2), detect the primary stack and load the matching base CV:
-- AI-first / LLM / Agentic roles → `candidate/base_cv_ai.md`
-- React + Next.js / NestJS (React prominent) → `candidate/base_cv_fullstack_react_next.md`
-- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `candidate/base_cv_fullstack_angular_nest.md`
-- Angular → `candidate/base_cv_angular.md`
-- React / Next.js / JavaScript → `candidate/base_cv_react.md`
+```bash
+CAND_DIR="$(dirname "${CANDIDATE_YAML_PATH:-candidate/candidate.yaml}")" && echo "Using: $CAND_DIR"
+```
+
+Use the value printed above as `{cand_dir}` below. Unset (a plain local checkout) falls back to `candidate/`; in the container it resolves to `/app/users/{userId}/candidate`.
+
+Read the candidate profile from `{cand_dir}/candidate_profile.md` — the single source of truth for all candidate data. It is gitignored (personal); if it is missing, stop and tell the user. `candidate_profile.example.md` is a placeholder template, never a substitute — generating from it would produce a CV for a fictional person.
+
+After reading the job posting (Step 2), detect the primary stack and load the matching base CV from the same directory:
+- AI-first / LLM / Agentic roles → `{cand_dir}/base_cv_ai.md`
+- React + Next.js / NestJS (React prominent) → `{cand_dir}/base_cv_fullstack_react_next.md`
+- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `{cand_dir}/base_cv_fullstack_angular_nest.md`
+- Angular → `{cand_dir}/base_cv_angular.md`
+- React / Next.js / JavaScript → `{cand_dir}/base_cv_react.md`
 
 Use the base CV as a starting point for experience bullets and skills order. Follow the "Base CV" instructions in `generation_rules.md`.
 
