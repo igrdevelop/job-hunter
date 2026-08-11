@@ -715,7 +715,14 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             and whether the verdict-refine loop earns its cost
   commands/
     add-source.md           Add a new job source (all five registration points)
-    apply.md                Generate a tailored application package
+    apply.md                Generate a tailored application package. NOT just a desktop
+                            convenience — this file is the CLI pipeline's live prompt
+                            (`hunter/apply_cli.py` runs `claude -p "/apply …"` with
+                            cwd=PROJECT_DIR, which is why `.dockerignore` re-includes
+                            `.claude/commands/` into the image). Repo files are addressed
+                            relative to the root; the candidate's own files are resolved
+                            from `CANDIDATE_YAML_PATH` (per-user since the multi-user
+                            migration — `/app/candidate` is empty in prod)
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → English-only

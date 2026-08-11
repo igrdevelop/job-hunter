@@ -22,8 +22,10 @@ fail=0
 
 # --- 1. protected paths -----------------------------------------------------
 # Matched as path prefixes / basenames against CLAUDE.md's never-commit list.
+# Any *token*.json / *credentials*.json is caught by pattern, not by name, so a
+# new integration's token file is refused before someone remembers to list it.
 protected_hit=$(printf '%s\n' "$staged" | grep -E \
-  '(^|/)\.env$|(^|/)tracker\.xlsx$|(^|/)gsheets_token\.json$|(^|/)gsheets_credentials\.json$|(^|/)gmail_token\.json$|^Applications/|^backups/|^candidate/notes/' \
+  '(^|/)\.env$|(^|/)tracker\.xlsx$|(^|/)[^/]*token[^/]*\.json$|(^|/)[^/]*credentials[^/]*\.json$|^Applications/|^backups/|^candidate/notes/' \
   || true)
 
 if [ -n "$protected_hit" ]; then
