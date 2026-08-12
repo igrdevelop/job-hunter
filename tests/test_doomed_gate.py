@@ -609,13 +609,47 @@ def test_off_domain_title_not_triggered_for_frontend_title() -> None:
     assert "off_domain_title" not in _rules(findings)
 
 
-def test_title_based_checks_do_not_override_a_known_title() -> None:
-    """A guessed title never runs when the real title is already known -
-    the guess is purely a paste-path fallback."""
-    text = "Skip to main content\n.NET Developer (Angular)\nSome Company\n\nAngular work."
+def test_known_title_is_not_second_guessed_when_the_text_agrees() -> None:
+    """The normal case: the posting's own header line contains the title we
+    were handed, so the guess adds nothing and the known title stands alone."""
+    text = (
+        "Skip to main content\n"
+        "Acme hiring Senior Angular Developer in Wroclaw | LinkedIn\n"
+        "Some Company\n\nAngular work."
+    )
     findings = assess_job_text(text, title="Senior Angular Developer")
     assert "title_exclude_pattern" not in _rules(findings)
     assert "off_domain_title" not in _rules(findings)
+
+
+def test_disagreeing_page_title_is_checked_too() -> None:
+    """Regression for the 2026-08-12 LanceSoft/Luxoft incident.
+
+    A Gmail alert digest labels EVERY job it links with the email subject, so
+    a Java/Scala contract role reached the gate titled "Programista Frontend
+    (Angular)". Supersedes the old contract ("a guessed title never runs when
+    the real title is known"): when the posting's own header line describes a
+    DIFFERENT job than the title we were handed, one of the two is wrong and
+    the text in front of us is the better witness, so both are checked.
+    """
+    text = (
+        "Luxoft Poland hiring Full stack / Front-end developer - Scala / Java in Poland\n"
+        "Remote\n\nScala, Java and React work.\n"
+    )
+    findings = assess_job_text(
+        text,
+        title="“frontend remote…”: LEMISOFT - Programista Frontend (Angular) posted on 8/9/26",
+    )
+    assert "title_exclude_pattern" in _rules(findings)
+    assert all(f.severity == "hard" for f in findings if f.rule == "title_exclude_pattern")
+
+
+def test_each_title_rule_reports_at_most_once() -> None:
+    """Explicit title and disagreeing guess can both trip the same rule — the
+    owner gets one line per rule, not a duplicated warning."""
+    text = "PHP Developer wanted\nSome Company\n\nPHP and WordPress work.\n"
+    findings = assess_job_text(text, title="Java Developer")
+    assert len([f for f in findings if f.rule == "title_exclude_pattern"]) == 1
 
 
 def test_guess_title_from_text_skips_boilerplate_lines() -> None:
