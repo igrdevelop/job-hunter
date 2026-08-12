@@ -27,7 +27,9 @@ def _dry_run(monkeypatch, tmp_path, tool_name: str) -> str:
     import hunter.db as db
 
     db_path = tmp_path / "tracker.db"
-    db.init_db(db_path)
+    # Prevent auto-migration from a real tracker.xlsx — these assertions expect
+    # an empty DB ("would write 0 rows").
+    db.init_db(db_path, xlsx_path=tmp_path / "no_tracker.xlsx")
     monkeypatch.setattr(config, "TRACKER_DB_PATH", db_path)
 
     mod = _load_tool(tool_name)
