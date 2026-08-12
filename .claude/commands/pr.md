@@ -1,3 +1,8 @@
+---
+description: Open a pull request with this repo's pre-flight checks — branch cut from current origin/master, ruff check + format, pytest, project-invariants-review, English-only body with no attribution lines.
+argument-hint: [PR title hint or plan-doc name]
+---
+
 Open a pull request for the current work, with this repository's pre-flight checks.
 
 ## Input

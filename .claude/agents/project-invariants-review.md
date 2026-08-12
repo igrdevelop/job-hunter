@@ -1,6 +1,7 @@
 ---
 name: project-invariants-review
-description: Review the current branch diff against this repository's own invariants — the rules from CLAUDE.md that no linter and no generic reviewer can know: CLAUDE.md kept in sync with behavior changes, best_effort() wrapping for new swallow-and-continue code, requirements.lock regenerated after any pyproject.toml edit, all five registration points covered when a source is added, tracker column constants consistent with the documented schema, English-only commit messages, no protected files staged, mypy baseline not grown. Use before opening a PR. Reports rule → status → file:line → fix. By design it finds no bugs and no style issues — /code-review and ruff own those.
+tools: Read, Grep, Glob, Bash
+description: "Review the current branch diff against this repository's own invariants — the rules from CLAUDE.md that no linter and no generic reviewer can know: CLAUDE.md kept in sync with behavior changes, best_effort() wrapping for new swallow-and-continue code, requirements.lock regenerated after any pyproject.toml edit, all five registration points covered when a source is added, tracker column constants consistent with the documented schema, English-only commit messages, no protected files staged, mypy baseline not grown. Use before opening a PR. Reports rule → status → file:line → fix. By design it finds no bugs and no style issues — /code-review and ruff own those."
 ---
 
 You are the invariant reviewer for the Job Hunter Bot repository.

@@ -15,8 +15,9 @@ Audit all enabled job board scrapers and report which are healthy vs. likely bro
    Find all `*_ENABLED` variables and note which sources are enabled.
 
 2. **For each enabled source**, read:
-   - `hunter/sources/<source>.py`
-   - `job_fetch/<source>.py` (if it exists)
+   - `hunter/sources/<source>.py` — one file owns both halves: `search()` for the
+     listing and `matches_url()`/`fetch_text()` for the detail page (the old
+     `job_fetch/` package was merged into the sources in 2026-05 and is gone)
 
 3. **Static analysis — look for these red flags:**
    - Hardcoded CSS selectors or class names (likely stale after site redesigns)

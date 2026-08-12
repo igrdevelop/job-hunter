@@ -1,7 +1,10 @@
 """
 Hook: PreToolUse — block edits to protected files (.env, tracker.xlsx).
 Receives tool input as JSON on stdin.
-Exits with code 1 to block the tool call.
+
+Exits with code 2 to block the tool call: in the hook protocol only 2 is a
+BLOCKING error (stderr is fed back to the model); any other non-zero code is a
+non-blocking error that merely prints to the user and lets the edit through.
 """
 
 import sys
@@ -31,7 +34,7 @@ def main():
                 f"   If you really need to edit it, do it manually.",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            sys.exit(2)
 
 
 if __name__ == "__main__":

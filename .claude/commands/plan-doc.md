@@ -1,3 +1,8 @@
+---
+description: Write docs/<NAME>_PLAN.md before any code — check AGENT_LOG for an already-rejected version of the idea, then open with M0, a free read-only measurement whose decision rule is stated up front.
+argument-hint: <feature, fix or idea to plan>
+---
+
 Write a plan document for a feature or fix, before any code is written.
 
 ## Input

@@ -1,4 +1,11 @@
-You are helping Ihar Petrasheuski apply for a frontend developer job. Generate a complete tailored application package.
+---
+description: Generate a complete tailored application package (resume, cover letters, about-me, ATS report) for one job posting, using this repo's own prompts, candidate profile and generate_docs.py.
+argument-hint: <job URL or pasted job text> [--full]
+---
+
+You are helping the candidate apply for a frontend developer job. Generate a complete tailored application package.
+
+Repo files below (`prompts/`, `generate_docs.py`) are relative to the repository root — run this command from there; the CLI pipeline does exactly that (`hunter/apply_cli.py` spawns `claude -p "/apply …"` with `cwd=PROJECT_DIR`). The candidate's personal files and the output folder are NOT in the repo — resolve them from the environment as shown in Steps 1 and 3.
 
 ## Input
 $ARGUMENTS
@@ -7,16 +14,24 @@ $ARGUMENTS
 
 ## Step 1 - Load generation rules and base CV
 
-Read the file `D:/LearningProject/Claude/prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
+Read the file `prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
 
-Also read the candidate profile from `D:/LearningProject/Claude/candidate/candidate_profile.md` — use it as the single source of truth for all candidate data.
+The candidate's own files are NOT at a fixed path — since the multi-user migration they live under `users/{userId}/candidate/`, and the active user is named by `CANDIDATE_YAML_PATH` (injected per user by `hunter.users.user_env`). Resolve the directory first, in one command:
 
-After reading the job posting (Step 2), detect the primary stack and load the matching base CV:
-- AI-first / LLM / Agentic roles → `D:/LearningProject/Claude/candidate/base_cv_ai.md`
-- React + Next.js / NestJS (React prominent) → `D:/LearningProject/Claude/candidate/base_cv_fullstack_react_next.md`
-- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `D:/LearningProject/Claude/candidate/base_cv_fullstack_angular_nest.md`
-- Angular → `D:/LearningProject/Claude/candidate/base_cv_angular.md`
-- React / Next.js / JavaScript → `D:/LearningProject/Claude/candidate/base_cv_react.md`
+```bash
+CAND_DIR="$(dirname "${CANDIDATE_YAML_PATH:-candidate/candidate.yaml}")" && echo "Using: $CAND_DIR"
+```
+
+Use the value printed above as `{cand_dir}` below. Unset (a plain local checkout) falls back to `candidate/`; in the container it resolves to `/app/users/{userId}/candidate`.
+
+Read the candidate profile from `{cand_dir}/candidate_profile.md` — the single source of truth for all candidate data. It is gitignored (personal); if it is missing, stop and tell the user. `candidate_profile.example.md` is a placeholder template, never a substitute — generating from it would produce a CV for a fictional person.
+
+After reading the job posting (Step 2), detect the primary stack and load the matching base CV from the same directory:
+- AI-first / LLM / Agentic roles → `{cand_dir}/base_cv_ai.md`
+- React + Next.js / NestJS (React prominent) → `{cand_dir}/base_cv_fullstack_react_next.md`
+- Angular + NestJS / Full-Stack (Angular or NestJS alone) → `{cand_dir}/base_cv_fullstack_angular_nest.md`
+- Angular → `{cand_dir}/base_cv_angular.md`
+- React / Next.js / JavaScript → `{cand_dir}/base_cv_react.md`
 
 Use the base CV as a starting point for experience bullets and skills order. Follow the "Base CV" instructions in `generation_rules.md`.
 
@@ -25,11 +40,13 @@ Use the base CV as a starting point for experience bullets and skills order. Fol
 ## Step 2 - Get the job posting
 
 If input is a URL:
-- **justjoin.it**: extract the slug from the URL and fetch via API:
-  `https://api.justjoin.it/v1/offers/{slug}`
+- **justjoin.it**: extract the slug from the URL and fetch via the candidate API:
+  `https://justjoin.it/api/candidate-api/offers/{slug}`
   e.g. `https://justjoin.it/job-offer/syberry-senior-frontend-engineer-krakow-javascript`
   → slug = `syberry-senior-frontend-engineer-krakow-javascript`
-  → fetch `https://api.justjoin.it/v1/offers/syberry-senior-frontend-engineer-krakow-javascript`
+  → fetch `https://justjoin.it/api/candidate-api/offers/syberry-senior-frontend-engineer-krakow-javascript`
+  (this is the endpoint `hunter/sources/justjoin.py::fetch_text` uses — the old
+  `api.justjoin.it/v1/offers/` host is dead)
 - **All other URLs**: fetch the page directly with WebFetch.
 - If fetching fails or returns CSS/empty content: ask the user to paste the job text manually.
 
@@ -88,12 +105,12 @@ Then run the generator (use the same `{base_dir}` determined in Step 3):
 
 **Default (short mode)** — PDF only, EN CV only:
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json"
+python generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json"
 ```
 
 **Full mode** (only when `--full` is explicitly passed):
 ```bash
-python D:/LearningProject/Claude/generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json" --full
+python generate_docs.py "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyName}/content.json" --full
 ```
 
 ---

@@ -6,8 +6,9 @@ Strategy (tested 2026-04):
      The page contains __NEXT_DATA__ JSON with up to 21+ job objects.
   2. Parse jobs directly from pageProps.jobs — no extra detail calls needed
      for filtering; Job objects are built from listing-level data.
-  3. Individual job description text is fetched lazily by job_fetch/bulldogjob.py
-     only when LLM processing is triggered.
+  3. Individual job description text is fetched lazily by this class's own
+     fetch_text() (via hunter.sources.fetch_job_text) only when LLM processing
+     is triggered.
 
 Listing URL: https://bulldogjob.com/companies/jobs/s/skills,Angular/experience,mid,senior
 Job page URL: https://bulldogjob.com/companies/jobs/{job_id}
