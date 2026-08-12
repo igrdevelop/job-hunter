@@ -16,6 +16,7 @@ Detail-page fetch has two paths:
 import logging
 import os
 import re
+import time
 from html import unescape as html_unescape
 from pathlib import Path
 from typing import Optional
@@ -38,7 +39,17 @@ HEADERS = {
     "Accept": "text/html",
     "Accept-Language": "en-US,en;q=0.9",
 }
-RESULTS_PER_PAGE = 25
+# The guest search endpoint returns TEN cards per call, not 25 — measured
+# 2026-08-12 against the live endpoint, with a control run first (three
+# identical requests returned identical id sets, so 10 is the real page size,
+# not a rotating sample). The old `RESULTS_PER_PAGE = 25` silently capped this
+# source at a SINGLE call per keyword: `_search_keyword` stepped `start` by 25
+# and broke out as soon as a page returned fewer than 25 rows, which 10 always
+# does. Paginated properly, the same keyword/window yields ~69 postings where
+# the bot was seeing 10 — see docs/AGENT_LOG.md for the measurement.
+PAGE_STEP = 10
+MAX_PAGES_PER_KEYWORD = 10  # ceiling ~100 postings per keyword
+PAGE_DELAY_SEC = 1.5
 
 # ── Detail-page fetch settings ──────────────────────────────────────────────
 _STORAGE_STATE_ENV = "LINKEDIN_STORAGE_STATE"
@@ -265,22 +276,54 @@ class LinkedInSource(BaseSource):
         return unique
 
     def _search_keyword(self, keyword: str, geo_id: str) -> list[Job]:
-        """Fetch up to 2 pages (50 results) for a single keyword."""
+        """Walk the guest search pages for one keyword.
+
+        Stops on an EMPTY page, never on a merely SHORT one: `start` offsets sit
+        on a fixed `PAGE_STEP` grid and the last populated page is routinely
+        short (measured sequence: 10, 10, 10, 10, 10, 10, 9, then 0), so "fewer
+        rows than a full page" does not mean "no more results". That exact
+        assumption is what used to end pagination on the first call.
+        """
         jobs: list[Job] = []
-        for start in (0, RESULTS_PER_PAGE):
-            page_jobs = self._fetch_page(keyword, geo_id, start)
-            jobs.extend(page_jobs)
-            if len(page_jobs) < RESULTS_PER_PAGE:
-                break  # no more results
+        seen_ids: set[str] = set()
+        pages_walked = 0
+
+        for page in range(MAX_PAGES_PER_KEYWORD):
+            if page:
+                time.sleep(PAGE_DELAY_SEC)
+            page_jobs = self._fetch_page(keyword, geo_id, page * PAGE_STEP)
+            pages_walked += 1
+            if not page_jobs:
+                break
+            for job in page_jobs:
+                # Overlapping offsets can repeat a posting; the caller dedups
+                # across keywords, this keeps one keyword's own list clean.
+                jid = self._extract_job_id(job.url) or job.url
+                if jid in seen_ids:
+                    continue
+                seen_ids.add(jid)
+                jobs.append(job)
+
+        logger.info(f"[LinkedIn] '{keyword}': {len(jobs)} unique over {pages_walked} page(s)")
         return jobs
 
     def _fetch_page(self, keyword: str, geo_id: str, start: int) -> list[Job]:
+        # Deliberately NOT sent (measured live 2026-08-12): the guest endpoint
+        # IGNORES both `f_E` (experience level) and `f_WT` (workplace type) —
+        # passing either returns a byte-identical id set. `f_E=3,4` used to sit
+        # here doing nothing; `f_WT` cannot express the remote/hybrid/Wrocław
+        # preference on this endpoint at all, so that stays the central filter's
+        # job (hunter/filters.py). Only an authenticated search honours them —
+        # don't "restore" these without re-measuring.
         params = {
             "keywords": keyword,
             "location": "Poland",
             "geoId": geo_id,
-            "f_TPR": "r86400",  # last 24 hours
-            "f_E": "3,4",  # mid + senior
+            # The window IS honoured (24h vs 7d shared only 14 of 57/69 ids),
+            # and the 7-day set is far more on-target: 49% of its rows carry
+            # "angular" in the title versus 11% for 24h. URL dedup in the hunt
+            # loop makes the wider window free.
+            "f_TPR": os.environ.get("LINKEDIN_TPR", "").strip() or "r604800",
             "sortBy": "DD",  # most recent
             "start": str(start),
         }
