@@ -1700,6 +1700,62 @@ def _assess_off_domain_title(
     return None
 
 
+def _normalize_title(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _titles_agree(explicit: str, guessed: str) -> bool:
+    """True if the guessed title line and the explicit title describe one job.
+
+    The guess is usually the posting's own header line, which CONTAINS the
+    real title ("Luxoft Poland hiring Full stack / Front-end developer -
+    Scala / Java in Poland | LinkedIn"), so plain containment either way is
+    enough to call them the same vacancy.
+    """
+    a, b = _normalize_title(explicit), _normalize_title(guessed)
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
+def _titles_to_check(title: str, job_text: str) -> list[tuple[str, bool]]:
+    """(title, was_guessed) pairs the title-based rules should run against.
+
+    An explicit title is normally authoritative — but it is only as good as
+    its source, and one source is known to be wrong by construction: a Gmail
+    alert digest links several jobs and `gmail_parsers` could only label them
+    all with the email subject, so a LinkedIn "Software Engineer" arrived
+    titled "Front-End Developer (Agentic AI) at Comarch" and a Java/Scala
+    role as "Programista Frontend (Angular)". Both passed every title rule
+    and reached generation (2026-08-12).
+
+    So when the posting's OWN header line disagrees with the title we were
+    handed, check both. Agreement (the common case) costs nothing and keeps
+    behavior identical; disagreement means one of the two is describing a
+    different vacancy, and the text in front of us is the better witness.
+    """
+    guessed = _guess_title_from_text(job_text)
+    if not title:
+        return [(guessed, True)] if guessed else []
+    checks = [(title, False)]
+    if guessed and not _titles_agree(title, guessed):
+        checks.append((guessed, True))
+    return checks
+
+
+def _dedup_findings(findings: list["GateFinding"]) -> list["GateFinding"]:
+    """First finding per rule — the title rules can now fire twice (explicit
+    title + disagreeing guess) and the owner needs one line per rule, not two."""
+    seen: set[str] = set()
+    unique: list[GateFinding] = []
+    for finding in findings:
+        if finding.rule in seen:
+            continue
+        seen.add(finding.rule)
+        unique.append(finding)
+    return unique
+
+
 # NOTE: an earlier iteration of this plan added a SOFT rule that flagged any
 # anti-hybrid city named near the top of the text (no onsite/hybrid wording
 # required) to catch header-only cases like Comarch ("Comarch Warsaw,
@@ -1803,24 +1859,22 @@ def assess_job_text(
 
     # Title-based checks (docs/DOOMED_GATE_PASTE_PLAN.md) — reuse the explicit
     # title when known (hunt/JobLeads), otherwise fall back to a best-effort
-    # guess from the raw text. Only meaningful on the manual-paste path, where
-    # no title is known at gate time; a guess miss just finds nothing.
-    was_guessed = not bool(title)
-    effective_title = title or _guess_title_from_text(job_text)
-    try:
-        finding = _assess_title_exclude_pattern(effective_title, flt=f)
-        if finding:
-            findings.append(finding)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        finding = _assess_off_domain_title(effective_title, was_guessed=was_guessed, flt=f)
-        if finding:
-            findings.append(finding)
-    except Exception:  # noqa: BLE001
-        pass
+    # guess from the raw text. A guess miss just finds nothing.
+    for effective_title, was_guessed in _titles_to_check(title, job_text):
+        try:
+            finding = _assess_title_exclude_pattern(effective_title, flt=f)
+            if finding:
+                findings.append(finding)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            finding = _assess_off_domain_title(effective_title, was_guessed=was_guessed, flt=f)
+            if finding:
+                findings.append(finding)
+        except Exception:  # noqa: BLE001
+            pass
 
-    return findings
+    return _dedup_findings(findings)
 
 
 def screen_job_text(
