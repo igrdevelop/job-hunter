@@ -1,5 +1,12 @@
 # Python Core Extraction & Web API Plan
 
+> **SUPERSEDED — kept for history.** A design interview established that the goal is
+> selling the product to other people, not extracting a core. That inverted most of
+> the conclusions below: the last stage here (per-user CV files) is blocking for the
+> MVP, the notifier design was too narrow, and a database migration and a whole
+> product pipeline were missing. Current plan:
+> [SAAS_PIVOT_PLAN_supersedes_PYTHON_CORE_PLAN.md](SAAS_PIVOT_PLAN_supersedes_PYTHON_CORE_PLAN.md).
+
 Goal: let the web frontend (job-hunter-site → job-hunter-api) use the bot's
 Python logic. Verified conclusion: **no separate pip package** — the boundary
 is a clean `hunter` core plus a second Python process (FastAPI) in this repo,
