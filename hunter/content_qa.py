@@ -36,40 +36,22 @@ _EN_SENTENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_EXPECTED_ROLE_COUNT = candidate.get("education.expected_role_count", 7)
+# How many roles the generated resume should list. Read from candidate.yaml;
+# 0 = not configured, which makes _check_role_count self-skip. The old default
+# (7) was the project owner's own role count — for anyone else it failed the
+# check on every single generation.
+_EXPECTED_ROLE_COUNT = candidate.get("education.expected_role_count", 0)
 
 # Known canonical profile titles (lowercase normalised). Read from
-# candidate.yaml (employers.profile_titles); falls back to the project
-# owner's original title list when candidate.yaml is absent.
-_PROFILE_TITLES_NORM = set(
-    candidate.get(
-        "employers.profile_titles",
-        [
-            "frontend developer (angular, part-time contract)",  # Alten Poland
-            "senior frontend developer (angular)",  # Fairmarkit, Venture Labs, SII
-            "senior frontend developer",  # Altoros
-            "frontend developer (angular)",  # SolbegSoft
-            "frontend developer",  # Staronka
-        ],
-    )
-)
+# candidate.yaml (employers.profile_titles). No default: these titles map
+# one-to-one onto a real person's job history and must not be baked into
+# shared code. Absent = the title check reports "unmeasured" instead of
+# comparing against someone else's career (see _check_titles).
+_PROFILE_TITLES_NORM = set(candidate.get("employers.profile_titles", []))
 
 # Known real company names (lowercase). Read from candidate.yaml
-# (employers.real_companies); falls back to the project owner's original list.
-_REAL_COMPANIES = set(
-    candidate.get(
-        "employers.real_companies",
-        [
-            "alten poland",
-            "fairmarkit",
-            "venture labs",
-            "sii",
-            "altoros",
-            "solbegsoft",
-            "staronka",
-        ],
-    )
-)
+# (employers.real_companies). No default, same reason as the titles above.
+_REAL_COMPANIES = set(candidate.get("employers.real_companies", []))
 
 
 def _norm_title(t: str) -> str:
@@ -127,6 +109,12 @@ class QAReport:
 def _check_role_count(resume_en: dict[str, Any]) -> QACheck:
     exp = resume_en.get("experience") or []
     count = len(exp)
+    if not _EXPECTED_ROLE_COUNT:
+        return QACheck(
+            name=f"Role count ({count})",
+            passed=True,
+            detail="unmeasured — set education.expected_role_count in candidate.yaml",
+        )
     ok = count >= _EXPECTED_ROLE_COUNT
     return QACheck(
         name=f"Role count ({count}/{_EXPECTED_ROLE_COUNT})",
@@ -223,9 +211,15 @@ def _check_education(resume_en: dict[str, Any]) -> QACheck:
             detail=f"education is a stringified dict: {edu[:80]}",
         )
     # Check known correct school name
-    school_keyword = candidate.get(
-        "education.school_keyword", "belarusian state technological university"
-    )
+    # No default: a school name is personal data. Absent = skip the check
+    # rather than measure against someone else's diploma.
+    school_keyword = candidate.get("education.school_keyword", "")
+    if not school_keyword.strip():
+        return QACheck(
+            name="Education matches profile",
+            passed=True,
+            detail="unmeasured — set education.school_keyword in candidate.yaml",
+        )
     if school_keyword.lower() not in edu.lower():
         return QACheck(
             name="Education matches profile",
@@ -268,6 +262,14 @@ def _check_no_duplicate_angular(resume_en: dict[str, Any]) -> QACheck:
 
 
 def _check_titles(resume_en: dict[str, Any]) -> QACheck:
+    # No configured title list = nothing to compare against. Report it as
+    # unmeasured rather than flagging every single role as unknown.
+    if not _PROFILE_TITLES_NORM:
+        return QACheck(
+            name="Experience titles match profile",
+            passed=True,
+            detail="unmeasured — set employers.profile_titles in candidate.yaml",
+        )
     bad: list[str] = []
     for entry in resume_en.get("experience") or []:
         title = (entry.get("title") or "").strip()
@@ -285,6 +287,12 @@ def _check_titles(resume_en: dict[str, Any]) -> QACheck:
 
 def _check_companies(resume_en: dict[str, Any]) -> QACheck:
     """All companies must be from the known whitelist."""
+    if not _REAL_COMPANIES:
+        return QACheck(
+            name="All companies from profile",
+            passed=True,
+            detail="unmeasured — set employers.real_companies in candidate.yaml",
+        )
     bad: list[str] = []
     for entry in resume_en.get("experience") or []:
         company = (entry.get("company") or "").strip().lower()

@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/igrdevelop/job-hunter/actions/workflows/deploy.yml/badge.svg)](https://github.com/igrdevelop/job-hunter/actions/workflows/deploy.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1700%2B-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2500%2B-brightgreen)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-An autonomous job-hunting system: it scrapes **21 IT job boards**, filters vacancies
+An autonomous job-hunting system: it scrapes **25 IT job boards**, filters vacancies
 against a candidate profile, generates a **tailored CV + cover letter per vacancy**
 with an LLM, verifies every generated claim through a multi-stage quality pipeline,
 and delivers ready-to-send PDFs to Telegram — with full tracking in Google Sheets
@@ -20,7 +20,7 @@ one hard rule — **a broken or dishonest CV must never leave the pipeline**.
 
 ## Highlights
 
-- **21 scraper sources** — Polish boards (JustJoin.it, NoFluffJobs, Pracuj.pl,
+- **25 scraper sources** — Polish boards (JustJoin.it, NoFluffJobs, Pracuj.pl,
   theprotocol.it…), global remote boards (RemoteOK, Himalayas, WeWorkRemotely…),
   LinkedIn, Gmail job alerts, and a multi-provider ATS aggregator
   (Workable / Greenhouse / Lever / Recruitee / Ashby). Strategies range from JSON
@@ -41,14 +41,14 @@ one hard rule — **a broken or dishonest CV must never leave the pipeline**.
 - **Cost-engineered** — prompt caching, deterministic early-exit in the ATS
   keyword loop, cheap judge model: **~$0.13–0.17 per tailored application**
   (down from $0.38 after a data-driven optimization across 713 production runs).
-- **1700+ tests**, full suite in ~14 seconds; ruff-gated CI; PR-based history
+- **2500+ tests**, full suite in ~10 minutes; ruff-gated CI; PR-based history
   with root-cause analysis documented for every production incident.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    A[21 job board scrapers] -->|"list[Job]"| B[Central filters<br/>keywords · seniority · location · language]
+    A[25 job board scrapers] -->|"list[Job]"| B[Central filters<br/>keywords · seniority · location · language]
     B --> C[Dedup<br/>URL + company/title vs SQLite tracker]
     C --> D[Telegram card<br/>Apply / Skip buttons]
     D -->|Apply| E[Fetch full job text]
@@ -158,7 +158,7 @@ Google Sheets / Drive / Gmail APIs · Docker + GitHub Actions → GHCR → VPS
 
 ```bash
 ruff check .        # lint (CI gate)
-pytest tests/       # 1700+ tests, ~14 s
+pytest tests/       # 2500+ tests, ~10 min
 ```
 
 Scrapers are covered by fixture-based parsing tests; the quality pipeline by

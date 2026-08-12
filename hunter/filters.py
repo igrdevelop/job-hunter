@@ -1563,9 +1563,9 @@ def _assess_russia_market(blob: str) -> "GateFinding | None":
 # Full-page dumps append unrelated recommendation/navigation blocks that don't
 # describe THIS job at all — real examples from calibration (docs/DOOMED_GATE_
 # PLAN.md M4):
-#   - LinkedIn "Similar jobs"/"People also viewed": a Fairmarkit dump contained
+#   - LinkedIn "Similar jobs"/"People also viewed": one employer's dump contained
 #     an unrelated "... (hybrid work in Warsaw) — Synergetica" sidebar entry
-#     that falsely tripped the on-site/hybrid check for Fairmarkit itself.
+#     that falsely tripped the on-site/hybrid check for that job itself.
 #   - theprotocol.it renders a sitewide SEO footer starting at "Praca w
 #     miastach:" (jobs by city) listing dozens of cities/positions/technologies
 #     as "<term> praca" links (e.g. "Wordpress praca", "Praca IT Kraków") that
@@ -1761,7 +1761,7 @@ def _dedup_findings(findings: list["GateFinding"]) -> list["GateFinding"]:
 # required) to catch header-only cases like Comarch ("Comarch Warsaw,
 # Mazowieckie, Poland" with no "hybrid"/"onsite" anywhere in the body).
 # Recalibration against the real corpus immediately proved it too noisy even
-# at SOFT: Fairmarkit — a real, fully described, SENT (98% ATS) Warsaw-office
+# at SOFT: a real, fully described, SENT (98% ATS) Warsaw-office
 # EU role with no hybrid language of its own — tripped it exactly the same as
 # Comarch. A bare city mention in a header can't be told apart from "this is
 # just where the company's office happens to be"; the rule was removed

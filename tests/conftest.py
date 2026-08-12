@@ -63,8 +63,41 @@ def _owner_candidate_data(monkeypatch) -> None:
     monkeypatch.setattr(verdict_refine, "_FLEXIBLE_EMPLOYER_PERIOD", "2018-2022")
     monkeypatch.setattr(
         verdict_refine,
-        "_ALTOROS_FLEXIBLE_PROJECTS",
+        "_FLEXIBLE_PROJECTS",
         ("E-commerce", "Insurance", "Healthcare", "Grant Management"),
+    )
+
+    # content_qa's whitelists are module-level and now have NO hardcoded
+    # fallback (they used to carry the owner's employer list). On CI there is
+    # no candidate.yaml at all, so without this the sets are empty and the
+    # checks self-skip as "unmeasured" — pin them so the QA tests keep
+    # exercising the real comparison logic.
+    from hunter import content_qa
+
+    monkeypatch.setattr(
+        content_qa,
+        "_REAL_COMPANIES",
+        {
+            "alten poland",
+            "fairmarkit",
+            "venture labs",
+            "sii",
+            "altoros",
+            "solbegsoft",
+            "staronka",
+        },
+    )
+    monkeypatch.setattr(content_qa, "_EXPECTED_ROLE_COUNT", 7)
+    monkeypatch.setattr(
+        content_qa,
+        "_PROFILE_TITLES_NORM",
+        {
+            "frontend developer (angular, part-time contract)",
+            "senior frontend developer (angular)",
+            "senior frontend developer",
+            "frontend developer (angular)",
+            "frontend developer",
+        },
     )
 
 

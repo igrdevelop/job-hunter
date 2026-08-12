@@ -220,7 +220,7 @@ def _whitelist() -> set[str]:
 
 
 def _base_name(company: str) -> str:
-    """Strip parenthetical suffixes: 'Fairmarkit (via contractor)' → 'fairmarkit'."""
+    """Strip parenthetical suffixes: 'Acme Corp (via contractor)' → 'acme corp'."""
     return re.sub(r"\s*\(.*?\)", "", company).lower().strip()
 
 
@@ -228,10 +228,10 @@ def _is_real_company(company: str) -> bool:
     """Check if company name (fuzzy) matches any whitelisted real company.
 
     Handles:
-    - Exact match: "SII" == "SII"
-    - Contains: "Fairmarkit (via contractor)" in whitelist; input "Fairmarkit (via contractor)"
-    - Base-name match: "Fairmarkit (przez kontraktora)" → base "fairmarkit" matches
-      whitelist entry base "fairmarkit"
+    - Exact match: "Acme" == "Acme"
+    - Contains: "Acme Corp (via contractor)" in whitelist; input "Acme Corp (via contractor)"
+    - Base-name match: "Acme Corp (przez kontraktora)" → base "acme corp" matches
+      whitelist entry base "acme corp"
     """
     c = company.lower().strip()
     c_base = _base_name(company)

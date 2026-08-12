@@ -18,14 +18,14 @@ Expects a JSON file with the following schema:
     "experience": [
       {
         "title": "Senior Frontend Developer (Angular)",
-        "company": "Fairmarkit (via contractor)",
+        "company": "Example Corp (via contractor)",
         "period": "Jun 2025 - March 2026",
-        "subtitle": "AI-powered Enterprise Procurement Platform | USA (Global)",
+        "subtitle": "Enterprise Procurement Platform | USA (Global)",
         "bullets": ["bullet 1", "bullet 2"],
         "stack_line": "Stack: Angular 19, TypeScript, ..."
       }
     ],
-    "education": "Belarusian State Technological University - Bachelor, PE and Systems of Information Processing",
+    "education": "Example University - Bachelor, Computer Science",
     "courses": "Angular Updates Course, Angular Advanced Course, ..."
   },
   "resume_pl": null,
@@ -183,14 +183,11 @@ def add_gdpr_clause(doc, lang):
 
 def build_resume(doc, data, stack, lang="EN"):
     name = candidate.get("identity.full_name", candidate.DEFAULT_FULL_NAME)
-    aka = candidate.get("identity.aka", "Igor Pietraszewski")
+    aka = candidate.get("identity.aka", candidate.DEFAULT_AKA)
     subtitle = f"also known as {aka}" if aka else ""
-    headline_base = candidate.get("identity.headline", "Senior Frontend Developer")
+    headline_base = candidate.get("identity.headline", candidate.DEFAULT_HEADLINE)
     headline = f"{headline_base} ({stack})"
-    contact = candidate.get(
-        "identity.contact",
-        "+48 571 525 110 | igrflex@gmail.com | linkedin.com/in/ijerweb | Wrocław, Poland",
-    )
+    contact = candidate.get("identity.contact", candidate.DEFAULT_CONTACT)
 
     # Name
     p = doc.add_paragraph()
@@ -386,6 +383,17 @@ def update_tracker(content: dict, force_mode: bool = False) -> None:
 def main():
     if len(sys.argv) < 2:
         print("Usage: python generate_docs.py <content.json> [--full] [--force] [--no-tracker]")
+        sys.exit(1)
+
+    # Identity gate — before any file is written. Without a configured
+    # candidate.yaml every identity field falls back to a placeholder, and a
+    # rendered PDF is the one artifact that leaves the machine and reaches a
+    # real employer. Aborting here is a normal retryable failure; a CV sent
+    # under the wrong name is not.
+    try:
+        candidate.require_identity()
+    except candidate.CandidateIdentityMissing as exc:
+        print(f"[generate_docs] ERROR: {exc}")
         sys.exit(1)
 
     json_path = sys.argv[1]

@@ -476,26 +476,29 @@ def _run_main_api(
         # unusable, so ask the LLM once to return a complete, fixed JSON rather
         # than silently generating a broken PDF.
         try:
-            _repair_role_count = candidate.get("education.expected_role_count", 7)
-            _repair_companies = candidate.get(
-                "employers.real_companies",
-                [
-                    "Alten Poland",
-                    "Fairmarkit",
-                    "Venture Labs",
-                    "SII",
-                    "Altoros",
-                    "SolbegSoft",
-                    "Staronka",
-                ],
-            )
+            # Both read from candidate.yaml with no fallback — an employer list
+            # is personal data and must not be baked into shared code. Without
+            # it the repair prompt still states the rule, just without naming
+            # the specific roles it must preserve.
+            _repair_role_count = candidate.get("education.expected_role_count", 0)
+            _repair_companies = candidate.get("employers.real_companies", [])
+            if _repair_companies:
+                _roles_rule = (
+                    f"CRITICAL: resume_en.experience MUST contain ALL "
+                    f"{_repair_role_count or len(_repair_companies)} roles in this exact "
+                    f"order: {', '.join(_repair_companies)}. "
+                )
+            else:
+                _roles_rule = (
+                    "CRITICAL: resume_en.experience MUST keep EVERY role that was already "
+                    "present, in the same order. "
+                )
             _repair_msg = (
                 "The JSON you returned has structural problems that make the resume "
                 "invalid. Fix ALL of the issues below and return the COMPLETE JSON "
                 "again (same schema, every field), not just the changed parts:\n"
                 + "\n".join(f"- {e}" for e in errors)
-                + f"\n\nCRITICAL: resume_en.experience MUST contain ALL {_repair_role_count} "
-                f"roles in this exact order: {', '.join(_repair_companies)}. Never drop a "
+                + f"\n\n{_roles_rule}Never drop a "
                 "role to fit 2 pages — compress older roles to 1-2 bullets instead. Keep "
                 "company, period, title, subtitle verbatim per the rules.\n\n"
                 f"Previous JSON to fix:\n{json.dumps(content, ensure_ascii=False)}"

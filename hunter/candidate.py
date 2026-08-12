@@ -2,10 +2,13 @@
 candidate's identity, location, languages and employer history.
 
 candidate/candidate.yaml is gitignored (personal data). If it is absent,
-load() degrades gracefully —
-every caller reads through get(dotpath, default) with an explicit fallback
-that reproduces the project owner's original hardcoded behavior, so a missing
-file never crashes the bot. One warning is logged the first time it's missing.
+load() returns {} and never raises — one warning is logged the first time.
+Callers read through get(dotpath, default), and every such `default` is
+NEUTRAL: empty, or an obviously-broken placeholder. It must never be the
+project owner's real value, however convenient that is for reproducing his
+behavior — that is what made a second person's checkout silently generate
+CVs under his name. Identity is gated rather than defaulted; see
+require_identity() below.
 
 Multi-user (Phase B3): the cache is keyed by the resolved yaml path — one
 process can serve several users' identities (the bot process reading
@@ -26,13 +29,34 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "candidate" / "candidate.yaml"
 _path_override: Path | None = None
 
-# The project owner's original hardcoded identity, kept here (not inlined at
-# each call site) so this personal data lives in exactly one place outside
-# candidate.yaml itself. Callers that need the byte-for-byte original
-# behavior when candidate.yaml is absent pass these as their default, e.g.
-# ``candidate.get("identity.full_name", DEFAULT_FULL_NAME)``.
-DEFAULT_FULL_NAME = "Ihar Petrasheuski"
-DEFAULT_CV_FILENAME_PREFIX = "Ihar_Petrasheuski_CV"
+# Neutral placeholders — deliberately NOT a working identity.
+#
+# These used to hold the project owner's real name, phone and email so that a
+# checkout without candidate.yaml reproduced his behavior byte-for-byte. That
+# is exactly the wrong failure mode for anyone else: a second person running
+# this repo without a candidate.yaml silently generated CVs carrying the
+# owner's name and phone number and mailed them to real employers. The
+# placeholders below are obviously broken instead of quietly wrong, and
+# ``require_identity()`` stops document generation before one can reach a PDF.
+DEFAULT_FULL_NAME = "UNCONFIGURED CANDIDATE"
+DEFAULT_CV_FILENAME_PREFIX = "Candidate_CV"
+DEFAULT_AKA = ""
+DEFAULT_HEADLINE = "Software Developer"
+DEFAULT_CONTACT = "set identity.contact in candidate/candidate.yaml"
+
+# Identity fields that MUST come from candidate.yaml before any document is
+# rendered. `identity.aka` and `identity.headline` are excluded on purpose:
+# aka is optional by design (blank omits the subtitle) and headline has a
+# generic, non-personal default that is merely bland, not wrong.
+REQUIRED_IDENTITY_FIELDS = (
+    "identity.full_name",
+    "identity.contact",
+    "identity.cv_filename_prefix",
+)
+
+
+class CandidateIdentityMissing(RuntimeError):
+    """Raised when a document would be rendered without a configured identity."""
 
 
 def _set_path(path) -> None:
@@ -86,3 +110,39 @@ def get(dotpath: str, default=None, *, path: str | Path | None = None):
             return default
         node = node[part]
     return node if node is not None else default
+
+
+def missing_identity_fields(*, path: str | Path | None = None) -> list[str]:
+    """Which REQUIRED_IDENTITY_FIELDS candidate.yaml does not supply.
+
+    Empty list = safe to render documents. A blank/whitespace-only value
+    counts as missing: an empty name on a CV is no better than an absent one.
+    """
+    missing = []
+    for dotpath in REQUIRED_IDENTITY_FIELDS:
+        value = get(dotpath, None, path=path)
+        if value is None or not str(value).strip():
+            missing.append(dotpath)
+    return missing
+
+
+def require_identity(*, path: str | Path | None = None) -> None:
+    """Abort before rendering a document with an unconfigured identity.
+
+    Called at the top of generate_docs.main(). An aborted generation is a
+    normal retryable failure; a PDF carrying someone else's name is not
+    recoverable once it has been sent, which is why this raises instead of
+    warning.
+    """
+    missing = missing_identity_fields(path=path)
+    if not missing:
+        return
+    resolved = _resolve_path() if path is None else Path(path)
+    raise CandidateIdentityMissing(
+        "candidate identity is not configured — refusing to generate documents.\n"
+        f"  Missing: {', '.join(missing)}\n"
+        f"  Expected in: {resolved}\n"
+        "  Fix: copy candidate/candidate.yaml.example to candidate/candidate.yaml "
+        "and fill in your own name, contact line and CV filename prefix "
+        "(see docs/SETUP_NEW_USER.md)."
+    )
