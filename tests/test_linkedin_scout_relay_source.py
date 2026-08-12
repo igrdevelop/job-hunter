@@ -192,3 +192,122 @@ def test_append_to_queue_no_leftover_tmp_file(relay):
     _source, queue_path = relay
     append_to_queue({"author": "Jane", "body": "We're hiring an Angular Developer."})
     assert not (queue_path.parent / (queue_path.name + ".tmp")).exists()
+
+
+# --- Payload v2: the scout's jobs track ("job" kind) -------------------------
+#
+# A jobs-track record is the opposite of a feed post in every way that matters:
+# it has a REAL canonical LinkedIn url, so that url stays job.url (dedup against
+# LinkedInSource's own finds, expired-check and FAIL retries all key on it), the
+# bot fetches the description itself, and post_text must be ABSENT so apply does
+# not reroute through the paste flow.
+
+JOB_RECORD = {
+    "v": 2,
+    "kind": "job",
+    "keyword": "angular",
+    "url": "https://www.linkedin.com/jobs/view/4451158730/",
+    "title": "Senior Angular Developer",
+    "company": "Example Software",
+    "location": "Wrocław, Dolnośląskie, Poland",
+    "workplace_type": "Remote",
+    "posted_age": "2 days ago",
+    "scouted_at": "2026-08-12T21:40:00+00:00",
+}
+
+
+def test_job_kind_keeps_the_real_url(relay):
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([JOB_RECORD]), encoding="utf-8")
+
+    jobs = source.search()
+
+    assert len(jobs) == 1
+    assert jobs[0].url == "https://www.linkedin.com/jobs/view/4451158730/"
+    assert not jobs[0].url.startswith(URL_PREFIX)
+
+
+def test_job_kind_carries_no_post_text(relay):
+    """post_text is what reroutes apply through the paste flow — a real job url
+    must be FETCHED instead (hunter/services/apply_service.py)."""
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([JOB_RECORD]), encoding="utf-8")
+
+    job = source.search()[0]
+
+    assert "post_text" not in job.raw
+
+
+def test_job_kind_sets_no_permalink_duplicate(relay):
+    """A permalink equal to url would render the same link twice on the card
+    (Job.telegram_text prints both)."""
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([JOB_RECORD]), encoding="utf-8")
+
+    assert not source.search()[0].raw.get("permalink")
+
+
+def test_job_kind_takes_title_and_company_from_the_record(relay):
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([JOB_RECORD]), encoding="utf-8")
+
+    job = source.search()[0]
+
+    assert job.title == "Senior Angular Developer"
+    assert job.company == "Example Software"
+
+
+def test_job_kind_folds_workplace_type_into_location(relay):
+    """The central location whitelist reads job.location only — a remote posting
+    tagged with a non-whitelisted city has to carry its "Remote" badge there or
+    the filter drops it."""
+    source, queue_path = relay
+    record = {**JOB_RECORD, "location": "Warsaw, Poland", "workplace_type": "Remote"}
+    queue_path.write_text(json.dumps([record]), encoding="utf-8")
+
+    assert source.search()[0].location == "Warsaw, Poland (Remote)"
+
+
+def test_job_kind_does_not_duplicate_an_already_present_badge(relay):
+    source, queue_path = relay
+    record = {**JOB_RECORD, "location": "Warsaw, Poland (Remote)", "workplace_type": "Remote"}
+    queue_path.write_text(json.dumps([record]), encoding="utf-8")
+
+    assert source.search()[0].location == "Warsaw, Poland (Remote)"
+
+
+def test_job_kind_without_url_is_dropped(relay):
+    """An empty url would normalize to the same dedup key for every such row and
+    could never be fetched."""
+    source, queue_path = relay
+    queue_path.write_text(json.dumps([{**JOB_RECORD, "url": ""}]), encoding="utf-8")
+
+    assert source.search() == []
+
+
+def test_post_kind_is_unchanged_by_the_v2_branch(relay):
+    """Absent `kind` means "post" — every v1 payload in flight keeps working."""
+    source, queue_path = relay
+    queue_path.write_text(
+        json.dumps([{"author": "Jane", "body": "We're hiring an Angular dev."}]),
+        encoding="utf-8",
+    )
+
+    job = source.search()[0]
+
+    assert job.url.startswith(URL_PREFIX)
+    assert job.raw["post_text"] == "We're hiring an Angular dev."
+
+
+def test_mixed_queue_yields_both_kinds(relay):
+    source, queue_path = relay
+    queue_path.write_text(
+        json.dumps([JOB_RECORD, {"author": "Jane", "body": "hiring an Angular dev"}]),
+        encoding="utf-8",
+    )
+
+    jobs = source.search()
+
+    assert len(jobs) == 2
+    assert jobs[0].url == JOB_RECORD["url"]
+    assert jobs[1].url.startswith(URL_PREFIX)

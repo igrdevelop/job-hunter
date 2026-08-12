@@ -39,7 +39,17 @@ from hunter.config import TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-MAX_SUPPORTED_PAYLOAD_VERSION = 1
+MAX_SUPPORTED_PAYLOAD_VERSION = 2
+
+# What each payload kind must carry to be actionable at all.
+#
+# v2 (2026-08-12) adds `kind`, because the scout gained a second track. A
+# "post" is a feed post relayed as TEXT — there is no fetchable URL, so the body
+# IS the payload and apply runs through the paste flow. A "job" is a real
+# LinkedIn Jobs posting, where the canonical url is the whole point: the bot
+# fetches the description itself and carries no body. An absent `kind` means
+# "post", so every v1 payload already in flight keeps working untouched.
+_REQUIRED_FIELD_BY_KIND = {"post": "body", "job": "url"}
 
 
 async def cmd_scoutfound(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -57,10 +67,16 @@ async def cmd_scoutfound(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.warning("[scoutfound] failed to decode payload: %s", e)
         return
 
-    if not isinstance(payload, dict) or not payload.get("body"):
-        logger.warning("[scoutfound] payload missing body, ignoring")
+    if not isinstance(payload, dict):
+        logger.warning("[scoutfound] payload is not an object, ignoring")
         return
 
+    # Version is checked BEFORE the field validation below, not after: a payload
+    # from a NEWER scout may legitimately not carry the fields this version knows
+    # to look for, and the owner must get the actionable "update the bot" reply
+    # rather than the silence a failed field check produces. (Until v2 the body
+    # check ran first, so a future kind with no `body` would have been dropped
+    # mutely — the reply this branch exists for could never have fired.)
     version = payload.get("v", 1)
     if version > MAX_SUPPORTED_PAYLOAD_VERSION:
         logger.warning("[scoutfound] rejected: unsupported payload version %s", version)
@@ -68,6 +84,15 @@ async def cmd_scoutfound(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(
                 f"scout payload v{version} not supported — update the bot"
             )
+        return
+
+    kind = str(payload.get("kind") or "post").strip().lower()
+    required = _REQUIRED_FIELD_BY_KIND.get(kind)
+    if required is None:
+        logger.warning("[scoutfound] rejected: unknown payload kind %r", kind)
+        return
+    if not payload.get(required):
+        logger.warning("[scoutfound] payload kind %r missing %r, ignoring", kind, required)
         return
 
     from hunter.sources.linkedin_scout_relay import append_to_queue

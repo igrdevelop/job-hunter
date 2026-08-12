@@ -116,6 +116,24 @@ def append_to_queue(record: dict) -> None:
     )
 
 
+def _job_location(rec: dict) -> str:
+    """Compose the display location for a jobs-track ("job" kind) record.
+
+    Workplace type arrives as its OWN payload field (the scout reads it off the
+    card's badge), but the central location filter only ever reads
+    `job.location`, and its whitelist passes remote/Wrocław and nothing else. A
+    genuinely remote posting whose card location reads "Warsaw, Poland" would be
+    filtered out unless the "Remote" badge is folded into that one string —
+    the same problem `sources.text_utils.ensure_remote_token` solves for the
+    JSON sources.
+    """
+    location = (rec.get("location") or "").strip()
+    workplace = (rec.get("workplace_type") or "").strip()
+    if not workplace or workplace.lower() in location.lower():
+        return location
+    return f"{location} ({workplace})" if location else workplace
+
+
 class LinkedInScoutRelaySource(BaseSource):
     name = "linkedin_scout_relay"
     # NOT manual_only — see module docstring. Goes through AUTO_APPLY exactly
@@ -134,7 +152,20 @@ class LinkedInScoutRelaySource(BaseSource):
             if not records:
                 return []
 
-            jobs: list[Job] = [self._record_to_job(rec) for rec in records]
+            # A "job"-kind record with no url would produce a Job whose url is
+            # "" — that poisons dedup (every such row normalizes to the same
+            # key) and can never be fetched, so drop it here rather than let it
+            # into the hunt. A "post" record always has its synthetic url.
+            jobs: list[Job] = []
+            for rec in records:
+                job = self._record_to_job(rec)
+                if not job.url:
+                    logger.warning(
+                        "[linkedin_scout_relay] dropped a record with no url (kind=%r)",
+                        rec.get("kind"),
+                    )
+                    continue
+                jobs.append(job)
 
             # Drain the queue now that it's been read — each record surfaces
             # exactly once. If a job below gets filtered/deduped, that's the
@@ -149,6 +180,48 @@ class LinkedInScoutRelaySource(BaseSource):
 
     @staticmethod
     def _record_to_job(rec: dict) -> Job:
+        if str(rec.get("kind") or "post").strip().lower() == "job":
+            return LinkedInScoutRelaySource._job_record_to_job(rec)
+        return LinkedInScoutRelaySource._post_record_to_job(rec)
+
+    @staticmethod
+    def _job_record_to_job(rec: dict) -> Job:
+        """A real LinkedIn Jobs posting, relayed by the scout's `jobs` track (v2).
+
+        The opposite of the feed-post case below in every way that matters: this
+        has a REAL canonical url (`linkedin.com/jobs/view/<id>`), and keeping it
+        as `job.url` is the point — dedup against `LinkedInSource`'s own finds,
+        the expired check and FAIL-row retries all key on the url, and apply
+        fetches the description itself through
+        `fetch_job_text(url, use_session=True)`. So the synthetic `URL_PREFIX`
+        and the host-collision reasoning above do NOT apply here: `LinkedInSource`
+        claiming this url in `_fetch_roster()` is exactly the desired routing.
+
+        `post_text` is deliberately absent: its presence is what reroutes apply
+        through the paste flow (`hunter/services/apply_service.py`), which would
+        skip the fetch and hand the LLM whatever text the scout had managed to
+        scrape. No `permalink` either — it would equal `url`, and
+        `Job.telegram_text()` renders both, so the card would show the same link
+        twice.
+        """
+        return Job(
+            title=rec.get("title") or "LinkedIn job",
+            company=rec.get("company") or "Unknown",
+            location=_job_location(rec),
+            salary=None,
+            url=(rec.get("url") or "").strip(),
+            source="linkedin_scout_relay",
+            raw={
+                "kind": "job",
+                "keyword": rec.get("keyword", ""),
+                "scouted_at": rec.get("scouted_at", ""),
+                "workplace_type": rec.get("workplace_type") or "",
+                "posted_age": rec.get("posted_age") or "",
+            },
+        )
+
+    @staticmethod
+    def _post_record_to_job(rec: dict) -> Job:
         author = rec.get("author", "") or "Unknown"
         body = rec.get("body", "") or ""
         key = hashlib.md5(
