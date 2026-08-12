@@ -180,26 +180,20 @@ _TECH_TERMS = {
     "kafka",
     "rabbitmq",
     "elasticsearch",
-    "intel",
-    "atruvia",
-    "fairmarkit",
-    "altoros",
-    "solbegsoft",
-    "staronka",
-    "alten",
-    "sii",
-    "venture",
-    "labs",
     "opus",
     "haiku",
     "sonnet",
 }
 
 # Extend with the candidate's own real employer names (candidate.yaml
-# employers.real_companies) so a company like "Fairmarkit" is never flagged
+# employers.real_companies) so a real employer name is never flagged
 # as Polish contamination. Names are split into individual tokens since
-# _is_tech() below matches per-token. No-op when candidate.yaml is absent —
-# the hardcoded employer tokens above already cover the project owner's case.
+# _is_tech() below matches per-token.
+#
+# This list used to ALSO be hardcoded above with the project owner's own
+# employers. It was removed: an employment history is personal data, and the
+# hardcoded copy protected only him — anyone else's employer was flagged as
+# contamination regardless. candidate.yaml is now the only source.
 for _company_name in candidate.get("employers.real_companies", []):
     _TECH_TERMS.update(str(_company_name).lower().split())
 

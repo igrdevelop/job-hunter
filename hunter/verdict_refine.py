@@ -13,9 +13,11 @@ Escalating rounds (owner decision 2026-07-07: max 3, stretch on the last):
   round 3+ (stretch)  — may add posting technologies absent from the profile,
                         as plain skills/summary entries; every addition is
                         tracked in content["to_learn"]. May be woven into ONE
-                        flexible Altoros project (2018-2022); never into the
-                        recent/verifiable employers (Atruvia, Fairmarkit,
-                        Intel, SII, SolbegSoft).
+                        project of the flexible employer named in
+                        candidate.yaml (employers.flexible); never into the
+                        recent/verifiable ones (employers.protected). With
+                        neither key configured the round stays in
+                        Skills/summary and protects every employer.
 
 Both functions are pure orchestration: no Telegram, no tracker writes. The
 caller (apply_api / apply_cli) decides what to notify and persists the
@@ -51,23 +53,18 @@ _DROP_RE = re.compile(
 STRETCH_FROM_ROUND = 4
 
 # Recent, verifiable employers — never touched by a stretch-round addition.
-# Read from candidate.yaml (employers.protected); falls back to the project
-# owner's original employer list when candidate.yaml is absent.
-_PROTECTED_EMPLOYERS = tuple(
-    candidate.get("employers.protected", ["Atruvia", "Fairmarkit", "Intel", "SII", "SolbegSoft"])
-)
+# Read from candidate.yaml (employers.protected). No default: an employment
+# history is personal data and must not be baked into shared code. When the
+# key is absent the stretch prompt protects EVERY employer instead (see
+# _round_block) — strictly safer than protecting a stranger's list.
+_PROTECTED_EMPLOYERS = tuple(candidate.get("employers.protected", []))
 
 # One flexible client employer whose project list a stretch-round tech MAY be
-# woven into (era-plausible, owner-approved precedent: React prototypes in
-# the E-commerce project). Read from candidate.yaml (employers.flexible).
-_FLEXIBLE_EMPLOYER_NAME = candidate.get("employers.flexible.name", "Altoros")
-_FLEXIBLE_EMPLOYER_PERIOD = candidate.get("employers.flexible.period", "2018-2022")
-_ALTOROS_FLEXIBLE_PROJECTS = tuple(
-    candidate.get(
-        "employers.flexible.projects",
-        ["E-commerce", "Insurance", "Healthcare", "Grant Management"],
-    )
-)
+# woven into (era-plausible precedent: prototypes inside an agency project).
+# Read from candidate.yaml (employers.flexible); absent = no weaving offered.
+_FLEXIBLE_EMPLOYER_NAME = candidate.get("employers.flexible.name", "")
+_FLEXIBLE_EMPLOYER_PERIOD = candidate.get("employers.flexible.period", "")
+_FLEXIBLE_PROJECTS = tuple(candidate.get("employers.flexible.projects", []))
 
 
 def _is_actionable(item: object) -> bool:
@@ -135,30 +132,55 @@ Every technology you add this way MUST also be listed in a top-level JSON
 field "stretch_additions" (a flat array of strings, one per added
 technology) so it can be tracked as the candidate's learning debt.
 
-Default placement: Skills section and/or summary. If (and only if) a
-technology needs experience-level grounding, you MAY weave it into ONE of
-these flexible {flexible_employer} client projects ({flexible_period}, choose
-the single most era/stack-plausible one): {altoros_projects} — add it to that
-project's Stack line and/or ONE modest bullet. NEVER invent numbers, metrics,
-or scale that aren't already there.
+{placement_block}
 
-NEVER touch these employers — recent, verifiable, off-limits for ANY
-addition: {protected_employers}.
+{protection_block}
 
 NEVER invent employers, projects, metrics, or years — on any round.
 
 Return the complete JSON:
 {{"resume_en": <same schema as the current resume_en, fully populated>, "stretch_additions": [<strings>]}}."""
 
+# Weaving into a client project is offered only when candidate.yaml names a
+# flexible employer WITH projects. Without both there is no vetted place to
+# put an addition, so the stretch round stays in Skills/summary.
+_PLACEMENT_WITH_FLEXIBLE = """Default placement: Skills section and/or summary. If (and only if) a
+technology needs experience-level grounding, you MAY weave it into ONE of
+these flexible {flexible_employer} client projects ({flexible_period}, choose
+the single most era/stack-plausible one): {flexible_projects} — add it to that
+project's Stack line and/or ONE modest bullet. NEVER invent numbers, metrics,
+or scale that aren't already there."""
+
+_PLACEMENT_SKILLS_ONLY = """Placement: Skills section and/or summary ONLY. Do NOT attach an addition to
+any employer, project, or bullet — there is no vetted project to weave it
+into. NEVER invent numbers, metrics, or scale that aren't already there."""
+
+_PROTECT_LISTED = """NEVER touch these employers — recent, verifiable, off-limits for ANY
+addition: {protected_employers}."""
+
+_PROTECT_ALL = """NEVER touch ANY employer already present in the resume — every one of them
+is treated as verifiable and off-limits for ANY addition."""
+
 
 def _round_block(round_num: int, kind: str) -> str:
     if kind == "stretch":
+        if _FLEXIBLE_EMPLOYER_NAME and _FLEXIBLE_PROJECTS:
+            placement = _PLACEMENT_WITH_FLEXIBLE.format(
+                flexible_employer=_FLEXIBLE_EMPLOYER_NAME,
+                flexible_period=_FLEXIBLE_EMPLOYER_PERIOD,
+                flexible_projects=", ".join(_FLEXIBLE_PROJECTS),
+            )
+        else:
+            placement = _PLACEMENT_SKILLS_ONLY
+        protection = (
+            _PROTECT_LISTED.format(protected_employers=", ".join(_PROTECTED_EMPLOYERS))
+            if _PROTECTED_EMPLOYERS
+            else _PROTECT_ALL
+        )
         return _STRETCH_BLOCK.format(
             round=round_num,
-            flexible_employer=_FLEXIBLE_EMPLOYER_NAME,
-            flexible_period=_FLEXIBLE_EMPLOYER_PERIOD,
-            altoros_projects=", ".join(_ALTOROS_FLEXIBLE_PROJECTS),
-            protected_employers=", ".join(_PROTECTED_EMPLOYERS),
+            placement_block=placement,
+            protection_block=protection,
         )
     return _HONEST_BLOCK.format(round=round_num)
 

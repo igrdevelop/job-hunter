@@ -58,7 +58,11 @@ Edit the files in `candidate/` with your real data — see
    to tune what the bot hunts for (stack, levels, hybrid rules). No file =
    shared defaults. Changes apply on the next `/hunt`.
 
-If you skip this step, the bot runs with example data (a warning is logged).
+**This step is not optional.** The `.example` files are templates, not
+fallbacks — nothing loads them automatically. Without your own
+`candidate.yaml`, document generation aborts with a message naming the
+missing fields (`hunter/candidate.py::require_identity`), and without
+`candidate_profile.md` the LLM has no career history to tailor from.
 
 ### 5. Generate a CV
 
@@ -143,8 +147,12 @@ The three files to edit (plus an optional fourth for hunt policy):
    (today's Angular/Wrocław owner behavior). Edit + `/hunt` — no
    deploy needed. See [docs/FILTERS_YAML_PLAN.md](FILTERS_YAML_PLAN.md).
 
-If you skip this step, the bot runs using the example data that ships
-with the repo (a warning is logged once); nothing crashes.
+**This step is not optional.** The `.example` files are templates you copy
+and edit — nothing loads them automatically. Hunting, filtering and Telegram
+work without them, but the moment a document would be rendered the run
+aborts with a message naming the missing identity fields. That is
+deliberate: the alternative is mailing a real employer a CV with a
+placeholder name on it.
 
 ### 5. Configure environment variables
 
