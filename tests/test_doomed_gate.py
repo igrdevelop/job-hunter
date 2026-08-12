@@ -254,7 +254,11 @@ def test_stack_mismatch_not_triggered_without_other_framework() -> None:
     assert "stack_mismatch_non_candidate_framework" not in _rules(findings)
 
 
-# ── SOFT rule: game-engine-first role (2026-07-12 Nexters case) ──────────────
+# ── HARD rule: game-engine-first role (2026-07-12 Nexters case) ─────────────
+# Severity raised SOFT → HARD on 2026-08-12 (owner decision) after the
+# EduTechPartner "Senior Software Engineer - Unity - Frontend" role was
+# generated for in full: an engine-first posting with no Angular/React anywhere
+# has nothing to apply with, so it is a $0 skip now, not a warning.
 
 
 @pytest.mark.parametrize(
@@ -266,14 +270,28 @@ def test_stack_mismatch_not_triggered_without_other_framework() -> None:
         "We build in TypeScript, C#, or Haxe on PixiJS.",
         "Unity 3D engineer for our casual games studio.",
         "Gameplay engineer working in Unreal Engine and Godot.",
+        # Real 2026-08-12 case: bare "Unity", never once as "Unity 3D"/"Unity
+        # Engine" — the shape the old token list could not see.
+        "Senior Software Engineer - Unity - Frontend. Building educational "
+        "applications with Unity and C# across mobile and WebGL.",
+        "Strong understanding of Unity performance and memory management, "
+        "including automated testing with the Unity Test Framework (UTF).",
     ],
 )
-def test_stack_mismatch_game_engine_soft(text: str) -> None:
+def test_stack_mismatch_game_engine_hard(text: str) -> None:
     findings = assess_job_text(text)
     assert "stack_mismatch_game_engine" in _rules(findings)
-    assert all(f.severity == "soft" for f in findings if f.rule == "stack_mismatch_game_engine")
-    # Must never HARD-block a game-dev role — it's a warn, not a skip.
-    assert not any(f.severity == "hard" for f in findings)
+    assert all(f.severity == "hard" for f in findings if f.rule == "stack_mismatch_game_engine")
+
+
+def test_stack_mismatch_game_engine_nice_to_have_stays_soft() -> None:
+    """A bonus engine mention is a warning, not a $0 skip."""
+    text = (
+        "Senior Frontend Developer working in TypeScript on our web platform. "
+        "Nice to have: Unity or Godot experience for our 3D product demos."
+    )
+    findings = [f for f in assess_job_text(text) if f.rule == "stack_mismatch_game_engine"]
+    assert findings and all(f.severity == "soft" for f in findings)
 
 
 @pytest.mark.parametrize(
@@ -296,6 +314,11 @@ def test_stack_mismatch_game_engine_not_triggered_when_candidate_framework_prese
         # Bare English words that must NOT be read as game engines.
         "A strong spine of automated tests keeps our releases safe.",
         "The team works in unity toward a shared roadmap.",
+        # "unity" the English word, with an unrelated engine-ish token far away:
+        # the proof token has to sit NEXT to the word, not merely in the posting.
+        "Our teams work in unity across three offices. "
+        + "We build design systems for the web. " * 6
+        + "You will own our 3D product configurator built in TypeScript.",
     ],
 )
 def test_stack_mismatch_game_engine_no_english_word_false_positive(text: str) -> None:
