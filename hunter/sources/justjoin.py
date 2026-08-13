@@ -71,6 +71,21 @@ def _extract_detail_slug(url: str) -> str:
     return match.group(1)
 
 
+def _skill_names(skills: list) -> list[str]:
+    """Render an API skill list as "Name (level)" entries, tolerating bare strings."""
+    names: list[str] = []
+    for s in skills:
+        if isinstance(s, dict):
+            name = str(s.get("name", "") or "").strip()
+            if not name:
+                continue
+            level = s.get("level", "")
+            names.append(f"{name} ({level})" if level != "" and level is not None else name)
+        elif s:
+            names.append(str(s).strip())
+    return names
+
+
 def _strip_html(html: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", html)
     text = re.sub(r"<li[^>]*>", "- ", text)
@@ -113,10 +128,17 @@ class JustJoinSource(BaseSource):
         if experience:
             parts.append(f"Experience Level: {experience}")
 
-        skills = data.get("skills", [])
-        if skills:
-            skill_names = [f"{s.get('name', '')} ({s.get('level', '')})" for s in skills]
-            parts.append(f"Required Skills: {', '.join(skill_names)}")
+        # The candidate API returns `skills: null` and puts the real list under
+        # requiredSkills / niceToHaveSkills. Reading only the old flat key
+        # dropped the whole stack section from job_posting.txt, which is what
+        # the apply-time text screens (React-only, doomed gate) read.
+        required = data.get("requiredSkills") or data.get("skills") or []
+        if required:
+            parts.append(f"Required Skills: {', '.join(_skill_names(required))}")
+
+        nice_to_have = data.get("niceToHaveSkills") or []
+        if nice_to_have:
+            parts.append(f"Nice to Have: {', '.join(_skill_names(nice_to_have))}")
 
         emp_types = data.get("employmentTypes", [])
         for et in emp_types:

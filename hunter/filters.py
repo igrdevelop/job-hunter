@@ -324,12 +324,20 @@ def _is_react_without_angular(job: Job, flt: Mapping[str, Any] | None = None) ->
     # Collect all tech-related text from raw API data
     tech_texts = [title]
 
-    # JustJoin: raw["skills"] = [{"name": "React.js", ...}, ...]; name may be nested
-    for skill in raw.get("skills") or []:
-        if isinstance(skill, dict):
-            tech_texts.append(_lower_text_fragment(skill.get("name")))
-        else:
-            tech_texts.append(_lower_text_fragment(skill))
+    # JustJoin: raw["requiredSkills"] / raw["niceToHaveSkills"] = [{"name":
+    # "React", "level": 4}, ...]; name may be nested. The flat "skills" key is
+    # the OLD shape — the candidate API now returns `skills: null` and puts the
+    # list under requiredSkills, which made this whole check blind for every
+    # JustJoin job (2026-08-12: an "Intermediate Frontend Developer" whose
+    # required skills were TypeScript/React/Next.js reached generation because
+    # only the title was inspected). "skills" is still read for other sources
+    # and older fixtures.
+    for skills_key in ("skills", "requiredSkills", "niceToHaveSkills"):
+        for skill in raw.get(skills_key) or []:
+            if isinstance(skill, dict):
+                tech_texts.append(_lower_text_fragment(skill.get("name")))
+            else:
+                tech_texts.append(_lower_text_fragment(skill))
 
     # 4dayweek.io API: stack + tools hold frameworks (React lives here; skills are often soft skills)
     for key in ("stack", "tools"):
@@ -1377,13 +1385,16 @@ def _assess_unsupported_language(job: Job) -> "GateFinding | None":
 _OTHER_FRAMEWORK_RE = re.compile(
     r"\b(?:vue(?:\.?js)?|sveltekit|svelte|ember(?:\.?js)?)\b", re.IGNORECASE
 )
-# SOFT — game-engine-first role (Pixi/Cocos/Phaser/Babylon/Haxe/Unity/…). These
+# HARD — game-engine-first role (Pixi/Cocos/Phaser/Babylon/Haxe/Unity/…). These
 # postings often carry "Frontend Developer" + "TypeScript" (so the title/level
 # filters pass) but want a game-rendering stack the candidate doesn't have —
 # real case 2026-07-12: a Nexters "Hero Wars" role reached generation at 82%
 # because the old Vue/Svelte-only rule couldn't see the mismatch. Tokens are
-# specific enough to avoid English-word false positives (no bare "spine"/
-# "unity"); still SOFT (warn only), so an occasional miss just adds a warning.
+# specific enough to avoid English-word false positives (no bare "spine"; bare
+# "unity" is handled separately below, since it is also an ordinary English
+# word). Owner decision 2026-08-12: this is now HARD (a $0 skip), not the
+# original warn-only SOFT — a posting whose engine stack is the job and which
+# never mentions Angular or React has nothing for the candidate to apply with.
 _GAME_ENGINE_RE = re.compile(
     r"\b(?:"
     r"pixi(?:\.?js)?|"
@@ -1399,14 +1410,51 @@ _GAME_ENGINE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+# Bare "Unity" — the suffixed forms above miss the way real Unity postings are
+# actually written ("Unity and C#", "Unity WebGL", "Unity Test Framework": the
+# 2026-08-12 EduTechPartner role mentioned Unity 11 times and never once as
+# "Unity 3D"/"Unity Engine"). It is also a plain English word ("the team works
+# in unity"), so it only counts when a Unity-ecosystem token sits within
+# _UNITY_CONTEXT_WINDOW characters — proof it names the engine.
+_UNITY_BARE_RE = re.compile(r"\bunity\b", re.IGNORECASE)
+_UNITY_CONTEXT_RES: tuple[re.Pattern[str], ...] = (
+    # No trailing \b after "#": "#" is a non-word char, so there is no boundary
+    # to match (same trap documented for the exclude_patterns "c#" entry).
+    re.compile(r"\bc#", re.IGNORECASE),
+    re.compile(r"\bwebgl\b", re.IGNORECASE),
+    re.compile(r"\bprefabs?\b", re.IGNORECASE),
+    re.compile(r"\bgameobjects?\b", re.IGNORECASE),
+    re.compile(r"\bmonobehaviours?\b", re.IGNORECASE),
+    re.compile(r"\bil2cpp\b", re.IGNORECASE),
+    re.compile(r"\baddressables\b", re.IGNORECASE),
+    re.compile(r"\bscriptable\s*objects?\b", re.IGNORECASE),
+    re.compile(r"\bshaders?\b", re.IGNORECASE),
+    re.compile(r"\bunity\s+(?:editor|hub|test\s+framework)\b", re.IGNORECASE),
+    re.compile(r"\bgame(?:s|play|dev\w*)?\b", re.IGNORECASE),
+    re.compile(r"\b3d\b", re.IGNORECASE),
+)
+_UNITY_CONTEXT_WINDOW = 100
 _CANDIDATE_FRAMEWORK_RE = re.compile(r"\b(?:angular|react(?:\.?js)?)\b", re.IGNORECASE)
 
 
+def _unity_engine_match(blob: str) -> "re.Match[str] | None":
+    """First bare "Unity" a nearby ecosystem token proves is the game engine."""
+    for m in _UNITY_BARE_RE.finditer(blob):
+        window = blob[max(0, m.start() - _UNITY_CONTEXT_WINDOW) : m.end() + _UNITY_CONTEXT_WINDOW]
+        if any(p.search(window) for p in _UNITY_CONTEXT_RES):
+            return m
+    return None
+
+
 def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
-    """SOFT — primary stack isn't Angular/React.
+    """Primary stack isn't Angular/React.
 
     Two shapes, same guard (only when neither Angular nor React appears): a
-    Vue/Svelte/Ember-first web role, or a game-engine-first role.
+    Vue/Svelte/Ember-first web role (SOFT — a Vue shop still writes web
+    frontend the candidate could argue for), or a game-engine-first role
+    (HARD — a Unity/Unreal/Pixi posting is a different craft; owner decision
+    2026-08-12). The optional-context guard keeps a nice-to-have engine
+    mention ("Unity is a plus") out of the HARD tier.
     """
     if _CANDIDATE_FRAMEWORK_RE.search(blob):
         return None
@@ -1417,14 +1465,21 @@ def _assess_stack_mismatch(blob: str) -> "GateFinding | None":
             severity="soft",
             evidence=_context_snippet(blob, other.start(), other.end()),
         )
-    engine = _GAME_ENGINE_RE.search(blob)
-    if engine:
-        return GateFinding(
-            rule="stack_mismatch_game_engine",
-            severity="soft",
-            evidence=_context_snippet(blob, engine.start(), engine.end()),
-        )
-    return None
+    engines = list(_GAME_ENGINE_RE.finditer(blob))
+    unity = _unity_engine_match(blob)
+    if unity:
+        engines.append(unity)
+    if not engines:
+        return None
+    required = [m for m in engines if not _is_optional_context(blob, m.start())]
+    engine = required[0] if required else engines[0]
+    return GateFinding(
+        rule="stack_mismatch_game_engine",
+        # A nice-to-have engine mention stays a warning; a required one is the
+        # job itself and there is nothing left to generate against.
+        severity="hard" if required else "soft",
+        evidence=_context_snippet(blob, engine.start(), engine.end()),
+    )
 
 
 # HARD — an unambiguous foreign-stack technology (PHP/WordPress/.NET/Blazor/
