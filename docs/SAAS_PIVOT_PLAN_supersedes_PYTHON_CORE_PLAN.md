@@ -179,15 +179,38 @@ from the web — silently diverges from the Sheets mirror.
   `sheets_dirty=1`, so the bot's `resync_dirty()` never learns the row changed.
   The bot's own writes go through `tracker.mark_sheets_dirty()`
   (`hunter/tracker.py:1989`); the API simply does not use the mechanism that exists.
-- Set the dirty flag on update, excluding columns that are themselves sheets metadata
-  (`sheets_row`, `sheets_dirty`).
+**Setting the flag unconditionally would break working behavior.** `resync_dirty()`
+(`hunter/gsheets_sync.py:239`) does not update the changed cell — it **overwrites the
+whole A–K row** from the DB (`update_row`), and when `sheets_row IS NULL` it
+**appends** the row to the sheet (`append_rows`). Two guards are therefore mandatory,
+and a third risk has to be accepted knowingly:
+
+- **Only for mirrored columns.** The API can patch `sent`, `to_learn` and `app_status`
+  (`api/src/tracker/tracker.service.ts:180`). `app_status` does not exist in the bot's
+  schema (`hunter/db.py:51`) and is not part of the A–K push — flagging on it would
+  trigger a full-row Sheets overwrite carrying no new information.
+- **Only when `sheets_row IS NOT NULL`.** `mark_orphans_expired`
+  (`hunter/tracker.py:1480`) deliberately sets `sheets_dirty=0, sheets_row=NULL` for
+  rows the owner **deleted from the sheet by hand** — the row survives in the DB for
+  dedup only, and its own docstring says the bot must never push it back. Such a row is
+  still visible in the web UI, so flagging it would make `resync_dirty` append it to
+  the sheet again and resurrect a deliberate deletion. The same guard prevents
+  never-mirrored rows (Sheets token down at apply time) from silently appearing.
+- **Accepted residual risk:** the `Sent` column is a free-text scratchpad and the pull
+  from Sheets runs every `GSHEETS_REFRESH_INTERVAL_MIN` (default 30). A web patch
+  landing between a manual sheet edit and the next pull pushes the stale DB row over
+  the fresh note. The mechanism already exists (the bot flags its own writes the same
+  way); the web just adds a trigger on exactly the rows the owner edits by hand.
+  Narrowing resync to a single cell (`mirror_cell_update` semantics) is the real fix
+  and belongs to a later stage, not here.
 - Confirm `resync_dirty()` runs on a schedule (`hunter/schedules/gsheets.py`) and not
   only after a failed mirror write; add a periodic tick if it does not.
 - Note for later: once customers exist, this mirroring must be **skipped** for
   customer-owned rows (§3.4).
 
 *Verification:* patch a row through the API, run resync, assert the spreadsheet cell
-changed.
+changed. Plus two regression cases: patching `app_status` leaves the row clean, and
+patching a row with `sheets_row IS NULL` does not flag it.
 
 *Why first:* it is a real bug affecting real data today, it is small, and it is
 independent of everything else.
