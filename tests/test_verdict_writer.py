@@ -27,7 +27,10 @@ def _seed_db(monkeypatch, tmp_path):
     db_path = tmp_path / "tracker.db"
     monkeypatch.setattr(db, "TRACKER_DB_PATH", db_path)
     monkeypatch.setattr(vw, "DB_PATH", db_path)
-    db.init_db(db_path)
+    # Prevent auto-migration from a real tracker.xlsx — init_db() imports every
+    # Excel row when the target DB is new, which would silently seed this temp
+    # DB with the developer's own rows and break the backfill row counts.
+    db.init_db(db_path, xlsx_path=tmp_path / "no_tracker.xlsx")
     vw._header_written.clear()
     return db_path
 
