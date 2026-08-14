@@ -158,6 +158,26 @@ async def run_apply_agent_subprocess(
 
         effective_timeout = _effective_timeout(timeout_sec)
         cli_mode = effective_timeout != timeout_sec
+        stdout: bytes | None = None
+        stderr: bytes | None = None
+
+        def _save_stdout(save_outcome: ApplyOutcome, exit_code: int | None = None) -> None:
+            try:
+                from hunter.apply_stdout_log import save_apply_stdout
+
+                save_apply_stdout(
+                    url=job.url,
+                    company=job.company,
+                    title=job.title,
+                    outcome=save_outcome,
+                    exit_code=exit_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                    duration_sec=time.monotonic() - started,
+                )
+            except Exception as e:  # noqa: BLE001 — logging must never break the apply run
+                logger.debug("[auto-apply] stdout transcript save failed: %s", e)
+
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),
@@ -165,7 +185,7 @@ async def run_apply_agent_subprocess(
             )
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.communicate()
+            stdout, stderr = await proc.communicate()
             logger.error(f"[auto-apply] TIMEOUT ({effective_timeout}s) for {job.url}")
             # A widened (CLI-eligible) timeout is infrastructure, not the
             # vacancy's fault (docs/HUNT_APPLY_SPLIT_PLAN.md M3) — the caller
@@ -180,6 +200,7 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
+            _save_stdout(outcome)
             return outcome
         except asyncio.CancelledError:
             # Worker/task cancel must not leave apply_agent.py running while
@@ -194,6 +215,7 @@ async def run_apply_agent_subprocess(
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
             logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
+            _save_stdout("manual", proc.returncode)
             return "manual"
 
         if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
@@ -207,10 +229,12 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
+            _save_stdout("rate_limited", proc.returncode)
             return "rate_limited"
 
         if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
             logger.error(f"[auto-apply] LLM OUTAGE (billing/auth) {job.company} — {job.title}")
+            _save_stdout("llm_outage", proc.returncode)
             return "llm_outage"
 
         if proc.returncode != 0:
@@ -230,6 +254,7 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
+            _save_stdout("fail", proc.returncode)
             return "fail"
 
         if stdout:
@@ -237,6 +262,7 @@ async def run_apply_agent_subprocess(
                 f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}"
             )
         logger.info(f"[auto-apply] OK {job.company} — {job.title}")
+        _save_stdout("ok", proc.returncode)
         return "ok"
     finally:
         if paste_path:
@@ -305,6 +331,25 @@ async def run_apply_agent_for_url(
 
     effective_timeout = _effective_timeout(timeout_sec)
     cli_mode = effective_timeout != timeout_sec
+    stdout: bytes | None = None
+    stderr: bytes | None = None
+
+    def _save_stdout(save_outcome: str, exit_code: int | None = None) -> None:
+        try:
+            from hunter.apply_stdout_log import save_apply_stdout
+
+            save_apply_stdout(
+                url=url,
+                title=label,
+                outcome=save_outcome,
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                duration_sec=time.monotonic() - started,
+            )
+        except Exception as e:  # noqa: BLE001 — logging must never break the apply run
+            logger.debug("[apply_agent] stdout transcript save failed: %s", e)
+
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -312,7 +357,7 @@ async def run_apply_agent_for_url(
         )
     except asyncio.TimeoutError:
         proc.kill()
-        await proc.communicate()
+        stdout, stderr = await proc.communicate()
         logger.error(f"[apply_agent] TIMEOUT ({effective_timeout}s) for {label}")
         outcome = "cli_timeout" if cli_mode else "fail"
         detail = f"{'CLI timed' if cli_mode else 'Timed'} out after {effective_timeout}s"
@@ -323,6 +368,7 @@ async def run_apply_agent_for_url(
             duration_sec=time.monotonic() - started,
             cli_mode=cli_mode,
         )
+        _save_stdout(outcome)
         return outcome, detail
     except asyncio.CancelledError:
         proc.kill()
@@ -334,10 +380,12 @@ async def run_apply_agent_for_url(
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
+        _save_stdout("manual", proc.returncode)
         return "manual", ""
 
     if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
         logger.error(f"[apply_agent] LLM OUTAGE (billing/auth) for {label}")
+        _save_stdout("llm_outage", proc.returncode)
         return "llm_outage", "LLM account outage (billing/auth) — no docs generated"
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
@@ -359,9 +407,11 @@ async def run_apply_agent_for_url(
             duration_sec=time.monotonic() - started,
             cli_mode=cli_mode,
         )
+        _save_stdout("fail", proc.returncode)
         return "fail", snippet
 
     if stdout:
         logger.debug(f"[apply_agent] stdout for {label}: {stdout.decode(errors='replace')[-300:]}")
     logger.info(f"[apply_agent] OK {label}")
+    _save_stdout("ok", proc.returncode)
     return "ok", ""

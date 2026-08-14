@@ -34,6 +34,22 @@ def _no_telegram(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_apply_stdout_log(tmp_path) -> None:
+    """Redirect the apply-subprocess transcript dir (hunter.apply_stdout_log)
+    away from the real logs/apply_stdout/ for every test.
+
+    Several tests drive run_apply_agent_subprocess / run_apply_agent_for_url
+    with a faked subprocess; without this, every one of those calls writes a
+    real file into the repo's logs/ directory.
+    """
+    from hunter import apply_stdout_log
+
+    apply_stdout_log.set_log_dir_for_tests(tmp_path / "apply_stdout")
+    yield
+    apply_stdout_log.set_log_dir_for_tests(None)
+
+
+@pytest.fixture(autouse=True)
 def _owner_candidate_data(monkeypatch) -> None:
     """Patch candidate-derived constants to the owner's Wroclaw-based values.
 
