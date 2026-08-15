@@ -7,9 +7,14 @@ callers can inject mocks in tests. No global state.
 Column order matches tracker.xlsx schema (11 columns, A-K):
   A=Date, B=Company, C=Job Title, D=Stack, E=ATS%, F=URL,
   G=Folder, H=Sent, I=Re-application, J=To Learn, K=ID
+
+One value is deliberately NOT mirrored verbatim: the Folder column is written
+short ("2026-08-14/CoreView") instead of as the absolute container path
+("/app/users/<uuid>/Applications/2026-08-14/CoreView") — see :func:`short_folder`.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -90,9 +95,44 @@ def _range(tab: str, start_row: int | None = None, end_row: int | None = None) -
     return f"'{tab}'!A{start_row}:{col_end}{end_row}"
 
 
+APPLICATIONS_DIR_NAME = "Applications"
+_PATH_SEP_RE = re.compile(r"[\\/]+")
+
+
+def short_folder(value: str) -> str:
+    """Render a tracker ``Folder`` path the way the Sheet should show it.
+
+    tracker.db stores the absolute container path — since the multi-user
+    migration that is ``/app/users/<uuid>/Applications/<date>/<Company>``, i.e.
+    ~60 characters of which only the last two segments carry information a
+    human reading the Sheet can use. Everything after the ``Applications``
+    component is kept: ``2026-08-14/CoreView``.
+
+    The transformation happens at the Sheets boundary only (:func:`_row_to_list`,
+    used by every write path) — tracker.db keeps the full path, because that is
+    what the Drive uploader, the re-post gate and the local file lookups resolve.
+    A path without an ``Applications`` component falls back to its last two
+    segments; anything unparseable is returned unchanged.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parts = [p for p in _PATH_SEP_RE.split(text) if p not in ("", ".")]
+    if not parts:
+        return text
+    tail = parts[-2:]
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i].casefold() == APPLICATIONS_DIR_NAME.casefold():
+            tail = parts[i + 1 :]
+            break
+    return "/".join(tail) if tail else text
+
+
 def _row_to_list(row: dict) -> list[str]:
     """Convert a row dict (column names as keys) to an ordered list of strings."""
-    return [str(row.get(col, "") or "") for col in COLUMNS]
+    values = [str(row.get(col, "") or "") for col in COLUMNS]
+    values[COLUMNS.index("Folder")] = short_folder(values[COLUMNS.index("Folder")])
+    return values
 
 
 def _list_to_row(values: list[str]) -> dict:
