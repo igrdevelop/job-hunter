@@ -304,6 +304,7 @@ def test_resync_dirty_counts_failures():
         patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
         patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
         patch("hunter.gsheets_sync.get_dirty_rows_for_sheets", return_value=[("fail1", row, None)]),
+        patch("hunter.gsheets_client.read_all", return_value=[]),
         patch("hunter.gsheets_client.append_rows", side_effect=Exception("timeout")),
         patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
     ):
@@ -313,6 +314,126 @@ def test_resync_dirty_counts_failures():
 
     assert result == 0
     mock_clean.assert_not_called()
+
+
+def test_resync_dirty_skips_reappend_when_row_already_in_sheet():
+    """Regression (owner report 2026-08-15, Caliberly duplicate row): a row
+    can be dirty with sheet_row=None even though mirror_new_row's append
+    actually landed server-side — the client-side response merely raised
+    (e.g. a read timeout) before set_sheets_row ran. Blindly re-appending
+    here duplicated the row. resync_dirty must cross-check the live Sheet
+    for the ID first and just record where it already is."""
+    row = _make_row("already_there")
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch(
+            "hunter.gsheets_sync.get_dirty_rows_for_sheets",
+            return_value=[("already_there", row, None)],
+        ),
+        patch(
+            "hunter.gsheets_client.read_all",
+            return_value=[(1286, {**row, "ID": "already_there"})],
+        ),
+        patch("hunter.gsheets_client.append_rows") as mock_append,
+        patch("hunter.gsheets_sync.set_sheets_row") as mock_set_row,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
+    ):
+        from hunter import gsheets_sync
+
+        result = run(gsheets_sync.resync_dirty())
+
+    assert result == 1
+    mock_append.assert_not_called()
+    mock_set_row.assert_called_once_with("already_there", 1286)
+    mock_clean.assert_called_once_with("already_there")
+
+
+def test_resync_dirty_appends_when_id_genuinely_absent_from_sheet():
+    """The guard must not block a real first-time append — only a row
+    already present in the live Sheet is skipped."""
+    row = _make_row("genuinely_new")
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch(
+            "hunter.gsheets_sync.get_dirty_rows_for_sheets",
+            return_value=[("genuinely_new", row, None)],
+        ),
+        patch(
+            "hunter.gsheets_client.read_all",
+            return_value=[(1, {**row, "ID": "some_other_row"})],
+        ),
+        patch("hunter.gsheets_client.append_rows", return_value=[9]) as mock_append,
+        patch("hunter.gsheets_sync.set_sheets_row") as mock_set_row,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
+    ):
+        from hunter import gsheets_sync
+
+        result = run(gsheets_sync.resync_dirty())
+
+    assert result == 1
+    mock_append.assert_called_once()
+    mock_set_row.assert_called_once_with("genuinely_new", 9)
+    mock_clean.assert_called_once_with("genuinely_new")
+
+
+def test_resync_dirty_falls_back_to_append_when_existing_id_read_fails():
+    """A failed live-Sheet read must degrade to the old blind-append
+    behavior, not block the sync entirely."""
+    row = _make_row("noguard")
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch(
+            "hunter.gsheets_sync.get_dirty_rows_for_sheets",
+            return_value=[("noguard", row, None)],
+        ),
+        patch("hunter.gsheets_client.read_all", side_effect=Exception("network down")),
+        patch("hunter.gsheets_client.append_rows", return_value=[3]) as mock_append,
+        patch("hunter.gsheets_sync.set_sheets_row") as mock_set_row,
+        patch("hunter.gsheets_sync.mark_sheets_clean") as mock_clean,
+    ):
+        from hunter import gsheets_sync
+
+        result = run(gsheets_sync.resync_dirty())
+
+    assert result == 1
+    mock_append.assert_called_once()
+    mock_set_row.assert_called_once_with("noguard", 3)
+    mock_clean.assert_called_once_with("noguard")
+
+
+def test_resync_dirty_does_not_read_sheet_when_no_row_needs_append():
+    """The existing-ID guard read is only needed for sheet_row=None rows —
+    a dirty row that already has a known sheet_row (plain update) must not
+    trigger it."""
+    row = _make_row("existing2")
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=MagicMock()),
+        patch("hunter.gsheets_sync._sheet_id", return_value="sheet123"),
+        patch(
+            "hunter.gsheets_sync.get_dirty_rows_for_sheets",
+            return_value=[("existing2", row, 42)],
+        ),
+        patch("hunter.gsheets_client.read_all") as mock_read_all,
+        patch("hunter.gsheets_client.update_row", return_value=None),
+        patch("hunter.gsheets_sync.mark_sheets_clean"),
+    ):
+        from hunter import gsheets_sync
+
+        result = run(gsheets_sync.resync_dirty())
+
+    assert result == 1
+    mock_read_all.assert_not_called()
 
 
 # ── validate_startup ──────────────────────────────────────────────────────────
