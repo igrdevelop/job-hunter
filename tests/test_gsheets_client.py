@@ -17,6 +17,7 @@ from hunter.gsheets_client import (
     batch_write_all,
     create_spreadsheet,
     read_all,
+    short_folder,
     update_cell,
     update_row,
 )
@@ -96,10 +97,14 @@ class TestRowHelpers:
         assert len(row) == 11
 
     def test_roundtrip(self):
+        """Every column round-trips verbatim — except Folder, shortened on write."""
         lst = _row_to_list(SAMPLE_ROW)
         recovered = _list_to_row(lst)
         for col in COLUMNS:
+            if col == "Folder":
+                continue
             assert recovered[col] == SAMPLE_ROW.get(col, "")
+        assert recovered["Folder"] == "Acme"
 
     def test_parse_start_row(self):
         assert _parse_start_row("Tracker!A5:K7") == 5
@@ -117,6 +122,49 @@ class TestRowHelpers:
 
     def test_range_row_span(self):
         assert _range("Tracker", 2, 10) == "'Tracker'!A2:K10"
+
+
+class TestShortFolder:
+    """The Sheet shows '<date>/<Company>', not the absolute container path."""
+
+    def test_multi_user_container_path(self):
+        assert (
+            short_folder(
+                "/app/users/d6c0ca67-6216-4bcc-bb84-aa40a6307e00/Applications/2026-08-14/CoreView"
+            )
+            == "2026-08-14/CoreView"
+        )
+
+    def test_relative_path(self):
+        assert short_folder("Applications/2026-08-15/Caliberly") == "2026-08-15/Caliberly"
+
+    def test_windows_path(self):
+        assert (
+            short_folder(r"D:\Projects\job-hunter\bot\Applications\2026-08-14\EgFactory")
+            == "2026-08-14/EgFactory"
+        )
+
+    def test_already_short_is_unchanged(self):
+        assert short_folder("2026-08-14/CoreView") == "2026-08-14/CoreView"
+
+    def test_no_applications_component_keeps_last_two_segments(self):
+        assert short_folder("/srv/data/2026-08-14/Acme") == "2026-08-14/Acme"
+
+    def test_single_segment(self):
+        assert short_folder("Acme") == "Acme"
+
+    def test_empty(self):
+        assert short_folder("") == ""
+        assert short_folder(None) == ""
+
+    def test_trailing_separator(self):
+        assert short_folder("/app/Applications/2026-08-14/Acme/") == "2026-08-14/Acme"
+
+    def test_row_to_list_uses_short_folder(self):
+        lst = _row_to_list(
+            {**SAMPLE_ROW, "Folder": "/app/users/uid/Applications/2026-08-14/3PillarGlobal_2"}
+        )
+        assert lst[COLUMNS.index("Folder")] == "2026-08-14/3PillarGlobal_2"
 
 
 # ---------------------------------------------------------------------------
