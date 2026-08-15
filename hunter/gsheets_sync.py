@@ -241,7 +241,7 @@ async def resync_dirty() -> int:
     if not _ready():
         return 0
 
-    from hunter.gsheets_client import append_rows, update_row
+    from hunter.gsheets_client import append_rows, read_all, update_row
 
     dirty = await asyncio.to_thread(get_dirty_rows_for_sheets)
     if not dirty:
@@ -251,14 +251,45 @@ async def resync_dirty() -> int:
     svc = _get_service()
     sheet_id = _sheet_id()
 
+    # A "never pushed" (sheet_row is None) dirty row isn't proof the append
+    # never landed — mirror_new_row's append_rows call can succeed server-side
+    # while the client-side response raises (timeout/network blip), leaving
+    # the row dirty with no sheet_row recorded. Blindly re-appending here
+    # would create a permanent duplicate line (owner report 2026-08-15:
+    # Caliberly appeared twice after a logged "read operation timed out" on
+    # the first mirror_new_row call). Cross-check against the live Sheet
+    # once — same guard push_missing_rows already uses — before appending
+    # any row we think was never pushed.
+    existing_ids: dict[str, int] = {}
+    if any(sheet_row is None for _, _, sheet_row in dirty):
+        try:
+            sheets_rows = await asyncio.to_thread(read_all, svc, sheet_id)
+            existing_ids = {
+                r.get("ID", "").strip(): idx for idx, r in sheets_rows if r.get("ID", "").strip()
+            }
+        except Exception as e:
+            log.warning(
+                "gsheets resync_dirty: existing-ID read failed, proceeding without guard: %s", e
+            )
+
     for row_id, row, sheet_row in dirty:
         with best_effort("gsheets.resync_dirty"):
             try:
                 if sheet_row is None:
-                    # Row was never pushed — append it
-                    indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
-                    if indices:
-                        set_sheets_row(row_id, indices[0])
+                    already_row = existing_ids.get(row_id)
+                    if already_row is not None:
+                        # Already in the Sheet from a prior append whose
+                        # response we lost — record where, don't duplicate it.
+                        set_sheets_row(row_id, already_row)
+                        log.info(
+                            "gsheets resync_dirty: %s already at row %d — skipping re-append",
+                            row_id,
+                            already_row,
+                        )
+                    else:
+                        indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
+                        if indices:
+                            set_sheets_row(row_id, indices[0])
                 else:
                     # Row exists in Sheets — overwrite it
                     await asyncio.to_thread(update_row, svc, sheet_id, sheet_row, row)
