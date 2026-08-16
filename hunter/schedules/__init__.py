@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from hunter.config import (
     SCHEDULE_TIMES,
     SCHEDULE_SOURCE_OFFSET_MIN,
+    SCHEDULE_BLACKOUT,
     RETRY_FAILED_TIMES,
     TRACKER_BACKUP_ENABLED,
     TRACKER_BACKUP_TIME,
@@ -24,6 +25,12 @@ from hunter.config import (
     APPLY_QUEUE_ENABLED,
 )
 
+from hunter.schedules.grid import (
+    blackout_covers_day,
+    fire_minute,
+    parse_blackout,
+    parse_hhmm,
+)
 from hunter.schedules.hunt import scheduled_hunt
 from hunter.schedules.retry_failed import scheduled_retry_failed
 from hunter.schedules.check_expired import scheduled_check_expired
@@ -65,11 +72,30 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     from hunter.config import TIMEZONE
 
     # ── Staggered per-source scheduled hunts ─────────────────────────────────
+    # Quiet hours are enforced here rather than by picking base times: one
+    # cycle of 25 sources at 40 min spans 16h40m, so a daytime base wraps into
+    # the evening on its own. fire_minute() walks the offsets through allowed
+    # minutes only (hunter/schedules/grid.py).
+    blackout = parse_blackout(SCHEDULE_BLACKOUT)
+    if blackout and blackout_covers_day(blackout):
+        logger.warning(
+            "[Schedule] SCHEDULE_BLACKOUT=%r covers the whole day — ignoring it "
+            "(a bot that never hunts is never the intent)",
+            SCHEDULE_BLACKOUT,
+        )
+        blackout = []
+    if blackout:
+        logger.info(
+            "[Schedule] Quiet hours: no hunt fires during %s %s", SCHEDULE_BLACKOUT, TIMEZONE
+        )
+
     for idx, source in enumerate(ALL_SOURCES):
         for base_time in SCHEDULE_TIMES:
-            h, m = map(int, base_time.split(":"))
-            total = h * 60 + m + idx * SCHEDULE_SOURCE_OFFSET_MIN
-            total %= 24 * 60
+            base_minute = parse_hhmm(base_time)
+            if base_minute is None:
+                logger.warning("[Schedule] Invalid SCHEDULE_TIMES entry %r — skipped", base_time)
+                continue
+            total = fire_minute(base_minute, idx, SCHEDULE_SOURCE_OFFSET_MIN, blackout)
             fire_hour, fire_min = total // 60, total % 60
 
             app.job_queue.run_daily(

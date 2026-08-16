@@ -267,20 +267,43 @@ GDRIVE_HTTP_TIMEOUT_SEC: int = int(os.getenv("GDRIVE_HTTP_TIMEOUT_SEC", "60"))
 
 # ── Search schedule (Warsaw time, 24h format) ─────────────────────────────────
 # Base trigger times — each source is offset by SCHEDULE_SOURCE_OFFSET_MIN minutes.
-# E.g. with times ["08:00","13:00","19:00"] and offset 40 min, 7 sources run at:
+# E.g. with times ["08:00","13:00"] and offset 40 min, 7 sources run at:
 #   08:00 / 08:40 / 09:20 / 10:00 / 10:40 / 11:20 / 12:00
 #   13:00 / 13:40 / 14:20 / 15:00 / 15:40 / 16:20 / 17:00
-#   19:00 / 19:40 / 20:20 / 21:00 / 21:40 / 22:20 / 23:00
-SCHEDULE_TIMES = ["08:00", "13:00", "19:00"]
+#
+# Night-weighted since 2026-08-16 (owner: "добавим запусков ночью, а запусков
+# с 18 по 00.00 вообще не будем делать"). Two of the four base cycles start
+# inside 02:00-08:00, and the old 19:00 base is gone. With APPLY_QUEUE_ENABLED
+# the apply worker claims a PENDING row within ~15 s of the hunt that wrote it,
+# so the hunt grid IS the generation grid — moving one moves the other.
+SCHEDULE_TIMES: list[str] = [
+    t.strip()
+    for t in os.getenv("SCHEDULE_TIMES", "02:00,05:00,08:00,13:00").split(",")
+    if t.strip()
+]
 SCHEDULE_SOURCE_OFFSET_MIN: int = int(os.getenv("SCHEDULE_SOURCE_OFFSET_MIN", "40"))
+
+# Quiet hours: no hunt slot ever fires inside this window. Dropping a base time
+# is NOT enough on its own — a cycle of 25 sources at 40 min spans 16h40m, so
+# the tail of an 08:00 or 13:00 cycle used to run deep into the evening and past
+# midnight. The grid builder (hunter/schedules/grid.py) walks the per-source
+# offsets through ALLOWED minutes only, jumping over this window, which keeps
+# every source scheduled (skipping slots would silently starve the sources whose
+# index happens to land in the gap) and preserves their relative order.
+# Format "HH:MM-HH:MM", may wrap midnight ("22:00-06:00"); an end of "00:00"
+# means end-of-day. Empty disables the blackout (pre-2026-08-16 behavior).
+SCHEDULE_BLACKOUT: str = os.getenv("SCHEDULE_BLACKOUT", "18:00-00:00")
 TIMEZONE = "Europe/Warsaw"
 
 # When to retry FAILed tracker rows (comma-separated HH:MM, same timezone).
 # Used to run after EVERY per-source hunt (72×/day) — that kept _hunt_lock busy
 # past the 40-min slot spacing. Minutes :45 never collide with the hunt grid,
-# which only fires at :00/:20/:40 (base minute 00 + multiples of 40).
+# which only fires at :00/:20/:40 (base minute 00 + multiples of 40 — the
+# blackout jump lands on a segment boundary, which is :00, so it stays on grid).
+# Both slots sit inside the night window: a retry runs the same apply pipeline
+# as a hunt, and the old 18:45 slot fell squarely in the blackout.
 RETRY_FAILED_TIMES: list[str] = [
-    t.strip() for t in os.getenv("RETRY_FAILED_TIMES", "07:45,18:45").split(",") if t.strip()
+    t.strip() for t in os.getenv("RETRY_FAILED_TIMES", "02:45,07:45").split(",") if t.strip()
 ]
 
 # How often the Drive backfill job re-checks for application folders that never
