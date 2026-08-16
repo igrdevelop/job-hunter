@@ -3,7 +3,8 @@
 Split out of the hunt tail (docs/HUNT_QUEUE_AND_DELIVERY_PLAN.md M2): retrying
 the global FAIL list after every per-source hunt kept _hunt_lock busy past the
 40-min slot spacing and hammered the same list dozens of times a day. Now it
-runs only at RETRY_FAILED_TIMES (default 07:45 / 18:45 Warsaw).
+runs only at RETRY_FAILED_TIMES (default 02:45 / 07:45 Warsaw — both inside the
+night window, since a retry runs the same apply pipeline as a hunt).
 """
 
 import logging

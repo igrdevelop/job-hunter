@@ -2,7 +2,8 @@
 main.py — core hunt loop.
 
 run_hunt() is called by:
-  - Telegram JobQueue on schedule (08:00 / 13:00 / 19:00)
+  - Telegram JobQueue on schedule (SCHEDULE_TIMES, default 02:00 / 05:00 /
+    08:00 / 13:00, per-source staggered and never inside SCHEDULE_BLACKOUT)
   - /hunt command for manual trigger
   - Direct call: python hunter.py --now
 """
