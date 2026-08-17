@@ -305,6 +305,27 @@ def _run_main_api(
             f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
         print(f"[apply_agent] SKIP (pre-LLM) — backend-only job text: {url}")
+        # Write a terminal SKIP row so the URL is deduped going forward — without
+        # this the pending placeholder gets cleared with no replacement (unlike
+        # every other skip path here) and the same posting gets re-fetched,
+        # re-queued and re-notified on every future hunt cycle forever (observed
+        # live: the same builtin.com URL skipped 8 times over ~40h).
+        try:
+            from hunter.models import Job
+            from hunter.tracker import add_skipped
+
+            add_skipped(
+                Job(
+                    title=jobleads_title,
+                    company=jobleads_company,
+                    location="",
+                    salary=None,
+                    url=url,
+                    source="backend_only_gate",
+                )
+            )
+        except Exception as e:
+            print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")
         return
 
     # Step 1.5e — Manual-apply "warn but allow" screen. A pasted URL bypasses the

@@ -350,6 +350,55 @@ class TestIsBackendOnlyJobText:
         assert not is_backend_only_job_text("")
 
 
+class TestBackendOnlySkipWritesTrackerRow:
+    """Wiring test for apply_api.py Step 1.5d: a backend-only pre-LLM skip must
+    write a terminal SKIP row, exactly like the React-only skip and the doomed
+    gate do — otherwise the pending placeholder is cleared with nothing to
+    dedup against, and the same URL is re-fetched/re-queued/re-notified on
+    every future hunt cycle (observed live: the same posting skipped 8 times
+    over ~40h before this was fixed)."""
+
+    def test_backend_only_skip_calls_add_skipped(self, monkeypatch) -> None:
+        from hunter.apply_api import main_api
+
+        monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
+        text = (
+            "We need a Python developer. Python is required. "
+            "You will build backend APIs using Django. "
+            "Must have strong Python skills. " * 5
+        )
+        with (
+            patch("hunter.sources.fetch_job_text", return_value=text),
+            patch("hunter.apply_api.notify"),
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+        ):
+            main_api(
+                "https://example.com/backend-only",
+                jobleads_company="Acme",
+                jobleads_title="Staff Python Developer",
+            )
+
+        mock_add_skipped.assert_called_once()
+        job_arg = mock_add_skipped.call_args[0][0]
+        assert job_arg.url == "https://example.com/backend-only"
+        assert job_arg.company == "Acme"
+        assert job_arg.title == "Staff Python Developer"
+
+    def test_tracker_write_failure_does_not_raise(self, monkeypatch) -> None:
+        """Best-effort: a DB error while writing the SKIP row must not blow up
+        the apply run — main_api should still return normally."""
+        from hunter.apply_api import main_api
+
+        monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
+        text = "PHP developer needed. PHP is a must-have. Building Laravel applications. " * 5
+        with (
+            patch("hunter.sources.fetch_job_text", return_value=text),
+            patch("hunter.apply_api.notify"),
+            patch("hunter.tracker.add_skipped", side_effect=RuntimeError("db locked")),
+        ):
+            main_api("https://example.com/backend-only-2")  # must not raise
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
