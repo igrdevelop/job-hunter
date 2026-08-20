@@ -79,6 +79,34 @@ def test_normalize_company_acme_variants(variant: str) -> None:
     assert normalize_company(variant) == "acme", f"Failed for: {variant!r}"
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Comarch SA",  # no-dot Polish legal suffix — pracuj.pl form
+        "Comarch S.A.",  # dotted form — LinkedIn form
+        "Comarch",  # bare
+    ],
+)
+def test_normalize_company_comarch_sa_variants(variant: str) -> None:
+    assert normalize_company(variant) == "comarch", f"Failed for: {variant!r}"
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [
+        ("USA Technologies", "usatechnologies"),
+        ("NASA", "nasa"),
+        ("Vasa", "vasa"),
+    ],
+)
+def test_normalize_company_sa_suffix_does_not_eat_mid_word(pair: tuple[str, str]) -> None:
+    # Bare "SA" must only strip as a whole standalone word (word-boundary
+    # guarded) — not out of the middle of an unrelated company name that
+    # happens to contain the letters "sa".
+    variant, expected = pair
+    assert normalize_company(variant) == expected, f"Failed for: {variant!r}"
+
+
 # ---------------------------------------------------------------------------
 # dedup_key — company+title dedup stable across name variants
 # ---------------------------------------------------------------------------
@@ -99,6 +127,17 @@ def test_dedup_key_squished_vs_formatted() -> None:
 def test_dedup_key_polish_form_vs_short() -> None:
     k1 = dedup_key("UpvantaSpółkaZOgraniczonąOdpowiedzialnoś", "Frontend Engineer")
     k2 = dedup_key("Upvanta", "Frontend Engineer")
+    assert k1 == k2
+
+
+def test_dedup_key_comarch_sa_vs_bare_comarch() -> None:
+    # Regression: pracuj.pl reports the company as "Comarch SA" while
+    # LinkedIn reports plain "Comarch" — before the "sa" suffix was added to
+    # _strip_legal_suffixes these normalized to different dedup keys and the
+    # same "Senior Angular Developer" requisition generated a full duplicate
+    # application (2026-08-20 incident).
+    k1 = dedup_key("Comarch SA", "Senior Angular Developer")
+    k2 = dedup_key("Comarch", "Senior Angular Developer")
     assert k1 == k2
 
 

@@ -609,6 +609,46 @@ def _run_main_api(
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
         return
 
+    # Step 4.55 — Company+title dedup (post-LLM). The manual entry points (URL
+    # paste, LinkedIn batch, forwarded text) call this pipeline directly with
+    # only a URL — company/title aren't known until the LLM extracts them here
+    # — so they never run the hunt loop's own dedup_key check (hunter/main.py
+    # Step 3) before spending on generation. A vacancy re-listed under a new
+    # URL (re-post, cross-board duplicate — e.g. the SAME Comarch requisition
+    # via LinkedIn and pracuj.pl) would otherwise sail through every gate above
+    # and produce a full duplicate application. `/force` bypasses, same as
+    # every other dedup gate here.
+    if not skip_dedup:
+        from hunter.tracker import add_skipped, dedup_key, get_known_company_titles
+
+        _company_name = content.get("company_name") or "Unknown"
+        _job_title = content.get("job_title") or ""
+        _ct_key = dedup_key(_company_name, _job_title)
+        if _ct_key in get_known_company_titles():
+            notify(
+                f"⏭ <b>Skipped — already applied to this company/role</b>\n"
+                f"🔗 {url}\n"
+                f"{_company_name} — {_job_title or '?'}\n"
+                f"Send /force {url} to generate anyway."
+            )
+            print(f"[apply_agent] SKIP — company+title dedup match: {_ct_key}")
+            try:
+                from hunter.models import Job
+
+                add_skipped(
+                    Job(
+                        title=_job_title,
+                        company=_company_name,
+                        location="",
+                        salary=None,
+                        url=url,
+                        source="dedup_ct_gate",
+                    )
+                )
+            except Exception as e:
+                print(f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}")
+            return
+
     # Step 4.6 — Independent ATS check + rewrite loop for resume (target ≥ 95%)
     print("[apply_agent] Step 4.6: Running independent ATS check on resume...")
     content = _ats_check_loop(content, job_text)

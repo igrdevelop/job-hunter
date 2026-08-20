@@ -175,7 +175,7 @@ def _strip_diacritics(s: str) -> str:
 def _strip_legal_suffixes(s: str) -> str:
     s = re.sub(r"sp\.?\s*z\.?\s*o\.?\s*o\.?", "", s)
     s = re.sub(r"s\.a\.(?![a-z])", "", s)
-    s = re.sub(r"\b(ltd|gmbh|inc|llc)\b\.?", "", s)
+    s = re.sub(r"\b(ltd|gmbh|inc|llc|sa)\b\.?", "", s)
     s = re.sub(r"spol?ka.*", "", s)
     s = re.sub(r"spzo+", "", s)
     return s
