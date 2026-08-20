@@ -403,6 +403,46 @@ def main_cli(
                         print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
                     return
 
+                # Company+title dedup (post-generation, parity with the API
+                # pipeline's Step 4.55): the manual entry points (URL paste,
+                # LinkedIn batch, forwarded text) never run the hunt loop's own
+                # dedup_key check before spending on generation, and by the
+                # time content.json exists here the CLI has already rendered
+                # docs — so this still can't save that compute, but it does
+                # stop a duplicate row/Sheets/Drive delivery. `/force` bypasses.
+                if not skip_dedup:
+                    from hunter.tracker import add_skipped, dedup_key, get_known_company_titles
+
+                    _cli_company = _cli_content.get("company_name") or "Unknown"
+                    _cli_title = _cli_content.get("job_title") or ""
+                    _cli_ct_key = dedup_key(_cli_company, _cli_title)
+                    if _cli_ct_key in get_known_company_titles():
+                        notify(
+                            f"⏭ <b>Skipped — already applied to this company/role</b>\n"
+                            f"🔗 {url}\n"
+                            f"{_cli_company} — {_cli_title or '?'}\n"
+                            f"Send /force {url} to generate anyway."
+                        )
+                        print(f"[apply_agent] SKIP — company+title dedup match: {_cli_ct_key}")
+                        try:
+                            from hunter.models import Job
+
+                            add_skipped(
+                                Job(
+                                    title=_cli_title,
+                                    company=_cli_company,
+                                    location="",
+                                    salary=None,
+                                    url=url,
+                                    source="dedup_ct_gate",
+                                )
+                            )
+                        except Exception as e:
+                            print(
+                                f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}"
+                            )
+                        return
+
                 # Language enforce-gate (parity with the API pipeline). The CLI skill
                 # already generated docs; if any _en field leaked Polish, repair the
                 # content and REGENERATE the docs from the cleaned content.json — or, if

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. expired_check — new patterns
@@ -397,6 +399,110 @@ class TestBackendOnlySkipWritesTrackerRow:
             patch("hunter.tracker.add_skipped", side_effect=RuntimeError("db locked")),
         ):
             main_api("https://example.com/backend-only-2")  # must not raise
+
+
+class TestCompanyTitleDedupGate:
+    """Step 4.55 (apply_api.py): manual entry points (URL paste, LinkedIn batch,
+    forwarded text) call main_api directly with only a URL — they never run the
+    hunt loop's own dedup_key check (hunter/main.py Step 3) before spending on
+    generation. A vacancy re-listed under a new URL (same company+role, e.g.
+    the 2026-08-20 Comarch incident: "Comarch SA" via pracuj.pl vs plain
+    "Comarch" via LinkedIn, three days apart) must be caught here instead,
+    once the LLM has extracted company_name/job_title — before the expensive
+    ATS-loop/judge/verdict machinery runs."""
+
+    def _golden_content(self) -> dict:
+        import json
+        from pathlib import Path
+
+        fixture = Path(__file__).parent / "fixtures" / "golden" / "generation_response.json"
+        return json.loads(fixture.read_text(encoding="utf-8"))
+
+    def test_known_company_title_skips_before_ats_loop(self, monkeypatch) -> None:
+        from hunter.apply_api import main_api
+        from hunter.tracker import dedup_key
+
+        content = self._golden_content()
+        known_key = dedup_key(content["company_name"], content["job_title"])
+
+        monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
+        with (
+            patch(
+                "hunter.sources.fetch_job_text",
+                return_value="Angular developer role. " * 50,
+            ),
+            patch("llm_client.call_llm", return_value=content),
+            patch("hunter.apply_api.notify"),
+            patch("hunter.tracker.get_known_company_titles", return_value={known_key}),
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+            patch("hunter.apply_api._ats_check_loop") as mock_ats_loop,
+        ):
+            main_api("https://example.com/comarch-repost")
+
+        mock_ats_loop.assert_not_called()
+        mock_add_skipped.assert_called_once()
+        job_arg = mock_add_skipped.call_args[0][0]
+        assert job_arg.url == "https://example.com/comarch-repost"
+        assert job_arg.company == content["company_name"]
+        assert job_arg.title == content["job_title"]
+
+    def test_unknown_company_title_proceeds_to_ats_loop(self, monkeypatch) -> None:
+        """A sentinel exception raised from _ats_check_loop stops the test right
+        as the gate hands off — proves the gate did NOT skip, without running
+        the rest of the pipeline (doc rendering needs a configured candidate.yaml
+        this dev worktree doesn't have)."""
+        from hunter.apply_api import main_api
+
+        content = self._golden_content()
+
+        class _ReachedAtsLoop(Exception):
+            pass
+
+        monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
+        with (
+            patch(
+                "hunter.sources.fetch_job_text",
+                return_value="Angular developer role. " * 50,
+            ),
+            patch("llm_client.call_llm", return_value=content),
+            patch("hunter.apply_api.notify"),
+            patch("hunter.tracker.get_known_company_titles", return_value=set()),
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+            patch("hunter.apply_api._ats_check_loop", side_effect=_ReachedAtsLoop),
+            pytest.raises(_ReachedAtsLoop),
+        ):
+            main_api("https://example.com/comarch-new-role")
+
+        mock_add_skipped.assert_not_called()
+
+    def test_force_mode_bypasses_dedup_gate(self, monkeypatch) -> None:
+        """`/force` (skip_dedup=True) must reach the ATS loop even when the
+        company+title is already known — same bypass semantics as every other
+        dedup gate in this pipeline."""
+        from hunter.apply_api import main_api
+
+        content = self._golden_content()
+
+        class _ReachedAtsLoop(Exception):
+            pass
+
+        monkeypatch.setattr("hunter.apply_api._already_processed", lambda *a, **kw: False)
+        with (
+            patch(
+                "hunter.sources.fetch_job_text",
+                return_value="Angular developer role. " * 50,
+            ),
+            patch("llm_client.call_llm", return_value=content),
+            patch("hunter.apply_api.notify"),
+            patch("hunter.tracker.get_known_company_titles", return_value={"anything"}),
+            patch("hunter.tracker.dedup_key", return_value="anything"),
+            patch("hunter.tracker.add_skipped") as mock_add_skipped,
+            patch("hunter.apply_api._ats_check_loop", side_effect=_ReachedAtsLoop),
+            pytest.raises(_ReachedAtsLoop),
+        ):
+            main_api("https://example.com/comarch-force", skip_dedup=True)
+
+        mock_add_skipped.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
