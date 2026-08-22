@@ -81,7 +81,12 @@ mkdir -p "${APPLICATIONS_DIR:-$(pwd)/Applications}/$(date +%Y-%m-%d)/{CompanyNam
 
 Follow all rules from `generation_rules.md` (loaded in Step 1) to produce the full application package: resume EN, cover letter EN+PL, about me EN+PL, ATS analysis.
 
-One difference from the API pipeline: set `"resume_pl": null` by default. Only populate it with a full Polish-translated resume when `--full` is explicitly passed as an argument.
+One difference from the API pipeline: set `"resume_pl": null` by default — it saves the output tokens of a Polish CV nobody receives. Two exceptions where you MUST populate it with a full Polish-translated resume:
+
+- **the job posting itself is written in Polish** — a Polish employer receives the Polish CV as the primary document, so it ships even in the default short flow;
+- `--full` is explicitly passed as an argument.
+
+(If it comes back empty on a Polish posting anyway, `apply_shared.ensure_pl_resume` mirrors it from `resume_en` — but that costs an extra translation call, so get it right here.)
 
 ---
 

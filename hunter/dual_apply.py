@@ -32,8 +32,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 from hunter.best_effort import best_effort
@@ -232,6 +235,21 @@ def _generate_shadow(
         except Exception as e:
             print(f"[dual] repair pass failed (using first pass): {e}")
 
+    # Structural floor: everything downstream (ATS loop, scrubs, judge, render,
+    # verdict) assumes `resume_en` is a populated dict. A shadow model that
+    # returns a different SHAPE — e.g. the resume fields at the top level, or
+    # only the skills object — used to sail past the repair pass and leave a
+    # folder holding nothing but a malformed content.json: no docs, no verdict,
+    # nothing to compare, and one more folder for the Drive backfill to carry
+    # forever. 6 such folders on the live corpus (2026-08-22), all deepseek-v4-pro.
+    # Give up cleanly instead; the primary application is untouched either way.
+    if not isinstance(content.get("resume_en"), dict) or not content["resume_en"]:
+        print(
+            "[dual] shadow ABORT — model returned an unusable schema "
+            f"(top-level keys: {sorted(content)[:12]}); nothing to compare"
+        )
+        return None
+
     # ATS rewrite loop (uses get_active() -> shadow via the override).
     content = _ats_check_loop(content, job_text)
 
@@ -426,6 +444,35 @@ def _generate_shadow(
 # ── Detached launcher ───────────────────────────────────────────────────────────
 
 
+_SHADOW_LOG_RETENTION_DAYS = 14
+
+
+def _open_shadow_log(primary_folder: Path):
+    """Open (append) the transcript file for one detached shadow run.
+
+    Mirrors hunter.apply_stdout_log's layout — logs/dual_shadow/<date>_<company>.log
+    — but is a plain file handle because the consumer is a subprocess's stdout,
+    not a logging call. Returns None if the directory cannot be created.
+    """
+    try:
+        from hunter.config import PROJECT_DIR
+
+        d = Path(PROJECT_DIR) / "logs" / "dual_shadow"
+        d.mkdir(parents=True, exist_ok=True)
+        cutoff = time.time() - _SHADOW_LOG_RETENTION_DAYS * 86400
+        for old in d.glob("*.log"):
+            try:
+                if old.stat().st_mtime < cutoff:
+                    old.unlink(missing_ok=True)
+            except OSError:
+                pass
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", primary_folder.name).strip("_")[:60] or "shadow"
+        return open(d / f"{stamp}_{slug}.log", "a", encoding="utf-8", errors="replace")  # noqa: SIM115
+    except Exception:  # noqa: BLE001 — best-effort; caller falls back to DEVNULL
+        return None
+
+
 def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> bool:
     """Fire-and-forget the shadow run in its OWN process and return immediately.
 
@@ -449,11 +496,27 @@ def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> b
 
     # Detach so the shadow outlives the parent and is never tied to its exit
     # code / timeout. Platform-specific flags keep it fully decoupled.
+    #
+    # stdout/stderr go to a per-run transcript rather than DEVNULL: because the
+    # shadow is detached its output reaches no other log, so every shadow
+    # failure used to be invisible — the only evidence was a missing or
+    # malformed content.json noticed by hand on Drive days later (live corpus
+    # 2026-08-22: 6 malformed shadow folders, and 0 of 12 August shadows
+    # carrying a verdict, with no trace anywhere of why). Best-effort: if the
+    # log file cannot be opened, fall back to the old DEVNULL behaviour.
     kwargs: dict = {
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "stdin": subprocess.DEVNULL,
     }
+    _log_handle = None
+    try:
+        _log_handle = _open_shadow_log(Path(primary_folder))
+        if _log_handle is not None:
+            kwargs["stdout"] = _log_handle
+            kwargs["stderr"] = subprocess.STDOUT
+    except Exception as e:  # noqa: BLE001 — logging must never block the shadow
+        print(f"[dual] shadow log unavailable (continuing without): {e}")
     try:
         if sys.platform == "win32":
             kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
@@ -467,6 +530,14 @@ def launch_detached(primary_folder: Path | str, *, full_mode: bool = False) -> b
     except Exception as e:
         print(f"[dual] shadow launch failed: {e}")
         return False
+    finally:
+        # The child inherits its own duplicate of the handle; this process must
+        # not keep it open or the file stays locked for the whole bot lifetime.
+        if _log_handle is not None:
+            try:
+                _log_handle.close()
+            except OSError:
+                pass
 
 
 # ── Detached CLI entry point ────────────────────────────────────────────────────

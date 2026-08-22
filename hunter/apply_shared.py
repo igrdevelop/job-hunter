@@ -16,7 +16,7 @@ from pathlib import Path
 
 import requests
 
-from hunter import candidate
+from hunter import candidate, text_repair
 import os
 
 from hunter.config import (
@@ -1058,6 +1058,57 @@ def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
 _ATS_CHECKLIST_CAP = 30
 
 
+def ensure_pl_resume(content: dict, posting_lang: str) -> list[str]:
+    """A Polish posting must ship a Polish CV — mirror it if the generator didn't.
+
+    Both pipelines ask the generator for `resume_pl` on a PL posting, but neither
+    can force it: the API path relies on the prompt, and the CLI skill
+    (`.claude/commands/apply.md`) was told to return `"resume_pl": null` unless
+    `--full` — an unconditional rule that also fired on Polish postings. Measured
+    on the live corpus 2026-08-22: 15 of 250 PL applications shipped an English CV
+    with a Polish cover letter, all of them from July onwards as prod moved onto
+    the CLI path.
+
+    Mirroring here rather than re-prompting keeps the fix independent of prompt
+    compliance, and reuses the same cheap translate model + role-count guard the
+    verdict-refine PL mirror uses (`_translate_resume`). Runs AFTER the judge and
+    the language gate, so what gets translated is the already-verified EN text —
+    no new fabrication surface. Best-effort: returns [] and changes nothing when
+    the posting is not Polish, a PL resume is already present, or translation
+    fails. Never raises.
+    """
+    if (posting_lang or "").upper() != "PL":
+        return []
+    resume_en = content.get("resume_en")
+    if not isinstance(resume_en, dict) or not resume_en:
+        return []
+    existing = content.get("resume_pl")
+    if isinstance(existing, dict) and existing:
+        return []
+
+    # Wrapped in best_effort (CLAUDE.md rule for new swallow-and-continue code):
+    # a mirror that silently stops working recreates the exact bug this closes —
+    # Polish employers receiving an English CV — and that went unnoticed for a
+    # month the first time. The `raise` re-raises out of the local except so the
+    # failure still reaches best_effort's counter; best_effort then swallows it.
+    from hunter.best_effort import best_effort
+
+    mirrored = None
+    with best_effort("apply.pl_mirror"):
+        try:
+            mirrored = _translate_resume(
+                resume_en, "PL", expected_roles=len(resume_en.get("experience") or [])
+            )
+        except Exception as e:
+            print(f"[apply_agent] PL mirror failed (continuing with EN only): {e}")
+            raise
+    if not mirrored:
+        print("[apply_agent] PL mirror returned nothing — continuing with EN only")
+        return []
+    content["resume_pl"] = mirrored
+    return ["[PL] mirrored resume_pl from resume_en (generator returned none)"]
+
+
 def build_pl_skip_instruction(posting_lang: str, *, full_mode: bool) -> str:
     """Prompt addition telling the generator to skip the _pl fields for an
     EN-language posting in short mode (docs/LLM_COST_REDUCTION_PLAN.md M4).
@@ -1143,11 +1194,15 @@ def _scrub_compliance_clause(text: str) -> str:
     cur = text
     while prev != cur and _COMPLIANCE_CLAIM_RE.search(cur):
         prev = cur
-        cur = _COMPLIANCE_CLAUSE_RE.sub("", cur, count=1)
-    # Tidy leftovers: double spaces, dangling connectors/punctuation before end.
-    cur = re.sub(r"\s{2,}", " ", cur)
-    cur = re.sub(r"\s+(?:and|with|following|including)\s*$", "", cur, flags=re.IGNORECASE)
-    cur = re.sub(r"\s*[,;]\s*$", "", cur)
+        m = _COMPLIANCE_CLAUSE_RE.search(cur)
+        if not m:
+            break
+        # Repair the seam where the clause actually sat (hunter.text_repair)
+        # instead of patching the whole field with global regexes afterwards.
+        cur = text_repair.cut_span(cur, m.start(), m.end())
+    # Tidy leftovers: dangling connectors/punctuation before end.
+    cur = re.sub(r"[^\S\n]+(?:and|with|following|including)\s*$", "", cur, flags=re.IGNORECASE)
+    cur = re.sub(r"[^\S\n]*[,;]\s*$", "", cur)
     return cur.strip()
 
 
@@ -1161,9 +1216,9 @@ def _strip_compliance_claims(content: dict) -> tuple[dict, list[str]]:
     def _scrub_sentences(text: str, label: str) -> str:
         if not isinstance(text, str) or not _COMPLIANCE_CLAIM_RE.search(text):
             return text
-        parts = re.split(r"(?<=[.!?])\s+", text)
-        kept = [s for s in parts if not _COMPLIANCE_CLAIM_RE.search(s)]
-        new = " ".join(kept).strip()
+        new = text_repair.drop_sentences(
+            text, lambda s: bool(_COMPLIANCE_CLAIM_RE.search(s))
+        ).strip()
         if new != text:
             fixes.append(f"[{label}] removed compliance-claim sentence(s)")
         return new
@@ -1288,14 +1343,15 @@ def _scrub_prestige_text(text: str, claim_re: re.Pattern) -> str:
     cur = text
     while prev != cur and claim_re.search(cur):
         prev = cur
-        cur = clause_re.sub("", cur, count=1)
+        m = clause_re.search(cur)
+        if not m:
+            break
+        cur = text_repair.cut_span(cur, m.start(), m.end())
     if claim_re.search(cur):  # clause removal couldn't reach it → drop sentence
-        parts = re.split(r"(?<=[.!?])\s+", cur)
-        cur = " ".join(s for s in parts if not claim_re.search(s))
-    cur = re.sub(r"\s{2,}", " ", cur)
-    cur = re.sub(rf"\s+(?:{_PRESTIGE_CONNECTORS})\s*$", "", cur, flags=re.IGNORECASE)
-    cur = re.sub(r"\s+([,.;])", r"\1", cur)
-    cur = re.sub(r"\s*[,;]\s*$", "", cur)
+        cur = text_repair.drop_sentences(cur, lambda s: bool(claim_re.search(s)))
+    cur = re.sub(rf"[^\S\n]+(?:{_PRESTIGE_CONNECTORS})\s*$", "", cur, flags=re.IGNORECASE)
+    cur = re.sub(r"[^\S\n]+([,.;])", r"\1", cur)
+    cur = re.sub(r"[^\S\n]*[,;]\s*$", "", cur)
     return cur.strip()
 
 
