@@ -454,6 +454,7 @@ def main_cli(
                         _dedup_skill_glosses,
                         _strip_prestige_claims,
                         enforce_language_separation,
+                        ensure_pl_resume,
                     )
 
                     # Deterministic scrubs (parity with the API pipeline): drop
@@ -527,12 +528,38 @@ def main_cli(
                     _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:
                         print(f"[apply_agent] lang-gate: {_line}")
-                    if _report or _scrub_fixes:  # repaired/scrubbed something and/or blocked
-                        _cli_content["primary_lang"] = _posting_lang
-                        content_json_path.write_text(
-                            json.dumps(_cli_content, ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
+
+                    # A Polish posting must ship a Polish CV. The CLI skill returns
+                    # "resume_pl": null unless --full, so mirror it from the already
+                    # judged + language-gated EN resume when it is missing.
+                    _pl_fixes = ensure_pl_resume(_cli_content, _posting_lang)
+                    for _line in _pl_fixes:
+                        print(f"[apply_agent] lang-gate: {_line}")
+
+                    # `primary_lang` used to be stamped ONLY as a side effect of a
+                    # repair, so a clean CLI run left it absent — which silently
+                    # disabled generate_docs' PL-CV routing (`_primary_pl`) AND the
+                    # verdict-refine PL mirror, both of which key on it. Stamp and
+                    # persist it unconditionally (a local file write, no LLM cost);
+                    # only the doc re-render below stays conditional.
+                    _cli_content["primary_lang"] = _posting_lang
+                    content_json_path.write_text(
+                        json.dumps(_cli_content, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+
+                    # A PL posting whose PL CV never reached disk needs a re-render
+                    # even when nothing else changed — the absent primary_lang is
+                    # exactly what stopped generate_docs from writing it.
+                    _pl_cv_due = (
+                        _posting_lang == "PL"
+                        and bool(_cli_content.get("resume_pl"))
+                        and not any(folder_path.glob("*CV*_PL.pdf"))
+                    )
+                    if _pl_cv_due:
+                        print("[apply_agent] lang-gate: PL CV missing — regenerating docs")
+
+                    if _report or _scrub_fixes or _pl_fixes or _pl_cv_due:
                         if _blocked:
                             for _f in list(folder_path.glob("*.pdf")) + list(
                                 folder_path.glob("*.docx")

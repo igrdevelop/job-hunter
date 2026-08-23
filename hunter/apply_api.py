@@ -34,6 +34,7 @@ from hunter.apply_shared import (
     _handle_jobleads_fetch_blocked,
     build_ats_keyword_checklist,
     build_pl_skip_instruction,
+    ensure_pl_resume,
     is_transient_fetch_error,
     compute_output_folder,
     is_backend_only_job_text,
@@ -791,6 +792,12 @@ def _run_main_api(
     # Deterministic posting language drives which CV is delivered as primary
     # (PL posting → also render the Polish CV in short mode; see generate_docs).
     content["primary_lang"] = posting_lang
+    # ...which only works if there IS a Polish resume. The generator is asked for
+    # one on a PL posting but cannot be forced; mirror it from the already judged
+    # and language-gated EN resume when it came back empty, so a Polish employer
+    # never receives an English CV with a Polish cover letter.
+    for _pl_line in ensure_pl_resume(content, posting_lang):
+        print(f"[apply_agent] {_pl_line}")
     if "ats_score" not in content:
         content["ats_score"] = ""
 

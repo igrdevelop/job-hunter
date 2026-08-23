@@ -409,8 +409,13 @@ def test_launch_detached_noop_when_dual_disabled(monkeypatch):
     assert called["popen"] is False
 
 
-def test_launch_detached_spawns_when_enabled(monkeypatch):
+def test_launch_detached_spawns_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(lp, "dual_enabled", lambda: True)
+    # The shadow transcript is a real file handle (_open_shadow_log resolves
+    # PROJECT_DIR lazily from hunter.config) — keep it out of the repo's logs/.
+    from hunter import config as _cfg
+
+    monkeypatch.setattr(_cfg, "PROJECT_DIR", tmp_path)
     captured = {}
 
     def fake_popen(cmd, **kwargs):
@@ -425,6 +430,12 @@ def test_launch_detached_spawns_when_enabled(monkeypatch):
     assert "--full" in captured["cmd"]
     # Detached: stdio redirected away so it can't tie to the parent.
     assert captured["kwargs"].get("stdout") is not None
+    # ...but to a transcript, NOT DEVNULL: a detached shadow's output reaches no
+    # other log, so DEVNULL made every shadow failure undiagnosable.
+    assert captured["kwargs"]["stdout"] is not dual_apply.subprocess.DEVNULL
+    assert list((tmp_path / "logs" / "dual_shadow").glob("*_Acme.log")), (
+        "the shadow must get its own transcript file"
+    )
 
 
 def test_maybe_run_shadow_noop_when_folder_none(monkeypatch):

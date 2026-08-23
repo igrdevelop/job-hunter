@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hunter import text_repair
+
 from hunter.config import (
     JUDGE_API_KEY,
     JUDGE_MAX_REPAIR_ROUNDS,
@@ -335,6 +337,11 @@ def _drop_quote(text: str, quote: str) -> str:
     firms" → "...300+ German banks"). Mirrors `_scrub_prestige_text` intent.
     Tier 2: if removal would empty the text (quote spans the whole sentence),
     drop the whole sentence and let the LLM-rewrite tier refill the field.
+
+    The seam left by the cut is repaired by `hunter.text_repair`, which knows
+    both sides of it — a global regex pass over the whole field used to leave
+    ", - from ...", "...decisions; across ..." and lowercase-opening bullets in
+    the rendered PDF, and flattened every paragraph break of a cover letter.
     """
     if not quote or quote not in text:
         return text
@@ -355,25 +362,17 @@ def _drop_quote(text: str, quote: str) -> str:
 
     remainder = (text[:drop_start] + text[end:]).strip()
     if remainder and remainder not in (",", ";", ".", "-"):
-        candidate = text[:drop_start] + text[end:]
+        candidate = text_repair.cut_span(text, drop_start, end)
     else:
         # Tier 2 — sentence drop (quote spans the whole sentence).
-        parts = re.split(r"(?<=[.!?])\s+", text)
-        candidate = " ".join(p for p in parts if quote not in p)
+        candidate = text_repair.drop_sentences(text, lambda s: quote in s)
 
-    # Cleanup: whitespace, double/dangling punctuation, trailing connectors.
-    candidate = re.sub(r"\s{2,}", " ", candidate)
-    candidate = re.sub(r"\s+([,.;:])", r"\1", candidate)  # " ,"  -> ","
+    # Residual tidy-ups the seam repair cannot see: " ," from an earlier stage
+    # and a dangling separator at either edge of the whole field.
+    candidate = re.sub(r"[^\S\n]+([,.;:])", r"\1", candidate)
     candidate = re.sub(r"([,;:])\s*(?=[,;:])", "", candidate)  # ", ," -> ","
-    candidate = re.sub(r"[,;:]\s*([.!?])", r"\1", candidate)  # ",."  -> "."
-    candidate = re.sub(
-        r"\s+(?:and|or|including|serving|with|oraz|i|dla)\s*([.;,]|$)",
-        r"\1",
-        candidate,
-        flags=re.IGNORECASE,
-    )
     candidate = re.sub(r"^\s*[,;:.\-]\s*", "", candidate)
-    candidate = re.sub(r"\s*[,;:]\s*$", "", candidate)
+    candidate = re.sub(r"[^\S\n]*[,;:]\s*$", "", candidate)
     return candidate.strip()
 
 
