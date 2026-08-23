@@ -64,9 +64,7 @@ def fetch_html(url: str) -> str:
     resp.raise_for_status()
     html = resp.text
 
-    text = _extract_with_bs4(html)
-    if not text:
-        text = _extract_with_regex(html)
+    text = extract_text(html)
 
     if len(text) < 100:
         raise ValueError(f"Page at {url} returned too little text ({len(text)} chars)")
@@ -74,6 +72,19 @@ def fetch_html(url: str) -> str:
     if len(text) > MAX_TEXT_LEN:
         text = text[:MAX_TEXT_LEN] + "\n\n[... truncated ...]"
 
+    return text
+
+
+def extract_text(html: str) -> str:
+    """HTML -> visible text (BeautifulSoup, regex fallback).
+
+    Split out of ``fetch_html`` so a source that fetches the HTML itself — to
+    inspect markup ``get_text()`` throws away, e.g. LinkedIn's apply CTA — can
+    still produce the exact same text without a second request.
+    """
+    text = _extract_with_bs4(html)
+    if not text:
+        text = _extract_with_regex(html)
     return text
 
 

@@ -105,6 +105,18 @@ def _check_html_expired(html: str, domain: str, url: str = "") -> bool | None:
 
     # LinkedIn: login wall → can't determine expiry without a session.
     if "linkedin.com" in domain:
+        # A closed posting shows no apply CTA to a logged-out visitor — the
+        # only guest-visible expiry signal LinkedIn gives (the "No longer
+        # accepting applications" banner is logged-in only, which is why the
+        # substring markers above never fire here). Without this, every
+        # LinkedIn row fell through to the login-wall branch below and
+        # /check_expired could never expire a single one.
+        from hunter.sources.linkedin import guest_html_expired
+
+        if guest_html_expired(html):
+            logger.info("[expired_marker] LinkedIn closed posting (no apply CTA): %s", url)
+            return True
+
         html_lower = html.lower()
         login_wall = (
             "authwall" in html_lower

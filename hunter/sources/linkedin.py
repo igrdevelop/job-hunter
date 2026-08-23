@@ -57,6 +57,46 @@ _DETAIL_TIMEOUT_MS = 15_000
 _DETAIL_MAX_TEXT_LEN = 15_000
 _BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
 
+# Same synthetic marker the findmyremote / thesmartjobs / Lever fetchers use:
+# hunter.expired_check.is_job_expired matches "has expired", so a closed
+# posting takes the clean $0 EXPIRED path instead of reaching the LLM.
+_EXPIRED_TEXT = "This job posting has expired."
+
+_CTA_CONTAINER_CLASS = "top-card-layout__cta-container"
+
+
+def guest_html_expired(html: str) -> bool:
+    """True when logged-out LinkedIn HTML shows a CLOSED posting.
+
+    LinkedIn does NOT render "No longer accepting applications" for a guest —
+    that banner exists only in the logged-in view, which is why the
+    ``HTML_EXPIRED_MARKERS["linkedin.com"]`` substrings never fire on a guest
+    page. Measured 2026-08-22 against 14 live postings and one closed one
+    (jobs/view/4455428397): the single difference is the apply CTA. A live
+    page puts an Apply button inside ``top-card-layout__cta-container``; a
+    closed one renders that container EMPTY (``<!----> <!---->``). 14/14 live
+    pages carried the button, the closed one carried none.
+
+    Deliberately conservative in two ways, because a false positive silently
+    EXPIREs a real vacancy: the container must be PRESENT (a renamed/removed
+    container returns False rather than expiring every LinkedIn posting), and
+    any link OR button inside counts as alive (so a class rename on the button
+    itself is harmless).
+    """
+    if not html:
+        return False
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:  # pragma: no cover - bs4 is a hard dependency in prod
+        logger.debug("[linkedin] beautifulsoup4 missing — skipping guest expiry check")
+        return False
+
+    soup = BeautifulSoup(html, "html.parser")
+    container = soup.find(class_=_CTA_CONTAINER_CLASS)
+    if container is None:
+        return False
+    return container.find(["a", "button"]) is None
+
 
 def _storage_state_path() -> Optional[Path]:
     val = os.environ.get(_STORAGE_STATE_ENV, "").strip()
@@ -144,14 +184,39 @@ class LinkedInSource(BaseSource):
     def fetch_text(self, url: str) -> str:
         """Fetch a LinkedIn job posting without a logged-in session.
 
-        Guest HTML is enough for title/description extraction used by
-        ``/check_expired`` and enrichers, but it does NOT include the
-        "No longer accepting applications" marker. Apply pipeline must use
-        ``fetch_text_with_session`` instead.
-        """
-        from hunter.sources.html_fallback import fetch_html
+        Guest HTML omits the "No longer accepting applications" banner, but a
+        closed posting is still recognisable by its empty apply-CTA container
+        (``guest_html_expired``) — so this path returns the synthetic expired
+        marker instead of a full description, and the caller's own
+        ``is_job_expired`` check takes it from there. Without that, a closed
+        posting reads as a perfectly normal one and gets a full LLM-generated
+        application (Ebiquity, 2026-08-22).
 
-        return fetch_html(url)
+        ``fetch_text_with_session`` is still preferred by the apply pipeline —
+        the logged-in view carries the banner explicitly — but it silently
+        falls back here whenever ``LINKEDIN_STORAGE_STATE`` is unset or stale.
+        """
+        from hunter.sources.html_fallback import (
+            HEADERS as HTML_HEADERS,
+            MAX_TEXT_LEN,
+            TIMEOUT as HTML_TIMEOUT,
+            extract_text,
+        )
+
+        resp = requests.get(url, headers=HTML_HEADERS, timeout=HTML_TIMEOUT)
+        resp.raise_for_status()
+        html = resp.text
+
+        if guest_html_expired(html):
+            logger.info("[linkedin] Closed posting (empty apply CTA in guest HTML): %s", url)
+            return _EXPIRED_TEXT
+
+        text = extract_text(html)
+        if len(text) < 100:
+            raise ValueError(f"Page at {url} returned too little text ({len(text)} chars)")
+        if len(text) > MAX_TEXT_LEN:
+            text = text[:MAX_TEXT_LEN] + "\n\n[... truncated ...]"
+        return text
 
     def fetch_text_with_session(self, url: str) -> str:
         """Fetch via Playwright + ``LINKEDIN_STORAGE_STATE`` (apply pipeline).
