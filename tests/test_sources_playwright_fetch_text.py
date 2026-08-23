@@ -46,14 +46,25 @@ def test_linkedin_matches_url() -> None:
     assert not s.matches_url("https://example.com/x")
 
 
-def test_linkedin_fetch_text_uses_html_fallback() -> None:
-    """Unauthenticated fetch_text always goes through fetch_html (no Playwright)."""
+def test_linkedin_fetch_text_uses_plain_http() -> None:
+    """Unauthenticated fetch_text is a plain HTTP fetch — no Playwright.
+
+    It no longer delegates to ``html_fallback.fetch_html``: the raw HTML is
+    needed to spot a closed posting's empty apply CTA (guest HTML carries no
+    "No longer accepting applications" banner), which ``get_text()`` drops.
+    Text extraction still runs through ``html_fallback.extract_text``.
+    """
+    html = (
+        "<html><body><div class='top-card-layout__cta-container'>"
+        "<button>Apply</button></div><section>" + ("Job description text. " * 20) + "</section>"
+        "</body></html>"
+    )
     with patch(
-        "hunter.sources.html_fallback.fetch_html",
-        return_value="fallback ok",
+        "hunter.sources.linkedin.requests.get",
+        return_value=_mk_html_response(html),
     ) as m:
         out = LinkedInSource().fetch_text("https://www.linkedin.com/jobs/view/123/")
-    assert out == "fallback ok"
+    assert "Job description text." in out
     m.assert_called_once()
 
 
