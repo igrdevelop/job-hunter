@@ -135,10 +135,13 @@ DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").stri
 # reached generation on a React stack it would have caught zero.
 PRESCREEN_ENABLED: bool = os.getenv("PRESCREEN_ENABLED", "true").lower() in ("true", "1", "yes")
 # report -> log only · warn -> + Telegram · skip -> SKIP row and no generation.
-# Starts at `report`: the calibration is offline evidence, and a week of live
-# verdicts alongside real outcomes is what earns the flip (owner decision
-# 2026-08-24 -- a week of `warn`, then `skip`).
-PRESCREEN_MODE: str = os.getenv("PRESCREEN_MODE", "report").strip().lower()
+# Ships at `warn` (owner decision 2026-08-24: a week of `warn`, then `skip`).
+# NOT `report`: in that mode the call is paid for and changes nothing the owner
+# ever sees, so the week of observation would never actually happen and the flip
+# would never be triggered. A Telegram line per react-first posting IS the
+# observation loop -- and the calibration measured zero false skips over 81 real
+# postings, so a warning is the cheapest honest thing to show.
+PRESCREEN_MODE: str = os.getenv("PRESCREEN_MODE", "warn").strip().lower()
 # Every skip in the 81-posting calibration scored >= 0.95, so this floor costs
 # nothing today and refuses a shakier verdict tomorrow.
 PRESCREEN_MIN_CONFIDENCE: float = float(os.getenv("PRESCREEN_MIN_CONFIDENCE", "0.9"))
