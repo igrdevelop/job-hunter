@@ -42,6 +42,7 @@ from hunter.apply_shared import (
     is_react_only_job_text,
     notify,
     run_doomed_gate,
+    run_prescreen,
     send_telegram_documents,
     validate_content,
 )
@@ -406,6 +407,22 @@ def _run_main_api(
         company=jobleads_company,
         permalink=permalink,
         is_force_override=skip_dedup,
+    ):
+        return
+
+    # Step 1.5h — Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M4): one cheap
+    # model call reading what the posting is ACTUALLY for, after every free
+    # deterministic gate and before the first generation call. It exists because
+    # the regex check above is blind by contract to a react-first posting that
+    # mentions Angular in passing — over the seven August cases that reached
+    # generation on a React stack it would have caught zero.
+    if run_prescreen(
+        job_text,
+        url,
+        title=jobleads_title,
+        company=jobleads_company,
+        is_force_override=skip_dedup,
+        is_manual=is_manual,
     ):
         return
 

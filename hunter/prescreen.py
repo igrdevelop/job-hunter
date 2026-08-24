@@ -174,6 +174,38 @@ def parse_verdict(raw: Any, job_text: str) -> PrescreenVerdict:
     )
 
 
+def should_skip(verdict: PrescreenVerdict, *, min_confidence: float) -> bool:
+    """True when this verdict is strong enough to skip the vacancy for $0.
+
+    Deliberately narrower than "the day-to-day framework is not Angular", which
+    is how the prompt describes a mismatch. The calibration (81 real postings,
+    2026-08-24) measured both:
+
+      * "not Angular"  -> 30 skips, recall 7/7, but **6 false skips** among the
+        35 rows the owner had actually sent: a Node.js backend role, a PixiJS
+        game role, a Vue role, GitLab, HeroDevs, and -- worst -- an EPAM posting
+        titled "Senior Software Engineer with Angular". The model read every one
+        of those correctly; the rule was simply wider than the owner's decision.
+      * react-only      -> 8 skips, recall 7/7, **zero** false skips. Not one row
+        the model called "react" was ever sent.
+
+    The owner's decision was "React only by hand" (docs/STACK_PRESCREEN_PLAN.md),
+    so this is that decision and nothing more. Everything else the model notices
+    is recorded and ignored.
+
+    `min_confidence` is free insurance: every skip in the calibration scored
+    0.95 or higher, so the floor costs nothing today and refuses a shakier call
+    tomorrow.
+    """
+    return (
+        verdict.ok
+        and verdict.verdict == "mismatch"
+        and verdict.primary_stack == "react"
+        and not verdict.angular_required
+        and verdict.confidence >= min_confidence
+    )
+
+
 def assess_stack(job_text: str, *, title: str = "", max_chars: int = 20000) -> PrescreenVerdict:
     """One cheap-model call describing the posting's stack. Never raises.
 

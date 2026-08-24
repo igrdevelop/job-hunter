@@ -6,7 +6,13 @@ is everything around it — because every one of these paths ends in "skip this
 vacancy without generating", and a wrong answer there costs a real application.
 """
 
-from hunter.prescreen import PrescreenVerdict, assess_stack, evidence_is_verbatim, parse_verdict
+from hunter.prescreen import (
+    PrescreenVerdict,
+    assess_stack,
+    evidence_is_verbatim,
+    parse_verdict,
+    should_skip,
+)
 
 POSTING = (
     "Senior Frontend Developer\n\n"
@@ -122,3 +128,144 @@ class TestCallBoundary:
         assess_stack(POSTING)
 
         assert seen["model"] == JUDGE_MODEL, "the pre-screen only earns its place at Haiku prices"
+
+
+class TestTheGateRuleIsReactOnly:
+    """The rule is the owner's decision, not the prompt's wider "mismatch".
+
+    Calibration over 81 real postings (2026-08-24) measured both. "Anything not
+    Angular" scored 7/7 recall but skipped SIX vacancies the owner had actually
+    sent — a Node.js role, a PixiJS game role, a Vue role, GitLab, HeroDevs, and
+    an EPAM posting literally titled "Senior Software Engineer with Angular".
+    React-only scored the same 7/7 with zero false skips: not one posting the
+    model called "react" was ever sent.
+    """
+
+    @staticmethod
+    def _v(**kw) -> PrescreenVerdict:
+        base = {
+            "primary_stack": "react",
+            "angular_required": False,
+            "verdict": "mismatch",
+            "confidence": 0.95,
+            "ok": True,
+        }
+        base.update(kw)
+        return PrescreenVerdict(**base)
+
+    def test_a_confident_react_posting_is_skipped(self):
+        assert should_skip(self._v(), min_confidence=0.9)
+
+    def test_every_other_stack_generates(self):
+        # These are the six false skips the wider rule produced, by stack.
+        for stack in ("vue", "other", "fullstack", "unclear", "angular", "svelte"):
+            assert not should_skip(self._v(primary_stack=stack), min_confidence=0.9), stack
+
+    def test_angular_required_rescues_the_posting(self):
+        # EPAM: "Senior Software Engineer with Angular", read as fullstack/react
+        # by the model but with Angular a stated requirement. He sent it.
+        assert not should_skip(self._v(angular_required=True), min_confidence=0.9)
+
+    def test_a_shaky_verdict_does_not_act(self):
+        # Every real skip in the calibration scored >= 0.95, so the floor costs
+        # nothing today and refuses a weaker call tomorrow.
+        assert not should_skip(self._v(confidence=0.6), min_confidence=0.9)
+
+    def test_an_unusable_verdict_never_acts(self):
+        assert not should_skip(self._v(ok=False), min_confidence=0.9)
+
+    def test_a_fit_verdict_never_acts(self):
+        assert not should_skip(self._v(verdict="fit"), min_confidence=0.9)
+
+
+class TestPipelineStage:
+    URL = "https://example.com/jobs/react-first"
+
+    @staticmethod
+    def _wire(monkeypatch, *, mode="skip", verdict=None, tracks=("angular",)):
+        notes = []
+        monkeypatch.setattr("hunter.apply_shared.notify", notes.append)
+        monkeypatch.setattr("hunter.config.PRESCREEN_ENABLED", True)
+        monkeypatch.setattr("hunter.config.PRESCREEN_MODE", mode)
+        monkeypatch.setattr("hunter.config.PRESCREEN_MIN_CONFIDENCE", 0.9)
+        # filters imported active_tracks at module load, so patch the reader
+        # the stage actually calls.
+        monkeypatch.setattr("hunter.filters._react_track_active", lambda: "react" in tracks)
+
+        calls = []
+
+        def _assess(text, **kw):
+            calls.append(kw)
+            return verdict or PrescreenVerdict(
+                primary_stack="react",
+                verdict="mismatch",
+                confidence=0.95,
+                evidence="We build our product in React",
+                ok=True,
+            )
+
+        monkeypatch.setattr("hunter.prescreen.assess_stack", _assess)
+        return notes, calls
+
+    def _run(self, **kw):
+        from hunter.apply_shared import run_prescreen
+
+        return run_prescreen("x" * 500, self.URL, **kw)
+
+    def test_report_mode_only_logs(self, tracker_db, monkeypatch):
+        notes, calls = self._wire(monkeypatch, mode="report")
+        assert self._run() is False
+        assert calls, "the verdict is still collected — that is the point of report mode"
+        assert notes == []
+
+    def test_warn_mode_notifies_but_generates(self, tracker_db, monkeypatch):
+        notes, _ = self._wire(monkeypatch, mode="warn")
+        assert self._run() is False
+        assert len(notes) == 1 and "Pre-screen" in notes[0]
+
+    def test_skip_mode_aborts_and_writes_the_row(self, tracker_db, monkeypatch):
+        from hunter import tracker
+
+        notes, _ = self._wire(monkeypatch, mode="skip")
+        assert self._run(title="Frontend Dev", company="Acme") is True
+
+        rows = tracker.lookup_url(self.URL)
+        assert rows and rows[0]["ats"].strip().upper() == "SKIP"
+        assert any("Skipped" in n for n in notes)
+
+    def test_a_manual_request_is_never_skipped(self, tracker_db, monkeypatch):
+        notes, _ = self._wire(monkeypatch, mode="skip")
+        assert self._run(is_manual=True) is False
+        assert any("Generating anyway" in n for n in notes)
+
+    def test_force_is_never_skipped(self, tracker_db, monkeypatch):
+        notes, _ = self._wire(monkeypatch, mode="skip")
+        assert self._run(is_force_override=True) is False
+        assert any("Generating anyway" in n for n in notes)
+
+    def test_the_react_track_makes_it_a_no_op(self, tracker_db, monkeypatch):
+        _notes, calls = self._wire(monkeypatch, mode="skip", tracks=("angular", "react"))
+        assert self._run() is False
+        assert calls == [], "no call at all when React is a stack the candidate applies for"
+
+    def test_a_broken_call_lets_the_vacancy_through(self, tracker_db, monkeypatch):
+        self._wire(monkeypatch, mode="skip")
+
+        def _boom(*_a, **_kw):
+            raise RuntimeError("judge down")
+
+        monkeypatch.setattr("hunter.prescreen.assess_stack", _boom)
+        assert self._run() is False
+
+    def test_disabled_makes_no_call(self, tracker_db, monkeypatch):
+        _notes, calls = self._wire(monkeypatch, mode="skip")
+        monkeypatch.setattr("hunter.config.PRESCREEN_ENABLED", False)
+        assert self._run() is False
+        assert calls == []
+
+    def test_an_empty_posting_makes_no_call(self, tracker_db, monkeypatch):
+        _notes, calls = self._wire(monkeypatch, mode="skip")
+        from hunter.apply_shared import run_prescreen
+
+        assert run_prescreen("", self.URL) is False
+        assert calls == []

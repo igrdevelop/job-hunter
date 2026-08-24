@@ -314,6 +314,17 @@ def main_cli(
         ):
             return
 
+        # Step 1.5h — Stack pre-screen (mirror of apply_api Step 1.5h).
+        from hunter.apply_shared import run_prescreen
+
+        if run_prescreen(
+            job_text,
+            url,
+            is_force_override=skip_dedup,
+            is_manual=is_manual,
+        ):
+            return
+
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
     print("[apply_agent] Running claude CLI...\n")
 

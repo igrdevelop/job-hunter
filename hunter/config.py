@@ -127,6 +127,22 @@ DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").stri
 # copy the donor folder's docs, write a Re-application tracker row at $0,
 # skip generation entirely. Thresholds live in repost_gate.py (calibrated
 # 2026-07-20 on the real corpus). `/force` bypasses the gate.
+# ── Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M4) ───────────────────────
+# One cheap-model call after the free deterministic gates and before the first
+# generation call, describing which framework the posting is actually for. It
+# exists because `is_react_only_job_text` is blind by contract to a react-first
+# posting that mentions Angular in passing: over the seven August postings that
+# reached generation on a React stack it would have caught zero.
+PRESCREEN_ENABLED: bool = os.getenv("PRESCREEN_ENABLED", "true").lower() in ("true", "1", "yes")
+# report -> log only · warn -> + Telegram · skip -> SKIP row and no generation.
+# Starts at `report`: the calibration is offline evidence, and a week of live
+# verdicts alongside real outcomes is what earns the flip (owner decision
+# 2026-08-24 -- a week of `warn`, then `skip`).
+PRESCREEN_MODE: str = os.getenv("PRESCREEN_MODE", "report").strip().lower()
+# Every skip in the 81-posting calibration scored >= 0.95, so this floor costs
+# nothing today and refuses a shakier verdict tomorrow.
+PRESCREEN_MIN_CONFIDENCE: float = float(os.getenv("PRESCREEN_MIN_CONFIDENCE", "0.9"))
+
 REPOST_GATE_ENABLED: bool = os.getenv("REPOST_GATE_ENABLED", "true").lower() in (
     "true",
     "1",

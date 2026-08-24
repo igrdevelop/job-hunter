@@ -545,6 +545,107 @@ def stack_gate_allows_manual(is_manual: bool, url: str, what: str) -> bool:
     return True
 
 
+def run_prescreen(
+    job_text: str,
+    url: str,
+    *,
+    title: str = "",
+    company: str = "",
+    is_force_override: bool = False,
+    is_manual: bool = False,
+) -> bool:
+    """Step 1.5h — one cheap-model read of the posting's stack, before generation.
+
+    Returns True when the caller should ABORT (a SKIP row is already written and
+    Telegram notified). False means carry on — and so does every failure path: an
+    unavailable pre-screen must never cost a vacancy.
+
+    Runs only after the deterministic gates have passed the posting, and only
+    when the candidate's active tracks do not already cover React. `/force` and a
+    manual request degrade it to a warning, exactly like the other stack gates
+    (docs/STACK_PRESCREEN_PLAN.md M2).
+
+    `PRESCREEN_MODE` stages the rollout — `report` logs, `warn` also notifies,
+    `skip` acts. It ships at `report`: the calibration is offline evidence, and a
+    week of live verdicts next to real outcomes is what earns the flip.
+    """
+    from hunter.config import (
+        PRESCREEN_ENABLED,
+        PRESCREEN_MIN_CONFIDENCE,
+        PRESCREEN_MODE,
+    )
+
+    if not PRESCREEN_ENABLED or not (job_text or "").strip():
+        return False
+
+    from hunter.filters import _react_track_active
+
+    if _react_track_active():
+        return False  # React is a stack the candidate applies for — nothing to screen
+
+    verdict = None
+    acts = False
+    with best_effort("apply.prescreen"):
+        from hunter.prescreen import assess_stack, should_skip
+
+        verdict = assess_stack(job_text, title=title)
+        acts = should_skip(verdict, min_confidence=PRESCREEN_MIN_CONFIDENCE)
+
+    if verdict is None:
+        return False
+
+    print(
+        f"[prescreen] stack={verdict.primary_stack} verdict={verdict.verdict} "
+        f"conf={verdict.confidence:.2f} usable={verdict.ok} seniority={verdict.seniority}"
+    )
+    if not acts:
+        return False
+
+    mode = PRESCREEN_MODE if PRESCREEN_MODE in ("report", "warn", "skip") else "report"
+    quote = (verdict.evidence or "").strip()[:200]
+
+    if mode == "report":
+        print(f"[prescreen] would skip (report mode only): {url}")
+        return False
+
+    if is_force_override or is_manual or mode == "warn":
+        why = (
+            "you asked for this one by hand"
+            if (is_manual or is_force_override)
+            else "warn mode — not skipping yet"
+        )
+        notify(
+            f"⚠️ <b>Pre-screen: React-first posting</b>\n"
+            f"🔗 {url}\n"
+            f"Generating anyway ({why}).\n"
+            f"<i>{quote}</i>"
+        )
+        return False
+
+    try:
+        from hunter.tracker import add_react_skipped
+
+        add_react_skipped(
+            {
+                "stack": f"React (pre-screen {verdict.confidence:.2f})",
+                "company_name": company,
+                "job_title": title,
+            },
+            url,
+        )
+    except Exception as e:  # noqa: BLE001 — a tracker failure must not crash the apply
+        print(f"[prescreen] Warning: could not write the SKIP row: {e}")
+
+    notify(
+        f"⏭ <b>Skipped — React-first posting (pre-screen)</b>\n"
+        f"🔗 {url}\n"
+        f"<i>{quote}</i>"
+        f"{_REACT_SKIP_FORCE_HINT}"
+    )
+    print(f"[prescreen] SKIP — react-first posting: {url}")
+    return True
+
+
 def abort_after_generation(
     folder: Path | None,
     url: str,
