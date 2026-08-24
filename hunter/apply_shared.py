@@ -511,6 +511,68 @@ _METRIC_RE = re.compile(
 )
 
 
+def abort_after_generation(
+    folder: Path | None,
+    url: str,
+    *,
+    reason: str,
+    telegram_text: str = "",
+) -> bool:
+    """Undo a package the pipeline decided to throw away AFTER it was rendered.
+
+    The CLI pipeline's abort stages (React-only stack, company+title dedup,
+    judge block, language-gate block) all run once the CLI skill has already
+    rendered the documents AND written the tracker row — `.claude/commands/
+    apply.md` calls generate_docs.py without --no-tracker, so the row exists
+    inside the CLI call. Deleting the PDFs alone is not enough: the row stays
+    APPLIED, exit 0 makes `apply_worker._resolve_outcome` see
+    `has_successful_entry`, and the package is mirrored to Sheets and uploaded
+    to Drive anyway (docs/STACK_PRESCREEN_PLAN.md M1 — the 2026-08-24 Interia
+    incident, and 5 more like it in the same two-week window).
+
+    So this does all three things in one place: drop the rendered documents,
+    convert the row to a terminal SKIP (`tracker.convert_own_applied_row` —
+    in place, so an already-mirrored Sheet row is corrected rather than
+    duplicated), and notify. After it the parent's own `_is_known_terminal`
+    branch takes over: no delivery, and the URL stays deduped.
+
+    Kept on purpose: `job_posting.txt` and `content.json` (diagnostics, and
+    the posting text the re-post gate reads — a SKIP row can never become a
+    donor, so keeping the file is free). Only rendered output goes.
+
+    Returns True when a tracker row was actually converted. False means there
+    was nothing to convert — the CLI skill never wrote a row for this URL — and
+    the caller should fall back to its own terminal write (add_react_skipped /
+    add_skipped), which is what it did before this helper existed.
+
+    Best-effort by construction: a failure here must not turn a clean skip
+    into a FAIL, so every step is guarded and merely logged.
+    """
+    if folder is not None:
+        for path in list(folder.glob("*.pdf")) + list(folder.glob("*.docx")):
+            try:
+                path.unlink()
+            except OSError as e:
+                print(f"[apply_agent] abort: could not delete {path.name}: {e}")
+
+    converted = False
+    if url and url != PASTE_NO_URL_PLACEHOLDER:
+        try:
+            from hunter.tracker import convert_own_applied_row
+
+            converted = convert_own_applied_row(url)
+        except Exception as e:  # noqa: BLE001 — never turn a skip into a failure
+            print(f"[apply_agent] abort: could not convert tracker row: {e}")
+
+    print(
+        f"[apply_agent] ABORT after generation ({reason}) — "
+        f"docs dropped, tracker row converted={converted}: {url}"
+    )
+    if telegram_text:
+        notify(telegram_text)
+    return converted
+
+
 def _opener_banlist_hits(letter: str) -> list[str]:
     """Return list of banned patterns matched in the letter's opener (first sentence)."""
     if not letter:

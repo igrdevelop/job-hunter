@@ -1105,6 +1105,48 @@ def _convert_own_fail_row(url: str, sent: str) -> bool:
         return bool(cur.rowcount)
 
 
+def convert_own_applied_row(url: str, *, status: str = "SKIP", sent: str = "—") -> bool:
+    """Convert this user's APPLIED row for `url` into a terminal SKIP row in place.
+
+    The CLI pipeline's abort stages (React-only stack, company+title dedup,
+    judge block, language-gate block) all run AFTER the CLI skill has already
+    rendered the documents and written the tracker row through generate_docs
+    (`.claude/commands/apply.md` calls it without --no-tracker). Their own
+    terminal writes then no-op on `_is_known_terminal`, and `apply_worker.
+    _resolve_outcome` sees `has_successful_entry` on exit 0 and DELIVERS the
+    package the stage just decided to throw away (docs/STACK_PRESCREEN_PLAN.md
+    M1; measured 2026-08-24: 6 of 14 main_cli runs shipped a row carrying the
+    skill's self-reported ATS score with no independent verdict at all).
+
+    Updating in place — rather than delete + insert — keeps the row's id and
+    `sheets_row` and marks it `sheets_dirty`, so a row already mirrored to the
+    Sheet is CORRECTED there instead of gaining a duplicate; a row that was
+    never mirrored (`sheets_row IS NULL`) simply has nothing to correct. Same
+    contract as _convert_own_fail_row, opposite direction.
+
+    Only a genuine applied row is converted: SKIP/FAIL/EXPIRED/MANUAL rows are
+    already terminal, and a PENDING/IN_PROGRESS placeholder belongs to the
+    queue's own bookkeeping (`_clear_own_placeholder` owns those). Returns True
+    when a row was converted.
+
+    `folder` is deliberately left in place: the abort deletes the rendered
+    documents but keeps job_posting.txt for diagnostics, and a SKIP row can
+    never become a re-post donor anyway (get_recent_applied_for_repost
+    excludes SKIP).
+    """
+    norm = normalize_url(url) if url else ""
+    if not norm:
+        return False
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 "
+            "WHERE url_norm=? AND user_id=? "
+            "AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?, ?, ?)",
+            (status, sent, norm, _uid(), MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS),
+        )
+        return bool(cur.rowcount)
+
+
 def add_expired(url: str, company: str = "", title: str = "") -> None:
     """Write an expired row — offer was no longer active when fetched.
 

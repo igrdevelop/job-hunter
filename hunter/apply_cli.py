@@ -24,6 +24,7 @@ from hunter.apply_shared import (
     ApplyError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
+    abort_after_generation,
     notify,
     send_telegram_documents,
 )
@@ -388,19 +389,26 @@ def main_cli(
                     and not skip_dedup
                     and not _react_track_active()
                 ):
-                    notify(
+                    _abort_msg = (
                         f"⏭ <b>Skipped — React-only stack</b>\n"
                         f"🔗 {url}\n"
                         f"Stack: {_cli_content.get('stack', '?')}"
                         f"{_REACT_SKIP_FORCE_HINT}"
                     )
-                    print(f"[apply_agent] SKIP — React-only stack: {_cli_content.get('stack')}")
-                    try:
-                        from hunter.tracker import add_react_skipped
+                    if not abort_after_generation(
+                        folder_path,
+                        url,
+                        reason="react-only stack",
+                        telegram_text=_abort_msg,
+                    ):
+                        try:
+                            from hunter.tracker import add_react_skipped
 
-                        add_react_skipped(_cli_content, url)
-                    except Exception as e:
-                        print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+                            add_react_skipped(_cli_content, url)
+                        except Exception as e:
+                            print(
+                                f"[apply_agent] Warning: could not write React-skip to tracker: {e}"
+                            )
                     return
 
                 # Company+title dedup (post-generation, parity with the API
@@ -417,30 +425,36 @@ def main_cli(
                     _cli_title = _cli_content.get("job_title") or ""
                     _cli_ct_key = dedup_key(_cli_company, _cli_title)
                     if _cli_ct_key in get_known_company_titles():
-                        notify(
+                        _abort_msg = (
                             f"⏭ <b>Skipped — already applied to this company/role</b>\n"
                             f"🔗 {url}\n"
                             f"{_cli_company} — {_cli_title or '?'}\n"
                             f"Send /force {url} to generate anyway."
                         )
-                        print(f"[apply_agent] SKIP — company+title dedup match: {_cli_ct_key}")
-                        try:
-                            from hunter.models import Job
+                        if not abort_after_generation(
+                            folder_path,
+                            url,
+                            reason=f"company+title dedup ({_cli_ct_key})",
+                            telegram_text=_abort_msg,
+                        ):
+                            try:
+                                from hunter.models import Job
 
-                            add_skipped(
-                                Job(
-                                    title=_cli_title,
-                                    company=_cli_company,
-                                    location="",
-                                    salary=None,
-                                    url=url,
-                                    source="dedup_ct_gate",
+                                add_skipped(
+                                    Job(
+                                        title=_cli_title,
+                                        company=_cli_company,
+                                        location="",
+                                        salary=None,
+                                        url=url,
+                                        source="dedup_ct_gate",
+                                    )
                                 )
-                            )
-                        except Exception as e:
-                            print(
-                                f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}"
-                            )
+                            except Exception as e:
+                                print(
+                                    "[apply_agent] Warning: could not write dedup SKIP "
+                                    f"to tracker: {e}"
+                                )
                         return
 
                 # Language enforce-gate (parity with the API pipeline). The CLI skill
@@ -504,14 +518,7 @@ def main_cli(
                             if JUDGE_MODE in ("warn", "block") and _outcome.report.actionable:
                                 notify(_outcome.report.telegram_summary(url))
                             if _outcome.blocked:
-                                for _f in list(folder_path.glob("*.pdf")) + list(
-                                    folder_path.glob("*.docx")
-                                ):
-                                    try:
-                                        _f.unlink()
-                                    except OSError:
-                                        pass
-                                notify(
+                                _abort_msg = (
                                     f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
                                     f"🔗 {url}\n"
                                     + "\n".join(
@@ -519,7 +526,12 @@ def main_cli(
                                         for v in _outcome.survivors[:3]
                                     )
                                 )
-                                print("[apply_agent] ABORT — claim judge blocked delivery (CLI)")
+                                abort_after_generation(
+                                    folder_path,
+                                    url,
+                                    reason="claim judge blocked delivery",
+                                    telegram_text=_abort_msg,
+                                )
                                 return
                         except Exception as _je:
                             print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
@@ -561,21 +573,19 @@ def main_cli(
 
                     if _report or _scrub_fixes or _pl_fixes or _pl_cv_due:
                         if _blocked:
-                            for _f in list(folder_path.glob("*.pdf")) + list(
-                                folder_path.glob("*.docx")
-                            ):
-                                try:
-                                    _f.unlink()
-                                except OSError:
-                                    pass
-                            notify(
+                            _abort_msg = (
                                 f"⛔ <b>Blocked — Polish leaked into the English CV</b>\n"
                                 f"🔗 {url}\n"
                                 f"The English documents still contained Polish after an "
                                 f"automatic translation pass, so they were NOT sent. "
                                 f"Re-run /force to retry, or apply manually."
                             )
-                            print("[apply_agent] ABORT — language gate blocked delivery (CLI)")
+                            abort_after_generation(
+                                folder_path,
+                                url,
+                                reason="language gate blocked delivery",
+                                telegram_text=_abort_msg,
+                            )
                             return
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed
                         # regeneration (e.g. LibreOffice down) can't leave a stale
