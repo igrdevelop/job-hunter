@@ -91,6 +91,17 @@ APPLY_RATE_LIMITED_EXIT_CODE = 45
 # (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1).
 APPLY_LLM_OUTAGE_EXIT_CODE = 46
 
+# Exit code: the Claude CLI ran and exited 0 but produced no usable package.
+# The commonest cause was the skill asking a clarifying question instead of
+# generating -- `claude -p` is non-interactive, so nobody answers and the run
+# ends empty (5 of 60 retained runs on 2026-08-24). That is NOT an account
+# outage: reporting it as one (exit 46) armed an hour-long auto-apply pause on
+# a perfectly healthy account, and NOT a vacancy failure either -- every
+# observed case succeeded on a later attempt. Callers treat it like
+# `cli_timeout`: no FAIL row, no fail_count escalation, no pause, back to the
+# queue (docs/STACK_PRESCREEN_PLAN.md M6).
+APPLY_CLI_NO_OUTPUT_EXIT_CODE = 47
+
 # Placeholder URL used when user pastes job text into Telegram without any link.
 PASTE_NO_URL_PLACEHOLDER = "paste://no-url"
 
@@ -208,6 +219,16 @@ def is_backend_only_job_text(text: str) -> bool:
 
 class ApplyError(RuntimeError):
     """Raised when an apply attempt fails and fallback should be tried."""
+
+
+class CliNoOutputError(ApplyError):
+    """The CLI exited 0 but left no usable package behind.
+
+    Distinct from a plain ApplyError so `apply_agent.main` can report exit 47
+    instead of folding it into the LLM-outage path: an empty CLI run says
+    nothing about the API account, and treating it as an outage paused
+    auto-apply for an hour every time the skill asked a question.
+    """
 
 
 # ── Tracker dedup ─────────────────────────────────────────────────────────────

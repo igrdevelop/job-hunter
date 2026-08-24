@@ -22,6 +22,7 @@ from pathlib import Path
 
 from hunter.apply_shared import (
     ApplyError,
+    CliNoOutputError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     abort_after_generation,
@@ -869,7 +870,7 @@ def main_cli(
                 f"Check the folder for partial output."
             )
             print("\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
-            raise ApplyError("Folder created but no docs found")
+            raise CliNoOutputError("Folder created but no docs found")
     else:
         stdout_preview = (result.stdout or "").strip()[:600] if result else ""
         notify(
@@ -882,4 +883,4 @@ def main_cli(
             )
         )
         print("\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
-        raise ApplyError("No output folder created")
+        raise CliNoOutputError("No output folder created")

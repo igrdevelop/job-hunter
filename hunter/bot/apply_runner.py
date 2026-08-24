@@ -120,7 +120,7 @@ async def _run_apply_agent(
                 f"🔗 {label}\n"
                 "Check the provider account/key, then send the URL again."
             )
-        elif outcome == "cli_timeout":
+        elif outcome in ("cli_timeout", "cli_no_output"):
             # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): infrastructure timeout, not
             # a vacancy failure — same treatment as llm_outage: no FAIL row
             # (this flow never wrote one for plain "fail" either), the URL

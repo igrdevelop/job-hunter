@@ -549,7 +549,7 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                 "Check the provider account/key. Vacancies were NOT marked FAIL.",
             )
             break
-        elif outcome == "cli_timeout":
+        elif outcome in ("cli_timeout", "cli_no_output"):
             # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): a widened (CLI-eligible)
             # subprocess timeout is infrastructure, not the vacancy's fault —
             # no FAIL row, no tracker row at all. The job has no tracker row,
@@ -718,7 +718,7 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Check the provider account/key.",
             )
             break
-        elif outcome == "cli_timeout":
+        elif outcome in ("cli_timeout", "cli_no_output"):
             # M3: infrastructure timeout, not the vacancy's fault — leave
             # fail_count untouched (row stays retryable at its current count).
             # Counted toward the consecutive-fail breaker (a broken CLI would

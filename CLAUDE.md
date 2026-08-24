@@ -650,6 +650,16 @@ hunter/
                              calls `hunter.apply_failures_log.log_apply_failure()`, appending one
                              JSON line to `logs/apply_failures.jsonl` (RotatingFileHandler, 5MB x5).
                              Read via `/fails [N]` (hunter/commands/fails.py, default 10/max 30).
+                             M6 (docs/STACK_PRESCREEN_PLAN.md): outcome `"cli_no_output"`
+                             (exit 47, `APPLY_CLI_NO_OUTPUT_EXIT_CODE`) — the Claude CLI
+                             exited 0 with no usable package, almost always because the
+                             skill asked a question nobody could answer. Handled exactly
+                             like `cli_timeout` everywhere (no FAIL row, no fail_count
+                             escalation, no outage pause, row back to PENDING) but
+                             reported distinctly: folding it into exit 46 armed an
+                             hour-long auto-apply pause on a perfectly healthy API
+                             account. The one place it still reports an outage is the
+                             API-outage CLI fallback, where the account really IS down.
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
   sources/                  24 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
@@ -827,7 +837,17 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             `.claude/commands/` into the image). Repo files are addressed
                             relative to the root; the candidate's own files are resolved
                             from `CANDIDATE_YAML_PATH` (per-user since the multi-user
-                            migration — `/app/candidate` is empty in prod)
+                            migration — `/app/candidate` is empty in prod).
+                            **Opens with a "decide, never ask" rule** (2026-08-24):
+                            `claude -p` is non-interactive, so a clarifying question
+                            does not pause the run, it ENDS it — no output folder,
+                            `main_cli` raises, and the vacancy comes back with an
+                            alert after burning the full 600 s timeout. Measured on
+                            the deploy host: 5 of 60 retained runs died that way.
+                            Every deterministic screen already ran before the skill
+                            starts and the post-generation gates run after it, so the
+                            skill is not a gate — it states its concerns in the Step 6
+                            summary and generates anyway
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → English-only

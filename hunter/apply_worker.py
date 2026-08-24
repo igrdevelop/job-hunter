@@ -114,7 +114,7 @@ async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
         )
         return False
 
-    if outcome == "cli_timeout":
+    if outcome in ("cli_timeout", "cli_no_output"):
         # M3: infrastructure timeout, not the vacancy's fault — back to
         # PENDING (not FAIL), no fail_count escalation.
         await asyncio.to_thread(tracker.release_claim, job.url)

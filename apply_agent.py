@@ -40,10 +40,12 @@ from hunter.config import APPLY_USE_CLI, LLM_API_KEY
 # ── Re-exports for backward compatibility with tests and external callers ──────
 # These symbols moved to hunter/apply_shared.py in Phase 4 Step 4.1.
 from hunter.apply_shared import (  # noqa: F401
+    APPLY_CLI_NO_OUTPUT_EXIT_CODE,
     APPLY_LLM_OUTAGE_EXIT_CODE,
     APPLY_MANUAL_EXIT_CODE,
     PASTE_NO_URL_PLACEHOLDER,
     ApplyError,
+    CliNoOutputError,
     _already_processed,
     _body_banlist_hits,
     _cover_letter_review,
@@ -86,14 +88,18 @@ def main(
       3. No API key — the CLI is the only path (the original mode).
     """
     if force_cli or APPLY_USE_CLI:
-        folder = main_cli(
-            url,
-            skip_dedup=force,
-            full_mode=full,
-            paste_text=paste_text,
-            permalink=permalink,
-            is_manual=is_manual,
-        )
+        try:
+            folder = main_cli(
+                url,
+                skip_dedup=force,
+                full_mode=full,
+                paste_text=paste_text,
+                permalink=permalink,
+                is_manual=is_manual,
+            )
+        except CliNoOutputError as e:
+            print(f"[apply_agent] CLI produced no package ({e}) - retryable, not an outage")
+            sys.exit(APPLY_CLI_NO_OUTPUT_EXIT_CODE)
         _maybe_run_shadow(folder, full=full)
         return
 
@@ -128,6 +134,9 @@ def main(
                     is_manual=is_manual,
                 )
             except (ApplyError, SystemExit) as cli_err:
+                # Includes CliNoOutputError: here the API account really IS
+                # down, so the outage code still applies -- the CLI was only
+                # the fallback, and it produced nothing either.
                 print(f"[apply_agent] CLI fallback failed too ({cli_err}) — reporting outage")
                 sys.exit(APPLY_LLM_OUTAGE_EXIT_CODE)
         _maybe_run_shadow(folder, full=full)
@@ -144,6 +153,9 @@ def main(
                 permalink=permalink,
                 is_manual=is_manual,
             )
+        except CliNoOutputError as e:
+            print(f"[apply_agent] CLI produced no package ({e}) - retryable, not a failure")
+            sys.exit(APPLY_CLI_NO_OUTPUT_EXIT_CODE)
         except (ApplyError, SystemExit) as e:
             print(f"[apply_agent] CLI failed and no API key available ({e})")
             sys.exit(1)
