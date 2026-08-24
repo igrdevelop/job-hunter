@@ -15,6 +15,7 @@ pause, back to the queue.
 """
 
 import asyncio
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,77 @@ class TestTheExceptionIsDistinct:
             APPLY_RATE_LIMITED_EXIT_CODE,
             APPLY_LLM_OUTAGE_EXIT_CODE,
         )
+
+
+class TestMainCliRaisesIt:
+    """The raise site itself, not a stand-in.
+
+    A mutation check caught this gap: every dispatcher test below monkeypatches
+    `main_cli`, so reverting the raise in hunter/apply_cli.py left them all
+    green. These drive the real function.
+    """
+
+    POSTING = (
+        "Job Title: Senior Angular Developer\nCompany: Nordic Labs\n"
+        "Location: Fully remote (Poland)\n\n"
+        "--- Job Description ---\n"
+        "We are looking for a senior Angular engineer to own our design system. "
+        "You will work with Angular, TypeScript and RxJS across several products, "
+        "mentor other engineers and shape the frontend architecture. Fully remote "
+        "within Poland, contract of employment or B2B, yearly training budget."
+    )
+
+    @staticmethod
+    def _env(monkeypatch, tmp_path, *, make_folder: bool):
+        applications = tmp_path / "Applications"
+        applications.mkdir()
+        monkeypatch.setattr("hunter.apply_shared.APPLICATIONS_DIR", applications)
+        monkeypatch.setattr("hunter.apply_cli.APPLICATIONS_DIR", applications)
+        monkeypatch.setattr(
+            "hunter.sources.fetch_job_text",
+            lambda url, **_kw: TestMainCliRaisesIt.POSTING,
+            raising=False,
+        )
+
+        class _Result:
+            returncode = 0
+            stdout = "I could generate this, but should I skip it instead?"
+            stderr = ""
+
+        def _fake_run(*_a, **_kw):
+            if make_folder:
+                # The skill made its folder and then produced nothing usable.
+                today = date.today().strftime("%Y-%m-%d")
+                (applications / today / "NordicLabs").mkdir(parents=True)
+            return _Result()
+
+        monkeypatch.setattr("hunter.apply_cli.subprocess.run", _fake_run)
+        # main_cli polls _find_new_folder for 30 wall-clock seconds before
+        # giving up -- right in production (the CLI writes the folder whenever
+        # it finishes), pure dead time here. Keep the real detection logic and
+        # only collapse the deadline.
+        from hunter import apply_cli as _mod
+
+        _real_find = _mod._find_new_folder
+        monkeypatch.setattr(
+            "hunter.apply_cli._find_new_folder",
+            lambda before, timeout=0: _real_find(before, timeout=0),
+        )
+        return applications
+
+    def test_no_folder_at_all(self, tracker_db, tmp_path, monkeypatch):
+        self._env(monkeypatch, tmp_path, make_folder=False)
+        from hunter.apply_cli import main_cli
+
+        with pytest.raises(CliNoOutputError):
+            main_cli("https://example.com/jobs/1")
+
+    def test_folder_but_no_documents(self, tracker_db, tmp_path, monkeypatch):
+        self._env(monkeypatch, tmp_path, make_folder=True)
+        from hunter.apply_cli import main_cli
+
+        with pytest.raises(CliNoOutputError):
+            main_cli("https://example.com/jobs/2")
 
 
 class TestDispatcherReportsIt:
