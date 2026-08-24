@@ -76,9 +76,16 @@ def _is_deliverable(url: str) -> bool:
     deliver as before rather than swallow a real application on a broken read.
     """
     try:
-        from hunter.tracker import has_successful_entry, is_known
+        from hunter.tracker import MANUAL_PENDING_ATS, has_successful_entry, is_known, lookup_url
 
-        return not is_known(url) or has_successful_entry(url)
+        if has_successful_entry(url) or not is_known(url):
+            return True
+        # The JobLeads MANUAL flow delivers on purpose: apply_service returns
+        # outcome "manual", bot.apply_runner falls through to deliver_apply_now,
+        # and the owner is told to open the Drive folder and paste the job text
+        # into it. It is not a successful entry and never will be until he does.
+        rows = lookup_url(url)
+        return any((r.get("ats") or "").strip().upper() == MANUAL_PENDING_ATS for r in rows)
     except Exception as e:  # noqa: BLE001 — a tracker read must not block delivery
         logger.warning("delivery: could not check %s against the tracker (%s) — delivering", url, e)
         return True

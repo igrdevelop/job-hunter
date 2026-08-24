@@ -408,8 +408,7 @@ def main_cli(
                         url,
                         reason="react-only stack",
                         telegram_text=_abort_msg,
-                        company=_cli_content.get("company_name") or "",
-                        title=_cli_content.get("job_title") or "",
+                        content=_cli_content,
                     )
                     return
 
@@ -438,8 +437,7 @@ def main_cli(
                             url,
                             reason=f"company+title dedup ({_cli_ct_key})",
                             telegram_text=_abort_msg,
-                            company=_cli_company,
-                            title=_cli_title,
+                            content=_cli_content,
                         )
                         return
 
@@ -517,8 +515,7 @@ def main_cli(
                                     url,
                                     reason="claim judge blocked delivery",
                                     telegram_text=_abort_msg,
-                                    company=_cli_content.get("company_name") or "",
-                                    title=_cli_content.get("job_title") or "",
+                                    content=_cli_content,
                                 )
                                 return
                         except Exception as _je:
@@ -573,8 +570,7 @@ def main_cli(
                                 url,
                                 reason="language gate blocked delivery",
                                 telegram_text=_abort_msg,
-                                company=_cli_content.get("company_name") or "",
-                                title=_cli_content.get("job_title") or "",
+                                content=_cli_content,
                             )
                             return
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed

@@ -48,15 +48,18 @@ class TestFolderIsAlsoAnIdentity:
 
         assert tracker.convert_own_applied_row("", folder=str(folder)) is True
 
-    def test_converts_when_the_row_holds_a_relative_path(self, tracker_db, tmp_path):
+    def test_a_differently_spelled_folder_is_refused_not_guessed(self, tracker_db, tmp_path):
         # The CLI skill has resolved output_folder against the wrong root before
-        # (Ness Solution, 2026-08-21), so the stored spelling cannot be trusted
-        # to match the absolute path the pipeline is holding.
+        # (Ness Solution, 2026-08-21). An earlier cut tried to paper over that
+        # with a "<date>/<Company>" suffix match, and a review reproduced it
+        # converting a SECOND, genuine application. The answer is not a cleverer
+        # guess: the caller passes the row's OWN output_folder from content.json
+        # (see tests/test_abort_identity.py), and a mismatch converts nothing.
         _applied_row(folder="Applications/2026-08-24/Interia")
         absolute = tmp_path / "app" / "Applications" / "2026-08-24" / "Interia"
 
-        assert tracker.convert_own_applied_row(url="", folder=str(absolute)) is True
-        assert _status() == "SKIP"
+        assert tracker.convert_own_applied_row(url="", folder=str(absolute)) is False
+        assert _status() == "96%"
 
     def test_url_alone_still_works(self, tracker_db):
         _applied_row()
@@ -78,7 +81,10 @@ class TestAbortAlwaysLeavesATerminalRow:
         folder.mkdir()
 
         abort_after_generation(
-            folder, URL, reason="claim judge blocked delivery", company="Interia", title="Dev"
+            folder,
+            URL,
+            reason="claim judge blocked delivery",
+            content={"company_name": "Interia", "job_title": "Dev"},
         )
 
         assert _status() == "SKIP", "an abort must always leave something terminal on record"
@@ -88,7 +94,12 @@ class TestAbortAlwaysLeavesATerminalRow:
         folder.mkdir()
         _applied_row(folder=str(folder))
 
-        assert abort_after_generation(folder, URL, reason="r", company="C", title="T") is True
+        assert (
+            abort_after_generation(
+                folder, URL, reason="r", content={"apply_url": URL, "output_folder": str(folder)}
+            )
+            is True
+        )
 
 
 class TestDeliveryRefusesANonAppliedRow:
@@ -216,7 +227,9 @@ class TestDriveBackfillSkipsNonApplications:
         assert result["uploaded"] == 0
         assert reached == [], "the backfill must not even resolve the Drive root for a SKIP row"
 
-    @pytest.mark.parametrize("status", ["FAIL", "EXPIRED", "MANUAL"])
+    # MANUAL is deliberately absent: add_manual_jobleads_pending has always
+    # written a folder and the owner is told to open it on Drive.
+    @pytest.mark.parametrize("status", ["FAIL", "EXPIRED"])
     def test_other_non_applications_are_skipped_too(self, monkeypatch, tmp_path, status):
         gdrive_sync, reached = self._run(
             monkeypatch, [self._row(status, "2026-08-24/Interia")], tmp_path

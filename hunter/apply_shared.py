@@ -551,53 +551,50 @@ def abort_after_generation(
     *,
     reason: str,
     telegram_text: str = "",
-    company: str = "",
-    title: str = "",
+    content: dict | None = None,
 ) -> bool:
     """Undo a package the pipeline decided to throw away AFTER it was rendered.
 
     The CLI pipeline's abort stages (React-only stack, company+title dedup,
     judge block, language-gate block) all run once the CLI skill has already
-    rendered the documents AND written the tracker row — `.claude/commands/
-    apply.md` calls generate_docs.py without --no-tracker, so the row exists
+    rendered the documents AND written the tracker row -- `.claude/commands/
+    apply.md` calls generate_docs.py WITHOUT `--no-tracker`, so the row exists
     inside the CLI call. Deleting the PDFs alone is not enough: the row stays
     APPLIED, exit 0 makes `apply_worker._resolve_outcome` see
     `has_successful_entry`, and the package is mirrored to Sheets and uploaded
-    to Drive anyway (docs/STACK_PRESCREEN_PLAN.md M1 — the 2026-08-24 Interia
+    to Drive anyway (docs/STACK_PRESCREEN_PLAN.md M1 -- the 2026-08-24 Interia
     incident, and 5 more like it in the same two-week window).
 
-    So this does all three things in one place: drop the rendered documents,
-    convert the row to a terminal SKIP (`tracker.convert_own_applied_row` —
-    in place, so an already-mirrored Sheet row is corrected rather than
-    duplicated), and notify. After it the parent's own `_is_known_terminal`
-    branch takes over: no delivery, and the URL stays deduped.
+    So this does all of it in one place: drop the rendered documents, settle the
+    tracker row, notify. After it the parent's own terminal-row branch takes
+    over: no delivery, and the URL stays deduped.
 
-    Kept on purpose: `job_posting.txt` and `content.json` (diagnostics, and
-    the posting text the re-post gate reads — a SKIP row can never become a
-    donor, so keeping the file is free). Only rendered output goes.
+    `content` is the content.json the row was written from, and it is the
+    IDENTITY -- `apply_url` and `output_folder` are the literal values
+    `add_applied` stored. The pipeline's own `url` is only a fallback: paste
+    mode never hands the skill a URL (the row lands with `url_norm=''`) and
+    `.claude/commands/apply.md` lets the skill record the apply-button URL
+    instead of the input one, so keying on it alone made this a guaranteed
+    no-op for the whole paste flow.
 
-    Identity is the URL **or** the folder — see convert_own_applied_row for why
-    the URL alone is not enough on this pipeline (paste mode never hands the
-    skill a URL, so the row is written with an empty url_norm; and
-    `.claude/commands/apply.md` explicitly allows the skill to record the
-    apply-button URL instead of the input one).
+    When no applied row could be converted, a terminal SKIP row is written here
+    so no call site has to remember to. A run that ends with NO terminal row is
+    not a harmless no-op: the worker clears the placeholder, the vacancy returns
+    on the next hunt, the CLI regenerates the whole package and the same gate
+    blocks again, forever -- the defect fixed for the backend-only pre-LLM skip
+    on 2026-08-17 (one posting processed 8 times in 40 h).
 
-    When nothing was converted — no applied row exists for this run at all — a
-    terminal SKIP row is written here, so no call site has to remember to do it.
-    Leaving a run with NO terminal row is not a harmless no-op: the worker then
-    clears the placeholder and the vacancy returns on the next hunt, which
-    regenerates the whole package and blocks again, forever. That exact defect
-    was fixed once already for the backend-only pre-LLM skip (Agent Work Log
-    2026-08-17 — one posting processed 8 times in 40 h) and must not come back
-    through a gate whose fallback only two of four call sites implemented.
+    Kept on purpose: `job_posting.txt` and `content.json` (diagnostics, and the
+    posting text the re-post gate reads -- a SKIP row can never become a donor).
+    Only rendered output goes.
 
-    Returns True when an existing applied row was converted.
+    Returns True when an applied row was converted.
 
-    Wrapped in best_effort: the swallow is correct — a failure here must not
-    turn a clean skip into a FAIL — but this path IS the fix for a delivery
-    incident, so silent degradation has to surface as an alert rather than
-    quietly restoring the bug. Two of the four call sites cannot even see the
-    return value.
+    Wrapped in best_effort: the swallow is correct -- an abort must never become
+    a FAIL -- but this path IS the fix for a delivery incident, so silent
+    degradation has to surface as an alert. Settling NOTHING raises for exactly
+    that reason: it is the failure mode with no exception of its own, and two of
+    the four call sites cannot even see the return value.
     """
     if folder is not None:
         for path in list(folder.glob("*.pdf")) + list(folder.glob("*.docx")):
@@ -606,52 +603,60 @@ def abort_after_generation(
             except OSError as e:
                 print(f"[apply_agent] abort: could not delete {path.name}: {e}")
 
+    meta = content or {}
+    row_url = (meta.get("apply_url") or "").strip() or url
+    row_folder = (meta.get("output_folder") or "").strip() or (
+        str(folder) if folder is not None else ""
+    )
+
     converted = False
     with best_effort("apply.abort_undo"):
-        try:
-            from hunter.tracker import convert_own_applied_row
+        from hunter.tracker import convert_own_applied_row
 
-            converted = convert_own_applied_row(
-                url if url and url != PASTE_NO_URL_PLACEHOLDER else "",
-                folder=str(folder) if folder is not None else "",
+        converted = convert_own_applied_row(
+            row_url if row_url and row_url != PASTE_NO_URL_PLACEHOLDER else "",
+            folder=row_folder,
+        )
+        if not converted and not _write_abort_skip_row(row_url or url, meta):
+            raise RuntimeError(
+                f"post-generation abort settled nothing for {row_url or url!r} "
+                f"(folder={row_folder!r}) - the applied row may still be delivered"
             )
-            if not converted:
-                _write_abort_skip_row(url, company, title)
-        except Exception as e:  # noqa: BLE001 — never turn a skip into a failure
-            print(f"[apply_agent] abort: could not settle the tracker row: {e}")
-            raise
 
     print(
-        f"[apply_agent] ABORT after generation ({reason}) — "
-        f"docs dropped, applied row converted={converted}: {url}"
+        f"[apply_agent] ABORT after generation ({reason}) -- "
+        f"docs dropped, applied row converted={converted}: {row_url or url}"
     )
     if telegram_text:
         notify(telegram_text)
     return converted
 
 
-def _write_abort_skip_row(url: str, company: str, title: str) -> None:
-    """Last resort when no applied row existed to convert: write the SKIP row.
+def _write_abort_skip_row(url: str, content: dict) -> bool:
+    """Last resort when no applied row could be converted: write the SKIP row.
 
-    add_skipped refuses when an unrelated terminal row already covers this URL
-    or its company+title, which is the correct outcome — something terminal is
-    on record either way.
+    True when a row was actually written. add_skipped returns None when an
+    existing terminal row already covers this URL or its company+title -- and
+    that is NOT good enough here: the row it is matching may be the very applied
+    row this abort failed to convert, in which case reporting success would hide
+    the original incident behind a false negative.
     """
     if not url or url == PASTE_NO_URL_PLACEHOLDER:
-        return
+        return False
     from hunter.models import Job
     from hunter.tracker import add_skipped
 
-    add_skipped(
+    written = add_skipped(
         Job(
-            title=title,
-            company=company,
+            title=(content.get("job_title") or "").strip(),
+            company=(content.get("company_name") or "").strip(),
             location="",
             salary=None,
             url=url,
             source="post_generation_abort",
         )
     )
+    return bool(written)
 
 
 def _opener_banlist_hits(letter: str) -> list[str]:

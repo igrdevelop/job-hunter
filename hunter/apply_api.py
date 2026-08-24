@@ -315,7 +315,11 @@ def _run_main_api(
         return
 
     # Step 1.5d — Pre-LLM backend-only text check (no FE framework + explicit BE required)
-    if not skip_dedup and is_backend_only_job_text(job_text):
+    if (
+        not skip_dedup
+        and is_backend_only_job_text(job_text)
+        and not stack_gate_allows_manual(is_manual, url, "Backend-only posting (pre-LLM text scan)")
+    ):
         notify(
             f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )

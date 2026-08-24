@@ -415,7 +415,7 @@ _backfill_running = False
 # Statuses that mean "no application was shipped", so their folder (when they
 # have one at all) must never be uploaded. Kept local to the uploader: tracker
 # owns the values, this module owns the delivery policy.
-_NON_APPLIED_STATUSES = frozenset({"SKIP", "FAIL", "EXPIRED", "MANUAL"})
+_NON_APPLIED_STATUSES = frozenset({"SKIP", "FAIL", "EXPIRED"})
 
 
 async def upload_missing_folders(
@@ -501,10 +501,14 @@ async def _upload_missing_folders_locked(
         folder_str = row.get("Folder", "").strip()
         if not folder_str:
             continue
-        # A folder on a non-applied row is not an application. Until 2026-08-24
-        # every SKIP producer wrote folder='' (add_skipped / add_react_skipped
-        # have no folder column at all), so "has a folder" was a safe proxy for
-        # "was generated" and this check was unnecessary.
+        # A folder on a SKIP/FAIL/EXPIRED row is not an application. Every
+        # producer of those statuses writes folder='' (add_skipped /
+        # add_react_skipped have no folder column at all), so "has a folder"
+        # used to be a safe proxy for "was generated".
+        # MANUAL is deliberately NOT in this set: add_manual_jobleads_pending
+        # has always written a folder, and the owner is told to paste the job
+        # text into a file inside it -- excluding it would strand the JobLeads
+        # flow's folder on the VPS filesystem only.
         # tracker.convert_own_applied_row is the first producer of a SKIP row
         # that KEEPS its folder -- the post-generation aborts delete the
         # rendered documents but leave job_posting.txt for diagnostics. Without

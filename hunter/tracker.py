@@ -21,6 +21,7 @@ Testable: monkeypatch hunter.tracker.DB_PATH to an isolated tmp path.
 """
 
 import json
+import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -29,6 +30,8 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
+
+log = logging.getLogger(__name__)
 from hunter.models import Job
 from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
 
@@ -1112,10 +1115,10 @@ def convert_own_applied_row(
     status: str = "SKIP",
     sent: str = "—",
 ) -> bool:
-    """Convert this user's APPLIED row for `url` into a terminal SKIP row in place.
+    """Convert this user's APPLIED row into a terminal SKIP row, in place.
 
     The CLI pipeline's abort stages (React-only stack, company+title dedup,
-    judge block, language-gate block) all run AFTER the CLI skill has already
+    judge block, language-gate block) all run after the CLI skill has already
     rendered the documents and written the tracker row through generate_docs
     (`.claude/commands/apply.md` calls it without --no-tracker). Their own
     terminal writes then no-op on `_is_known_terminal`, and `apply_worker.
@@ -1124,74 +1127,81 @@ def convert_own_applied_row(
     M1; measured 2026-08-24: 6 of 14 main_cli runs shipped a row carrying the
     skill's self-reported ATS score with no independent verdict at all).
 
-    Updating in place — rather than delete + insert — keeps the row's id and
+    Updating in place -- rather than delete + insert -- keeps the row's id and
     `sheets_row` and marks it `sheets_dirty`, so a row already mirrored to the
-    Sheet is CORRECTED there instead of gaining a duplicate; a row that was
-    never mirrored (`sheets_row IS NULL`) simply has nothing to correct. Same
-    contract as _convert_own_fail_row, opposite direction.
+    Sheet is CORRECTED there instead of gaining a duplicate.
 
-    Only a genuine applied row is converted: SKIP/FAIL/EXPIRED/MANUAL rows are
-    already terminal, and a PENDING/IN_PROGRESS placeholder belongs to the
-    queue's own bookkeeping (`_clear_own_placeholder` owns those). Returns True
-    when a row was converted.
+    **Identity must be exact.** `url` and `folder` should come from the
+    content.json the row was WRITTEN from (`apply_url` / `output_folder`) --
+    those are the literal values `add_applied` stored. The pipeline's own idea
+    of the URL is not a safe substitute: paste mode never hands the skill a URL
+    (the row lands with `url_norm=''`) and `.claude/commands/apply.md` lets the
+    skill record the apply-button URL instead of the input one.
 
-    Matches on the URL **or** the output folder, because the CLI pipeline does
-    not reliably own the URL the row was written under. In paste mode the skill
-    is handed the pasted text and never sees the URL at all, so `add_applied`
-    writes `url_norm=''`; and `.claude/commands/apply.md` explicitly allows the
-    skill to record the apply-button URL instead of the input one. The folder,
-    by contrast, is the identity the caller always holds -- `add_applied` wrote
-    it from the same `content["output_folder"]` the pipeline is standing in.
-    Both spellings of the path are tried, since the row may hold a relative
-    value while the caller holds an absolute one (or the reverse).
+    Matching is exact equality only. An earlier version also matched a
+    `<date>/<Company>` suffix to survive relative-vs-absolute path spellings;
+    a review reproduced it converting a SECOND, unrelated row -- two runs for
+    the same company on the same day under different roots share that suffix,
+    and `_` in a sanitised company name is a LIKE wildcard. A destructive write
+    does not get to guess: when more than one row matches, nothing is converted
+    and a warning is logged, because ambiguity means the identity is wrong and
+    the caller needs to know.
 
     `folder` is left in place on the converted row: the abort deletes the
     rendered documents but keeps job_posting.txt for diagnostics, and a SKIP row
     can never become a re-post donor (get_recent_applied_for_repost excludes
-    SKIP). The Drive backfill DOES have to know about it -- see
-    gdrive_sync.upload_missing_folders, which now skips non-applied rows.
+    SKIP). The Drive backfill knows about it -- see
+    gdrive_sync.upload_missing_folders, which skips non-applied rows.
+
+    Returns True only when exactly one row was converted.
     """
     norm = normalize_url(url) if url else ""
     folders = []
     if folder:
         folders.append(str(folder))
         try:
-            folders.append(str(Path(folder).resolve()))
+            resolved = str(Path(folder).resolve())
+            if resolved != str(folder):
+                folders.append(resolved)
         except OSError:  # pragma: no cover - resolve() on a hostile path
             pass
-    folders = list(dict.fromkeys(f for f in folders if f))
     if not norm and not folders:
         return False
 
     where = []
-    params: list = [status, sent]
+    params: list = []
     if norm:
         where.append("url_norm=?")
         params.append(norm)
     if folders:
         where.append(f"folder IN ({','.join('?' * len(folders))})")
         params.extend(folders)
-        # Exact string equality is not enough on its own: the row may hold a
-        # relative path while the caller holds an absolute one, or the reverse
-        # (the CLI skill has resolved output_folder against the wrong root
-        # before -- Ness Solution, 2026-08-21). Fall back to the last two
-        # components, "<date>/<Company>", with separators normalised so a
-        # Windows-written value matches a POSIX one. Two rows can only share
-        # that suffix by being the same vacancy folder.
-        tail = "/".join(Path(folders[0]).parts[-2:])
-        if tail:
-            where.append("replace(folder, '\\', '/') LIKE ?")
-            params.append(f"%{tail}")
-    params.extend([_uid(), MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS])
+    params.append(_uid())
 
     with get_db(DB_PATH) as conn:
-        cur = conn.execute(
-            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 "  # noqa: S608
+        rows = conn.execute(
+            f"SELECT rowid, url, folder FROM applications "  # noqa: S608
             f"WHERE ({' OR '.join(where)}) AND user_id=? "
             "AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?, ?, ?)",
-            params,
+            [*params, MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS],
+        ).fetchall()
+        if not rows:
+            return False
+        if len(rows) > 1:
+            log.warning(
+                "convert_own_applied_row: %d rows match url=%r folder=%r - refusing to convert "
+                "any of them (%s)",
+                len(rows),
+                url,
+                folder,
+                ", ".join(r["folder"] or r["url"] or "?" for r in rows),
+            )
+            return False
+        conn.execute(
+            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 WHERE rowid=?",
+            (status, sent, rows[0]["rowid"]),
         )
-        return bool(cur.rowcount)
+    return True
 
 
 def add_expired(url: str, company: str = "", title: str = "") -> None:

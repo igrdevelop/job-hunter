@@ -50,6 +50,7 @@ class TestFlagIsOnlyOnTheManualPath:
                 timeout_sec=5,
                 apply_agent_path=Path("apply_agent.py"),
                 python_executable="python",
+                is_manual=True,
             )
         )
 

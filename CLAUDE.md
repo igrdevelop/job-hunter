@@ -1257,13 +1257,17 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
   (`content["primary_lang"] == "PL"`), so a Polish employer receives the clean Polish CV
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
 - **Force** (`--force`): skip dedup, bypass React-only skip
-- **Manual** (`--manual`): the owner asked for THIS vacancy by hand (pasted URL,
-  Apply button, LinkedIn batch — every caller of
-  `apply_service.run_apply_agent_for_url`; the auto-hunt/queue path goes through
-  `run_apply_agent_subprocess` and never gets the flag). It degrades the STACK
-  gates to warnings — Step 1.5c and Step 4.5 in `apply_api`, their CLI twin in
-  `apply_cli`, all via `apply_shared.stack_gate_allows_manual` — and nothing
-  else. Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the
+- **Manual** (`--manual`): the owner asked for THIS vacancy by hand. It degrades
+  the STACK gates to warnings — Step 1.5c (React), Step 1.5d (backend-only) and
+  Step 4.5 in `apply_api`, their CLI twin in `apply_cli`, all via
+  `apply_shared.stack_gate_allows_manual` — and nothing else. It is an explicit
+  `is_manual=True` argument to `apply_service.run_apply_agent_for_url` (passed by
+  `bot.apply_runner._run_apply_agent`, the Telegram paste/Apply-button runner),
+  NOT a property of that function: "reached the manual runner" and "the owner saw
+  this vacancy" are different claims, and a bulk expansion — a pasted LinkedIn
+  alert fanning out into dozens of job ids nobody read a title for — must not
+  inherit it by sharing a code path. The auto-hunt/queue path goes through
+  `run_apply_agent_subprocess` and never gets the flag. Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the
   auto-hunt keeps filtering React-only postings, measured at 2 of 38 such
   packages ever sent against a 43% baseline, but a link the owner sends himself
   is generated without argument. Deliberately NOT `--force`: dedup, the doomed
@@ -1315,15 +1319,22 @@ equivalent gates run BEFORE `generate_docs`. Wrapped in
 become a FAIL) but this path IS the incident fix, and two of the four call sites
 cannot see its return value.
 
-Three things an adversarial review (2026-08-24) showed the first cut got wrong,
+Things two adversarial reviews (2026-08-24) showed the first cuts got wrong,
 all now covered by tests:
-- **Identity is the URL OR the folder.** Paste mode never hands the CLI skill a
-  URL, so `add_applied` writes `url_norm=''`; and `.claude/commands/apply.md`
-  lets the skill record the apply-button URL instead of the input one. Keying on
-  the URL alone made the conversion a guaranteed no-op for the whole paste flow
-  (including every `linkedin_scout_relay` post). `convert_own_applied_row` now
-  also matches the folder -- as stored, resolved, and as a `<date>/<Company>`
-  suffix, since the stored spelling may be relative where the caller is absolute.
+- **Identity comes from the content.json the row was written from**, passed as
+  `content=`: `apply_url` and `output_folder` are the literal values
+  `add_applied` stored. The pipeline's own `url` is only a fallback — paste mode
+  never hands the skill a URL (`url_norm=''`, so the whole paste flow including
+  every `linkedin_scout_relay` post was a guaranteed no-op) and
+  `.claude/commands/apply.md` lets the skill record the apply-button URL
+  instead of the input one. Matching is **exact equality, single row**: an
+  intermediate cut also matched a `<date>/<Company>` folder SUFFIX, and a review
+  reproduced it converting a SECOND, genuine, already-delivered application to
+  SKIP (two runs for one company on one day under different roots share that
+  suffix; and `_`, which `_sanitize_folder_company` substitutes for every
+  illegal character, is a SQL LIKE wildcard). When more than one row matches,
+  `convert_own_applied_row` converts NOTHING and logs — a destructive write does
+  not get to guess.
 - **The delivery gate belongs in `delivery.py`, not in one parent.** Of the four
   callers of `deliver_apply_now`, only `apply_worker._resolve_outcome` checked
   the tracker; `bot.apply_runner` (manual paste / Apply button), the LinkedIn
@@ -1331,11 +1342,22 @@ all now covered by tests:
   now refuses any URL that is KNOWN and not a successful entry, so an aborted run
   reaches neither Sheets nor Drive nor the backfills. An UNKNOWN url still
   delivers (see the identity problem above), and a failed tracker read fails OPEN.
-- **`SKIP` rows never used to carry a folder.** Every other SKIP producer writes
-  `folder=''`, so `gdrive_sync.upload_missing_folders` selected purely on "has a
-  folder + no Drive URL". The converted row is the first exception, and without a
-  status check the next backfill pass (every 30 min) would upload a folder holding
-  only `job_posting.txt` + `content.json` and stamp a Drive URL on it.
+- **`SKIP`/`FAIL`/`EXPIRED` rows never used to carry a folder.** Those producers
+  write `folder=''`, so `gdrive_sync.upload_missing_folders` selected purely on
+  "has a folder + no Drive URL". The converted row is the first exception, and
+  without a status check the next backfill pass (every 30 min) would upload a
+  folder holding only `job_posting.txt` + `content.json` and stamp a Drive URL on
+  it. **`MANUAL` is deliberately NOT in that set** (and gets its own carve-out in
+  `delivery._is_deliverable`): `add_manual_jobleads_pending` has always written a
+  folder, the JobLeads flow returns outcome `"manual"` and delivers on purpose,
+  and the bot's own message tells the owner to open that Drive folder and paste
+  the job text into it. Excluding it stranded the folder on the VPS filesystem.
+- **Settling nothing raises**, so `best_effort("apply.abort_undo")` has something
+  to count. The real failure mode has no exception of its own: the conversion
+  finds no row AND the fallback `add_skipped` no-ops because `_is_known_terminal`
+  matched the very applied row the conversion failed to convert. Silence there
+  restores the original incident invisibly — two of the four call sites cannot
+  see the return value.
 
 A GDPR/RODO consent clause is auto-appended as the **last body paragraph** of the CV
 (small italic grey text, in the document body so ATS parsers read it — NOT a footer).
