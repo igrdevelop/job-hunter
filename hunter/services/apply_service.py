@@ -21,14 +21,8 @@ _APPLY_RATE_LIMITED_EXIT_CODE = 45
 # Must match apply_shared.APPLY_LLM_OUTAGE_EXIT_CODE (LLM billing/auth outage —
 # global state, not the vacancy's fault; the batch loop stops without FAIL rows)
 _APPLY_LLM_OUTAGE_EXIT_CODE = 46
-# Must match apply_shared.APPLY_CLI_NO_OUTPUT_EXIT_CODE (the CLI exited 0 with
-# no usable package -- retryable infrastructure noise, not the vacancy's fault
-# and not an account outage; docs/STACK_PRESCREEN_PLAN.md M6)
-_APPLY_CLI_NO_OUTPUT_EXIT_CODE = 47
 
-ApplyOutcome = Literal[
-    "ok", "fail", "manual", "rate_limited", "llm_outage", "cli_timeout", "cli_no_output"
-]
+ApplyOutcome = Literal["ok", "fail", "manual", "rate_limited", "llm_outage", "cli_timeout"]
 
 # Second element: human-readable error snippet for Telegram (empty string on success).
 ApplyResult = tuple[ApplyOutcome, str]
@@ -243,11 +237,6 @@ async def run_apply_agent_subprocess(
             _save_stdout("llm_outage", proc.returncode)
             return "llm_outage"
 
-        if proc.returncode == _APPLY_CLI_NO_OUTPUT_EXIT_CODE:
-            logger.warning(f"[auto-apply] CLI produced no package {job.company} — {job.title}")
-            _save_stdout("cli_no_output", proc.returncode)
-            return "cli_no_output"
-
         if proc.returncode != 0:
             # Same stdout fallback as run_apply_agent_for_url: apply_agent's
             # error paths print to stdout and exit 1 with an empty stderr.
@@ -408,11 +397,6 @@ async def run_apply_agent_for_url(
         logger.error(f"[apply_agent] LLM OUTAGE (billing/auth) for {label}")
         _save_stdout("llm_outage", proc.returncode)
         return "llm_outage", "LLM account outage (billing/auth) — no docs generated"
-
-    if proc.returncode == _APPLY_CLI_NO_OUTPUT_EXIT_CODE:
-        logger.warning(f"[apply_agent] CLI produced no package for {label}")
-        _save_stdout("cli_no_output", proc.returncode)
-        return "cli_no_output", "the Claude CLI exited 0 without producing a package"
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if proc.returncode != 0:

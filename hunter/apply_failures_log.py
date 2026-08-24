@@ -26,7 +26,7 @@ _MAX_ERROR_CHARS = 500
 # Outcomes that are genuinely a per-vacancy failure worth auditing. Kept as a
 # module constant (not inlined at each call site) so a new outcome added to
 # ApplyOutcome later is an explicit, reviewable decision here.
-LOGGED_OUTCOMES = frozenset({"fail", "cli_timeout", "cli_no_output", "rate_limited"})
+LOGGED_OUTCOMES = frozenset({"fail", "cli_timeout", "rate_limited"})
 
 _log_path_override: Path | str | None = None  # test hook — see set_log_path_for_tests
 

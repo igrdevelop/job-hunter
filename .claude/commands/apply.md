@@ -84,7 +84,7 @@ If input is a URL:
   (this is the endpoint `hunter/sources/justjoin.py::fetch_text` uses — the old
   `api.justjoin.it/v1/offers/` host is dead)
 - **All other URLs**: fetch the page directly with WebFetch.
-- If fetching fails or returns CSS/empty content: ask the user to paste the job text manually.
+- If fetching fails or returns CSS/empty content: **stop** with the one-line reason `could not read the posting` and generate nothing. Do NOT ask a question (nobody is there to answer, see the rule at the top) and do NOT write a package from the URL alone — with no posting text the pipeline's own screens (expired check, doomed gate, re-post gate, ATS verdict) are all skipped, and the claim judge has nothing to check the CV against, so an invented vacancy would sail through to delivery. The pipeline aborts on a too-short posting before it ever spawns you; stopping here is the same decision one step later.
 
 If input is plain text: use it directly.
 

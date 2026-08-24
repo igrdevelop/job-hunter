@@ -22,7 +22,6 @@ from pathlib import Path
 
 from hunter.apply_shared import (
     ApplyError,
-    CliNoOutputError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     abort_after_generation,
@@ -238,6 +237,29 @@ def main_cli(
                 print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
             return
 
+        # Abort if the posting we hold is too short to generate from (parity
+        # with apply_api Step 1.5b, added 2026-08-24). This branch used to
+        # have NO floor at all: a fetch returning under 100 chars silently
+        # handed the skill a bare URL, and with job_text falsy the expired
+        # check, doomed gate, re-post gate, PDF roundtrip and ATS verdict are
+        # ALL skipped -- so the one run that most needs guarding ran with none
+        # of them, and the skill was left to invent a posting from a URL slug.
+        # Placed AFTER the expired check on purpose: a deleted posting is often
+        # served as a short synthetic marker, and the floor would swallow it.
+        from hunter.validation import is_job_text_too_short, min_job_text_len_for
+
+        _min_len = min_job_text_len_for(url)
+        if is_job_text_too_short(job_text, _min_len):
+            notify(
+                f"⚠️ <b>Job text too short — skipped</b>\n"
+                f"Got {len((job_text or '').strip())} chars (min {_min_len}).\n🔗 {url}"
+            )
+            print(
+                f"[apply_agent] ABORT — job text too short "
+                f"({len((job_text or '').strip())} chars): {url}"
+            )
+            return None
+
         # Manual-apply "warn but allow" screen (see apply_api Step 1.5e).
         # Skipped when the doomed gate (Step 1.5f below) is enabled — the gate
         # re-runs the same assess_job_text and reports every finding with its
@@ -426,7 +448,13 @@ def main_cli(
                     _cli_company = _cli_content.get("company_name") or "Unknown"
                     _cli_title = _cli_content.get("job_title") or ""
                     _cli_ct_key = dedup_key(_cli_company, _cli_title)
-                    if _cli_ct_key in get_known_company_titles():
+                    # Exclude this run's OWN row: the skill already ran
+                    # generate_docs without --no-tracker, so the row exists and
+                    # the gate would match itself (see get_known_company_titles).
+                    if _cli_ct_key in get_known_company_titles(
+                        exclude_url=_cli_content.get("apply_url") or url,
+                        exclude_folder=_cli_content.get("output_folder") or str(folder_path),
+                    ):
                         _abort_msg = (
                             f"⏭ <b>Skipped — already applied to this company/role</b>\n"
                             f"🔗 {url}\n"
@@ -864,13 +892,28 @@ def main_cli(
             # dual-apply shadow comparison (if enabled).
             return folder_path
         else:
-            notify(
-                f"⚠️ <b>Folder created but no docs found!</b>\n"
-                f"📁 <code>Applications/{new_folder}/</code>\n"
-                f"Check the folder for partial output."
+            # A folder with no documents is not an empty run: generate_docs
+            # writes the tracker row BEFORE the PDF step ("so a LibreOffice
+            # crash doesn't lose the record"), and the language/scrub re-render
+            # above deletes every rendered file before regenerating. The likely
+            # state here is therefore an APPLIED row pointing at a folder holding
+            # only content.json and job_posting.txt -- which the Sheets and Drive
+            # backfills would deliver ~30 min later. Settle the row the same way
+            # every other post-generation abort does.
+            abort_after_generation(
+                folder_path,
+                url,
+                reason="CLI produced no documents",
+                telegram_text=(
+                    f"⚠️ <b>No documents were produced — nothing sent</b>\n"
+                    f"📁 <code>Applications/{new_folder}/</code>\n"
+                    f"🔗 {url}\n"
+                    "The tracker row was settled; re-run with /force to try again."
+                ),
+                content=_cli_content if isinstance(_cli_content, dict) else None,
             )
-            print("\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
-            raise CliNoOutputError("Folder created but no docs found")
+            print("\n[apply_agent] ABORT: folder created but no .docx/.pdf files found.")
+            return None
     else:
         stdout_preview = (result.stdout or "").strip()[:600] if result else ""
         notify(
@@ -883,4 +926,4 @@ def main_cli(
             )
         )
         print("\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
-        raise CliNoOutputError("No output folder created")
+        raise ApplyError("No output folder created")

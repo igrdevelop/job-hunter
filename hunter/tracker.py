@@ -332,15 +332,33 @@ def get_known_urls() -> set[str]:
         return {r["url_norm"] for r in rows}
 
 
-def get_known_company_titles() -> set[str]:
-    """Return dedup_key(company, title) for all rows in tracker."""
+def get_known_company_titles(*, exclude_url: str = "", exclude_folder: str = "") -> set[str]:
+    """Return dedup_key(company, title) for all rows in tracker.
+
+    `exclude_url` / `exclude_folder` drop THIS run's own row from the set. The
+    CLI pipeline needs that and the API pipeline does not: there, the dedup gate
+    runs before generate_docs, so no row exists yet. In the CLI pipeline the
+    skill has already run generate_docs (without --no-tracker) by the time the
+    gate is reached, so the run's own row is in the tracker and the gate matched
+    ITSELF -- every CLI apply that got past the stack gate aborted as a
+    duplicate from 2026-08-21 (when the gate shipped) until this fix. Confirmed
+    on production data: `Ness Solution` and `Grupa Com40` each had exactly ONE
+    row carrying their dedup_key, written by the very run their transcript shows
+    aborting with "SKIP - company+title dedup match".
+    """
+    norm = normalize_url(exclude_url) if exclude_url else ""
+    folder = str(exclude_folder) if exclude_folder else ""
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT company, title FROM applications "
+            "SELECT company, title, url_norm, folder FROM applications "
             "WHERE company != '' AND title != '' AND user_id=?",
             (_uid(),),
         ).fetchall()
-        return {dedup_key(r["company"], r["title"]) for r in rows}
+    return {
+        dedup_key(r["company"], r["title"])
+        for r in rows
+        if not (norm and r["url_norm"] == norm) and not (folder and r["folder"] == folder)
+    }
 
 
 def get_sent_companies() -> set[str]:

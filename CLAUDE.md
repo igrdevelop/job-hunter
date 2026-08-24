@@ -650,16 +650,22 @@ hunter/
                              calls `hunter.apply_failures_log.log_apply_failure()`, appending one
                              JSON line to `logs/apply_failures.jsonl` (RotatingFileHandler, 5MB x5).
                              Read via `/fails [N]` (hunter/commands/fails.py, default 10/max 30).
-                             M6 (docs/STACK_PRESCREEN_PLAN.md): outcome `"cli_no_output"`
-                             (exit 47, `APPLY_CLI_NO_OUTPUT_EXIT_CODE`) — the Claude CLI
-                             exited 0 with no usable package, almost always because the
-                             skill asked a question nobody could answer. Handled exactly
-                             like `cli_timeout` everywhere (no FAIL row, no fail_count
-                             escalation, no outage pause, row back to PENDING) but
-                             reported distinctly: folding it into exit 46 armed an
-                             hour-long auto-apply pause on a perfectly healthy API
-                             account. The one place it still reports an outage is the
-                             API-outage CLI fallback, where the account really IS down.
+                             M6 (docs/STACK_PRESCREEN_PLAN.md), revised after review:
+                             an empty CLI run stays a plain `"fail"`. A bespoke
+                             "retryable" outcome was tried and reverted — it had no
+                             retry budget, so one posting that reliably made the skill
+                             open with a question would have re-run every
+                             `APPLY_DELAY_SEC` forever with the whole PENDING queue
+                             frozen behind it (`claim_pending` re-claims the same
+                             released row), and `_retry_failed` would never escalate
+                             `fail_count` to give up. `"fail"` is bounded by all three.
+                             The case that DID need separating is "folder created, no
+                             documents": `generate_docs` writes the tracker row before
+                             the PDF step, and the language/scrub re-render deletes every
+                             rendered file first, so that state is an APPLIED row over a
+                             folder holding only content.json + job_posting.txt — it now
+                             goes through `abort_after_generation` like every other
+                             post-generation abort instead of raising.
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
   sources/                  24 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
@@ -847,7 +853,16 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             Every deterministic screen already ran before the skill
                             starts and the post-generation gates run after it, so the
                             skill is not a gate — it states its concerns in the Step 6
-                            summary and generates anyway
+                            summary and generates anyway. Step 2's failure branch used to
+                            say "ask the user to paste the job text manually", which
+                            the new rule contradicted while citing it as authority —
+                            it now stops instead. `main_cli` also gained the too-short
+                            posting floor `main_api` always had (same
+                            `min_job_text_len_for`, placed AFTER the expired check so a
+                            short "offer expired" marker still wins): with no job text,
+                            the expired check, doomed gate, re-post gate and ATS verdict
+                            are ALL skipped, so a run that reached the skill on a bare
+                            URL had no screens at all
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → English-only

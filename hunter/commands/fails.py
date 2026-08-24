@@ -24,7 +24,6 @@ _MAX_N = 30
 _OUTCOME_EMOJI = {
     "fail": "❌",
     "cli_timeout": "⏰",
-    "cli_no_output": "🫥",
     "rate_limited": "🚦",
 }
 
