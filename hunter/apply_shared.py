@@ -17,6 +17,7 @@ from pathlib import Path
 import requests
 
 from hunter import candidate, text_repair
+from hunter.best_effort import best_effort
 import os
 
 from hunter.config import (
@@ -550,6 +551,8 @@ def abort_after_generation(
     *,
     reason: str,
     telegram_text: str = "",
+    company: str = "",
+    title: str = "",
 ) -> bool:
     """Undo a package the pipeline decided to throw away AFTER it was rendered.
 
@@ -573,13 +576,28 @@ def abort_after_generation(
     the posting text the re-post gate reads — a SKIP row can never become a
     donor, so keeping the file is free). Only rendered output goes.
 
-    Returns True when a tracker row was actually converted. False means there
-    was nothing to convert — the CLI skill never wrote a row for this URL — and
-    the caller should fall back to its own terminal write (add_react_skipped /
-    add_skipped), which is what it did before this helper existed.
+    Identity is the URL **or** the folder — see convert_own_applied_row for why
+    the URL alone is not enough on this pipeline (paste mode never hands the
+    skill a URL, so the row is written with an empty url_norm; and
+    `.claude/commands/apply.md` explicitly allows the skill to record the
+    apply-button URL instead of the input one).
 
-    Best-effort by construction: a failure here must not turn a clean skip
-    into a FAIL, so every step is guarded and merely logged.
+    When nothing was converted — no applied row exists for this run at all — a
+    terminal SKIP row is written here, so no call site has to remember to do it.
+    Leaving a run with NO terminal row is not a harmless no-op: the worker then
+    clears the placeholder and the vacancy returns on the next hunt, which
+    regenerates the whole package and blocks again, forever. That exact defect
+    was fixed once already for the backend-only pre-LLM skip (Agent Work Log
+    2026-08-17 — one posting processed 8 times in 40 h) and must not come back
+    through a gate whose fallback only two of four call sites implemented.
+
+    Returns True when an existing applied row was converted.
+
+    Wrapped in best_effort: the swallow is correct — a failure here must not
+    turn a clean skip into a FAIL — but this path IS the fix for a delivery
+    incident, so silent degradation has to surface as an alert rather than
+    quietly restoring the bug. Two of the four call sites cannot even see the
+    return value.
     """
     if folder is not None:
         for path in list(folder.glob("*.pdf")) + list(folder.glob("*.docx")):
@@ -589,21 +607,51 @@ def abort_after_generation(
                 print(f"[apply_agent] abort: could not delete {path.name}: {e}")
 
     converted = False
-    if url and url != PASTE_NO_URL_PLACEHOLDER:
+    with best_effort("apply.abort_undo"):
         try:
             from hunter.tracker import convert_own_applied_row
 
-            converted = convert_own_applied_row(url)
+            converted = convert_own_applied_row(
+                url if url and url != PASTE_NO_URL_PLACEHOLDER else "",
+                folder=str(folder) if folder is not None else "",
+            )
+            if not converted:
+                _write_abort_skip_row(url, company, title)
         except Exception as e:  # noqa: BLE001 — never turn a skip into a failure
-            print(f"[apply_agent] abort: could not convert tracker row: {e}")
+            print(f"[apply_agent] abort: could not settle the tracker row: {e}")
+            raise
 
     print(
         f"[apply_agent] ABORT after generation ({reason}) — "
-        f"docs dropped, tracker row converted={converted}: {url}"
+        f"docs dropped, applied row converted={converted}: {url}"
     )
     if telegram_text:
         notify(telegram_text)
     return converted
+
+
+def _write_abort_skip_row(url: str, company: str, title: str) -> None:
+    """Last resort when no applied row existed to convert: write the SKIP row.
+
+    add_skipped refuses when an unrelated terminal row already covers this URL
+    or its company+title, which is the correct outcome — something terminal is
+    on record either way.
+    """
+    if not url or url == PASTE_NO_URL_PLACEHOLDER:
+        return
+    from hunter.models import Job
+    from hunter.tracker import add_skipped
+
+    add_skipped(
+        Job(
+            title=title,
+            company=company,
+            location="",
+            salary=None,
+            url=url,
+            source="post_generation_abort",
+        )
+    )
 
 
 def _opener_banlist_hits(letter: str) -> list[str]:

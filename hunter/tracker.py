@@ -1105,7 +1105,13 @@ def _convert_own_fail_row(url: str, sent: str) -> bool:
         return bool(cur.rowcount)
 
 
-def convert_own_applied_row(url: str, *, status: str = "SKIP", sent: str = "—") -> bool:
+def convert_own_applied_row(
+    url: str = "",
+    *,
+    folder: str = "",
+    status: str = "SKIP",
+    sent: str = "—",
+) -> bool:
     """Convert this user's APPLIED row for `url` into a terminal SKIP row in place.
 
     The CLI pipeline's abort stages (React-only stack, company+title dedup,
@@ -1129,20 +1135,61 @@ def convert_own_applied_row(url: str, *, status: str = "SKIP", sent: str = "—"
     queue's own bookkeeping (`_clear_own_placeholder` owns those). Returns True
     when a row was converted.
 
-    `folder` is deliberately left in place: the abort deletes the rendered
-    documents but keeps job_posting.txt for diagnostics, and a SKIP row can
-    never become a re-post donor anyway (get_recent_applied_for_repost
-    excludes SKIP).
+    Matches on the URL **or** the output folder, because the CLI pipeline does
+    not reliably own the URL the row was written under. In paste mode the skill
+    is handed the pasted text and never sees the URL at all, so `add_applied`
+    writes `url_norm=''`; and `.claude/commands/apply.md` explicitly allows the
+    skill to record the apply-button URL instead of the input one. The folder,
+    by contrast, is the identity the caller always holds -- `add_applied` wrote
+    it from the same `content["output_folder"]` the pipeline is standing in.
+    Both spellings of the path are tried, since the row may hold a relative
+    value while the caller holds an absolute one (or the reverse).
+
+    `folder` is left in place on the converted row: the abort deletes the
+    rendered documents but keeps job_posting.txt for diagnostics, and a SKIP row
+    can never become a re-post donor (get_recent_applied_for_repost excludes
+    SKIP). The Drive backfill DOES have to know about it -- see
+    gdrive_sync.upload_missing_folders, which now skips non-applied rows.
     """
     norm = normalize_url(url) if url else ""
-    if not norm:
+    folders = []
+    if folder:
+        folders.append(str(folder))
+        try:
+            folders.append(str(Path(folder).resolve()))
+        except OSError:  # pragma: no cover - resolve() on a hostile path
+            pass
+    folders = list(dict.fromkeys(f for f in folders if f))
+    if not norm and not folders:
         return False
+
+    where = []
+    params: list = [status, sent]
+    if norm:
+        where.append("url_norm=?")
+        params.append(norm)
+    if folders:
+        where.append(f"folder IN ({','.join('?' * len(folders))})")
+        params.extend(folders)
+        # Exact string equality is not enough on its own: the row may hold a
+        # relative path while the caller holds an absolute one, or the reverse
+        # (the CLI skill has resolved output_folder against the wrong root
+        # before -- Ness Solution, 2026-08-21). Fall back to the last two
+        # components, "<date>/<Company>", with separators normalised so a
+        # Windows-written value matches a POSIX one. Two rows can only share
+        # that suffix by being the same vacancy folder.
+        tail = "/".join(Path(folders[0]).parts[-2:])
+        if tail:
+            where.append("replace(folder, '\\', '/') LIKE ?")
+            params.append(f"%{tail}")
+    params.extend([_uid(), MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS])
+
     with get_db(DB_PATH) as conn:
         cur = conn.execute(
-            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 "
-            "WHERE url_norm=? AND user_id=? "
+            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 "  # noqa: S608
+            f"WHERE ({' OR '.join(where)}) AND user_id=? "
             "AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?, ?, ?)",
-            (status, sent, norm, _uid(), MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS),
+            params,
         )
         return bool(cur.rowcount)
 

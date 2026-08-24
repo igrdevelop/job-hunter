@@ -1303,14 +1303,39 @@ the stage just rejected. Measured on the live corpus: 6 of 14 `main_cli` runs in
 the retained window shipped a row carrying the CLI skill's SELF-reported ATS score
 (96%, 96%, 78%...) with no independent verdict and no refine round at all -- the
 2026-08-24 Interia incident plus 5 more. All four sites now call
-`abort_after_generation(folder, url, reason=..., telegram_text=...)`: drop `*.pdf`/
-`*.docx`, convert the row in place via `tracker.convert_own_applied_row` (keeps
-id + `sheets_row`, sets `sheets_dirty=1`, so an already-mirrored Sheet row is
-CORRECTED instead of duplicated), notify. It returns False when there was no row
-to convert, and the two stack/dedup sites then fall back to their old terminal
-write. `job_posting.txt` and `content.json` stay on purpose (diagnostics; a SKIP
-row can never become a re-post donor). The API pipeline needs none of this -- its
-equivalent gates run BEFORE `generate_docs`.
+`abort_after_generation(folder, url, reason=..., telegram_text=..., company=...,
+title=...)`: drop `*.pdf`/`*.docx`, convert the row in place via
+`tracker.convert_own_applied_row` (keeps id + `sheets_row`, sets
+`sheets_dirty=1`), notify -- and, when there was no applied row to convert,
+write the terminal SKIP row itself so no call site has to remember to.
+`job_posting.txt` and `content.json` stay on purpose (diagnostics; a SKIP row can
+never become a re-post donor). The API pipeline needs none of this -- its
+equivalent gates run BEFORE `generate_docs`. Wrapped in
+`best_effort("apply.abort_undo")`: the swallow is correct (an abort must never
+become a FAIL) but this path IS the incident fix, and two of the four call sites
+cannot see its return value.
+
+Three things an adversarial review (2026-08-24) showed the first cut got wrong,
+all now covered by tests:
+- **Identity is the URL OR the folder.** Paste mode never hands the CLI skill a
+  URL, so `add_applied` writes `url_norm=''`; and `.claude/commands/apply.md`
+  lets the skill record the apply-button URL instead of the input one. Keying on
+  the URL alone made the conversion a guaranteed no-op for the whole paste flow
+  (including every `linkedin_scout_relay` post). `convert_own_applied_row` now
+  also matches the folder -- as stored, resolved, and as a `<date>/<Company>`
+  suffix, since the stored spelling may be relative where the caller is absolute.
+- **The delivery gate belongs in `delivery.py`, not in one parent.** Of the four
+  callers of `deliver_apply_now`, only `apply_worker._resolve_outcome` checked
+  the tracker; `bot.apply_runner` (manual paste / Apply button), the LinkedIn
+  batch and `main._auto_apply_all` all deliver on a plain exit 0. `_is_deliverable`
+  now refuses any URL that is KNOWN and not a successful entry, so an aborted run
+  reaches neither Sheets nor Drive nor the backfills. An UNKNOWN url still
+  delivers (see the identity problem above), and a failed tracker read fails OPEN.
+- **`SKIP` rows never used to carry a folder.** Every other SKIP producer writes
+  `folder=''`, so `gdrive_sync.upload_missing_folders` selected purely on "has a
+  folder + no Drive URL". The converted row is the first exception, and without a
+  status check the next backfill pass (every 30 min) would upload a folder holding
+  only `job_posting.txt` + `content.json` and stamp a Drive URL on it.
 
 A GDPR/RODO consent clause is auto-appended as the **last body paragraph** of the CV
 (small italic grey text, in the document body so ATS parsers read it — NOT a footer).

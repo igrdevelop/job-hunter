@@ -403,20 +403,14 @@ def main_cli(
                         f"Stack: {_cli_content.get('stack', '?')}"
                         f"{_REACT_SKIP_FORCE_HINT}"
                     )
-                    if not abort_after_generation(
+                    abort_after_generation(
                         folder_path,
                         url,
                         reason="react-only stack",
                         telegram_text=_abort_msg,
-                    ):
-                        try:
-                            from hunter.tracker import add_react_skipped
-
-                            add_react_skipped(_cli_content, url)
-                        except Exception as e:
-                            print(
-                                f"[apply_agent] Warning: could not write React-skip to tracker: {e}"
-                            )
+                        company=_cli_content.get("company_name") or "",
+                        title=_cli_content.get("job_title") or "",
+                    )
                     return
 
                 # Company+title dedup (post-generation, parity with the API
@@ -427,7 +421,7 @@ def main_cli(
                 # docs — so this still can't save that compute, but it does
                 # stop a duplicate row/Sheets/Drive delivery. `/force` bypasses.
                 if not skip_dedup:
-                    from hunter.tracker import add_skipped, dedup_key, get_known_company_titles
+                    from hunter.tracker import dedup_key, get_known_company_titles
 
                     _cli_company = _cli_content.get("company_name") or "Unknown"
                     _cli_title = _cli_content.get("job_title") or ""
@@ -439,30 +433,14 @@ def main_cli(
                             f"{_cli_company} — {_cli_title or '?'}\n"
                             f"Send /force {url} to generate anyway."
                         )
-                        if not abort_after_generation(
+                        abort_after_generation(
                             folder_path,
                             url,
                             reason=f"company+title dedup ({_cli_ct_key})",
                             telegram_text=_abort_msg,
-                        ):
-                            try:
-                                from hunter.models import Job
-
-                                add_skipped(
-                                    Job(
-                                        title=_cli_title,
-                                        company=_cli_company,
-                                        location="",
-                                        salary=None,
-                                        url=url,
-                                        source="dedup_ct_gate",
-                                    )
-                                )
-                            except Exception as e:
-                                print(
-                                    "[apply_agent] Warning: could not write dedup SKIP "
-                                    f"to tracker: {e}"
-                                )
+                            company=_cli_company,
+                            title=_cli_title,
+                        )
                         return
 
                 # Language enforce-gate (parity with the API pipeline). The CLI skill
@@ -539,6 +517,8 @@ def main_cli(
                                     url,
                                     reason="claim judge blocked delivery",
                                     telegram_text=_abort_msg,
+                                    company=_cli_content.get("company_name") or "",
+                                    title=_cli_content.get("job_title") or "",
                                 )
                                 return
                         except Exception as _je:
@@ -593,6 +573,8 @@ def main_cli(
                                 url,
                                 reason="language gate blocked delivery",
                                 telegram_text=_abort_msg,
+                                company=_cli_content.get("company_name") or "",
+                                title=_cli_content.get("job_title") or "",
                             )
                             return
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed
