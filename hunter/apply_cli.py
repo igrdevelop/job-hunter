@@ -26,6 +26,7 @@ from hunter.apply_shared import (
     _already_processed,
     abort_after_generation,
     notify,
+    stack_gate_allows_manual,
     send_telegram_documents,
 )
 from hunter.config import (
@@ -152,11 +153,17 @@ def main_cli(
     full_mode: bool = False,
     paste_text: str = "",
     permalink: str = "",
+    is_manual: bool = False,
 ) -> Path | None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
 
     Returns the output folder on success (so the caller can run the dual-apply
     shadow), or None when the job was skipped / deduped / expired / blocked.
+
+    `is_manual` (docs/STACK_PRESCREEN_PLAN.md M2) marks a run the owner
+    triggered by hand. It degrades the STACK gates below to warnings -- see
+    apply_shared.stack_gate_allows_manual for why that is narrower than
+    `skip_dedup`.
 
     Parameters
     ----------
@@ -388,6 +395,7 @@ def main_cli(
                     and "angular" not in _cli_stack
                     and not skip_dedup
                     and not _react_track_active()
+                    and not stack_gate_allows_manual(is_manual, url, "React-only stack")
                 ):
                     _abort_msg = (
                         f"⏭ <b>Skipped — React-only stack</b>\n"

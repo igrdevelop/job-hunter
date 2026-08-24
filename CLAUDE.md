@@ -1257,6 +1257,20 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
   (`content["primary_lang"] == "PL"`), so a Polish employer receives the clean Polish CV
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
 - **Force** (`--force`): skip dedup, bypass React-only skip
+- **Manual** (`--manual`): the owner asked for THIS vacancy by hand (pasted URL,
+  Apply button, LinkedIn batch — every caller of
+  `apply_service.run_apply_agent_for_url`; the auto-hunt/queue path goes through
+  `run_apply_agent_subprocess` and never gets the flag). It degrades the STACK
+  gates to warnings — Step 1.5c and Step 4.5 in `apply_api`, their CLI twin in
+  `apply_cli`, all via `apply_shared.stack_gate_allows_manual` — and nothing
+  else. Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the
+  auto-hunt keeps filtering React-only postings, measured at 2 of 38 such
+  packages ever sent against a 43% baseline, but a link the owner sends himself
+  is generated without argument. Deliberately NOT `--force`: dedup, the doomed
+  gate's HARD rules (location / work authorization / language) and everything
+  else still apply to a pasted URL — that paste exception was REMOVED on purpose
+  after calibration (docs/DOOMED_GATE_PASTE_PLAN.md), and only stack rules are
+  being relaxed here.
 
 **Two things have to hold for the PL CV to actually ship, and both silently broke
 (fixed 2026-08-22 — 15 of 250 PL applications had shipped an EN CV next to a PL

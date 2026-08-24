@@ -71,6 +71,7 @@ def main(
     jobleads_company: str = "",
     jobleads_title: str = "",
     permalink: str = "",
+    is_manual: bool = False,
 ) -> None:
     """Dispatch to CLI or API pipeline.
 
@@ -86,7 +87,12 @@ def main(
     """
     if force_cli or APPLY_USE_CLI:
         folder = main_cli(
-            url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
+            url,
+            skip_dedup=force,
+            full_mode=full,
+            paste_text=paste_text,
+            permalink=permalink,
+            is_manual=is_manual,
         )
         _maybe_run_shadow(folder, full=full)
         return
@@ -101,6 +107,7 @@ def main(
                 jobleads_company=jobleads_company,
                 jobleads_title=jobleads_title,
                 permalink=permalink,
+                is_manual=is_manual,
             )
         except SystemExit as e:
             if e.code != APPLY_LLM_OUTAGE_EXIT_CODE or not _is_cli_available():
@@ -118,6 +125,7 @@ def main(
                     full_mode=full,
                     paste_text=paste_text,
                     permalink=permalink,
+                    is_manual=is_manual,
                 )
             except (ApplyError, SystemExit) as cli_err:
                 print(f"[apply_agent] CLI fallback failed too ({cli_err}) — reporting outage")
@@ -129,7 +137,12 @@ def main(
         print("[apply_agent] No LLM_API_KEY — running via Claude CLI (Pro subscription)")
         try:
             folder = main_cli(
-                url, skip_dedup=force, full_mode=full, paste_text=paste_text, permalink=permalink
+                url,
+                skip_dedup=force,
+                full_mode=full,
+                paste_text=paste_text,
+                permalink=permalink,
+                is_manual=is_manual,
             )
         except (ApplyError, SystemExit) as e:
             print(f"[apply_agent] CLI failed and no API key available ({e})")
@@ -160,16 +173,23 @@ def _maybe_run_shadow(folder, full: bool) -> None:
 
 def parse_apply_cli_argv(
     argv: list[str],
-) -> tuple[str, bool, bool, bool, str, str, str, bool, str]:
+) -> tuple[str, bool, bool, bool, str, str, str, bool, str, bool]:
     """Parse argv (including script name).
 
-    Returns: url, force_cli, force, full, company, title, paste_file, notify_start, permalink
+    Returns: url, force_cli, force, full, company, title, paste_file,
+    notify_start, permalink, is_manual
+
+    `--manual` marks a run the owner triggered by hand (pasted URL, Apply
+    button, LinkedIn batch — every caller of apply_service.
+    run_apply_agent_for_url). It degrades the STACK gates to warnings; it is
+    not `--force`, which bypasses every gate including dedup.
     """
     args = argv[1:]
     force_cli = "--cli" in args
     force = "--force" in args
     full = "--full" in args
     notify_start = "--notify-start" in args
+    is_manual = "--manual" in args
     company, title, paste_file, permalink = "", "", "", ""
     pos: list[str] = []
     i = 0
@@ -197,7 +217,18 @@ def parse_apply_cli_argv(
         pos.append(a)
         i += 1
     url = pos[0] if pos else ""
-    return url, force_cli, force, full, company, title, paste_file, notify_start, permalink
+    return (
+        url,
+        force_cli,
+        force,
+        full,
+        company,
+        title,
+        paste_file,
+        notify_start,
+        permalink,
+        is_manual,
+    )
 
 
 # ── __main__ block ─────────────────────────────────────────────────────────────
@@ -210,9 +241,18 @@ if __name__ == "__main__":
         )
         sys.exit(1)
 
-    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(
-        sys.argv
-    )
+    (
+        url,
+        force_cli,
+        force,
+        full,
+        co,
+        ti,
+        paste_file,
+        notify_start,
+        permalink,
+        is_manual,
+    ) = parse_apply_cli_argv(sys.argv)
 
     paste_text = ""
     if paste_file:
@@ -244,4 +284,5 @@ if __name__ == "__main__":
         jobleads_company=co,
         jobleads_title=ti,
         permalink=permalink,
+        is_manual=is_manual,
     )

@@ -511,6 +511,39 @@ _METRIC_RE = re.compile(
 )
 
 
+def stack_gate_allows_manual(is_manual: bool, url: str, what: str) -> bool:
+    """True when a STACK-mismatch gate must degrade to a warning instead of
+    skipping, because the owner asked for this vacancy by hand.
+
+    Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the auto-hunt
+    keeps filtering React-only postings, but a URL the owner pasted himself is
+    generated without argument -- he can read the title before sending it, and
+    the measured cost of the other policy is real (37 of 38 React packages the
+    bot generated on its own went unsent).
+
+    Deliberately narrow: this relaxes stack rules only. The doomed gate's HARD
+    rules (location / work authorization / language) still block a pasted
+    posting, because that exception was REMOVED on purpose after calibration
+    showed real money lost on pasted postings (docs/DOOMED_GATE_PASTE_PLAN.md).
+    `/force` (skip_dedup) remains the override that bypasses everything.
+
+    Call it as the last term of the gate condition -- it notifies, so it must
+    run only once the gate has actually matched:
+
+        if <gate matched> and not stack_gate_allows_manual(is_manual, url, "..."):
+            <write the SKIP row and return>
+    """
+    if not is_manual:
+        return False
+    notify(
+        f"⚠️ <b>{what}</b>\n"
+        f"🔗 {url}\n"
+        "You asked for this one by hand, so it is being generated anyway."
+    )
+    print(f"[apply_agent] {what}: manual request -- stack gate degraded to warn")
+    return True
+
+
 def abort_after_generation(
     folder: Path | None,
     url: str,
