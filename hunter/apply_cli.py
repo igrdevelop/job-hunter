@@ -24,7 +24,9 @@ from hunter.apply_shared import (
     ApplyError,
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
+    abort_after_generation,
     notify,
+    stack_gate_allows_manual,
     send_telegram_documents,
 )
 from hunter.config import (
@@ -151,11 +153,19 @@ def main_cli(
     full_mode: bool = False,
     paste_text: str = "",
     permalink: str = "",
+    is_manual: bool = False,
+    jobleads_company: str = "",
+    jobleads_title: str = "",
 ) -> Path | None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
 
     Returns the output folder on success (so the caller can run the dual-apply
     shadow), or None when the job was skipped / deduped / expired / blocked.
+
+    `is_manual` (docs/STACK_PRESCREEN_PLAN.md M2) marks a run the owner
+    triggered by hand. It degrades the STACK gates below to warnings -- see
+    apply_shared.stack_gate_allows_manual for why that is narrower than
+    `skip_dedup`.
 
     Parameters
     ----------
@@ -229,6 +239,29 @@ def main_cli(
                 print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
             return
 
+        # Abort if the posting we hold is too short to generate from (parity
+        # with apply_api Step 1.5b, added 2026-08-24). This branch used to
+        # have NO floor at all: a fetch returning under 100 chars silently
+        # handed the skill a bare URL, and with job_text falsy the expired
+        # check, doomed gate, re-post gate, PDF roundtrip and ATS verdict are
+        # ALL skipped -- so the one run that most needs guarding ran with none
+        # of them, and the skill was left to invent a posting from a URL slug.
+        # Placed AFTER the expired check on purpose: a deleted posting is often
+        # served as a short synthetic marker, and the floor would swallow it.
+        from hunter.validation import is_job_text_too_short, min_job_text_len_for
+
+        _min_len = min_job_text_len_for(url)
+        if is_job_text_too_short(job_text, _min_len):
+            notify(
+                f"⚠️ <b>Job text too short — skipped</b>\n"
+                f"Got {len((job_text or '').strip())} chars (min {_min_len}).\n🔗 {url}"
+            )
+            print(
+                f"[apply_agent] ABORT — job text too short "
+                f"({len((job_text or '').strip())} chars): {url}"
+            )
+            return None
+
         # Manual-apply "warn but allow" screen (see apply_api Step 1.5e).
         # Skipped when the doomed gate (Step 1.5f below) is enabled — the gate
         # re-runs the same assess_job_text and reports every finding with its
@@ -280,6 +313,19 @@ def main_cli(
             url,
             permalink=permalink,
             is_force_override=skip_dedup,
+        ):
+            return
+
+        # Step 1.5h — Stack pre-screen (mirror of apply_api Step 1.5h).
+        from hunter.apply_shared import run_prescreen
+
+        if run_prescreen(
+            job_text,
+            url,
+            title=jobleads_title,
+            company=jobleads_company,
+            is_force_override=skip_dedup,
+            is_manual=is_manual,
         ):
             return
 
@@ -374,6 +420,15 @@ def main_cli(
                 print(f"[apply_agent] Warning: could not save job_posting.txt: {e}")
 
         # Post-process content.json written by Claude: React-only skip + CL review
+        # Bound up front: the abort at the bottom of this function reads it, and
+        # a folder that exists WITHOUT a content.json is a reachable state (the
+        # skill mkdir'd and died, or the subprocess timed out after the folder
+        # appeared -- see the new_folder_on_timeout branch above). Leaving it to
+        # the `if` below made that path raise UnboundLocalError, which escapes
+        # apply_agent.main's `except (ApplyError, SystemExit)` entirely: no
+        # Telegram message, no row settled, and the empty folder shipped by the
+        # backfills half an hour later -- the exact incident this branch closes.
+        _cli_content: dict | None = None
         content_json_path = folder_path / "content.json"
         if content_json_path.exists():
             try:
@@ -387,20 +442,21 @@ def main_cli(
                     and "angular" not in _cli_stack
                     and not skip_dedup
                     and not _react_track_active()
+                    and not stack_gate_allows_manual(is_manual, url, "React-only stack")
                 ):
-                    notify(
+                    _abort_msg = (
                         f"⏭ <b>Skipped — React-only stack</b>\n"
                         f"🔗 {url}\n"
                         f"Stack: {_cli_content.get('stack', '?')}"
                         f"{_REACT_SKIP_FORCE_HINT}"
                     )
-                    print(f"[apply_agent] SKIP — React-only stack: {_cli_content.get('stack')}")
-                    try:
-                        from hunter.tracker import add_react_skipped
-
-                        add_react_skipped(_cli_content, url)
-                    except Exception as e:
-                        print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+                    abort_after_generation(
+                        folder_path,
+                        url,
+                        reason="react-only stack",
+                        telegram_text=_abort_msg,
+                        content=_cli_content,
+                    )
                     return
 
                 # Company+title dedup (post-generation, parity with the API
@@ -411,36 +467,31 @@ def main_cli(
                 # docs — so this still can't save that compute, but it does
                 # stop a duplicate row/Sheets/Drive delivery. `/force` bypasses.
                 if not skip_dedup:
-                    from hunter.tracker import add_skipped, dedup_key, get_known_company_titles
+                    from hunter.tracker import dedup_key, get_known_company_titles
 
                     _cli_company = _cli_content.get("company_name") or "Unknown"
                     _cli_title = _cli_content.get("job_title") or ""
                     _cli_ct_key = dedup_key(_cli_company, _cli_title)
-                    if _cli_ct_key in get_known_company_titles():
-                        notify(
+                    # Exclude this run's OWN row: the skill already ran
+                    # generate_docs without --no-tracker, so the row exists and
+                    # the gate would match itself (see get_known_company_titles).
+                    if _cli_ct_key in get_known_company_titles(
+                        exclude_url=_cli_content.get("apply_url") or url,
+                        exclude_folder=_cli_content.get("output_folder") or str(folder_path),
+                    ):
+                        _abort_msg = (
                             f"⏭ <b>Skipped — already applied to this company/role</b>\n"
                             f"🔗 {url}\n"
                             f"{_cli_company} — {_cli_title or '?'}\n"
                             f"Send /force {url} to generate anyway."
                         )
-                        print(f"[apply_agent] SKIP — company+title dedup match: {_cli_ct_key}")
-                        try:
-                            from hunter.models import Job
-
-                            add_skipped(
-                                Job(
-                                    title=_cli_title,
-                                    company=_cli_company,
-                                    location="",
-                                    salary=None,
-                                    url=url,
-                                    source="dedup_ct_gate",
-                                )
-                            )
-                        except Exception as e:
-                            print(
-                                f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}"
-                            )
+                        abort_after_generation(
+                            folder_path,
+                            url,
+                            reason=f"company+title dedup ({_cli_ct_key})",
+                            telegram_text=_abort_msg,
+                            content=_cli_content,
+                        )
                         return
 
                 # Language enforce-gate (parity with the API pipeline). The CLI skill
@@ -504,14 +555,7 @@ def main_cli(
                             if JUDGE_MODE in ("warn", "block") and _outcome.report.actionable:
                                 notify(_outcome.report.telegram_summary(url))
                             if _outcome.blocked:
-                                for _f in list(folder_path.glob("*.pdf")) + list(
-                                    folder_path.glob("*.docx")
-                                ):
-                                    try:
-                                        _f.unlink()
-                                    except OSError:
-                                        pass
-                                notify(
+                                _abort_msg = (
                                     f"⛔ <b>Blocked — fabricated claim survived repair</b>\n"
                                     f"🔗 {url}\n"
                                     + "\n".join(
@@ -519,7 +563,13 @@ def main_cli(
                                         for v in _outcome.survivors[:3]
                                     )
                                 )
-                                print("[apply_agent] ABORT — claim judge blocked delivery (CLI)")
+                                abort_after_generation(
+                                    folder_path,
+                                    url,
+                                    reason="claim judge blocked delivery",
+                                    telegram_text=_abort_msg,
+                                    content=_cli_content,
+                                )
                                 return
                         except Exception as _je:
                             print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
@@ -561,21 +611,20 @@ def main_cli(
 
                     if _report or _scrub_fixes or _pl_fixes or _pl_cv_due:
                         if _blocked:
-                            for _f in list(folder_path.glob("*.pdf")) + list(
-                                folder_path.glob("*.docx")
-                            ):
-                                try:
-                                    _f.unlink()
-                                except OSError:
-                                    pass
-                            notify(
+                            _abort_msg = (
                                 f"⛔ <b>Blocked — Polish leaked into the English CV</b>\n"
                                 f"🔗 {url}\n"
                                 f"The English documents still contained Polish after an "
                                 f"automatic translation pass, so they were NOT sent. "
                                 f"Re-run /force to retry, or apply manually."
                             )
-                            print("[apply_agent] ABORT — language gate blocked delivery (CLI)")
+                            abort_after_generation(
+                                folder_path,
+                                url,
+                                reason="language gate blocked delivery",
+                                telegram_text=_abort_msg,
+                                content=_cli_content,
+                            )
                             return
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed
                         # regeneration (e.g. LibreOffice down) can't leave a stale
@@ -867,13 +916,28 @@ def main_cli(
             # dual-apply shadow comparison (if enabled).
             return folder_path
         else:
-            notify(
-                f"⚠️ <b>Folder created but no docs found!</b>\n"
-                f"📁 <code>Applications/{new_folder}/</code>\n"
-                f"Check the folder for partial output."
+            # A folder with no documents is not an empty run: generate_docs
+            # writes the tracker row BEFORE the PDF step ("so a LibreOffice
+            # crash doesn't lose the record"), and the language/scrub re-render
+            # above deletes every rendered file before regenerating. The likely
+            # state here is therefore an APPLIED row pointing at a folder holding
+            # only content.json and job_posting.txt -- which the Sheets and Drive
+            # backfills would deliver ~30 min later. Settle the row the same way
+            # every other post-generation abort does.
+            abort_after_generation(
+                folder_path,
+                url,
+                reason="CLI produced no documents",
+                telegram_text=(
+                    f"⚠️ <b>No documents were produced — nothing sent</b>\n"
+                    f"📁 <code>Applications/{new_folder}/</code>\n"
+                    f"🔗 {url}\n"
+                    "The tracker row was settled; re-run with /force to try again."
+                ),
+                content=_cli_content if isinstance(_cli_content, dict) else None,  # may be None
             )
-            print("\n[apply_agent] WARNING: Folder created but no .docx/.pdf files found.")
-            raise ApplyError("Folder created but no docs found")
+            print("\n[apply_agent] ABORT: folder created but no .docx/.pdf files found.")
+            return None
     else:
         stdout_preview = (result.stdout or "").strip()[:600] if result else ""
         notify(

@@ -12,6 +12,42 @@ $ARGUMENTS
 
 ---
 
+## Non-negotiable: decide, never ask
+
+This command runs non-interactively (`claude -p`, spawned by
+`hunter/apply_cli.py`). **Nobody is reading your output while it runs and nobody
+can answer a question.** A clarifying question does not pause the run — it ends
+it: the process produces no output folder, `main_cli` raises, and the vacancy
+comes back with an alert. Measured on the deploy host 2026-08-24: 5 of 60
+retained runs died exactly this way, each burning the full 600 s timeout and
+arming an hour-long auto-apply pause, for questions like *"Do you want me to
+proceed anyway, or should I skip this one?"*.
+
+So: **generate the package, always.** You are not the gate. Every deterministic
+screen the project has — expired check, doomed gate (location, work
+authorization, language, foreign stack), re-post gate, React-only and
+backend-only pre-LLM checks — already ran and passed this vacancy before you
+were started, and the post-generation gates (stack, company+title dedup, claim
+judge, language gate) run after you and abort cleanly on their own. Deciding
+again in here can only produce a run that cost the full generation and left
+nothing behind.
+
+If the vacancy looks like a poor fit — wrong stack, wrong seniority, on-site in
+the wrong city, a language the candidate does not have — say so plainly in your
+Step 6 summary, in one or two sentences, and generate it anyway. That note is
+read: it lands in `logs/apply_stdout/` and in the Telegram message, and it is
+how a missing gate rule gets found. Silence is what costs money here, not
+candour.
+
+The single exception is a genuinely missing input — no candidate profile, an
+unreadable posting — which Step 1 and Step 2 already tell you to stop on. Stop
+means stop with a clear one-line reason, not a question.
+
+---
+
+
+---
+
 ## Step 1 - Load generation rules and base CV
 
 Read the file `prompts/generation_rules.md` — it is the single source of truth for all content generation rules: ATS gap analysis, red lines, resume structure, cover letter spec (two-layer model, story bank, quality gates), about me, ATS scoring loop, and output JSON schema.
@@ -48,7 +84,7 @@ If input is a URL:
   (this is the endpoint `hunter/sources/justjoin.py::fetch_text` uses — the old
   `api.justjoin.it/v1/offers/` host is dead)
 - **All other URLs**: fetch the page directly with WebFetch.
-- If fetching fails or returns CSS/empty content: ask the user to paste the job text manually.
+- If fetching fails or returns CSS/empty content: **stop** with the one-line reason `could not read the posting` and generate nothing. Do NOT ask a question (nobody is there to answer, see the rule at the top) and do NOT write a package from the URL alone — with no posting text the pipeline's own screens (expired check, doomed gate, re-post gate, ATS verdict) are all skipped, and the claim judge has nothing to check the CV against, so an invented vacancy would sail through to delivery. The pipeline aborts on a too-short posting before it ever spawns you; stopping here is the same decision one step later.
 
 If input is plain text: use it directly.
 

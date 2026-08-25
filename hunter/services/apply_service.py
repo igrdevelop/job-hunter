@@ -278,6 +278,7 @@ async def run_apply_agent_for_url(
     paste_file: Optional[str] = None,
     permalink: Optional[str] = None,
     extra_env: Optional[dict[str, str]] = None,
+    is_manual: bool = False,
 ) -> ApplyResult:
     """URL-based variant of run_apply_agent_subprocess for manual Telegram triggers.
 
@@ -310,6 +311,15 @@ async def run_apply_agent_for_url(
         cmd.extend(["--permalink", permalink])
     # Signal apply_agent.py to send an early Telegram notification confirming start
     cmd.append("--notify-start")
+    # `is_manual` says the OWNER chose this exact vacancy, which degrades the
+    # stack gates to warnings (docs/STACK_PRESCREEN_PLAN.md M2). It is an
+    # explicit opt-in rather than a property of this function: every caller
+    # today is a hand-triggered paste/Apply-button run, but "reached the manual
+    # runner" and "the owner saw this vacancy" are not the same claim -- a bulk
+    # expansion (e.g. a pasted LinkedIn alert fanning out into 40 job ids the
+    # owner never saw a title for) would silently inherit it otherwise.
+    if is_manual:
+        cmd.append("--manual")
 
     env = {**os.environ, **extra_env} if extra_env else None
     try:

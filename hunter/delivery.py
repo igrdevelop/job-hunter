@@ -33,6 +33,10 @@ async def deliver_apply_now(url: str | None) -> str | None:
     Returns the Drive folder URL when the targeted upload produced one
     (callers may show an "Open folder on Drive" link). Never raises.
     """
+    if url and not await asyncio.to_thread(_is_deliverable, url):
+        logger.info("delivery: %s resolves to a non-applied row - nothing to deliver", url)
+        return None
+
     delivered_sheets = False
     if url:
         delivered_sheets = await _mirror_row_targeted(url)
@@ -47,6 +51,44 @@ async def deliver_apply_now(url: str | None) -> str | None:
     if not delivered_drive:
         await _upload_missing_folders()
     return drive_url
+
+
+def _is_deliverable(url: str) -> bool:
+    """False only when this URL is KNOWN and is not a successful application.
+
+    The gate belongs here rather than in the callers: of the four parents that
+    call deliver_apply_now, only apply_worker._resolve_outcome checks the
+    tracker first. The manual paste / Apply-button parent
+    (bot.apply_runner), the LinkedIn batch and main._auto_apply_all all
+    deliver on a plain exit 0 -- so a CLI run that generated a package and then
+    aborted (React-only stack, dedup, judge or language block) had its row
+    converted to SKIP and its documents deleted, and was mirrored to Sheets and
+    uploaded to Drive anyway, leaving the owner an "Open folder on Drive" link
+    to a folder with no CV in it (docs/STACK_PRESCREEN_PLAN.md M1, review
+    finding 2026-08-24).
+
+    An UNKNOWN url still delivers exactly as before: the CLI pipeline does not
+    reliably own the URL its row was written under (paste mode writes an empty
+    url_norm), so "no row for this URL" must keep falling through to the
+    idempotent backfills instead of silently dropping a real application.
+
+    Fails OPEN for the same reason: if the tracker cannot be read at all,
+    deliver as before rather than swallow a real application on a broken read.
+    """
+    try:
+        from hunter.tracker import MANUAL_PENDING_ATS, has_successful_entry, is_known, lookup_url
+
+        if has_successful_entry(url) or not is_known(url):
+            return True
+        # The JobLeads MANUAL flow delivers on purpose: apply_service returns
+        # outcome "manual", bot.apply_runner falls through to deliver_apply_now,
+        # and the owner is told to open the Drive folder and paste the job text
+        # into it. It is not a successful entry and never will be until he does.
+        rows = lookup_url(url)
+        return any((r.get("ats") or "").strip().upper() == MANUAL_PENDING_ATS for r in rows)
+    except Exception as e:  # noqa: BLE001 — a tracker read must not block delivery
+        logger.warning("delivery: could not check %s against the tracker (%s) — delivering", url, e)
+        return True
 
 
 async def _mirror_row_targeted(url: str) -> bool:

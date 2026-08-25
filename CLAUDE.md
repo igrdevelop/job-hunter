@@ -301,6 +301,18 @@ hunter/
                             `hunter.llm_outage`). `read_last_failures(n)` is the read side,
                             used by `/fails [N]` (hunter/commands/fails.py). Best-effort —
                             a logging failure never breaks an apply run
+  prescreen.py              Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M3/M4):
+                            ONE JUDGE_MODEL call reading which framework a posting
+                            is actually for, at Step 1.5h — after every free
+                            deterministic gate, before the first generation call.
+                            `assess_stack()` returns a PrescreenVerdict whose `ok`
+                            is False for any unusable answer (failed call, bad
+                            shape, non-verbatim evidence quote), and every caller
+                            reads that as "no opinion, carry on". `should_skip()`
+                            is the gate rule and is deliberately narrower than the
+                            prompt's own "mismatch": react-first only, calibrated
+                            (see the config table). Wired by
+                            `apply_shared.run_prescreen` in both pipelines.
   repost_gate.py            Same-vacancy re-post gate (Step 1.5g, $0): TF-IDF text match
                             of the fetched posting vs recent applied rows' job_posting.txt
                             + fuzzy company-name agreement → reuse the existing CV (copy
@@ -342,6 +354,14 @@ hunter/
                             IN_PROGRESS — a queued-but-not-yet-applied job isn't a real
                             application yet and must stay invisible to every downstream
                             consumer until the worker resolves it.
+                            `convert_own_applied_row(url)` is the opposite direction
+                            (2026-08-24): it turns THIS user's applied row back into a
+                            terminal SKIP in place, for the CLI pipeline's
+                            post-generation aborts (see "Aborting AFTER generation"
+                            under Doc generation modes). In place, so an already-
+                            mirrored Sheet row is corrected rather than duplicated;
+                            SKIP/FAIL/EXPIRED/MANUAL rows and PENDING/IN_PROGRESS
+                            placeholders are deliberately left alone.
                             Retry-vs-dead-postings (2026-08-10): `_convert_own_fail_row`
                             lets add_expired/add_skipped CONVERT this user's live FAIL row
                             to SKIP/EXPIRED (resp. SKIP/'—') in place — same id/sheets_row,
@@ -642,6 +662,22 @@ hunter/
                              calls `hunter.apply_failures_log.log_apply_failure()`, appending one
                              JSON line to `logs/apply_failures.jsonl` (RotatingFileHandler, 5MB x5).
                              Read via `/fails [N]` (hunter/commands/fails.py, default 10/max 30).
+                             M6 (docs/STACK_PRESCREEN_PLAN.md), revised after review:
+                             an empty CLI run stays a plain `"fail"`. A bespoke
+                             "retryable" outcome was tried and reverted — it had no
+                             retry budget, so one posting that reliably made the skill
+                             open with a question would have re-run every
+                             `APPLY_DELAY_SEC` forever with the whole PENDING queue
+                             frozen behind it (`claim_pending` re-claims the same
+                             released row), and `_retry_failed` would never escalate
+                             `fail_count` to give up. `"fail"` is bounded by all three.
+                             The case that DID need separating is "folder created, no
+                             documents": `generate_docs` writes the tracker row before
+                             the PDF step, and the language/scrub re-render deletes every
+                             rendered file first, so that state is an APPLIED row over a
+                             folder holding only content.json + job_posting.txt — it now
+                             goes through `abort_after_generation` like every other
+                             post-generation abort instead of raising.
     tracker_service.py      High-level: should_skip_url(), record_successful_apply()
   sources/                  24 scrapers (see table above) + per-site detail-page fetchers
     base.py                 BaseSource ABC: search() / matches_url() / fetch_text()
@@ -701,6 +737,18 @@ tests/test_handoff_readiness.py CI gate that keeps ONE person's personal data ou
                             regression each time, but a rule (`default` reproduces the
                             owner's value) that kept legitimately producing them. A
                             continuously-regenerating source needs a gate, not an audit.
+tests/test_golden_apply_cli_e2e.py Golden E2E for the CLI pipeline (docs/
+                            STACK_PRESCREEN_PLAN.md M7). `main_api` had a golden test
+                            since docs/quality/04; `main_cli` — the branch that keeps
+                            drifting, because every stage is mirrored into it by hand —
+                            had none, and four production incidents in five weeks came
+                            from that gap. Fakes only the boundaries: the `claude -p`
+                            subprocess (a stand-in that behaves like the real skill —
+                            creates the folder, writes content.json, runs generate_docs
+                            WITHOUT --no-tracker), the network, the LLM, LibreOffice.
+                            Each scenario reproduces one incident. It found a live bug
+                            on its first run: the CLI company+title dedup gate matched
+                            the row the run itself had just written
 tests/test_golden_apply_e2e.py  Golden E2E test (docs/quality/04): runs
                             hunter.apply_api.main_api() for REAL, mocking only the external
                             boundaries (LLM via fake_llm, network via fetch_job_text, the
@@ -764,6 +812,16 @@ tools/judge_stats.py        LLM_COST_REDUCTION_PLAN M6: aggregates Applications/
                             severity breakdown, and draft "RED LINE candidate" lines for
                             classes seen repeatedly — read-only, doesn't edit
                             generation_rules.md
+tools/prescreen_calibrate.py Offline calibration for hunter/prescreen.py (M3): replays
+                            assess_stack over the Applications/ corpus and scores it
+                            against the tracker Stack column + what the owner actually
+                            did with each row (sent_parse). Prints its own verdict
+                            against a decision rule fixed BEFORE the run (recall >= 5
+                            of the 7 known React failures AND zero false skips among
+                            rows really sent) and exits non-zero when it fails — which
+                            is what happened on 2026-08-24 with the wider rule, and is
+                            why the shipped one is react-only. Read-only; --dry-run
+                            reports the corpus without spending anything
 tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "reuse a past
                             generated CV for a new vacancy" idea): offline replay over
                             Applications/** — for each vacancy, rank STRICTLY EARLIER
@@ -819,7 +877,26 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             `.claude/commands/` into the image). Repo files are addressed
                             relative to the root; the candidate's own files are resolved
                             from `CANDIDATE_YAML_PATH` (per-user since the multi-user
-                            migration — `/app/candidate` is empty in prod)
+                            migration — `/app/candidate` is empty in prod).
+                            **Opens with a "decide, never ask" rule** (2026-08-24):
+                            `claude -p` is non-interactive, so a clarifying question
+                            does not pause the run, it ENDS it — no output folder,
+                            `main_cli` raises, and the vacancy comes back with an
+                            alert after burning the full 600 s timeout. Measured on
+                            the deploy host: 5 of 60 retained runs died that way.
+                            Every deterministic screen already ran before the skill
+                            starts and the post-generation gates run after it, so the
+                            skill is not a gate — it states its concerns in the Step 6
+                            summary and generates anyway. Step 2's failure branch used to
+                            say "ask the user to paste the job text manually", which
+                            the new rule contradicted while citing it as authority —
+                            it now stops instead. `main_cli` also gained the too-short
+                            posting floor `main_api` always had (same
+                            `min_job_text_len_for`, placed AFTER the expired check so a
+                            short "offer expired" marker still wins): with no job text,
+                            the expired check, doomed gate, re-post gate and ATS verdict
+                            are ALL skipped, so a run that reached the skill on a bare
+                            URL had no screens at all
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → English-only
@@ -920,6 +997,9 @@ Applications/               Generated documents (gitignored)
 | `OUTREACH_ENABLED` | `true` | After each successful apply (both pipelines, Step 7.8), write `outreach.md` into the application folder next to the CV: recruiter contact parsed from `job_posting.txt` (`hunter/contact_extract.py`, regex, $0) + a ready-to-paste ≤300-char LinkedIn message in the posting's language (+EN version for PL postings; one `JUDGE_MODEL` call grounded only in the already-judged content.json — no fresh fabrication surface). Rides the existing Drive folder upload. Best-effort — never blocks/fails the apply; the bot NEVER sends the message anywhere (owner sends manually). No Telegram/Sheets changes (owner decisions 2026-07-10). See issue #138. |
 | `DOOMED_GATE_ENABLED` | `true` | Deterministic (regex-only, zero LLM cost) full-text screen (`hunter.apply_shared.run_doomed_gate` → `hunter.filters.assess_job_text`), run right after expired-check and before the first LLM call in both pipelines (Step 1.5f). HARD findings (non-Poland onsite/hybrid, non-EU work authorization, unsupported required language, foreign stack / game engine with no Angular or React anywhere) write a SKIP tracker row and abort generation for $0.00; SOFT findings (e.g. a Vue/Svelte-first web role) warn in Telegram and generation continues. Force-mode/manual-paste always degrades HARD to warn. See docs/DOOMED_GATE_PLAN.md. |
 | `DOOMED_GATE_HARD_ACTION` | `skip` | `skip` aborts generation on a HARD finding; `warn` is an emergency lever to downgrade every HARD finding to a warning without disabling the gate entirely (e.g. if live-data precision turns out worse than calibration). |
+| `PRESCREEN_ENABLED` | `true` | Stack pre-screen (`hunter/prescreen.py`, Step 1.5h in both pipelines, docs/STACK_PRESCREEN_PLAN.md M4): ONE `JUDGE_MODEL` (Haiku) call reading which framework the posting is actually for, after every free deterministic gate and before the first generation call. It exists because `is_react_only_job_text` is blind by contract to a react-first posting that mentions Angular in passing — over the seven August cases that reached generation on a React stack it would have caught **zero**. Acts ONLY on a confident react-first reading (`prescreen.should_skip`): calibrated over 81 real postings, the wider "anything not Angular" rule scored the same 7/7 recall but skipped **six** vacancies the owner had actually sent (Node.js, PixiJS, Vue, GitLab, HeroDevs, and an EPAM posting titled "Senior Software Engineer with Angular"), while react-only scored 7/7 with **zero** false skips. `/force` and `--manual` degrade it to a warning; an active react track makes it a no-op; every failure — bad call, malformed shape, non-verbatim evidence quote — lets the vacancy through. |
+| `PRESCREEN_MODE` | `warn` | `report` (log only) → `warn` (+Telegram) → `skip` (SKIP row, no generation). Ships at `warn` (owner decision 2026-08-24: a week of `warn`, then `skip`) — NOT `report`, where the call is paid for and changes nothing the owner ever sees, so the week of observation never happens and the flip is never triggered. |
+| `PRESCREEN_MIN_CONFIDENCE` | `0.9` | Floor under the model's own confidence. Every skip in the 81-posting calibration scored ≥ 0.95, so this costs nothing today and refuses a shakier verdict tomorrow. |
 | `REPOST_GATE_ENABLED` | `true` | Re-post gate (`hunter/repost_gate.py`, Step 1.5g, $0): when the fetched posting is a near-verbatim re-post of a vacancy applied to in the last `REPOST_WINDOW_DAYS` days (new URL — re-listed after expiry, cross-board dup, agency name variation), REUSE the existing CV: copy the donor folder's docs, write a Re-application tracker row at cost $0, stamp the donor verdict, skip generation and the dual-apply shadow. Ambiguous band (sim 0.85–0.90, agency-boilerplate territory) only warns. `/force` bypasses. Thresholds calibrated 2026-07-20 (tools/reuse_calibrate.py) live as module constants. |
 | `REPOST_WINDOW_DAYS` | `60` | How far back the re-post gate looks for donor applications. |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
@@ -1104,6 +1184,22 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
    mid-reuse error) degrades to normal generation. `REPOST_GATE_ENABLED`
    (default true) / `REPOST_WINDOW_DAYS` in config; thresholds are module
    constants in repost_gate.py.
+3d. **Stack pre-screen** (`hunter.apply_shared.run_prescreen` →
+   `hunter.prescreen.assess_stack`, Step 1.5h in BOTH pipelines, right after the
+   re-post gate and before the FIRST generation call, docs/STACK_PRESCREEN_PLAN.md
+   M4): ONE `JUDGE_MODEL` (Haiku) call reading which framework the posting is
+   actually for. It exists because the deterministic React check is blind by
+   contract — `is_react_only_job_text` returns False on ANY mention of "angular",
+   and over the seven August postings that reached generation on a React stack it
+   would have caught **zero** (four mention Angular in passing, two mention React
+   only twice). Acts only on a confident react-first reading and only when the
+   active tracks don't already cover React; `/force` and `--manual` degrade it to
+   a warning. Calibrated over 81 real postings: the wider "anything not Angular"
+   rule scored the same 7/7 recall but skipped SIX vacancies the owner had really
+   sent, so the shipped rule is react-only (7/7, zero false skips). Every failure
+   — bad call, malformed shape, non-verbatim evidence quote — lets the vacancy
+   through; the whole stage is wrapped in `best_effort("apply.prescreen")`.
+
 4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
    **Company+title dedup gate** (`apply_api.py` Step 4.55 / `apply_cli.py`'s
    post-generation equivalent, added 2026-08-20): the manual entry points (URL
@@ -1249,6 +1345,24 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
   (`content["primary_lang"] == "PL"`), so a Polish employer receives the clean Polish CV
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
 - **Force** (`--force`): skip dedup, bypass React-only skip
+- **Manual** (`--manual`): the owner asked for THIS vacancy by hand. It degrades
+  the STACK gates to warnings — Step 1.5c (React), Step 1.5d (backend-only) and
+  Step 4.5 in `apply_api`, their CLI twin in `apply_cli`, all via
+  `apply_shared.stack_gate_allows_manual` — and nothing else. It is an explicit
+  `is_manual=True` argument to `apply_service.run_apply_agent_for_url` (passed by
+  `bot.apply_runner._run_apply_agent`, the Telegram paste/Apply-button runner),
+  NOT a property of that function: "reached the manual runner" and "the owner saw
+  this vacancy" are different claims, and a bulk expansion — a pasted LinkedIn
+  alert fanning out into dozens of job ids nobody read a title for — must not
+  inherit it by sharing a code path. The auto-hunt/queue path goes through
+  `run_apply_agent_subprocess` and never gets the flag. Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the
+  auto-hunt keeps filtering React-only postings, measured at 2 of 38 such
+  packages ever sent against a 43% baseline, but a link the owner sends himself
+  is generated without argument. Deliberately NOT `--force`: dedup, the doomed
+  gate's HARD rules (location / work authorization / language) and everything
+  else still apply to a pasted URL — that paste exception was REMOVED on purpose
+  after calibration (docs/DOOMED_GATE_PASTE_PLAN.md), and only stack rules are
+  being relaxed here.
 
 **Two things have to hold for the PL CV to actually ship, and both silently broke
 (fixed 2026-08-22 — 15 of 250 PL applications had shipped an EN CV next to a PL
@@ -1267,6 +1381,70 @@ cover letter, all from July on, as prod moved onto the CLI path):**
    one from the already judged + language-gated `resume_en` via `_translate_resume`
    (cheap translate model, role-count guarded, best-effort). Prompt compliance is
    not something a pipeline can assume — the net is what makes it true.
+
+**Aborting AFTER generation (CLI pipeline only) must undo the tracker row, not
+just the files** (`apply_shared.abort_after_generation`, added 2026-08-24 --
+docs/STACK_PRESCREEN_PLAN.md M1). The CLI skill runs `generate_docs.py` WITHOUT
+`--no-tracker` (`.claude/commands/apply.md`), so by the time `apply_cli`'s own
+post-processing runs, the documents are rendered AND the applied row exists. Its
+four abort stages -- React-only stack, company+title dedup, judge block,
+language-gate block -- therefore cannot abort by writing a terminal row:
+`add_react_skipped`/`add_skipped` no-op on `_is_known_terminal`, and exit 0 makes
+`apply_worker._resolve_outcome` see `has_successful_entry` and DELIVER the package
+the stage just rejected. Measured on the live corpus: 6 of 14 `main_cli` runs in
+the retained window shipped a row carrying the CLI skill's SELF-reported ATS score
+(96%, 96%, 78%...) with no independent verdict and no refine round at all -- the
+2026-08-24 Interia incident plus 5 more. All four sites now call
+`abort_after_generation(folder, url, reason=..., telegram_text=..., content=...)`: drop `*.pdf`/`*.docx`, convert the row in place via
+`tracker.convert_own_applied_row` (keeps id + `sheets_row`, sets
+`sheets_dirty=1`), notify -- and, when there was no applied row to convert,
+write the terminal SKIP row itself so no call site has to remember to.
+`job_posting.txt` and `content.json` stay on purpose (diagnostics; a SKIP row can
+never become a re-post donor). The API pipeline needs none of this -- its
+equivalent gates run BEFORE `generate_docs`. Wrapped in
+`best_effort("apply.abort_undo")`: the swallow is correct (an abort must never
+become a FAIL) but this path IS the incident fix, and two of the four call sites
+cannot see its return value.
+
+Things two adversarial reviews (2026-08-24) showed the first cuts got wrong,
+all now covered by tests:
+- **Identity comes from the content.json the row was written from**, passed as
+  `content=`: `apply_url` and `output_folder` are the literal values
+  `add_applied` stored. The pipeline's own `url` is only a fallback — paste mode
+  never hands the skill a URL (`url_norm=''`, so the whole paste flow including
+  every `linkedin_scout_relay` post was a guaranteed no-op) and
+  `.claude/commands/apply.md` lets the skill record the apply-button URL
+  instead of the input one. Matching is **exact equality, single row**: an
+  intermediate cut also matched a `<date>/<Company>` folder SUFFIX, and a review
+  reproduced it converting a SECOND, genuine, already-delivered application to
+  SKIP (two runs for one company on one day under different roots share that
+  suffix; and `_`, which `_sanitize_folder_company` substitutes for every
+  illegal character, is a SQL LIKE wildcard). When more than one row matches,
+  `convert_own_applied_row` converts NOTHING and logs — a destructive write does
+  not get to guess.
+- **The delivery gate belongs in `delivery.py`, not in one parent.** Of the four
+  callers of `deliver_apply_now`, only `apply_worker._resolve_outcome` checked
+  the tracker; `bot.apply_runner` (manual paste / Apply button), the LinkedIn
+  batch and `main._auto_apply_all` all deliver on a plain exit 0. `_is_deliverable`
+  now refuses any URL that is KNOWN and not a successful entry, so an aborted run
+  reaches neither Sheets nor Drive nor the backfills. An UNKNOWN url still
+  delivers (see the identity problem above), and a failed tracker read fails OPEN.
+- **`SKIP`/`FAIL`/`EXPIRED` rows never used to carry a folder.** Those producers
+  write `folder=''`, so `gdrive_sync.upload_missing_folders` selected purely on
+  "has a folder + no Drive URL". The converted row is the first exception, and
+  without a status check the next backfill pass (every 30 min) would upload a
+  folder holding only `job_posting.txt` + `content.json` and stamp a Drive URL on
+  it. **`MANUAL` is deliberately NOT in that set** (and gets its own carve-out in
+  `delivery._is_deliverable`): `add_manual_jobleads_pending` has always written a
+  folder, the JobLeads flow returns outcome `"manual"` and delivers on purpose,
+  and the bot's own message tells the owner to open that Drive folder and paste
+  the job text into it. Excluding it stranded the folder on the VPS filesystem.
+- **Settling nothing raises**, so `best_effort("apply.abort_undo")` has something
+  to count. The real failure mode has no exception of its own: the conversion
+  finds no row AND the fallback `add_skipped` no-ops because `_is_known_terminal`
+  matched the very applied row the conversion failed to convert. Silence there
+  restores the original incident invisibly — two of the four call sites cannot
+  see the return value.
 
 A GDPR/RODO consent clause is auto-appended as the **last body paragraph** of the CV
 (small italic grey text, in the document body so ATS parsers read it — NOT a footer).
@@ -1808,8 +1986,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-24 | opus | **React-only vacancy produced a full application package and was delivered -- the CLI pipeline's gates fire after the documents and the tracker row already exist** (owner: 'why do we make documents for such vacancies?' about `Interia / Regular Frontend Developer/ka / React / 96%`). **Diagnosis (live prod, read-only).** The CLI skill runs `generate_docs.py` without `--no-tracker`, so the applied row is written INSIDE the CLI call; `apply_cli`'s React check sits after it, `add_react_skipped` no-ops on `_is_known_terminal`, and exit 0 makes `apply_worker._resolve_outcome` see `has_successful_entry` and deliver (Sheets row 1339 + Drive folder, 831s of subscription time). The API pipeline is unaffected -- its Step 4.5 runs BEFORE `generate_docs`. Measurement found the same leak on the company+title dedup gate and, by code reading, on the judge/lang-gate blocks: **6 of 14 `main_cli` runs** in the retained window shipped a row carrying the skill's SELF-reported ATS score (96/96/78%) with no independent verdict and no refine round -- exactly the number the project stopped trusting when the verdict was introduced. **M0 (measured, 1333 tracker rows, `sent_parse` to decode the free-text Sent column):** React-only packages were actually sent **2 of 38** against a **43%** baseline, zero confirmations, zero answers -- and the owner's own Sent notes say 'not my stack, should have been filtered out' five times in August. The same measurement KILLED the adjacent seniority-filter idea: mid/regular titles were sent at **46%**, inside the baseline, so filtering them would have cost 6 live applications for 13 rows in 4 months. **M1 fix:** new `tracker.convert_own_applied_row` (turns this user's applied row back into a terminal SKIP in place -- keeps id + `sheets_row`, sets `sheets_dirty=1`, so an already-mirrored Sheet row is corrected instead of duplicated) + new `apply_shared.abort_after_generation` (drop `*.pdf`/`*.docx`, convert the row, notify; returns False when there was no row, and the stack/dedup sites fall back to their old terminal write). All four `apply_cli` abort sites rewired. No parent-side change needed: `_resolve_outcome` already prefers `has_successful_entry`, so after the conversion it takes the soft-terminal branch and does not deliver. 14 new tests, mutation-verified; full suite 2687 green, ruff clean. Plan + remaining milestones (Haiku stack pre-screen behind an offline calibration, `--manual` flag, CLI-prompt fix, golden E2E for `main_cli`, narrow pipeline unification): docs/STACK_PRESCREEN_PLAN.md. **The rest of the branch shipped the same day** (docs/STACK_PRESCREEN_PLAN.md): **M2** `--manual`, an explicit flag so a hand-picked URL relaxes the STACK gates only (never dedup, never the doomed gate's HARD rules); **M6** a "decide, never ask" rule at the top of `.claude/commands/apply.md` — `claude -p` is non-interactive, so a clarifying question ends the run (5 of 60 retained runs died that way) — plus its Step 2 no longer tells the skill to ask, and `main_cli` gained the too-short-posting floor `main_api` always had; **M7** `tests/test_golden_apply_cli_e2e.py`, the CLI pipeline's first golden test, which found a LIVE bug on its first run — the CLI company+title dedup gate matched the row the run itself had just written (`generate_docs` writes it inside the skill's invocation), so since 2026-08-21 no CLI apply that got past the stack gate had survived it; confirmed on prod, where Ness Solution and Grupa Com40 each hold exactly ONE row carrying the dedup_key their transcript shows them aborting on; **M3/M4** the Haiku stack pre-screen, calibrated over 81 real postings. That calibration FAILED its pre-registered rule as first written: recall was 7/7 but it also skipped six vacancies the owner had really sent (Node.js, PixiJS, Vue, GitLab, HeroDevs, and an EPAM posting titled "Senior Software Engineer with Angular") — the model read all of them correctly, the prompt's "anything not Angular" was simply wider than the owner's decision. Re-scored react-only on the same answers: 7/7, zero false skips, 8 skips of 81, and not one posting the model called react had ever been sent. Ships at `PRESCREEN_MODE=warn`. Three adversarial reviews reshaped M1 twice and reverted M6's code half (it had no retry budget and would have re-run one chatty posting every 30 s forever with the queue frozen behind it). **Also verified for the owner:** the verdict and refine loops DO run on the Claude CLI subscription -- 46 of 60 retained runs stay in API mode with only the transport swapped, and full `main_cli` runs refine too (70 -> 78 -> 93...); only `cost_usd` is structurally blank there. **Reported, not fixed:** the CLI skill sometimes asks a clarifying question instead of deciding, and `claude -p` being non-interactive that burns the full 600s timeout and arms the hour-long auto-apply pause (5 of 60 runs). |
 | 2026-08-22 | opus | **Closed LinkedIn postings invisible — session path dead in prod, guest path blind by design** (owner: `jobs/view/4455428397` clearly shows "No longer accepting applications"; bot generated a full CV for it — tracker row `Ebiquity / Frontend Developer / 88%`). **Two independent causes.** (1) Prod `.env` has `LINKEDIN_STORAGE_STATE` pointing at a **Windows desktop path** inside the Linux container — `_storage_state_path()` returns None for a missing file and `fetch_text_with_session` falls back to the guest fetch silently, so every LinkedIn apply runs unauthenticated. (2) The guest path could never have caught it: measured live, a logged-out page NEVER carries the "No longer accepting applications" banner (0 hits over 14 live + 1 closed posting), making `HTML_EXPIRED_MARKERS["linkedin.com"]` dead code outside Playwright — and `/check_expired` reported every LinkedIn row as `linkedin-login-wall` skipped, so it has never expired one. **The one guest-visible signal:** live pages put an Apply control inside `top-card-layout__cta-container` (14/14); a closed page renders that container EMPTY. New `linkedin.guest_html_expired()` encodes it conservatively (container must be present; any `<a>`/`<button>` inside = alive, so a markup rename goes silent instead of expiring every LinkedIn posting), wired into `LinkedInSource.fetch_text` (returns the synthetic `"This job posting has expired."` marker → apply Step 1.5a skips for $0) and `expired_marker._check_html_expired`. `fetch_text` now does its own `requests.get` — the signal lives in raw HTML that `get_text()` discards — with `html_fallback.extract_text()` split out so the text path is unchanged. Live re-verified end-to-end: dead URL → `is_job_expired=True`, two live controls → False. 9 new tests, mutation-verified; full suite 2643 green, ruff clean. **Owner action left open:** repoint `LINKEDIN_STORAGE_STATE` to `/app/.secrets/linkedin_storage_state.json` + refresh the session (`tools/linkedin_login.py`) — the session path also catches closures where the CTA does not disappear. See docs/AGENT_LOG.md. |
 | 2026-08-22 | opus | **Corpus audit of the live deploy host: Polish employers were getting an English CV, and the dual-apply shadow was unobservable** (owner: 'делай всё что можешь, с сервера и гугл драйва тоже возьми файлы на проверку'). Read-only audit of 761 applications / 323 judge reports on the VPS. **(1) PL CV.** 15 of 250 PL applications shipped an EN CV next to a PL cover letter — 0 in May/June, 3 in July, 12 of 28 in August, tracking prod's move onto the CLI path. Two compounding causes: `.claude/commands/apply.md` told the CLI skill to return `resume_pl: null` unless `--full` UNCONDITIONALLY (the token saving is only legitimate for an EN posting), and `apply_cli` stamped `primary_lang` only as a side effect of a repair — that key gates BOTH generate_docs' PL routing and verdict_refine's PL mirror, so the fallback was disabled exactly when needed. Fixed all three layers: prompt excepts Polish postings, `primary_lang` stamped + persisted unconditionally (re-render when the PL CV is missing from disk), and new `apply_shared.ensure_pl_resume()` mirrors resume_pl from the already judged + language-gated resume_en in BOTH pipelines. **(2) Dual-apply.** `launch_detached` sent the shadow's stdout+stderr to DEVNULL; being detached, that output reached no other log, so 6 malformed shadow folders and 0-of-12 August shadows without a verdict had no diagnostic trace anywhere. Now writes `logs/dual_shadow/<date>_<company>.log` (14-day prune). A shadow whose model returns a different SCHEMA now aborts cleanly instead of leaving a folder holding only a broken content.json. **(3)** New RED LINE in generation_rules.md against promoting the profile's own verb ('participated in' -> 'drove') — the single most repeated judge finding (`Drove frontend architecture decisions` 13x), and `exaggeration` is warn-only so every occurrence ships. **Verification:** replayed old vs new clause-drop over 1495 real fields from the server corpus — visible defects introduced by a cut fell 17.7% -> 0.0%. 11 new tests, mutation-verified x5; full suite 2663 green, ruff clean. See docs/AGENT_LOG.md for the full entry. |
 | 2026-08-21 | opus | **Clause-drop artifacts reached a delivered CV — punctuation seams and a flattened cover letter** (found while analysing the Claude vs DeepSeek applications on Drive). Four defects in the shipped Avive Solutions package all reproduce byte-for-byte from `claim_judge._drop_quote`: `', - from a real-time...'`, `'...decisions; across a team of 10+.'`, a bullet opening lowercase, and the whole cover letter rendered as ONE paragraph — that last one because the cleanup line `re.sub(r'\s{2,}', ' ', candidate)` treats a newline as whitespace, so ONE dropped clause flattened every break in the letter. Root cause common to all four: the seam left by the cut was patched with global regexes over the whole field, covering a few hard-coded pairs and missing the rest. **Fix:** new `hunter/text_repair.py` repairs the junction where the cut actually happened (the caller knows both sides), with newline-safe space collapsing and a paragraph-preserving sentence drop; rewired `claim_judge._drop_quote` plus `apply_shared._scrub_prestige_text` / `_scrub_compliance_clause`, which had the same bug class. Self-inflicted bug caught mid-fix: interpolating a dash into a character class made `.-–` a RANGE over every ASCII letter and ate the survivor's first letter — pre-escaped `_SEPARATOR_CLASS` + regression test. 18 new tests, the four artifacts asserted through the production entry point; mutation-verified ×6. Full suite 2652 green, ruff clean. NOT fixed (reported separately): shadow runs write no `ats_verdict`, 2 of 5 recent DeepSeek shadows returned malformed JSON, `resume_pl` null on two recent PL postings, and the recurring un-repaired `'Drove frontend architecture decisions'` exaggeration. See docs/AGENT_LOG.md for the full entry. |
 | 2026-08-20 | sonnet | **Comarch dedup gap — company+title dedup never ran for manual entry points; "Comarch SA" vs "Comarch" normalized differently** (owner: repeated Comarch "Senior Angular Developer" rows across 2026-06-20…2026-08-20). **Diagnosis:** 19 Comarch rows, all distinct URLs (URL dedup fine) — the real safety net, `dedup_key(company, title)` (checked in the hunt loop, `hunter/main.py` Step 3), never runs for manual URL paste (`cmd_url`) or the LinkedIn batch flow (`_run_linkedin_batch`), which only check the exact URL. Today's specific duplicate: pracuj.pl reported "Comarch SA", a 3-day-older LinkedIn row "Comarch" — `_strip_legal_suffixes` stripped the dotted "S.A." form but not the no-dot Polish "SA", so the two normalized to different dedup keys. **Fix:** (1) `_strip_legal_suffixes` (hunter/tracker.py) now also strips a bare word-boundary "sa" suffix. (2) New Step 4.55 in both `apply_api.py`/`apply_cli.py`: once the LLM returns `company_name`/`job_title`, check `dedup_key(...)` against `get_known_company_titles()` and abort with a SKIP row on a match — the one check that covers URL paste, LinkedIn batch and forwarded text uniformly, since none of them know company/title before the LLM call. `/force` bypasses. 5 new tests, mutation-verified ×2. Full suite 2634 green, ruff clean. See docs/AGENT_LOG.md for the full entry. |
-| 2026-08-17 | sonnet | **Backend-only pre-LLM skip left no tracker row — same posting re-processed on every hunt** (owner: "проверь, чо воообще в боте происходит" after a Cerebras Systems builtin.com posting kept generating the same 3-message Telegram sequence). **Diagnosis (live VPS, read-only):** `logs/apply_stdout/` transcripts showed the same URL fetched and skipped as backend-only 8 times over ~40h, each run 1.1s, $0. Root cause: `apply_api.py` Step 1.5d (pre-LLM backend-only check) returned after notify+print with NO tracker write — every sibling skip path (React-only → `add_react_skipped`; doomed gate → `add_skipped`) writes a terminal SKIP row so the URL is deduped afterward; this one didn't. `apply_worker._resolve_outcome`'s exit-0/no-terminal-row branch then cleared the PENDING placeholder and reported "vacancy can return on the next hunt" — correct for a genuinely transient run, wrong for a posting that will always fail the same deterministic check. 8 of 16 apply-pipeline runs in the retained window were this one posting. **Fix:** Step 1.5d now calls `tracker.add_skipped(Job(...))`, mirroring the doomed gate's pattern, using the already-in-scope `jobleads_company`/`jobleads_title` (populated for every auto-hunt run via `apply_service.py`'s `--company`/`--title`, not just JobLeads). New test `tests/test_pre_llm_filters.py::TestBackendOnlySkipWritesTrackerRow`, mutation-verified. Full suite 2624 green, ruff clean. **Rest-of-bot health check (same investigation):** no exceptions in 24h of logs, apply queue empty, no LLM outage armed, 0 FAIL rows in 2 days, recent applies scoring 90–95% ATS verdict. Not touched: Inhire returned 0 jobs on 2 of 3 recent runs (intermittent, below the 3-in-a-row alert streak); the pre-existing `gdrive: 12 duplicate 'Logs' folders` warning (tool already exists). |

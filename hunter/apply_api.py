@@ -36,11 +36,13 @@ from hunter.apply_shared import (
     build_pl_skip_instruction,
     ensure_pl_resume,
     is_transient_fetch_error,
+    stack_gate_allows_manual,
     compute_output_folder,
     is_backend_only_job_text,
     is_react_only_job_text,
     notify,
     run_doomed_gate,
+    run_prescreen,
     send_telegram_documents,
     validate_content,
 )
@@ -125,11 +127,17 @@ def main_api(
     jobleads_company: str = "",
     jobleads_title: str = "",
     permalink: str = "",
+    is_manual: bool = False,
 ) -> Path | None:
     """API pipeline: fetch job text → LLM → content.json → generate_docs.
 
     Returns the output folder on success (so the caller can run the dual-apply
     shadow), or None when the job was skipped / deduped / expired.
+
+    `is_manual` (docs/STACK_PRESCREEN_PLAN.md M2) marks a run the owner
+    triggered by hand. It degrades the STACK gates below to warnings -- see
+    apply_shared.stack_gate_allows_manual for why that is narrower than
+    `skip_dedup`.
 
     Parameters
     ----------
@@ -188,6 +196,7 @@ def main_api(
             jobleads_company=jobleads_company,
             jobleads_title=jobleads_title,
             permalink=permalink,
+            is_manual=is_manual,
             _usage_log=_usage_log,
         )
     finally:
@@ -203,6 +212,7 @@ def _run_main_api(
     jobleads_company: str,
     jobleads_title: str,
     permalink: str = "",
+    is_manual: bool = False,
     _usage_log: list,
 ) -> Path | None:
     """Inner body of main_api, split out so push_usage_log() / pop_usage_log()
@@ -285,7 +295,12 @@ def _run_main_api(
     # and the react track isn't active (docs/quality/09-multi-track-react.md).
     from hunter.filters import _react_track_active
 
-    if not skip_dedup and not _react_track_active() and is_react_only_job_text(job_text):
+    if (
+        not skip_dedup
+        and not _react_track_active()
+        and is_react_only_job_text(job_text)
+        and not stack_gate_allows_manual(is_manual, url, "React-only posting (pre-LLM text scan)")
+    ):
         notify(
             f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
@@ -301,7 +316,11 @@ def _run_main_api(
         return
 
     # Step 1.5d — Pre-LLM backend-only text check (no FE framework + explicit BE required)
-    if not skip_dedup and is_backend_only_job_text(job_text):
+    if (
+        not skip_dedup
+        and is_backend_only_job_text(job_text)
+        and not stack_gate_allows_manual(is_manual, url, "Backend-only posting (pre-LLM text scan)")
+    ):
         notify(
             f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
         )
@@ -388,6 +407,22 @@ def _run_main_api(
         company=jobleads_company,
         permalink=permalink,
         is_force_override=skip_dedup,
+    ):
+        return
+
+    # Step 1.5h — Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M4): one cheap
+    # model call reading what the posting is ACTUALLY for, after every free
+    # deterministic gate and before the first generation call. It exists because
+    # the regex check above is blind by contract to a react-first posting that
+    # mentions Angular in passing — over the seven August cases that reached
+    # generation on a React stack it would have caught zero.
+    if run_prescreen(
+        job_text,
+        url,
+        title=jobleads_title,
+        company=jobleads_company,
+        is_force_override=skip_dedup,
+        is_manual=is_manual,
     ):
         return
 
@@ -594,7 +629,13 @@ def _run_main_api(
 
     # Step 4.5 — Skip React-only jobs (unless the react track is active)
     stack = (content.get("stack") or "").lower()
-    if "react" in stack and "angular" not in stack and not skip_dedup and not _react_track_active():
+    if (
+        "react" in stack
+        and "angular" not in stack
+        and not skip_dedup
+        and not _react_track_active()
+        and not stack_gate_allows_manual(is_manual, url, "React-only stack")
+    ):
         notify(
             f"⏭ <b>Skipped — React-only stack</b>\n"
             f"🔗 {url}\n"

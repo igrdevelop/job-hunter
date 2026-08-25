@@ -21,6 +21,7 @@ Testable: monkeypatch hunter.tracker.DB_PATH to an isolated tmp path.
 """
 
 import json
+import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -29,6 +30,8 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
 from hunter.db import get_db
+
+log = logging.getLogger(__name__)
 from hunter.models import Job
 from hunter.validation import SCOUT_POSTS_URL_MARKER, _LEGACY_SCOUT_POSTS_URL_MARKER
 
@@ -329,15 +332,57 @@ def get_known_urls() -> set[str]:
         return {r["url_norm"] for r in rows}
 
 
-def get_known_company_titles() -> set[str]:
-    """Return dedup_key(company, title) for all rows in tracker."""
+def get_known_company_titles(*, exclude_url: str = "", exclude_folder: str = "") -> set[str]:
+    """Return dedup_key(company, title) for all rows in tracker.
+
+    `exclude_url` / `exclude_folder` drop THIS run's own row from the set. The
+    CLI pipeline needs that and the API pipeline does not: there, the dedup gate
+    runs before generate_docs, so no row exists yet. In the CLI pipeline the
+    skill has already run generate_docs (without --no-tracker) by the time the
+    gate is reached, so the run's own row is in the tracker and the gate matched
+    ITSELF -- every CLI apply that got past the stack gate aborted as a
+    duplicate from 2026-08-21 (when the gate shipped) until this fix. Confirmed
+    on production data: `Ness Solution` and `Grupa Com40` each had exactly ONE
+    row carrying their dedup_key, written by the very run their transcript shows
+    aborting with "SKIP - company+title dedup match".
+    """
+    norm = normalize_url(exclude_url) if exclude_url else ""
+    folder = str(exclude_folder) if exclude_folder else ""
+
     with get_db(DB_PATH) as conn:
+        # Exclude exactly ONE row -- the newest match, which is the row this run
+        # just wrote. Dropping every row that shares the folder string is not
+        # safe: `.claude/commands/apply.md` tells the skill to name the folder
+        # "{date}/{CompanyName}" with no _2 collision suffix (that logic lives in
+        # compute_output_folder, which only the API path uses), so two CLI
+        # applications for the same company on the same day carry an IDENTICAL
+        # folder. Excluding both would hide the earlier one from the gate and let
+        # a genuine duplicate through -- which is the Comarch case the gate was
+        # added for on 2026-08-20: one requisition arriving via LinkedIn and via
+        # pracuj.pl in the same day's hunts.
+        excluded_rowid = None
+        if norm or folder:
+            clauses, params = [], []
+            if norm:
+                clauses.append("url_norm=?")
+                params.append(norm)
+            if folder:
+                clauses.append("folder=?")
+                params.append(folder)
+            params.append(_uid())
+            own = conn.execute(
+                f"SELECT rowid FROM applications WHERE ({' OR '.join(clauses)}) "  # noqa: S608
+                "AND user_id=? ORDER BY rowid DESC LIMIT 1",
+                params,
+            ).fetchone()
+            excluded_rowid = own["rowid"] if own else None
+
         rows = conn.execute(
-            "SELECT company, title FROM applications "
+            "SELECT rowid, company, title FROM applications "
             "WHERE company != '' AND title != '' AND user_id=?",
             (_uid(),),
         ).fetchall()
-        return {dedup_key(r["company"], r["title"]) for r in rows}
+    return {dedup_key(r["company"], r["title"]) for r in rows if r["rowid"] != excluded_rowid}
 
 
 def get_sent_companies() -> set[str]:
@@ -1103,6 +1148,102 @@ def _convert_own_fail_row(url: str, sent: str) -> bool:
             (sent, norm, _uid()),
         )
         return bool(cur.rowcount)
+
+
+def convert_own_applied_row(
+    url: str = "",
+    *,
+    folder: str = "",
+    status: str = "SKIP",
+    sent: str = "—",
+) -> bool:
+    """Convert this user's APPLIED row into a terminal SKIP row, in place.
+
+    The CLI pipeline's abort stages (React-only stack, company+title dedup,
+    judge block, language-gate block) all run after the CLI skill has already
+    rendered the documents and written the tracker row through generate_docs
+    (`.claude/commands/apply.md` calls it without --no-tracker). Their own
+    terminal writes then no-op on `_is_known_terminal`, and `apply_worker.
+    _resolve_outcome` sees `has_successful_entry` on exit 0 and DELIVERS the
+    package the stage just decided to throw away (docs/STACK_PRESCREEN_PLAN.md
+    M1; measured 2026-08-24: 6 of 14 main_cli runs shipped a row carrying the
+    skill's self-reported ATS score with no independent verdict at all).
+
+    Updating in place -- rather than delete + insert -- keeps the row's id and
+    `sheets_row` and marks it `sheets_dirty`, so a row already mirrored to the
+    Sheet is CORRECTED there instead of gaining a duplicate.
+
+    **Identity must be exact.** `url` and `folder` should come from the
+    content.json the row was WRITTEN from (`apply_url` / `output_folder`) --
+    those are the literal values `add_applied` stored. The pipeline's own idea
+    of the URL is not a safe substitute: paste mode never hands the skill a URL
+    (the row lands with `url_norm=''`) and `.claude/commands/apply.md` lets the
+    skill record the apply-button URL instead of the input one.
+
+    Matching is exact equality only. An earlier version also matched a
+    `<date>/<Company>` suffix to survive relative-vs-absolute path spellings;
+    a review reproduced it converting a SECOND, unrelated row -- two runs for
+    the same company on the same day under different roots share that suffix,
+    and `_` in a sanitised company name is a LIKE wildcard. A destructive write
+    does not get to guess: when more than one row matches, nothing is converted
+    and a warning is logged, because ambiguity means the identity is wrong and
+    the caller needs to know.
+
+    `folder` is left in place on the converted row: the abort deletes the
+    rendered documents but keeps job_posting.txt for diagnostics, and a SKIP row
+    can never become a re-post donor (get_recent_applied_for_repost excludes
+    SKIP). The Drive backfill knows about it -- see
+    gdrive_sync.upload_missing_folders, which skips non-applied rows.
+
+    Returns True only when exactly one row was converted.
+    """
+    norm = normalize_url(url) if url else ""
+    folders = []
+    if folder:
+        folders.append(str(folder))
+        try:
+            resolved = str(Path(folder).resolve())
+            if resolved != str(folder):
+                folders.append(resolved)
+        except OSError:  # pragma: no cover - resolve() on a hostile path
+            pass
+    if not norm and not folders:
+        return False
+
+    where = []
+    params: list = []
+    if norm:
+        where.append("url_norm=?")
+        params.append(norm)
+    if folders:
+        where.append(f"folder IN ({','.join('?' * len(folders))})")
+        params.extend(folders)
+    params.append(_uid())
+
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            f"SELECT rowid, url, folder FROM applications "  # noqa: S608
+            f"WHERE ({' OR '.join(where)}) AND user_id=? "
+            "AND upper(coalesce(ats_status, '')) NOT IN ('SKIP', 'FAIL', 'EXPIRED', ?, ?, ?)",
+            [*params, MANUAL_PENDING_ATS, PENDING_ATS, IN_PROGRESS_ATS],
+        ).fetchall()
+        if not rows:
+            return False
+        if len(rows) > 1:
+            log.warning(
+                "convert_own_applied_row: %d rows match url=%r folder=%r - refusing to convert "
+                "any of them (%s)",
+                len(rows),
+                url,
+                folder,
+                ", ".join(r["folder"] or r["url"] or "?" for r in rows),
+            )
+            return False
+        conn.execute(
+            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 WHERE rowid=?",
+            (status, sent, rows[0]["rowid"]),
+        )
+    return True
 
 
 def add_expired(url: str, company: str = "", title: str = "") -> None:

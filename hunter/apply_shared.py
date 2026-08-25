@@ -17,6 +17,7 @@ from pathlib import Path
 import requests
 
 from hunter import candidate, text_repair
+from hunter.best_effort import best_effort
 import os
 
 from hunter.config import (
@@ -509,6 +510,255 @@ _METRIC_RE = re.compile(
     r"repos?|repositories?|teams?|companies|countries)\b",
     re.IGNORECASE,
 )
+
+
+def stack_gate_allows_manual(is_manual: bool, url: str, what: str) -> bool:
+    """True when a STACK-mismatch gate must degrade to a warning instead of
+    skipping, because the owner asked for this vacancy by hand.
+
+    Owner decision 2026-08-24 (docs/STACK_PRESCREEN_PLAN.md M2): the auto-hunt
+    keeps filtering React-only postings, but a URL the owner pasted himself is
+    generated without argument -- he can read the title before sending it, and
+    the measured cost of the other policy is real (37 of 38 React packages the
+    bot generated on its own went unsent).
+
+    Deliberately narrow: this relaxes stack rules only. The doomed gate's HARD
+    rules (location / work authorization / language) still block a pasted
+    posting, because that exception was REMOVED on purpose after calibration
+    showed real money lost on pasted postings (docs/DOOMED_GATE_PASTE_PLAN.md).
+    `/force` (skip_dedup) remains the override that bypasses everything.
+
+    Call it as the last term of the gate condition -- it notifies, so it must
+    run only once the gate has actually matched:
+
+        if <gate matched> and not stack_gate_allows_manual(is_manual, url, "..."):
+            <write the SKIP row and return>
+    """
+    if not is_manual:
+        return False
+    notify(
+        f"⚠️ <b>{what}</b>\n"
+        f"🔗 {url}\n"
+        "You asked for this one by hand, so it is being generated anyway."
+    )
+    print(f"[apply_agent] {what}: manual request -- stack gate degraded to warn")
+    return True
+
+
+def run_prescreen(
+    job_text: str,
+    url: str,
+    *,
+    title: str = "",
+    company: str = "",
+    is_force_override: bool = False,
+    is_manual: bool = False,
+) -> bool:
+    """Step 1.5h — one cheap-model read of the posting's stack, before generation.
+
+    Returns True when the caller should ABORT (a SKIP row is already written and
+    Telegram notified). False means carry on — and so does every failure path: an
+    unavailable pre-screen must never cost a vacancy.
+
+    Runs only after the deterministic gates have passed the posting, and only
+    when the candidate's active tracks do not already cover React. `/force` and a
+    manual request degrade it to a warning, exactly like the other stack gates
+    (docs/STACK_PRESCREEN_PLAN.md M2).
+
+    `PRESCREEN_MODE` stages the rollout — `report` logs, `warn` also notifies,
+    `skip` acts. It ships at `warn`: a Telegram line per react-first posting IS
+    the week of observation that earns the flip to `skip`, where `report` would
+    pay for the call and show the owner nothing.
+    """
+    from hunter.config import (
+        PRESCREEN_ENABLED,
+        PRESCREEN_MIN_CONFIDENCE,
+        PRESCREEN_MODE,
+    )
+
+    if not PRESCREEN_ENABLED or not (job_text or "").strip():
+        return False
+
+    from hunter.filters import _react_track_active
+
+    if _react_track_active():
+        return False  # React is a stack the candidate applies for — nothing to screen
+
+    verdict = None
+    acts = False
+    with best_effort("apply.prescreen"):
+        from hunter.prescreen import assess_stack, should_skip
+
+        verdict = assess_stack(job_text, title=title)
+        acts = should_skip(verdict, min_confidence=PRESCREEN_MIN_CONFIDENCE)
+
+    if verdict is None:
+        return False
+
+    print(
+        f"[prescreen] stack={verdict.primary_stack} verdict={verdict.verdict} "
+        f"conf={verdict.confidence:.2f} usable={verdict.ok} seniority={verdict.seniority}"
+    )
+    if not acts:
+        return False
+
+    mode = PRESCREEN_MODE if PRESCREEN_MODE in ("report", "warn", "skip") else "report"
+    quote = (verdict.evidence or "").strip()[:200]
+
+    if mode == "report":
+        print(f"[prescreen] would skip (report mode only): {url}")
+        return False
+
+    if is_force_override or is_manual or mode == "warn":
+        why = (
+            "you asked for this one by hand"
+            if (is_manual or is_force_override)
+            else "warn mode — not skipping yet"
+        )
+        notify(
+            f"⚠️ <b>Pre-screen: React-first posting</b>\n"
+            f"🔗 {url}\n"
+            f"Generating anyway ({why}).\n"
+            f"<i>{quote}</i>"
+        )
+        return False
+
+    try:
+        from hunter.tracker import add_react_skipped
+
+        add_react_skipped(
+            {
+                "stack": f"React (pre-screen {verdict.confidence:.2f})",
+                "company_name": company,
+                "job_title": title,
+            },
+            url,
+        )
+    except Exception as e:  # noqa: BLE001 — a tracker failure must not crash the apply
+        print(f"[prescreen] Warning: could not write the SKIP row: {e}")
+
+    notify(
+        f"⏭ <b>Skipped — React-first posting (pre-screen)</b>\n"
+        f"🔗 {url}\n"
+        f"<i>{quote}</i>"
+        f"{_REACT_SKIP_FORCE_HINT}"
+    )
+    print(f"[prescreen] SKIP — react-first posting: {url}")
+    return True
+
+
+def abort_after_generation(
+    folder: Path | None,
+    url: str,
+    *,
+    reason: str,
+    telegram_text: str = "",
+    content: dict | None = None,
+) -> bool:
+    """Undo a package the pipeline decided to throw away AFTER it was rendered.
+
+    The CLI pipeline's abort stages (React-only stack, company+title dedup,
+    judge block, language-gate block) all run once the CLI skill has already
+    rendered the documents AND written the tracker row -- `.claude/commands/
+    apply.md` calls generate_docs.py WITHOUT `--no-tracker`, so the row exists
+    inside the CLI call. Deleting the PDFs alone is not enough: the row stays
+    APPLIED, exit 0 makes `apply_worker._resolve_outcome` see
+    `has_successful_entry`, and the package is mirrored to Sheets and uploaded
+    to Drive anyway (docs/STACK_PRESCREEN_PLAN.md M1 -- the 2026-08-24 Interia
+    incident, and 5 more like it in the same two-week window).
+
+    So this does all of it in one place: drop the rendered documents, settle the
+    tracker row, notify. After it the parent's own terminal-row branch takes
+    over: no delivery, and the URL stays deduped.
+
+    `content` is the content.json the row was written from, and it is the
+    IDENTITY -- `apply_url` and `output_folder` are the literal values
+    `add_applied` stored. The pipeline's own `url` is only a fallback: paste
+    mode never hands the skill a URL (the row lands with `url_norm=''`) and
+    `.claude/commands/apply.md` lets the skill record the apply-button URL
+    instead of the input one, so keying on it alone made this a guaranteed
+    no-op for the whole paste flow.
+
+    When no applied row could be converted, a terminal SKIP row is written here
+    so no call site has to remember to. A run that ends with NO terminal row is
+    not a harmless no-op: the worker clears the placeholder, the vacancy returns
+    on the next hunt, the CLI regenerates the whole package and the same gate
+    blocks again, forever -- the defect fixed for the backend-only pre-LLM skip
+    on 2026-08-17 (one posting processed 8 times in 40 h).
+
+    Kept on purpose: `job_posting.txt` and `content.json` (diagnostics, and the
+    posting text the re-post gate reads -- a SKIP row can never become a donor).
+    Only rendered output goes.
+
+    Returns True when an applied row was converted.
+
+    Wrapped in best_effort: the swallow is correct -- an abort must never become
+    a FAIL -- but this path IS the fix for a delivery incident, so silent
+    degradation has to surface as an alert. Settling NOTHING raises for exactly
+    that reason: it is the failure mode with no exception of its own, and two of
+    the four call sites cannot even see the return value.
+    """
+    if folder is not None:
+        for path in list(folder.glob("*.pdf")) + list(folder.glob("*.docx")):
+            try:
+                path.unlink()
+            except OSError as e:
+                print(f"[apply_agent] abort: could not delete {path.name}: {e}")
+
+    meta = content or {}
+    row_url = (meta.get("apply_url") or "").strip() or url
+    row_folder = (meta.get("output_folder") or "").strip() or (
+        str(folder) if folder is not None else ""
+    )
+
+    converted = False
+    with best_effort("apply.abort_undo"):
+        from hunter.tracker import convert_own_applied_row
+
+        converted = convert_own_applied_row(
+            row_url if row_url and row_url != PASTE_NO_URL_PLACEHOLDER else "",
+            folder=row_folder,
+        )
+        if not converted and not _write_abort_skip_row(row_url or url, meta):
+            raise RuntimeError(
+                f"post-generation abort settled nothing for {row_url or url!r} "
+                f"(folder={row_folder!r}) - the applied row may still be delivered"
+            )
+
+    print(
+        f"[apply_agent] ABORT after generation ({reason}) -- "
+        f"docs dropped, applied row converted={converted}: {row_url or url}"
+    )
+    if telegram_text:
+        notify(telegram_text)
+    return converted
+
+
+def _write_abort_skip_row(url: str, content: dict) -> bool:
+    """Last resort when no applied row could be converted: write the SKIP row.
+
+    True when a row was actually written. add_skipped returns None when an
+    existing terminal row already covers this URL or its company+title -- and
+    that is NOT good enough here: the row it is matching may be the very applied
+    row this abort failed to convert, in which case reporting success would hide
+    the original incident behind a false negative.
+    """
+    if not url or url == PASTE_NO_URL_PLACEHOLDER:
+        return False
+    from hunter.models import Job
+    from hunter.tracker import add_skipped
+
+    written = add_skipped(
+        Job(
+            title=(content.get("job_title") or "").strip(),
+            company=(content.get("company_name") or "").strip(),
+            location="",
+            salary=None,
+            url=url,
+            source="post_generation_abort",
+        )
+    )
+    return bool(written)
 
 
 def _opener_banlist_hits(letter: str) -> list[str]:

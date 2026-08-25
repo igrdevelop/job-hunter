@@ -435,6 +435,108 @@ def test_golden_doomed_gate_hard_skips_before_llm(golden_env, fake_llm, monkeypa
     assert any("Skipped before generation" in n for n in golden_env.notifications)
 
 
+# -- Stack gates: auto-hunt filters React, a manual request does not ---------
+#
+# docs/STACK_PRESCREEN_PLAN.md M2. Owner decision 2026-08-24: the auto-hunt
+# keeps skipping React-only postings, but a URL the owner pastes himself is
+# generated without argument. `is_manual` is exactly the kind of flag whose
+# threading this module exists to guard -- "a flag that isn't threaded into
+# the second pipeline" is named in the docstring above as the bug class.
+
+REACT_ONLY_POSTING = (
+    "Job Title: Senior Frontend Developer\nCompany: Remote React Shop\n"
+    "Location: Fully remote (Poland)\n\n"
+    "--- Job Description ---\n"
+    "We are looking for a senior frontend engineer to work on our React "
+    "application. You will build React components, own the React state "
+    "management layer and mentor other engineers on the team. Our stack is "
+    "React, TypeScript, Next.js and GraphQL, with a design system shared "
+    "across products. Fully remote within Poland, contract of employment or "
+    "B2B, with a yearly training budget and no on-call duty."
+)
+
+
+def test_golden_react_only_skips_the_auto_hunt(golden_env, fake_llm, monkeypatch):
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: REACT_ONLY_POSTING, raising=False
+    )
+
+    from hunter.apply_api import main_api
+
+    url = "https://example.com/jobs/react-only-auto"
+    assert main_api(url) is None
+    assert fake_llm.calls == [], "the pre-LLM React gate must abort before any LLM call"
+
+    from hunter import tracker
+
+    rows = tracker.lookup_url(url)
+    assert rows and rows[0]["ats"].strip().upper() == "SKIP"
+
+
+def test_golden_react_only_generates_on_a_manual_request(
+    golden_env, fake_llm, golden_generation_response, golden_verdict_response, monkeypatch
+):
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: REACT_ONLY_POSTING, raising=False
+    )
+    fake_llm.generation_response = golden_generation_response
+    fake_llm.verdict_response = golden_verdict_response
+
+    from hunter.apply_api import main_api
+
+    url = "https://example.com/jobs/react-only-manual"
+    folder = main_api(url, is_manual=True)
+
+    assert folder is not None, "a manual request must generate a React-only posting"
+    assert fake_llm.calls, "the pipeline must reach the generation call"
+    assert any("generated anyway" in n for n in golden_env.notifications), (
+        "the owner still has to be told the gate was degraded, not silently skipped"
+    )
+
+
+def test_golden_react_stack_skips_after_generation_for_the_auto_hunt(
+    golden_env, fake_llm, golden_job_text, golden_generation_response, monkeypatch
+):
+    # The posting itself mentions Angular, so the pre-LLM gate stays quiet and
+    # only the post-generation Step 4.5 can catch it.
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
+    fake_llm.generation_response = {**golden_generation_response, "stack": "React"}
+
+    from hunter.apply_api import main_api
+
+    url = "https://example.com/jobs/react-stack-auto"
+    assert main_api(url) is None
+
+    from hunter import tracker
+
+    rows = tracker.lookup_url(url)
+    assert rows and rows[0]["ats"].strip().upper() == "SKIP"
+
+
+def test_golden_react_stack_survives_a_manual_request(
+    golden_env,
+    fake_llm,
+    golden_job_text,
+    golden_generation_response,
+    golden_verdict_response,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
+    fake_llm.generation_response = {**golden_generation_response, "stack": "React"}
+    fake_llm.verdict_response = golden_verdict_response
+
+    from hunter.apply_api import main_api
+
+    folder = main_api("https://example.com/jobs/react-stack-manual", is_manual=True)
+
+    assert folder is not None
+    assert any("generated anyway" in n for n in golden_env.notifications)
+
+
 # ── Mutation checks: the golden test must actually be able to fail ──────────
 #
 # Not full mutation testing — three cheap, targeted breaks of the pipeline's

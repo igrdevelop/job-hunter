@@ -94,6 +94,7 @@ async def _run_apply_agent(
         return
     try:
         outcome, error_detail = await run_apply_agent_for_url(
+            is_manual=True,
             url=url,
             timeout_sec=_APPLY_AGENT_TIMEOUT,
             apply_agent_path=APPLY_AGENT_PATH,

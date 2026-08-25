@@ -22,11 +22,16 @@ def test_apply_agent_is_thin() -> None:
     255 for the M4 outage→CLI fallback (docs/LLM_OUTAGE_RESILIENCE_PLAN.md,
     2026-07-18): ~25 lines of genuine PIPELINE-CHOICE logic, which is exactly
     the dispatcher's job — pipeline internals still live in apply_api/apply_cli.
+    Raised to 300 for the `--manual` flag (docs/STACK_PRESCREEN_PLAN.md M2,
+    2026-08-24): ONE keyword threaded onto four existing pipeline calls plus a
+    tenth element on the argv tuple — no new logic, but the formatter explodes
+    every touched call into its own block. The companion test below is what
+    actually guards "no pipeline logic here"; this one only guards bulk.
     """
     here = Path(__file__).parent.parent / "apply_agent.py"
     lines = here.read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 255, (
-        f"apply_agent.py has {len(lines)} lines — expected ≤ 255 (thin dispatcher guard)"
+    assert len(lines) <= 300, (
+        f"apply_agent.py has {len(lines)} lines — expected ≤ 300 (thin dispatcher guard)"
     )
 
 
@@ -104,6 +109,7 @@ def test_main_paste_text_with_cli_still_uses_api(monkeypatch) -> None:
         jobleads_company="",
         jobleads_title="",
         permalink="",
+        is_manual=False,
     ):
         api_calls.append((url, paste_text))
 
@@ -134,6 +140,7 @@ def test_main_paste_text_without_cli_uses_api(monkeypatch) -> None:
         jobleads_company="",
         jobleads_title="",
         permalink="",
+        is_manual=False,
     ):
         api_calls.append((url, paste_text))
 
@@ -172,7 +179,17 @@ def test_main_force_cli_calls_main_cli_directly(monkeypatch) -> None:
     """--cli flag must send directly to main_cli without checking CLI availability."""
     cli_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
+    def fake_main_cli(
+        url,
+        *,
+        skip_dedup=False,
+        full_mode=False,
+        paste_text="",
+        permalink="",
+        is_manual=False,
+        jobleads_company="",
+        jobleads_title="",
+    ):
         cli_calls.append(url)
 
     monkeypatch.setattr("apply_agent.main_cli", fake_main_cli)
@@ -201,6 +218,7 @@ def test_main_no_cli_calls_main_api(monkeypatch) -> None:
         jobleads_company="",
         jobleads_title="",
         permalink="",
+        is_manual=False,
     ):
         api_calls.append(url)
 
@@ -241,7 +259,17 @@ def test_main_cli_failure_falls_back_to_api(monkeypatch) -> None:
 
     api_calls = []
 
-    def fake_main_cli(url, *, skip_dedup=False, full_mode=False, paste_text="", permalink=""):
+    def fake_main_cli(
+        url,
+        *,
+        skip_dedup=False,
+        full_mode=False,
+        paste_text="",
+        permalink="",
+        is_manual=False,
+        jobleads_company="",
+        jobleads_title="",
+    ):
         raise ApplyError("CLI failed")
 
     def fake_main_api(
@@ -253,6 +281,7 @@ def test_main_cli_failure_falls_back_to_api(monkeypatch) -> None:
         jobleads_company="",
         jobleads_title="",
         permalink="",
+        is_manual=False,
     ):
         api_calls.append(url)
 
@@ -284,11 +313,22 @@ def test_parse_apply_cli_argv_stays_in_apply_agent() -> None:
 def test_parse_apply_cli_argv_force_and_full() -> None:
     from apply_agent import parse_apply_cli_argv
 
-    url, force_cli, force, full, co, ti, paste_file, notify_start, permalink = parse_apply_cli_argv(
-        ["apply_agent.py", "https://example.com/j/1", "--force", "--full"]
-    )
+    (
+        url,
+        force_cli,
+        force,
+        full,
+        co,
+        ti,
+        paste_file,
+        notify_start,
+        permalink,
+        is_manual,
+    ) = parse_apply_cli_argv(["apply_agent.py", "https://example.com/j/1", "--force", "--full"])
     assert url == "https://example.com/j/1"
     assert force is True
     assert full is True
     assert force_cli is False
     assert permalink == ""
+    # --force is not --manual: it bypasses every gate, not just the stack ones.
+    assert is_manual is False
