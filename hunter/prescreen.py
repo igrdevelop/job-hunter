@@ -207,11 +207,22 @@ def should_skip(verdict: PrescreenVerdict, *, min_confidence: float) -> bool:
 
 
 def assess_stack(job_text: str, *, title: str = "", max_chars: int = 20000) -> PrescreenVerdict:
-    """One cheap-model call describing the posting's stack. Never raises.
+    """One cheap-model call describing the posting's stack.
 
-    Returns a verdict with `ok=False` when the call failed, the response was
-    malformed, or the evidence quote was not verbatim — in every one of those
-    cases the caller carries on exactly as if the pre-screen did not exist.
+    Returns a verdict with `ok=False` when the response was malformed or the
+    evidence quote was not verbatim — the caller then carries on exactly as if
+    the pre-screen did not exist.
+
+    A failing CALL, though, RE-RAISES. It would be easy to swallow it here and
+    return an empty verdict, and that is what this did first — but then
+    `best_effort("apply.prescreen")` around the caller could never see anything,
+    and a permanently dead pre-screen (revoked key, CLI logged out, model
+    retired) would degrade silently forever while the plan's own Risks table
+    claimed the wrapper was the mitigation. CLAUDE.md states the rule directly:
+    a block that already returns None/False on error re-raises from its except
+    clause so the failure still reaches best_effort() for counting. Direct
+    callers outside the pipeline (tools/prescreen_calibrate.py) own their own
+    try/except.
     """
     text = (job_text or "").strip()
     if len(text) < 200:
@@ -234,8 +245,8 @@ def assess_stack(job_text: str, *, title: str = "", max_chars: int = 20000) -> P
             api_key=JUDGE_API_KEY,
             max_tokens=512,
         )
-    except Exception as e:  # noqa: BLE001 — best-effort, never fatal
-        print(f"[prescreen] call failed (skipping): {e}")
-        return PrescreenVerdict()
+    except Exception as e:  # noqa: BLE001 — logged here, counted by the caller
+        print(f"[prescreen] call failed: {e}")
+        raise
 
     return parse_verdict(raw, text)

@@ -93,6 +93,8 @@ def main(
             paste_text=paste_text,
             permalink=permalink,
             is_manual=is_manual,
+            jobleads_company=jobleads_company,
+            jobleads_title=jobleads_title,
         )
         _maybe_run_shadow(folder, full=full)
         return
@@ -126,6 +128,8 @@ def main(
                     paste_text=paste_text,
                     permalink=permalink,
                     is_manual=is_manual,
+                    jobleads_company=jobleads_company,
+                    jobleads_title=jobleads_title,
                 )
             except (ApplyError, SystemExit) as cli_err:
                 print(f"[apply_agent] CLI fallback failed too ({cli_err}) — reporting outage")
@@ -143,6 +147,8 @@ def main(
                 paste_text=paste_text,
                 permalink=permalink,
                 is_manual=is_manual,
+                jobleads_company=jobleads_company,
+                jobleads_title=jobleads_title,
             )
         except (ApplyError, SystemExit) as e:
             print(f"[apply_agent] CLI failed and no API key available ({e})")

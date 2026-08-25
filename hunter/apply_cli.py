@@ -154,6 +154,8 @@ def main_cli(
     paste_text: str = "",
     permalink: str = "",
     is_manual: bool = False,
+    jobleads_company: str = "",
+    jobleads_title: str = "",
 ) -> Path | None:
     """CLI pipeline: pre-fetch job text → run `claude -p /apply` → post-process.
 
@@ -320,6 +322,8 @@ def main_cli(
         if run_prescreen(
             job_text,
             url,
+            title=jobleads_title,
+            company=jobleads_company,
             is_force_override=skip_dedup,
             is_manual=is_manual,
         ):
@@ -416,6 +420,15 @@ def main_cli(
                 print(f"[apply_agent] Warning: could not save job_posting.txt: {e}")
 
         # Post-process content.json written by Claude: React-only skip + CL review
+        # Bound up front: the abort at the bottom of this function reads it, and
+        # a folder that exists WITHOUT a content.json is a reachable state (the
+        # skill mkdir'd and died, or the subprocess timed out after the folder
+        # appeared -- see the new_folder_on_timeout branch above). Leaving it to
+        # the `if` below made that path raise UnboundLocalError, which escapes
+        # apply_agent.main's `except (ApplyError, SystemExit)` entirely: no
+        # Telegram message, no row settled, and the empty folder shipped by the
+        # backfills half an hour later -- the exact incident this branch closes.
+        _cli_content: dict | None = None
         content_json_path = folder_path / "content.json"
         if content_json_path.exists():
             try:
@@ -921,7 +934,7 @@ def main_cli(
                     f"🔗 {url}\n"
                     "The tracker row was settled; re-run with /force to try again."
                 ),
-                content=_cli_content if isinstance(_cli_content, dict) else None,
+                content=_cli_content if isinstance(_cli_content, dict) else None,  # may be None
             )
             print("\n[apply_agent] ABORT: folder created but no .docx/.pdf files found.")
             return None

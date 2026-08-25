@@ -36,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from hunter.config import APPLICATIONS_DIR  # noqa: E402
-from hunter.prescreen import assess_stack  # noqa: E402
+from hunter.prescreen import PrescreenVerdict, assess_stack  # noqa: E402
 from hunter.sent_parse import classify  # noqa: E402
 
 # The seven August postings that reached generation on a React stack. Named
@@ -112,7 +112,14 @@ def main() -> int:
 
     results = []
     for i, row in enumerate(corpus, 1):
-        verdict = assess_stack(row["job_text"], title=row.get("title") or "")
+        # assess_stack re-raises a failed call so the pipeline's best_effort
+        # wrapper can count it; a calibration run owns its own swallow and
+        # keeps going, so one dead call costs one row and not the whole pass.
+        try:
+            verdict = assess_stack(row["job_text"], title=row.get("title") or "")
+        except Exception as e:  # noqa: BLE001 — one bad row must not end the run
+            print(f"  [{i}/{len(corpus)}] {row.get('company')}: call failed: {e}")
+            verdict = PrescreenVerdict()
         results.append(
             {
                 "company": row.get("company"),

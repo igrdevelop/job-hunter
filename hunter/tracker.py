@@ -348,17 +348,41 @@ def get_known_company_titles(*, exclude_url: str = "", exclude_folder: str = "")
     """
     norm = normalize_url(exclude_url) if exclude_url else ""
     folder = str(exclude_folder) if exclude_folder else ""
+
     with get_db(DB_PATH) as conn:
+        # Exclude exactly ONE row -- the newest match, which is the row this run
+        # just wrote. Dropping every row that shares the folder string is not
+        # safe: `.claude/commands/apply.md` tells the skill to name the folder
+        # "{date}/{CompanyName}" with no _2 collision suffix (that logic lives in
+        # compute_output_folder, which only the API path uses), so two CLI
+        # applications for the same company on the same day carry an IDENTICAL
+        # folder. Excluding both would hide the earlier one from the gate and let
+        # a genuine duplicate through -- which is the Comarch case the gate was
+        # added for on 2026-08-20: one requisition arriving via LinkedIn and via
+        # pracuj.pl in the same day's hunts.
+        excluded_rowid = None
+        if norm or folder:
+            clauses, params = [], []
+            if norm:
+                clauses.append("url_norm=?")
+                params.append(norm)
+            if folder:
+                clauses.append("folder=?")
+                params.append(folder)
+            params.append(_uid())
+            own = conn.execute(
+                f"SELECT rowid FROM applications WHERE ({' OR '.join(clauses)}) "  # noqa: S608
+                "AND user_id=? ORDER BY rowid DESC LIMIT 1",
+                params,
+            ).fetchone()
+            excluded_rowid = own["rowid"] if own else None
+
         rows = conn.execute(
-            "SELECT company, title, url_norm, folder FROM applications "
+            "SELECT rowid, company, title FROM applications "
             "WHERE company != '' AND title != '' AND user_id=?",
             (_uid(),),
         ).fetchall()
-    return {
-        dedup_key(r["company"], r["title"])
-        for r in rows
-        if not (norm and r["url_norm"] == norm) and not (folder and r["folder"] == folder)
-    }
+    return {dedup_key(r["company"], r["title"]) for r in rows if r["rowid"] != excluded_rowid}
 
 
 def get_sent_companies() -> set[str]:

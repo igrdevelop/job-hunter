@@ -1395,8 +1395,7 @@ the stage just rejected. Measured on the live corpus: 6 of 14 `main_cli` runs in
 the retained window shipped a row carrying the CLI skill's SELF-reported ATS score
 (96%, 96%, 78%...) with no independent verdict and no refine round at all -- the
 2026-08-24 Interia incident plus 5 more. All four sites now call
-`abort_after_generation(folder, url, reason=..., telegram_text=..., company=...,
-title=...)`: drop `*.pdf`/`*.docx`, convert the row in place via
+`abort_after_generation(folder, url, reason=..., telegram_text=..., content=...)`: drop `*.pdf`/`*.docx`, convert the row in place via
 `tracker.convert_own_applied_row` (keeps id + `sheets_row`, sets
 `sheets_dirty=1`), notify -- and, when there was no applied row to convert,
 write the terminal SKIP row itself so no call site has to remember to.

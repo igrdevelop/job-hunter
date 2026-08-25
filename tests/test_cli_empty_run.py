@@ -201,3 +201,39 @@ class TestNoBespokeOutcomeSurvives:
         from hunter.apply_failures_log import LOGGED_OUTCOMES
 
         assert "cli_no_output" not in LOGGED_OUTCOMES
+
+
+class TestFolderWithoutContentJson:
+    """The state that made the abort crash instead of settling anything.
+
+    A folder can exist with no content.json at all: the skill mkdir'd and died,
+    or the subprocess timed out after the folder appeared (main_cli handles that
+    shape explicitly). `_cli_content` is bound inside `if content_json_path
+    .exists()`, so the abort at the bottom of the function referenced an unbound
+    name and raised UnboundLocalError — which escapes apply_agent.main's
+    `except (ApplyError, SystemExit)` entirely: no Telegram message, no row
+    settled, and the empty folder shipped by the backfills half an hour later.
+    """
+
+    URL = "https://example.com/jobs/no-content-json"
+
+    def test_it_settles_instead_of_crashing(self, tracker_db, tmp_path, monkeypatch):
+        _env(
+            monkeypatch,
+            tmp_path,
+            folder_with={"job_posting.txt": "posting"},
+            row_url=self.URL,
+        )
+        from hunter.apply_cli import main_cli
+
+        # No UnboundLocalError, no ApplyError — a clean settled abort.
+        assert main_cli(self.URL) is None
+
+        rows = tracker.lookup_url(self.URL)
+        assert rows and rows[0]["ats"].strip().upper() == "SKIP"
+
+    def test_it_settles_even_with_no_row_to_convert(self, tracker_db, tmp_path, monkeypatch):
+        _env(monkeypatch, tmp_path, folder_with={"job_posting.txt": "posting"})
+        from hunter.apply_cli import main_cli
+
+        assert main_cli(self.URL) is None

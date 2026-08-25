@@ -100,15 +100,23 @@ class TestCallBoundary:
         assert assess_stack("Frontend dev wanted.").ok is False
         assert called == [], "no model call for text there is nothing to read in"
 
-    def test_a_failing_call_is_swallowed(self, monkeypatch):
+    def test_a_failing_call_re_raises_for_best_effort(self, monkeypatch):
+        # Swallowing it here would make `best_effort("apply.prescreen")` around
+        # the caller decorative: a permanently dead pre-screen (revoked key, CLI
+        # logged out, model retired) would degrade silently forever while the
+        # plan claimed the wrapper was the mitigation. CLAUDE.md states the rule
+        # — re-raise from the except clause so the failure reaches best_effort.
+        # The vacancy is still never blocked; run_prescreen returns False (see
+        # TestPipelineStage::test_a_broken_call_lets_the_vacancy_through).
+        import pytest
+
         def _boom(**_kw):
             raise RuntimeError("provider down")
 
         monkeypatch.setattr("llm_client.call_llm", _boom)
 
-        v = assess_stack(POSTING)
-        assert isinstance(v, PrescreenVerdict)
-        assert v.ok is False, "an unavailable pre-screen must never block a vacancy"
+        with pytest.raises(RuntimeError):
+            assess_stack(POSTING)
 
     def test_the_title_reaches_the_model(self, monkeypatch):
         seen = {}

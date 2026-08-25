@@ -566,8 +566,9 @@ def run_prescreen(
     (docs/STACK_PRESCREEN_PLAN.md M2).
 
     `PRESCREEN_MODE` stages the rollout — `report` logs, `warn` also notifies,
-    `skip` acts. It ships at `report`: the calibration is offline evidence, and a
-    week of live verdicts next to real outcomes is what earns the flip.
+    `skip` acts. It ships at `warn`: a Telegram line per react-first posting IS
+    the week of observation that earns the flip to `skip`, where `report` would
+    pay for the call and show the owner nothing.
     """
     from hunter.config import (
         PRESCREEN_ENABLED,

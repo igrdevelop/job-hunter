@@ -289,3 +289,83 @@ class TestManualFlagIsAnExplicitOptIn:
 
         src = inspect.getsource(apply_runner._run_apply_agent)
         assert "is_manual=True" in src
+
+
+class TestDedupExclusionTakesExactlyOneRow:
+    """Excluding by folder must not hide a genuine duplicate.
+
+    `.claude/commands/apply.md` tells the skill to name the folder
+    "{date}/{CompanyName}" with no `_2` collision suffix — that logic lives in
+    compute_output_folder, which only the API path uses. So two CLI applications
+    for the same company on the same day carry an IDENTICAL folder string, and
+    dropping every row that matches it would hide the earlier one from the
+    company+title gate. That is exactly the Comarch case the gate was added for
+    on 2026-08-20: one requisition arriving via LinkedIn and via pracuj.pl in the
+    same day's hunts.
+    """
+
+    FOLDER = "/app/Applications/2026-08-25/Comarch"
+
+    def _two_rows_one_folder(self):
+        tracker.add_applied(
+            {
+                "company_name": "Comarch",
+                "job_title": "Senior Angular Developer",
+                "apply_url": "https://linkedin.com/jobs/view/1",
+                "stack": "Angular",
+                "ats_score": "94",
+                "output_folder": self.FOLDER,
+            }
+        )
+        tracker.add_applied(
+            {
+                "company_name": "Comarch",
+                "job_title": "Senior Angular Developer",
+                "apply_url": "https://pracuj.pl/oferta/2",
+                "stack": "Angular",
+                "ats_score": "96",
+                "output_folder": self.FOLDER,
+            }
+        )
+
+    def test_the_earlier_duplicate_stays_visible(self, tracker_db):
+        self._two_rows_one_folder()
+        key = tracker.dedup_key("Comarch", "Senior Angular Developer")
+
+        known = tracker.get_known_company_titles(
+            exclude_url="https://pracuj.pl/oferta/2", exclude_folder=self.FOLDER
+        )
+
+        assert key in known, (
+            "the run's own row is excluded, but the earlier application sharing "
+            "its folder must still be seen — otherwise the gate lets a real "
+            "duplicate through"
+        )
+
+    def test_the_runs_own_row_is_still_excluded(self, tracker_db):
+        # Single row: the gate must not match itself (the bug the golden CLI
+        # suite found on its first run).
+        tracker.add_applied(
+            {
+                "company_name": "Solo Corp",
+                "job_title": "Frontend Developer",
+                "apply_url": "https://example.com/only",
+                "stack": "Angular",
+                "ats_score": "95",
+                "output_folder": "/app/Applications/2026-08-25/SoloCorp",
+            }
+        )
+        key = tracker.dedup_key("Solo Corp", "Frontend Developer")
+
+        known = tracker.get_known_company_titles(
+            exclude_url="https://example.com/only",
+            exclude_folder="/app/Applications/2026-08-25/SoloCorp",
+        )
+
+        assert key not in known
+
+    def test_no_exclusion_sees_everything(self, tracker_db):
+        self._two_rows_one_folder()
+        assert tracker.dedup_key("Comarch", "Senior Angular Developer") in (
+            tracker.get_known_company_titles()
+        )

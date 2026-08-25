@@ -180,7 +180,15 @@ def test_main_force_cli_calls_main_cli_directly(monkeypatch) -> None:
     cli_calls = []
 
     def fake_main_cli(
-        url, *, skip_dedup=False, full_mode=False, paste_text="", permalink="", is_manual=False
+        url,
+        *,
+        skip_dedup=False,
+        full_mode=False,
+        paste_text="",
+        permalink="",
+        is_manual=False,
+        jobleads_company="",
+        jobleads_title="",
     ):
         cli_calls.append(url)
 
@@ -252,7 +260,15 @@ def test_main_cli_failure_falls_back_to_api(monkeypatch) -> None:
     api_calls = []
 
     def fake_main_cli(
-        url, *, skip_dedup=False, full_mode=False, paste_text="", permalink="", is_manual=False
+        url,
+        *,
+        skip_dedup=False,
+        full_mode=False,
+        paste_text="",
+        permalink="",
+        is_manual=False,
+        jobleads_company="",
+        jobleads_title="",
     ):
         raise ApplyError("CLI failed")
 
