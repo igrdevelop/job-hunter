@@ -70,8 +70,8 @@ RED LINES (never cross):
   | # | company (exact) | title (exact) | period |
   |---|----------------|---------------|--------|
   | 1 | Alten Poland | Frontend Developer (Angular, part-time contract) | Apr 2026 - May 2026 |
-  | 2 | Fairmarkit | Senior Frontend Developer (Angular) | Jun 2025 - Mar 2026 |
-  | 3 | Venture Labs | Senior Frontend Developer (Angular) | Jul 2023 - Apr 2025 |
+  | 2 | Fairmarkit | Senior Frontend Developer (Angular) | Sep 2025 - Feb 2026 |
+  | 3 | Venture Labs | Senior Frontend Developer (Angular) | Jul 2023 - May 2025 |
   | 4 | SII | Senior Frontend Developer (Angular) | Nov 2022 - Jul 2023 |
   | 5 | Altoros | Senior Frontend Developer | Apr 2018 - Nov 2022 |
   | 6 | SolbegSoft | Frontend Developer (Angular) | Apr 2016 - Apr 2018 |
@@ -248,7 +248,7 @@ Return ONLY a valid JSON object with this exact structure:
       {
         "title": "Senior Frontend Developer (Angular)",
         "company": "Fairmarkit",
-        "period": "Jun 2025 - March 2026",
+        "period": "Sep 2025 - Feb 2026",
         "subtitle": "AI-powered Enterprise Procurement Platform | USA (Global)",
         "bullets": ["reframed bullet 1", "reframed bullet 2", "..."],
         "stack_line": "Stack: Angular 21, TypeScript, Signals, RxJS, NgRx, Nx Monorepo, AG Grid, SCSS."
