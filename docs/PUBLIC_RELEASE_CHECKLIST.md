@@ -4,7 +4,7 @@ Steps to flip `igrdevelop/job-hunter` from private to public. Items 1–2 are
 already done on the branch; **item 3 (history scrub) is manual and destructive
 — read it fully before running anything.**
 
-## 1. Working tree is clean of personal data ✅ (done)
+## 1. Working tree is clean of personal data ⚠️ (partially done — NOT clean)
 
 - `prompts/candidate_profile.md`, `prompts/base_cv_*.md`, `prompts/candidate/`,
   `prompts/examples/` — untracked + gitignored; `.example` templates +
@@ -14,6 +14,22 @@ already done on the branch; **item 3 (history scrub) is manual and destructive
   longer inside the image).
 - Secrets were never tracked (verified: no `.env`, tokens, tracker data in
   `git ls-files`).
+- **Still tracked and NOT clean:** `prompts/generation_rules.md` (41 of 274
+  lines — a 7-employer table with exact periods, per-employer backend rules,
+  university, course list, the candidate's language set) and
+  `prompts/judge_rules.md` (real client names: Intel, Atruvia AG, "300+ German
+  banks"). Both pipelines read `generation_rules.md` as their single source of
+  generation rules, so today neither a second user nor the owner can change
+  that history without editing a tracked repo file — even though the same
+  facts already live in `candidate/candidate.yaml`. Found and detailed in
+  `docs/GENERATION_ARCHITECTURE_ANALYSIS.md` §5.2-§5.3; the fix (render the
+  personal block into the prompt from `candidate.yaml` at runtime, the way
+  `hunter/verdict_refine.py:60-67` already does for its own prompt blocks) is
+  wave 2 of that document's §6 and is not done yet.
+  `tests/test_handoff_readiness.py` now scans `prompts/*.md` +
+  `.claude/commands/*.md` (previously `*.py` only, which is why this went
+  unnoticed) and fails on this exact file pair via an explicit, shrinking
+  allowlist — see the test docstring.
 
 ## 2. Repo presentation ✅ (done)
 
