@@ -358,6 +358,154 @@ def test_add_manual_jobleads_pending_replaces_placeholder(tracker_db):
     assert [r["ats_status"] for r in rows] == ["MANUAL"]
 
 
+def test_add_skipped_still_writes_when_a_different_url_shares_company_title(tracker_db):
+    """Real incident 2026-08-27: AVENGA "Senior Angular Developer" was
+    re-posted on nofluffjobs under a NEW url; the Step 4.55 company+title
+    dedup gate correctly matched it against an unrelated April application
+    (a DIFFERENT url) and decided to SKIP the new one. `add_skipped` must
+    still write a terminal row for the NEW url and clear ITS OWN
+    PENDING/IN_PROGRESS placeholder — a match on some OTHER url's terminal
+    row must never suppress that. Before the fix, `_is_known_terminal`
+    checked company+title globally, so this write silently no-op'd: the new
+    url's IN_PROGRESS placeholder was never cleared, it bounced back to
+    PENDING on the next stale-claim sweep, got re-claimed, hit the same
+    dedup gate, and repeated forever without ever resolving.
+    """
+    from hunter import tracker
+
+    donor = _job(1, url="https://nofluffjobs.com/job/avenga-remote", company="Avenga")
+    tracker.add_applied(
+        {
+            "company_name": donor.company,
+            "job_title": donor.title,
+            "apply_url": donor.url,
+            "ats_score": "99",
+            "output_folder": "",
+        }
+    )
+
+    repost = _job(
+        2,
+        url="https://nofluffjobs.com/job/avenga-remote-1",
+        # The real incident's Step 4.55 caller builds this Job from the
+        # LLM-EXTRACTED company_name ("Avenga"), not the raw agency-wrapped
+        # listing string ("AVENGA (Agencja Pracy, nr KRAZ: 8448)") — the LLM
+        # normalizes it away, which is exactly why the gate's own dedup_key
+        # matched the donor even though the HUNT-TIME listing dedup (which
+        # only ever sees the raw string) did not.
+        company=donor.company,
+        title=donor.title,  # same dedup_key as the donor, different url
+    )
+    tracker.add_pending(repost)
+    tracker.claim_pending()  # -> IN_PROGRESS, as the worker would
+
+    result = tracker.add_skipped(repost)
+    assert result is not None  # must NOT silently no-op
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(repost.url),),
+        ).fetchall()
+    assert [r["ats_status"] for r in rows] == ["SKIP"]  # placeholder replaced, not stranded
+    # The donor row is untouched.
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        donor_rows = conn.execute(
+            "SELECT ats_status FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(donor.url),),
+        ).fetchall()
+    assert [r["ats_status"] for r in donor_rows] == ["99%"]
+
+
+def test_add_expired_still_writes_when_a_different_url_shares_company_title(tracker_db):
+    from hunter import tracker
+
+    donor = _job(1, url="https://example.com/job/donor", company="Acme")
+    tracker.add_applied(
+        {
+            "company_name": donor.company,
+            "job_title": donor.title,
+            "apply_url": donor.url,
+            "ats_score": "95",
+            "output_folder": "",
+        }
+    )
+
+    repost = _job(2, url="https://example.com/job/repost", company="Acme", title=donor.title)
+    tracker.add_pending(repost)
+    tracker.claim_pending()
+
+    tracker.add_expired(repost.url, repost.company, repost.title)
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status, sent FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(repost.url),),
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["ats_status"] == "SKIP"
+    assert rows[0]["sent"] == "EXPIRED"
+
+
+def test_add_failed_still_writes_when_a_different_url_shares_company_title(tracker_db):
+    from hunter import tracker
+
+    donor = _job(1, url="https://example.com/job/donor", company="Acme")
+    tracker.add_applied(
+        {
+            "company_name": donor.company,
+            "job_title": donor.title,
+            "apply_url": donor.url,
+            "ats_score": "95",
+            "output_folder": "",
+        }
+    )
+
+    repost = _job(2, url="https://example.com/job/repost", company="Acme", title=donor.title)
+    tracker.add_pending(repost)
+    tracker.claim_pending()
+
+    tracker.add_failed(repost)
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(repost.url),),
+        ).fetchall()
+    assert [r["ats_status"] for r in rows] == ["FAIL"]
+
+
+def test_add_react_skipped_still_writes_when_a_different_url_shares_company_title(tracker_db):
+    from hunter import tracker
+
+    donor = _job(1, url="https://example.com/job/donor", company="Acme")
+    tracker.add_applied(
+        {
+            "company_name": donor.company,
+            "job_title": donor.title,
+            "apply_url": donor.url,
+            "ats_score": "95",
+            "output_folder": "",
+        }
+    )
+
+    repost = _job(2, url="https://example.com/job/repost", company="Acme", title=donor.title)
+    tracker.add_pending(repost)
+    tracker.claim_pending()
+
+    tracker.add_react_skipped(
+        {"company_name": repost.company, "job_title": repost.title, "stack": "React"},
+        repost.url,
+    )
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT ats_status FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(repost.url),),
+        ).fetchall()
+    assert [r["ats_status"] for r in rows] == ["SKIP"]
+
+
 def test_add_failed_still_blocks_on_genuine_existing_success(tracker_db):
     """A real terminal row (not a placeholder) must still block, same as before."""
     from hunter import tracker

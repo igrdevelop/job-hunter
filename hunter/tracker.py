@@ -446,14 +446,37 @@ def _is_known_terminal(url: str, company: str = "", title: str = "") -> bool:
     """Same contract as is_known(), but a PENDING/IN_PROGRESS placeholder for
     THIS exact job does not count (M1, docs/HUNT_APPLY_SPLIT_PLAN.md).
 
-    Used internally by the terminal-write functions (add_failed, add_skipped,
-    add_expired, add_react_skipped, add_manual_jobleads_pending) instead of
-    is_known(): in queue mode the row already exists as PENDING/IN_PROGRESS
-    by the time the apply pipeline resolves it, and that placeholder must not
-    block the pipeline from writing its own outcome onto the same URL. With
-    the queue disabled (APPLY_QUEUE_ENABLED=false, the default) no PENDING/
-    IN_PROGRESS row is ever created, so this behaves identically to
-    is_known() — zero behavior change for the non-queue path.
+    **Call this URL-ONLY (omit company/title) from every terminal-write
+    function** (add_failed, add_skipped, add_expired, add_react_skipped —
+    add_manual_jobleads_pending already does its own URL-only check). Passing
+    company/title there is a bug, not a stricter guard: the company+title
+    branch matches ANY row anywhere sharing dedup_key, including a
+    COMPLETELY DIFFERENT url's terminal row (e.g. the same employer re-posted
+    under a new URL). A caller reaching add_skipped/etc. has ALREADY decided
+    THIS url needs its own terminal write — a match on some OTHER url must
+    not suppress it, or THIS url's own PENDING/IN_PROGRESS placeholder is
+    never cleared and the vacancy claims, fails the same company+title dedup
+    gate, and gets released back to the queue forever (real incident
+    2026-08-27: AVENGA "Senior Angular Developer" re-posted under a new
+    nofluffjobs URL matched an unrelated April application by company+title,
+    the Step 4.55 dedup gate correctly decided to SKIP it, but add_skipped's
+    then-company+title-aware guard silently no-op'd instead of writing the
+    SKIP row for the NEW url — so its own placeholder bounced between
+    PENDING and IN_PROGRESS every ~60 min, burning a full CLI generation
+    attempt each time, never resolving, forever). The URL-only check is
+    still exactly what queue mode needs: it lets a write proceed onto THIS
+    url's own PENDING/IN_PROGRESS placeholder while still refusing a
+    duplicate write when THIS SAME url already carries a genuine terminal
+    row.
+
+    Company+title matching is reserved for READ-ONLY "has this vacancy
+    already been decided, by any URL" checks (e.g.
+    apply_worker._resolve_outcome's "ok" branch, deciding whether a
+    successful exit deserves delivery) — never for gating a write.
+
+    With the queue disabled (APPLY_QUEUE_ENABLED=false, the default) no
+    PENDING/IN_PROGRESS row is ever created, so the URL branch alone behaves
+    identically to is_known() — zero behavior change for the non-queue path.
     """
     norm = normalize_url(url)
     uid = _uid()
@@ -1060,7 +1083,7 @@ def add_skipped(job: Job) -> dict | None:
     """
     if _convert_own_fail_row(job.url, sent="—"):
         return None
-    if _is_known_terminal(job.url, job.company, job.title):
+    if _is_known_terminal(job.url):
         return None
 
     row_id = _new_row_id()
@@ -1100,7 +1123,7 @@ def add_react_skipped(content: dict, url: str) -> None:
     """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered."""
     company = (content.get("company_name") or "").strip()
     title = (content.get("job_title") or "").strip()
-    if _is_known_terminal(url, company, title):
+    if _is_known_terminal(url):
         return
 
     norm = normalize_url(url) if url else ""
@@ -1259,7 +1282,7 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
     """
     if _convert_own_fail_row(url, sent="EXPIRED"):
         return
-    if _is_known_terminal(url, company, title):
+    if _is_known_terminal(url):
         return
 
     norm = normalize_url(url) if url else ""
@@ -1290,7 +1313,7 @@ def add_failed(job: Job) -> None:
     row blocks nothing. On a successful retry the row is deleted and replaced
     by a normal applied row anyway (delete_failed_row).
     """
-    if _is_known_terminal(job.url, job.company, job.title):
+    if _is_known_terminal(job.url):
         return
 
     norm = normalize_url(job.url)
