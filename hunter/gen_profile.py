@@ -111,6 +111,45 @@ def builtin_defaults() -> dict[str, Any]:
         "generation": {
             "skip_pl_for_en": True,  # config GEN_SKIP_PL_FOR_EN
         },
+        "document": {
+            # generate_docs.py::set_font's "name" default.
+            "font": "Calibri",
+            # generate_docs.py::set_font's per-element "size" literals, grouped
+            # by role: 16 (candidate name), 13 (headline), 11 (section
+            # headings + body text — summary/skills/experience/education/
+            # courses/cover letter), 10 (subtitle/contact/period/stack line).
+            # The GDPR clause's own 7.5pt is deliberately NOT here — it isn't
+            # one of the four roles the rest of the document uses.
+            "sizes": {"name": 16.0, "headline": 13.0, "body": 11.0, "small": 10.0},
+            # generate_docs.py::set_margins's defaults.
+            "margins_cm": {"top": 0.8, "bottom": 0.5, "left": 1.0, "right": 1.0},
+            # Section HEADING LABELS, by fixed structural position — position 0
+            # always renders the summary content, 1 skills, 2 experience, 3
+            # education, 4 courses. Only the label text is configurable, not
+            # which content renders where (docs/GENERATION_ARCHITECTURE_ANALYSIS.md
+            # §6 explicitly rejects a YAML DSL over pipeline/document ORDER).
+            # WHY position 2 says "EXPERIENCE", never "WORK EXPERIENCE": Taleo
+            # and a handful of legacy ATS parsers classify "WORK EXPERIENCE" as
+            # "Other" and silently drop the entire parsed experience array —
+            # this is a real, measured ATS-parsing risk, not a style choice.
+            # A user who renames it takes that risk knowingly.
+            "sections": ["SUMMARY", "SKILLS", "EXPERIENCE", "EDUCATION", "ADDITIONAL COURSES"],
+            # Skills sub-sections: `key` looks up content.json's resume_en.
+            # skills[key]; `label` is the rendered prefix ("Frontend: ...").
+            # Unlike `sections` above, order/membership here IS meaningful and
+            # safe to change — each entry is keyed by name, not position, and
+            # a key with no matching content just renders nothing (see
+            # generate_docs.py::build_resume's `if value:` guard).
+            "skill_categories": [
+                {"key": "frontend", "label": "Frontend"},
+                {"key": "tools", "label": "Tools"},
+                {"key": "methodologies", "label": "Methodologies"},
+                {"key": "languages", "label": "Languages"},
+            ],
+            # GDPR/RODO consent clause at the bottom of the CV body. Env:
+            # CV_GDPR_CLAUSE. both = PL+EN CVs, pl = PL CV only, none = off.
+            "gdpr_clause": "both",
+        },
     }
 
 
@@ -143,10 +182,142 @@ _KEY_SPECS: dict[str, dict[str, Any]] = {
 }
 
 # Sections handled by a dedicated merge function instead of the generic
-# flat-leaf validator above (PR 2 adds "document": heterogeneous sub-shapes —
-# dicts, lists, list-of-dict — that a single {type, min, max, choices} spec
-# can't describe). Populated by the section itself; empty until PR 2.
+# flat-leaf validator above ("document": heterogeneous sub-shapes — dicts,
+# lists, list-of-dict — that a single {type, min, max, choices} spec can't
+# describe). Populated below by _merge_document_section.
 _SECTION_MERGERS: dict[str, Callable[[dict[str, Any], Any, str], None]] = {}
+
+_DOCUMENT_SIZE_KEYS = ("name", "headline", "body", "small")
+_DOCUMENT_MARGIN_KEYS = ("top", "bottom", "left", "right")
+_DOCUMENT_GDPR_CHOICES = ("both", "pl", "none")
+
+
+def _validate_positive_number(value: Any, *, dotpath: str, source: str) -> tuple[bool, float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        logger.warning(
+            "generation profile %s: %s must be a positive number, got %r — kept default",
+            source,
+            dotpath,
+            value,
+        )
+        return False, 0.0
+    return True, float(value)
+
+
+def _is_valid_skill_category(v: Any) -> bool:
+    if not isinstance(v, dict):
+        return False
+    key = v.get("key")
+    return isinstance(key, str) and bool(key.strip()) and isinstance(v.get("label"), str)
+
+
+def _merge_document_section(profile: dict[str, Any], value: Any, source: str) -> None:
+    """Merge the "document" section — per-field validation with a per-field
+    (not whole-section) fallback to the builtin default, since a typo in one
+    margin shouldn't discard an otherwise-valid font override."""
+    doc = profile["document"]
+    if not isinstance(value, dict):
+        logger.warning(
+            "generation profile %s: section 'document' must be a mapping — ignored",
+            source,
+        )
+        return
+
+    for key, val in value.items():
+        dotpath = f"document.{key}"
+        if key == "font":
+            if isinstance(val, str) and val.strip():
+                doc["font"] = val.strip()
+            else:
+                logger.warning(
+                    "generation profile %s: %s must be a non-empty string — kept default",
+                    source,
+                    dotpath,
+                )
+        elif key == "sizes":
+            if not isinstance(val, dict):
+                logger.warning(
+                    "generation profile %s: %s must be a mapping — kept default", source, dotpath
+                )
+                continue
+            for size_key, size_val in val.items():
+                if size_key not in _DOCUMENT_SIZE_KEYS:
+                    logger.warning(
+                        "generation profile %s: unknown key %r — ignored",
+                        source,
+                        f"{dotpath}.{size_key}",
+                    )
+                    continue
+                ok, normalized = _validate_positive_number(
+                    size_val, dotpath=f"{dotpath}.{size_key}", source=source
+                )
+                if ok:
+                    doc["sizes"][size_key] = normalized
+        elif key == "margins_cm":
+            if not isinstance(val, dict):
+                logger.warning(
+                    "generation profile %s: %s must be a mapping — kept default", source, dotpath
+                )
+                continue
+            for margin_key, margin_val in val.items():
+                if margin_key not in _DOCUMENT_MARGIN_KEYS:
+                    logger.warning(
+                        "generation profile %s: unknown key %r — ignored",
+                        source,
+                        f"{dotpath}.{margin_key}",
+                    )
+                    continue
+                if (
+                    isinstance(margin_val, bool)
+                    or not isinstance(margin_val, (int, float))
+                    or (margin_val < 0)
+                ):
+                    logger.warning(
+                        "generation profile %s: %s must be a non-negative number, got %r — "
+                        "kept default",
+                        source,
+                        f"{dotpath}.{margin_key}",
+                        margin_val,
+                    )
+                    continue
+                doc["margins_cm"][margin_key] = float(margin_val)
+        elif key == "sections":
+            if isinstance(val, list) and all(isinstance(v, str) and v.strip() for v in val):
+                doc["sections"] = list(val)
+            else:
+                logger.warning(
+                    "generation profile %s: %s must be a list of non-empty strings — kept default",
+                    source,
+                    dotpath,
+                )
+        elif key == "skill_categories":
+            if isinstance(val, list) and all(_is_valid_skill_category(v) for v in val):
+                doc["skill_categories"] = [
+                    {"key": str(v["key"]).strip(), "label": v["label"]} for v in val
+                ]
+            else:
+                logger.warning(
+                    "generation profile %s: %s must be a list of {key, label} mappings — "
+                    "kept default",
+                    source,
+                    dotpath,
+                )
+        elif key == "gdpr_clause":
+            if isinstance(val, str) and val.strip().lower() in _DOCUMENT_GDPR_CHOICES:
+                doc["gdpr_clause"] = val.strip().lower()
+            else:
+                logger.warning(
+                    "generation profile %s: %s=%r must be one of %s — kept default",
+                    source,
+                    dotpath,
+                    val,
+                    _DOCUMENT_GDPR_CHOICES,
+                )
+        else:
+            logger.warning("generation profile %s: unknown key %r — ignored", source, dotpath)
+
+
+_SECTION_MERGERS["document"] = _merge_document_section
 
 
 def _cast_bool(raw: str) -> bool:
@@ -182,6 +353,7 @@ _ENV_OVERRIDES: dict[str, tuple[str, Callable[[str], Any]]] = {
     "gates.repost_enabled": ("REPOST_GATE_ENABLED", _cast_bool),
     "gates.repost_window_days": ("REPOST_WINDOW_DAYS", _cast_int),
     "generation.skip_pl_for_en": ("GEN_SKIP_PL_FOR_EN", _cast_bool),
+    "document.gdpr_clause": ("CV_GDPR_CLAUSE", _cast_str_lower),
 }
 
 # (path, mtime_ns) -> profile, WITHOUT env overrides applied (see module

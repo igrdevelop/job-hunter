@@ -1,0 +1,414 @@
+{
+  "resume": [
+    {
+      "alignment": "CENTER (1)",
+      "runs": [
+        {
+          "text": "Jane Golden Tester",
+          "font_name": "Calibri",
+          "size_pt": 16.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": "CENTER (1)",
+      "runs": [
+        {
+          "text": "also known as JGT",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": false,
+          "italic": true
+        }
+      ]
+    },
+    {
+      "alignment": "CENTER (1)",
+      "runs": [
+        {
+          "text": "Senior Test Engineer (Angular)",
+          "font_name": "Calibri",
+          "size_pt": 13.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": "CENTER (1)",
+      "runs": [
+        {
+          "text": "jane@example.com | +1 555 0100 | Testville",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "SUMMARY",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "A concise professional summary for the golden snapshot test.",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "SKILLS",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Frontend: ",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "Angular, TypeScript, RxJS",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Tools: ",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "Git, Jest, Webpack",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Methodologies: ",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "Agile, Scrum, TDD",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Languages: ",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "English (Fluent), Polish (B2)",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "EXPERIENCE",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Senior Frontend Developer | Acme Corp",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "   01/2020 – Present",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": false,
+          "italic": true
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Enterprise Platform | Remote",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": false,
+          "italic": true
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Built feature X",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Improved performance by 30%",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Stack: Angular 17, TypeScript, RxJS",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Frontend Developer | Beta LLC",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        },
+        {
+          "text": "   06/2017 – 12/2019",
+          "font_name": "Calibri",
+          "size_pt": 10.0,
+          "bold": false,
+          "italic": true
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Shipped feature Y",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "EDUCATION",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Golden University - BSc Computer Science",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "ADDITIONAL COURSES",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": true,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Angular Advanced, TypeScript Deep Dive",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "I hereby consent to the processing of my personal data for the purposes necessary to carry out the current and future recruitment processes, in accordance with the Act of 10 May 2018 on the Protection of Personal Data (Journal of Laws 2018, item 1000) and Article 6(1)(a) of Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 (GDPR).",
+          "font_name": "Calibri",
+          "size_pt": 7.5,
+          "bold": false,
+          "italic": true
+        }
+      ]
+    }
+  ],
+  "cover_letter": [
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Dear Hiring Manager,",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "I am excited to apply.",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Sincerely,",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    },
+    {
+      "alignment": null,
+      "runs": [
+        {
+          "text": "Jane",
+          "font_name": "Calibri",
+          "size_pt": 11.0,
+          "bold": false,
+          "italic": false
+        }
+      ]
+    }
+  ],
+  "margins_cm": {
+    "top": 0.8008055555555555,
+    "bottom": 0.49918055555555557,
+    "left": 1.000125,
+    "right": 1.000125
+  }
+}

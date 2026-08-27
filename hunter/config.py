@@ -168,7 +168,7 @@ GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() i
 GEN_SKIP_PL_FOR_EN: bool = gen_profile.get("generation.skip_pl_for_en", True)
 # GDPR/RODO consent clause appended at the bottom of the CV body (not in a footer,
 # so ATS parsers still read it). "both" = PL + EN CVs, "pl" = PL CV only, "none" = off.
-CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()
+CV_GDPR_CLAUSE: str = gen_profile.get("document.gdpr_clause", "both")
 
 # ── Resilience ────────────────────────────────────────────────────────────────
 APPLY_DELAY_SEC: int = int(os.getenv("APPLY_DELAY_SEC", "30"))

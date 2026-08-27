@@ -48,8 +48,25 @@ from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from hunter import candidate
+from hunter import candidate, gen_profile
 from hunter.services.tracker_service import record_successful_apply
+
+# Fallback document-layout defaults, used when generation.yaml/gen_profile
+# don't resolve a value — kept as the doc-comment anchor for what each
+# document.* key means; see hunter.gen_profile.builtin_defaults() for the
+# authoritative copy. Read at call time (not as function-signature defaults)
+# so a profile change within the same process takes effect immediately —
+# see hunter.filters._resolve_flt's docstring for why.
+_DEFAULT_FONT = "Calibri"
+_DEFAULT_SIZES = {"name": 16.0, "headline": 13.0, "body": 11.0, "small": 10.0}
+_DEFAULT_MARGINS_CM = {"top": 0.8, "bottom": 0.5, "left": 1.0, "right": 1.0}
+_DEFAULT_SECTIONS = ["SUMMARY", "SKILLS", "EXPERIENCE", "EDUCATION", "ADDITIONAL COURSES"]
+_DEFAULT_SKILL_CATEGORIES = [
+    {"key": "frontend", "label": "Frontend"},
+    {"key": "tools", "label": "Tools"},
+    {"key": "methodologies", "label": "Methodologies"},
+    {"key": "languages", "label": "Languages"},
+]
 
 # Polish boards (e.g. Pracuj.pl) often reject uploads when the filename exceeds ~50 characters.
 MAX_ATTACHMENT_BASENAME_LEN = 50
@@ -100,7 +117,12 @@ def resume_docx_basename(stack: str, lang: str) -> str:
     return f"CV_{year}_{lang_u}{ext}"
 
 
-def set_font(run, name="Calibri", size=11, bold=False, italic=False, color=None):
+def set_font(run, name=None, size=11, bold=False, italic=False, color=None):
+    """name=None resolves document.font (generation.yaml) at call time, not
+    as a frozen function-signature default — every call site below omits
+    `name` except where a document element intentionally uses a fixed font."""
+    if name is None:
+        name = gen_profile.get("document.font", _DEFAULT_FONT)
     run.font.name = name
     run.font.size = Pt(size)
     run.font.bold = bold
@@ -149,9 +171,10 @@ def set_paragraph_spacing(paragraph, before=0, after=4, line_spacing=1.08):
 
 
 def add_section_heading(doc, text):
+    sizes = gen_profile.get("document.sizes", _DEFAULT_SIZES)
     p = doc.add_paragraph()
     run = p.add_run(text.upper())
-    set_font(run, size=11, bold=True)
+    set_font(run, size=sizes.get("body", _DEFAULT_SIZES["body"]), bold=True)
     add_horizontal_line(p)
     set_paragraph_spacing(p, before=6, after=3)
     keep_with_next(p)
@@ -182,6 +205,22 @@ def add_gdpr_clause(doc, lang):
 
 
 def build_resume(doc, data, stack, lang="EN"):
+    sizes = gen_profile.get("document.sizes", _DEFAULT_SIZES)
+    name_size = sizes.get("name", _DEFAULT_SIZES["name"])
+    headline_size = sizes.get("headline", _DEFAULT_SIZES["headline"])
+    body_size = sizes.get("body", _DEFAULT_SIZES["body"])
+    small_size = sizes.get("small", _DEFAULT_SIZES["small"])
+    # Heading LABELS by fixed structural position (0=summary .. 4=courses) —
+    # only the text is configurable, not which content renders where. See
+    # hunter.gen_profile.builtin_defaults()'s "document.sections" comment for
+    # why position 2 ("EXPERIENCE") is an ATS-parsing risk to rename.
+    sections = gen_profile.get("document.sections", _DEFAULT_SECTIONS)
+
+    def _heading(position: int) -> str:
+        if isinstance(sections, list) and position < len(sections) and sections[position]:
+            return sections[position]
+        return _DEFAULT_SECTIONS[position]
+
     name = candidate.get("identity.full_name", candidate.DEFAULT_FULL_NAME)
     aka = candidate.get("identity.aka", candidate.DEFAULT_AKA)
     subtitle = f"also known as {aka}" if aka else ""
@@ -193,7 +232,7 @@ def build_resume(doc, data, stack, lang="EN"):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(name)
-    set_font(run, size=16, bold=True)
+    set_font(run, size=name_size, bold=True)
     set_paragraph_spacing(p, before=0, after=2)
 
     # Subtitle (also known as) — optional, skipped when aka is blank
@@ -201,52 +240,52 @@ def build_resume(doc, data, stack, lang="EN"):
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run(subtitle)
-        set_font(run, size=10, italic=True)
+        set_font(run, size=small_size, italic=True)
         set_paragraph_spacing(p, before=0, after=2)
 
     # Headline
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(headline)
-    set_font(run, size=13, bold=True)
+    set_font(run, size=headline_size, bold=True)
     set_paragraph_spacing(p, before=0, after=2)
 
     # Contact
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(contact)
-    set_font(run, size=10)
+    set_font(run, size=small_size)
     set_paragraph_spacing(p, before=0, after=6)
 
     # SUMMARY
-    add_section_heading(doc, "SUMMARY")
+    add_section_heading(doc, _heading(0))
     p = doc.add_paragraph()
     run = p.add_run(data["summary"])
-    set_font(run, size=11)
+    set_font(run, size=body_size)
     set_paragraph_spacing(p, before=3, after=6)
 
     # SKILLS
-    add_section_heading(doc, "SKILLS")
+    add_section_heading(doc, _heading(1))
     skills = data["skills"]
+    categories = gen_profile.get("document.skill_categories", _DEFAULT_SKILL_CATEGORIES)
     skill_lines = [
-        ("Frontend", skills.get("frontend", "")),
-        ("Tools", skills.get("tools", "")),
-        ("Methodologies", skills.get("methodologies", "")),
-        ("Languages", skills.get("languages", "")),
+        (c.get("label", ""), skills.get(c.get("key", ""), ""))
+        for c in categories
+        if isinstance(c, dict)
     ]
     for label, value in skill_lines:
         if value:
             p = doc.add_paragraph()
             run_label = p.add_run(f"{label}: ")
-            set_font(run_label, size=11, bold=True)
+            set_font(run_label, size=body_size, bold=True)
             run_value = p.add_run(value)
-            set_font(run_value, size=11)
+            set_font(run_value, size=body_size)
             set_paragraph_spacing(p, before=1, after=1)
 
     # EXPERIENCE — Taleo and a handful of legacy ATS expect an exact-match
     # section header. "WORK EXPERIENCE" can be classified as "Other" and
     # the entire experience array silently drops out of the parsed fields.
-    add_section_heading(doc, "EXPERIENCE")
+    add_section_heading(doc, _heading(2))
     # Date normalizer (lazy import — generate_docs.py is invoked as a script).
     from hunter.date_normalize import normalize_period
 
@@ -255,9 +294,9 @@ def build_resume(doc, data, stack, lang="EN"):
         # Taleo-strict ATS parsers; unparseable periods pass through unchanged).
         p = doc.add_paragraph()
         run_title = p.add_run(f"{job['title']} | {job['company']}")
-        set_font(run_title, size=11, bold=True)
+        set_font(run_title, size=body_size, bold=True)
         run_period = p.add_run(f"   {normalize_period(job['period'])}")
-        set_font(run_period, size=10, italic=True)
+        set_font(run_period, size=small_size, italic=True)
         set_paragraph_spacing(p, before=4, after=1)
         keep_with_next(p)
 
@@ -265,7 +304,7 @@ def build_resume(doc, data, stack, lang="EN"):
         if job.get("subtitle"):
             p = doc.add_paragraph()
             run = p.add_run(job["subtitle"])
-            set_font(run, size=10, italic=True)
+            set_font(run, size=small_size, italic=True)
             set_paragraph_spacing(p, before=0, after=2)
             keep_with_next(p)
 
@@ -273,18 +312,18 @@ def build_resume(doc, data, stack, lang="EN"):
         for bullet in job.get("bullets", []):
             p = doc.add_paragraph(style="List Bullet")
             run = p.add_run(bullet)
-            set_font(run, size=11)
+            set_font(run, size=body_size)
             set_paragraph_spacing(p, before=0, after=1)
 
         # Stack line
         if job.get("stack_line"):
             p = doc.add_paragraph()
             run = p.add_run(job["stack_line"])
-            set_font(run, size=10, bold=True)
+            set_font(run, size=small_size, bold=True)
             set_paragraph_spacing(p, before=1, after=3)
 
     # EDUCATION
-    add_section_heading(doc, "EDUCATION")
+    add_section_heading(doc, _heading(3))
     p = doc.add_paragraph()
     edu = data.get("education", "")
     if not isinstance(edu, str):
@@ -294,11 +333,11 @@ def build_resume(doc, data, stack, lang="EN"):
             else str(edu or "")
         )
     run = p.add_run(edu)
-    set_font(run, size=11)
+    set_font(run, size=body_size)
     set_paragraph_spacing(p, before=3, after=3)
 
     # ADDITIONAL COURSES
-    add_section_heading(doc, "ADDITIONAL COURSES")
+    add_section_heading(doc, _heading(4))
     p = doc.add_paragraph()
     courses = data.get("courses", "")
     if not isinstance(courses, str):
@@ -306,7 +345,7 @@ def build_resume(doc, data, stack, lang="EN"):
             ", ".join(str(v) for v in courses) if isinstance(courses, list) else str(courses or "")
         )
     run = p.add_run(courses)
-    set_font(run, size=11)
+    set_font(run, size=body_size)
     set_paragraph_spacing(p, before=3, after=3)
 
     # GDPR/RODO consent clause — last body paragraph (ATS-readable, not a footer)
@@ -314,14 +353,29 @@ def build_resume(doc, data, stack, lang="EN"):
 
 
 def build_cover_letter(doc, text):
+    body_size = gen_profile.get("document.sizes", _DEFAULT_SIZES).get(
+        "body", _DEFAULT_SIZES["body"]
+    )
     for line in text.split("\n"):
         p = doc.add_paragraph()
         run = p.add_run(line)
-        set_font(run, size=11)
+        set_font(run, size=body_size)
         set_paragraph_spacing(p, before=0, after=6)
 
 
-def set_margins(doc, top_cm=0.8, bottom_cm=0.5, left_cm=1.0, right_cm=1.0):
+def set_margins(doc, top_cm=None, bottom_cm=None, left_cm=None, right_cm=None):
+    """Any margin left None resolves document.margins_cm (generation.yaml) at
+    call time — callers that pass no arguments (the normal case) get the
+    profile-driven default; an explicit value still wins."""
+    margins = gen_profile.get("document.margins_cm", _DEFAULT_MARGINS_CM)
+    if top_cm is None:
+        top_cm = margins.get("top", _DEFAULT_MARGINS_CM["top"])
+    if bottom_cm is None:
+        bottom_cm = margins.get("bottom", _DEFAULT_MARGINS_CM["bottom"])
+    if left_cm is None:
+        left_cm = margins.get("left", _DEFAULT_MARGINS_CM["left"])
+    if right_cm is None:
+        right_cm = margins.get("right", _DEFAULT_MARGINS_CM["right"])
     for section in doc.sections:
         section.top_margin = Cm(top_cm)
         section.bottom_margin = Cm(bottom_cm)

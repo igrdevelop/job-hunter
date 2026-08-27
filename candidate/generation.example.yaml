@@ -91,3 +91,41 @@ generation:
   # never delivered for an EN posting anyway). A PL posting or --full run is
   # unaffected. Env: GEN_SKIP_PL_FOR_EN.
   skip_pl_for_en: true
+
+document:
+  # Font family used throughout the CV and cover letter. Env: none.
+  font: Calibri
+  # Point sizes by role — name (candidate's name), headline (title line
+  # under the name), body (section headings, summary, skills, experience
+  # bullets, education, courses, cover letter), small (subtitle/contact/
+  # period/stack line). Partial override supported: set only the roles you
+  # want to change, the rest keep their builtin size. The GDPR clause's own
+  # 7.5pt is intentionally NOT one of these roles. Env: none.
+  sizes: {name: 16, headline: 13, body: 11, small: 10}
+  # Page margins in centimeters. Partial override supported. Env: none.
+  margins_cm: {top: 0.8, bottom: 0.5, left: 1.0, right: 1.0}
+  # Section HEADING LABELS, by fixed structural position: 0=Summary,
+  # 1=Skills, 2=Experience, 3=Education, 4=Additional courses. Only the
+  # label TEXT is configurable — the content that renders under each
+  # position is not. WARNING: position 2 is "EXPERIENCE" on purpose —
+  # Taleo and a handful of legacy ATS parsers classify "WORK EXPERIENCE" as
+  # "Other" and silently drop the entire parsed experience array. Renaming
+  # it is a real, measured ATS-parsing risk, not a style choice. Env: none.
+  sections: ["SUMMARY", "SKILLS", "EXPERIENCE", "EDUCATION", "ADDITIONAL COURSES"]
+  # Skills sub-sections rendered under the Skills heading. `key` looks up
+  # content.json's resume_en.skills[key] (the LLM generation prompt only
+  # ever populates frontend/tools/methodologies/languages — adding a new
+  # key here renders nothing unless prompts/generation_rules.md changes
+  # too, which is out of scope for this file). Unlike `sections` above,
+  # order/membership here IS safe to change: each entry is keyed by name,
+  # not position, and an empty value is skipped automatically. Env: none.
+  skill_categories:
+    - {key: frontend, label: Frontend}
+    - {key: tools, label: Tools}
+    - {key: methodologies, label: Methodologies}
+    - {key: languages, label: Languages}
+  # GDPR/RODO consent clause at the bottom of the CV body (small italic
+  # grey text, in the document BODY so ATS parsers still read it — never a
+  # docx footer). both = PL+EN CVs, pl = PL CV only, none = off.
+  # Env: CV_GDPR_CLAUSE.
+  gdpr_clause: both
