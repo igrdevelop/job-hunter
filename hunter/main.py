@@ -514,6 +514,9 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
         if outcome == "ok":
             ok += 1
             consecutive_fails = 0
+            # A genuine success ends any outage streak (see the llm_outage
+            # branch below) so a LATER, unrelated outage alerts fresh again.
+            await asyncio.to_thread(llm_outage.clear_pause)
             await _deliver_now(job.url)
             done_text = f"✅ [{i}/{total}] Done: {job.company} — {job.title}"
             if permalink:
@@ -537,17 +540,33 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
             # docs/LLM_OUTAGE_RESILIENCE_PLAN.md). M2: arm the time-boxed pause
             # so the NEXT source slots skip their apply step too; this is the
             # ONE alert for the whole pause window.
-            until_ts = await asyncio.to_thread(llm_outage.arm_pause)
+            until_ts, is_fresh = await asyncio.to_thread(llm_outage.arm_pause)
             remaining = total - i
-            await send_text(
-                context,
-                f"💳 <b>LLM outage (billing/auth)</b> — stopping batch.\n"
-                f"[{i}/{total}] {job.company} — {job.title} left untouched "
-                f"(+{remaining} not attempted; they return on the next hunt).\n"
-                f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
-                f"(<code>/llm outage clear</code> to lift early).\n"
-                "Check the provider account/key. Vacancies were NOT marked FAIL.",
-            )
+            if is_fresh:
+                await send_text(
+                    context,
+                    f"💳 <b>LLM outage (billing/auth)</b> — stopping batch.\n"
+                    f"[{i}/{total}] {job.company} — {job.title} left untouched "
+                    f"(+{remaining} not attempted; they return on the next hunt).\n"
+                    f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
+                    "(<code>/llm outage clear</code> to lift early).\n\n"
+                    "Reaching this alert at all means the CLI subscription "
+                    "fallback (M4b) ALSO failed — normally it absorbs an API "
+                    "billing outage silently. Check both:\n"
+                    "1. Anthropic balance/key — console.anthropic.com\n"
+                    "2. CLI login on the server — <code>docker compose exec -it "
+                    "job-hunter claude</code> → <code>/login</code>\n\n"
+                    "This is the only alert for this outage — it won't repeat "
+                    "every hour while it continues.",
+                )
+            else:
+                logger.warning(
+                    "[Hunt] LLM outage streak continues (paused until %s) — "
+                    "%s — %s, alert already sent",
+                    llm_outage.format_until(until_ts),
+                    job.company,
+                    job.title,
+                )
             break
         elif outcome == "cli_timeout":
             # M3 (docs/HUNT_APPLY_SPLIT_PLAN.md): a widened (CLI-eligible)
@@ -644,6 +663,9 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             consecutive_fails = 0
             if resolution == "applied":
                 ok += 1
+                # Ends any outage streak (see the llm_outage branch below) so
+                # a LATER, unrelated outage alerts fresh again.
+                await asyncio.to_thread(llm_outage.clear_pause)
                 await asyncio.to_thread(remove_failed, job.url)
                 await _deliver_now(job.url)
                 await send_text(context, f"✅ Retry OK: {job.company} - {job.title}")
@@ -705,18 +727,31 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
             # the whole retry pass — every further row would burn a fetch to
             # hit the same wall (M1, docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
             # M2: arm the pause so upcoming hunt slots skip their apply step.
-            until_ts = await asyncio.to_thread(llm_outage.arm_pause)
+            until_ts, is_fresh = await asyncio.to_thread(llm_outage.arm_pause)
             remaining = len(capped) - i
             logger.error("[retry] LLM outage (billing/auth) — stopping retries")
-            await send_text(
-                context,
-                f"💳 <b>LLM outage (billing/auth)</b> — stopping retries.\n"
-                f"{job.company} — {job.title} left at its current fail count "
-                f"(+{remaining} not attempted).\n"
-                f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
-                f"(<code>/llm outage clear</code> to lift early).\n"
-                "Check the provider account/key.",
-            )
+            if is_fresh:
+                await send_text(
+                    context,
+                    f"💳 <b>LLM outage (billing/auth)</b> — stopping retries.\n"
+                    f"{job.company} — {job.title} left at its current fail count "
+                    f"(+{remaining} not attempted).\n"
+                    f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
+                    "(<code>/llm outage clear</code> to lift early).\n\n"
+                    "Reaching this alert at all means the CLI subscription "
+                    "fallback (M4b) ALSO failed — normally it absorbs an API "
+                    "billing outage silently. Check both:\n"
+                    "1. Anthropic balance/key — console.anthropic.com\n"
+                    "2. CLI login on the server — <code>docker compose exec -it "
+                    "job-hunter claude</code> → <code>/login</code>\n\n"
+                    "This is the only alert for this outage — it won't repeat "
+                    "every hour while it continues.",
+                )
+            else:
+                logger.warning(
+                    "[retry] LLM outage streak continues (paused until %s) — alert already sent",
+                    llm_outage.format_until(until_ts),
+                )
             break
         elif outcome == "cli_timeout":
             # M3: infrastructure timeout, not the vacancy's fault — leave

@@ -42,8 +42,9 @@ def test_no_pause_by_default(outage_db):
 
 def test_arm_then_remaining_then_expiry(outage_db, monkeypatch):
     monkeypatch.setattr("hunter.config.LLM_OUTAGE_PAUSE_MIN", 60)
-    until = llm_outage.arm_pause(now=1_000_000.0)
+    until, is_fresh = llm_outage.arm_pause(now=1_000_000.0)
     assert until == 1_000_000 + 3600
+    assert is_fresh is True
     assert llm_outage.pause_remaining(now=1_000_000.0) == 3600
     assert llm_outage.pause_remaining(now=1_000_000.0 + 3599) == 1
     # Time-boxed: expired on its own, no manual clear needed.
@@ -52,9 +53,12 @@ def test_arm_then_remaining_then_expiry(outage_db, monkeypatch):
 
 def test_rearm_extends_deadline(outage_db, monkeypatch):
     monkeypatch.setattr("hunter.config.LLM_OUTAGE_PAUSE_MIN", 60)
-    llm_outage.arm_pause(now=1_000_000.0)
-    llm_outage.arm_pause(now=1_002_000.0)  # probe hit the wall again
+    _, first_fresh = llm_outage.arm_pause(now=1_000_000.0)
+    _, second_fresh = llm_outage.arm_pause(now=1_002_000.0)  # probe hit the wall again
     assert llm_outage.pause_remaining(now=1_002_000.0) == 3600
+    # Same streak: the second arm must NOT re-trigger a loud alert.
+    assert first_fresh is True
+    assert second_fresh is False
 
 
 def test_clear_pause(outage_db):
@@ -63,6 +67,17 @@ def test_clear_pause(outage_db):
     assert llm_outage.clear_pause() is True
     assert llm_outage.pause_remaining() == 0
     assert llm_outage.clear_pause() is False  # already clear
+
+
+def test_clear_pause_resets_streak(outage_db, monkeypatch):
+    """After clear_pause(), a later outage is fresh again — a resolved
+    outage must never suppress the alert for a later, unrelated one."""
+    monkeypatch.setattr("hunter.config.LLM_OUTAGE_PAUSE_MIN", 60)
+    _, first_fresh = llm_outage.arm_pause(now=1_000_000.0)
+    llm_outage.clear_pause()
+    _, second_fresh = llm_outage.arm_pause(now=2_000_000.0)
+    assert first_fresh is True
+    assert second_fresh is True
 
 
 def test_garbage_db_value_means_no_pause(outage_db):

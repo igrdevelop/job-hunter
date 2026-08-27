@@ -122,7 +122,13 @@ def tracker_db(tmp_path: Path, monkeypatch) -> Path:
     """Return a path to a fresh, isolated SQLite tracker DB.
 
     Also monkeypatches ``hunter.tracker.DB_PATH`` so all tracker.py functions
-    use this DB for the duration of the test.
+    use this DB for the duration of the test, and
+    ``hunter.llm_profiles._get_db_path`` (reads ``hunter.config.TRACKER_DB_PATH``,
+    a separate symbol) so the config KV table — ``llm_outage``'s pause/streak
+    state, dual-apply/track/profile toggles — lands in the SAME tmp db instead
+    of the real repo tracker.db (see test_llm_outage.py's ``_isolated_config_db``
+    for the incident this avoids: an unpatched KV write there caused 3
+    ordering-dependent failures in unrelated tests, 2026-07-18).
 
     Usage::
 
@@ -135,6 +141,7 @@ def tracker_db(tmp_path: Path, monkeypatch) -> Path:
     # Prevent auto-migration from a real tracker.xlsx
     init_db(db, xlsx_path=tmp_path / "no_tracker.xlsx")
     monkeypatch.setattr(tracker_module, "DB_PATH", db)
+    monkeypatch.setattr("hunter.llm_profiles._get_db_path", lambda: db)
     return db
 
 
