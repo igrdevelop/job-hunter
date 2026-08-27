@@ -64,6 +64,11 @@ async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
         if await asyncio.to_thread(tracker.has_successful_entry, job.url):
             from hunter.delivery import deliver_apply_now
 
+            # A genuine success is proof the LLM path (API and/or CLI
+            # fallback) is working again — end any outage streak so a
+            # LATER, unrelated outage is treated as fresh and alerts loudly
+            # instead of being silently folded into one that already ended.
+            await asyncio.to_thread(llm_outage.clear_pause)
             await deliver_apply_now(job.url)
             text = f"✅ [W{worker_id}] Done: {job.company} — {job.title}"
             if permalink:
@@ -101,17 +106,39 @@ async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
         # Put the row back to PENDING (not FAIL) so it's retried once the
         # outage clears, and arm the shared pause so the next claim attempt
         # (top of the loop) waits instead of burning another subprocess on
-        # the same wall. One alert per arm, same contract as _auto_apply_all.
+        # the same wall. One alert per OUTAGE STREAK, not per arm — a
+        # long-running outage re-probes and re-arms roughly hourly
+        # (LLM_OUTAGE_PAUSE_MIN), and a Telegram message every hour for a
+        # 36h outage (real incident, 2026-08-27) buried the one alert that
+        # mattered. is_fresh is False on every re-arm of the same streak.
         await asyncio.to_thread(tracker.release_claim, job.url)
-        until_ts = await asyncio.to_thread(llm_outage.arm_pause)
-        await send_text(
-            context,
-            f"💳 <b>LLM outage (billing/auth)</b> — [W{worker_id}] {job.company} — {job.title} "
-            "returned to the queue.\n"
-            f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
-            "(<code>/llm outage clear</code> to lift early).\n"
-            "Check the provider account/key. Vacancy was NOT marked FAIL.",
-        )
+        until_ts, is_fresh = await asyncio.to_thread(llm_outage.arm_pause)
+        if is_fresh:
+            await send_text(
+                context,
+                f"💳 <b>LLM outage (billing/auth)</b> — [W{worker_id}] {job.company} — {job.title} "
+                "returned to the queue.\n"
+                f"⏸ Auto-apply paused until <b>{llm_outage.format_until(until_ts)}</b> "
+                "(<code>/llm outage clear</code> to lift early).\n\n"
+                "Reaching this alert at all means the CLI subscription fallback "
+                "(M4b) ALSO failed to cover the API outage — normally it absorbs "
+                "one silently. Check both:\n"
+                "1. Anthropic balance/key — console.anthropic.com\n"
+                "2. CLI login on the server — <code>docker compose exec -it "
+                "job-hunter claude</code> → <code>/login</code>\n\n"
+                "This is the only alert for this outage — it won't repeat every "
+                "hour while it continues. <code>/llm outage</code> or "
+                "<code>/status</code> shows the live state.",
+            )
+        else:
+            logger.warning(
+                "[apply_worker %d] LLM outage streak continues (paused until %s) — "
+                "%s — %s, alert already sent",
+                worker_id,
+                llm_outage.format_until(until_ts),
+                job.company,
+                job.title,
+            )
         return False
 
     if outcome == "cli_timeout":

@@ -193,7 +193,7 @@ def test_resolve_llm_outage_releases_claim_and_arms_pause(tracker_db, monkeypatc
     monkeypatch.setattr(
         apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
     )
-    arm_pause = MagicMock(return_value=1234567890)
+    arm_pause = MagicMock(return_value=(1234567890, True))
     monkeypatch.setattr(apply_worker.llm_outage, "arm_pause", arm_pause)
 
     is_fail = asyncio.run(apply_worker._resolve_outcome(None, 0, job, "llm_outage"))
@@ -204,6 +204,29 @@ def test_resolve_llm_outage_releases_claim_and_arms_pause(tracker_db, monkeypatc
     assert len(rows) == 1
     assert rows[0]["ats"] == "PENDING"
     assert any("outage" in t.lower() for t in sent)
+
+
+def test_resolve_llm_outage_streak_continuation_sends_no_alert(tracker_db, monkeypatch):
+    """A re-arm of the SAME ongoing outage (is_fresh=False) must not repeat
+    the Telegram alert — real incident 2026-08-27: an outage spanning ~36h
+    re-armed roughly hourly and sent ~36 near-identical messages, burying
+    the one that mattered."""
+    job = _job(5)
+    tracker.add_pending(job)
+    tracker.claim_pending()
+
+    sent = []
+    monkeypatch.setattr(
+        apply_worker, "send_text", AsyncMock(side_effect=lambda _c, t: sent.append(t))
+    )
+    arm_pause = MagicMock(return_value=(1234567890, False))
+    monkeypatch.setattr(apply_worker.llm_outage, "arm_pause", arm_pause)
+
+    is_fail = asyncio.run(apply_worker._resolve_outcome(None, 0, job, "llm_outage"))
+
+    assert is_fail is False
+    arm_pause.assert_called_once()
+    assert sent == []
 
 
 def test_resolve_cli_timeout_releases_claim_no_fail_row(tracker_db, monkeypatch):
