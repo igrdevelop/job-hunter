@@ -25,6 +25,8 @@ from hunter.apply_shared import (
     _REACT_SKIP_FORCE_HINT,
     _already_processed,
     abort_after_generation,
+    is_backend_only_job_text,
+    is_react_only_job_text,
     notify,
     stack_gate_allows_manual,
     send_telegram_documents,
@@ -261,6 +263,71 @@ def main_cli(
                 f"({len((job_text or '').strip())} chars): {url}"
             )
             return None
+
+        # Step 1.5c/1.5d — Pre-LLM stack text checks (mirror of apply_api Steps
+        # 1.5c/1.5d, docs/GENERATION_ARCHITECTURE_ANALYSIS.md wave 0.5). Placed
+        # here, before the manual screen / doomed gate / repost gate / prescreen
+        # below, to match apply_api's own order byte-for-byte -- an obvious
+        # React-only or backend-only posting is now rejected by this free
+        # regex check before paying for the repost-gate TF-IDF pass or the
+        # prescreen's Haiku call, exactly like the API pipeline. Before this
+        # stage existed at all, the CLI pipeline only caught a React-only or
+        # backend-only posting AFTER `claude -p` had already rendered a full
+        # document set (see the post-generation React check below) -- this is
+        # the one wave-0.5 stage that also SAVES the generation spend, not
+        # just parity.
+        from hunter.filters import _react_track_active
+
+        if (
+            not skip_dedup
+            and not _react_track_active()
+            and is_react_only_job_text(job_text)
+            and not stack_gate_allows_manual(
+                is_manual, url, "React-only posting (pre-LLM text scan)"
+            )
+        ):
+            notify(
+                f"⏭ <b>Skipped — React-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
+            )
+            print(f"[apply_agent] SKIP (pre-LLM) — React-only job text: {url}")
+            try:
+                from hunter.tracker import add_react_skipped
+
+                add_react_skipped(
+                    {"stack": "React (pre-LLM)", "company_name": "", "job_title": ""}, url
+                )
+            except Exception as e:
+                print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+            return
+
+        if (
+            not skip_dedup
+            and is_backend_only_job_text(job_text)
+            and not stack_gate_allows_manual(
+                is_manual, url, "Backend-only posting (pre-LLM text scan)"
+            )
+        ):
+            notify(
+                f"⏭ <b>Skipped — Backend-only (pre-LLM text scan)</b>\n🔗 {url}{_REACT_SKIP_FORCE_HINT}"
+            )
+            print(f"[apply_agent] SKIP (pre-LLM) — backend-only job text: {url}")
+            try:
+                from hunter.models import Job
+                from hunter.tracker import add_skipped
+
+                add_skipped(
+                    Job(
+                        title=jobleads_title,
+                        company=jobleads_company,
+                        location="",
+                        salary=None,
+                        url=url,
+                        source="backend_only_gate",
+                    )
+                )
+            except Exception as e:
+                print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")
+            return
 
         # Manual-apply "warn but allow" screen (see apply_api Step 1.5e).
         # Skipped when the doomed gate (Step 1.5f below) is enabled — the gate
@@ -503,16 +570,20 @@ def main_cli(
                     from hunter.lang_guard import detect_posting_language
                     from hunter.apply_shared import (
                         _dedup_skill_glosses,
+                        _strip_compliance_claims,
                         _strip_prestige_claims,
                         enforce_language_separation,
                         ensure_pl_resume,
                     )
 
                     # Deterministic scrubs (parity with the API pipeline): drop
+                    # fabricated compliance claims (DORA/RODO/GDPR/ISO/...) +
                     # fabricated prestige claims + collapse skills gloss pairs.
                     # Any fix means the already-generated docs are stale and must
                     # be regenerated below, same as a language-gate repair.
                     _scrub_fixes: list[str] = []
+                    _cli_content, _compliance_fixes = _strip_compliance_claims(_cli_content)
+                    _scrub_fixes.extend(_compliance_fixes)
                     _cli_content, _prestige_fixes = _strip_prestige_claims(
                         _cli_content, job_text or ""
                     )
@@ -658,6 +729,43 @@ def main_cli(
                     print(
                         f"[apply_agent] Warning: CLI language gate failed (continuing): {_lang_err}"
                     )
+
+                # Content QA sanity check (mirror of apply_api Step 4.8, wave
+                # 0.5). Warn-only — never touches content.json or the docs.
+                try:
+                    from hunter.content_qa import run_qa
+
+                    if isinstance(_cli_content, dict):
+                        _qa = run_qa(_cli_content)
+                        print(_qa.summary())
+                        if not _qa.passed:
+                            notify(_qa.telegram_summary(url))
+                except Exception as _qa_err:
+                    print(f"[apply_agent] Warning: QA check failed (continuing): {_qa_err}")
+
+                # Bogus-company abort (mirror of apply_api Step 5's check,
+                # wave 0.5). In API mode this runs BEFORE the output folder
+                # exists; here the CLI skill already rendered docs and wrote
+                # the tracker row, so undo them via abort_after_generation
+                # instead of a bare sys.exit(0) -- see its docstring for the
+                # Interia incident this pattern fixes.
+                if isinstance(_cli_content, dict):
+                    from hunter.validation import is_bogus_company
+
+                    _company_check = _cli_content.get("company_name") or "Unknown"
+                    if is_bogus_company(_company_check):
+                        _abort_msg = (
+                            f"⚠️ <b>Bogus company name — skipped</b>\n"
+                            f"LLM returned: <code>{_company_check}</code>\n🔗 {url}"
+                        )
+                        abort_after_generation(
+                            folder_path,
+                            url,
+                            reason=f"bogus company name {_company_check!r}",
+                            telegram_text=_abort_msg,
+                            content=_cli_content,
+                        )
+                        return
 
             except Exception as e:
                 print(f"[apply_agent] CLI post-processing error: {e}")

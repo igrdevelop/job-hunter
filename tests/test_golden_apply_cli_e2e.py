@@ -27,6 +27,8 @@ LibreOffice. Everything between them is the real `main_cli`.
 """
 
 import json
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -71,12 +73,24 @@ class FakeClaudeSkill:
         self.applications_dir = applications_dir
         self.gen_runner = gen_runner
         self.claude_calls = 0
+        # Captured before the fixture monkeypatches subprocess.run onto this
+        # instance -- the real function, for delegating anything that isn't
+        # actually a `claude -p ...` call.
+        self._real_run = subprocess.run
 
     def __call__(self, cmd, **kwargs):
-        import subprocess
-
         if any("generate_docs" in str(part) for part in cmd):
             return self.gen_runner(cmd, **kwargs)
+
+        if not cmd or str(cmd[0]) != "claude":
+            # subprocess.run is patched process-wide (hunter.apply_cli.subprocess
+            # is the same module object as subprocess), so any unrelated
+            # subprocess.run call made while this fixture is active -- e.g.
+            # sklearn's lazy import shelling out to `ver` via
+            # platform.win32_ver() on Windows -- would otherwise be miscounted
+            # as a `claude -p` invocation. Only a genuine claude invocation is
+            # ours to fake; everything else runs for real.
+            return self._real_run(cmd, **kwargs)
 
         self.claude_calls += 1
         folder = self.applications_dir / date.today().strftime("%Y-%m-%d") / "NordicFrontendLabs"
@@ -273,6 +287,21 @@ class TestPostGenerationAbortsUndoTheRow:
         assert _row(url).get("ats", "").strip().endswith("%")
 
 
+def test_fake_claude_skill_does_not_miscount_unrelated_subprocess_calls(tmp_path):
+    # subprocess.run is patched process-wide by the cli_env fixture (see its
+    # docstring), so anything else that shells out while the fixture is active
+    # -- e.g. sklearn's lazy import triggering platform.win32_ver(), which on
+    # Windows shells out to `ver` -- must not be counted as a `claude -p`
+    # invocation. Any command whose argv[0] isn't literally "claude" is not
+    # ours to fake.
+    skill = FakeClaudeSkill(content={}, applications_dir=tmp_path, gen_runner=lambda *a, **k: None)
+
+    result = skill([sys.executable, "-c", "pass"], capture_output=True, text=True)
+
+    assert skill.claude_calls == 0
+    assert result.returncode == 0
+
+
 class TestTheSkillIsCalledOnce:
     def test_no_accidental_second_generation(self, cli_env, golden_generation_response):
         # Re-renders (PL mirror, language repair, verdict refine) must go through
@@ -283,3 +312,137 @@ class TestTheSkillIsCalledOnce:
         cli_env.run(url, PL_POSTING, content)
 
         assert cli_env.skill.claude_calls == 1
+
+
+# ── Wave 0.5 (docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6): four quality
+# stages that used to run only in apply_api now also run in apply_cli. ──────
+
+REACT_ONLY_POSTING = (
+    "Job Title: Senior React Developer\nCompany: Nordic Frontend Labs\n"
+    "Location: Fully remote (Poland)\n\n"
+    "--- Job Description ---\n"
+    "We are looking for a senior React engineer to own our component "
+    "library. You will build React applications with React hooks and "
+    "modern React patterns, and mentor other React developers. Fully "
+    "remote within Poland, B2B contract, yearly training budget."
+)
+
+BACKEND_ONLY_POSTING = (
+    "Job Title: Senior Python Developer\nCompany: Nordic Frontend Labs\n"
+    "Location: Fully remote (Poland)\n\n"
+    "--- Job Description ---\n"
+    "We need a senior Python developer. Python is required for this role. "
+    "You will build backend APIs using Django and FastAPI, and own our "
+    "PostgreSQL data layer. Must have strong Python skills. Fully remote "
+    "within Poland, B2B contract."
+)
+
+
+class TestPreLlmStackChecksSaveGenerationSpend:
+    """Step 1.5c/1.5d mirror (apply_api). Before this, the CLI pipeline only
+    caught an obvious React-only or backend-only posting AFTER `claude -p`
+    had already rendered a full document set (see
+    TestPostGenerationAbortsUndoTheRow.test_react_only_stack below, which
+    stays as the safety net for stacks the LLM decides on its own text isn't
+    obvious enough to catch pre-LLM). These checks abort BEFORE `claude -p`
+    ever runs -- the one wave-0.5 stage that also saves the generation spend,
+    not just parity."""
+
+    def test_react_only_text_skips_before_claude_runs(self, cli_env, golden_generation_response):
+        url = "https://example.com/jobs/react-pre-llm"
+        content = _content(golden_generation_response, apply_url=url, stack="React")
+
+        result = cli_env.run(url, REACT_ONLY_POSTING, content)
+
+        assert result is None
+        assert cli_env.skill.claude_calls == 0, (
+            "the expensive claude -p call must never run for an obvious React-only posting"
+        )
+        assert _row(url).get("ats", "").strip().upper() == "SKIP"
+
+    def test_backend_only_text_skips_before_claude_runs(self, cli_env, golden_generation_response):
+        url = "https://example.com/jobs/backend-pre-llm"
+        content = _content(golden_generation_response, apply_url=url)
+
+        result = cli_env.run(url, BACKEND_ONLY_POSTING, content)
+
+        assert result is None
+        assert cli_env.skill.claude_calls == 0
+        assert _row(url).get("ats", "").strip().upper() == "SKIP"
+
+    def test_force_bypasses_the_pre_llm_react_check(self, cli_env, golden_generation_response):
+        url = "https://example.com/jobs/react-pre-llm-forced"
+        content = _content(golden_generation_response, apply_url=url, stack="React")
+
+        folder = cli_env.run(url, REACT_ONLY_POSTING, content, skip_dedup=True)
+
+        assert folder is not None, "/force means generate this one anyway"
+        assert cli_env.skill.claude_calls == 1
+
+
+class TestComplianceScrubRunsOnCli:
+    """_strip_compliance_claims mirror (apply_api). Used to be marked "API
+    only" -- a Polish employer's own DORA/RODO/ISO self-description leaking
+    into the generated resume as the CANDIDATE's claimed expertise shipped
+    unfixed on the CLI (= primary) path."""
+
+    def test_compliance_claim_is_stripped_and_docs_regenerated(
+        self, cli_env, golden_generation_response
+    ):
+        url = "https://example.com/jobs/compliance-scrub"
+        content = _content(golden_generation_response, apply_url=url)
+        content["resume_en"] = dict(content["resume_en"])
+        content["resume_en"]["summary"] = (
+            content["resume_en"]["summary"]
+            + " Proven DORA compliance and ISO 27001 standards adherence."
+        )
+
+        folder = cli_env.run(url, EN_POSTING, content)
+
+        assert folder is not None
+        written = json.loads((folder / "content.json").read_text(encoding="utf-8"))
+        summary = written["resume_en"]["summary"]
+        assert "DORA" not in summary
+        assert "ISO 27001" not in summary
+
+
+class TestContentQaWarnsButDoesNotBlockOnCli:
+    """content_qa.run_qa mirror (apply_api Step 4.8). QA never ran at all on
+    the CLI path -- a resume missing education, for example, shipped with no
+    warning anywhere."""
+
+    def test_missing_education_notifies_but_still_delivers(
+        self, cli_env, golden_generation_response
+    ):
+        url = "https://example.com/jobs/qa-warn"
+        content = _content(golden_generation_response, apply_url=url)
+        content["resume_en"] = dict(content["resume_en"])
+        content["resume_en"]["education"] = ""
+
+        folder = cli_env.run(url, EN_POSTING, content)
+
+        assert folder is not None, "QA is warn-only -- it must never block delivery"
+        assert any("QA" in n for n in cli_env.notifications), (
+            "a failing QA check must reach Telegram, exactly like the API pipeline"
+        )
+
+
+class TestBogusCompanyAbortsOnCli:
+    """is_bogus_company mirror (apply_api Step 5). In API mode this check ran
+    BEFORE the output folder existed; on the CLI path the folder and tracker
+    row are already there by the time content.json is read, so the abort
+    must undo them via abort_after_generation -- the same pattern the
+    post-generation stack/dedup gates were fixed with on 2026-08-24 (see its
+    docstring for the Interia incident)."""
+
+    def test_bogus_company_name_undoes_the_row(self, cli_env, golden_generation_response):
+        url = "https://example.com/jobs/bogus-company"
+        content = _content(golden_generation_response, apply_url=url, company_name="Unknown")
+
+        result = cli_env.run(url, EN_POSTING, content)
+
+        assert result is None, "an aborted run must not return a folder to deliver"
+        assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert not tracker.has_successful_entry(url), "the parent must not deliver this"
+        folder = cli_env.applications / date.today().strftime("%Y-%m-%d") / "NordicFrontendLabs"
+        assert not list(folder.glob("*.pdf")), "the rendered documents must be gone"
