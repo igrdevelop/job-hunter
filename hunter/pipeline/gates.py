@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 
+from hunter import gen_profile
 from hunter.best_effort import best_effort
 from hunter.pipeline.errors import PASTE_NO_URL_PLACEHOLDER
 
@@ -32,7 +33,11 @@ _REACT_SKIP_FORCE_HINT = (
 
 # ── Pre-LLM text-based stack screening ───────────────────────────────────────
 
-# Minimum number of React mentions (no Angular present) to auto-skip pre-LLM.
+# Default minimum number of React mentions (no Angular present) to auto-skip
+# pre-LLM. Configurable via generation.yaml (gates.react_skip_min_mentions),
+# read at call time inside is_react_only_job_text() — this constant is only
+# the fallback default (see hunter.filters._resolve_flt's docstring for why
+# a module-level snapshot would break monkeypatching / profile reload).
 _REACT_SKIP_MIN_MENTIONS: int = 3
 
 # BE-required signal patterns: language/framework + hard-requirement qualifier.
@@ -67,7 +72,8 @@ def is_react_only_job_text(text: str) -> bool:
     t = text.lower()
     if "angular" in t:
         return False
-    return len(re.findall(r"\breact\b", t)) >= _REACT_SKIP_MIN_MENTIONS
+    min_mentions = gen_profile.get("gates.react_skip_min_mentions", _REACT_SKIP_MIN_MENTIONS)
+    return len(re.findall(r"\breact\b", t)) >= min_mentions
 
 
 def is_backend_only_job_text(text: str) -> bool:

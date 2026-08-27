@@ -32,7 +32,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from hunter import candidate
+from hunter import candidate, gen_profile
 from hunter.apply_shared import CANDIDATE_DIR, PROMPTS_DIR, _llm_p, validate_content
 
 # Recommendations the independent verdict sometimes returns that no CV edit
@@ -50,6 +50,10 @@ _DROP_RE = re.compile(
 # Rounds 1-3 honest, 4+ stretch (owner decision 2026-08-10, together with the
 # ATS_VERDICT_MAX_REFINES 3→5 raise: one more honest pass AND one more
 # stretch pass, since CLI-subscription-served rounds are ~free).
+# Configurable via generation.yaml (verdict.stretch_from_round) — read at
+# call time inside refine_loop(), not stashed here: see hunter.filters.
+# _resolve_flt's docstring for why a module-level snapshot would break
+# monkeypatching / same-process profile reload.
 STRETCH_FROM_ROUND = 4
 
 # Recent, verifiable employers — never touched by a stretch-round addition.
@@ -342,6 +346,8 @@ def refine_loop(
 
     from hunter.ats_pdf_roundtrip import run_llm_verdict
 
+    stretch_from_round = gen_profile.get("verdict.stretch_from_round", STRETCH_FROM_ROUND)
+
     content_path = folder / "content.json"
     best_content = content
     best_verdict = verdict
@@ -365,7 +371,7 @@ def refine_loop(
                 print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
                 break
 
-            natural_kind = "stretch" if round_num >= STRETCH_FROM_ROUND else "honest"
+            natural_kind = "stretch" if round_num >= stretch_from_round else "honest"
             if last_round_failed and natural_kind == "honest":
                 kind = "stretch"
                 print(

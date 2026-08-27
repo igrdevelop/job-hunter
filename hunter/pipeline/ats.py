@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import json
 
+from hunter import gen_profile
 from hunter.pipeline.profiles import _llm_p
 from hunter.pipeline.scrubs import _COMPLIANCE_CLAIM_RE
 
-_ATS_THRESHOLD = 95.0
-_ATS_MAX_ROUNDS = 2  # honest rounds; after this: soft → aggressive → final check
+# Defaults below (ats.threshold / ats.honest_rounds / ats.checklist_cap /
+# ats.total_rounds in generation.yaml) are read at CALL time inside the
+# functions that use them, not stashed here as module constants — a
+# default-arg snapshot would freeze the value at import time and stop
+# observing a profile change within the same process (see
+# hunter.filters._resolve_flt's docstring for why this matters).
 
 # Regulatory / compliance terms that job postings list as the EMPLOYER's own
 # credentials ("we work in accordance with DORA, RODO"). The ATS keyword extractor
@@ -52,12 +57,6 @@ def _filter_self_description_keywords(keywords: list[str]) -> list[str]:
     return [k for k in keywords if k.strip().lower() not in _ATS_KEYWORD_BLOCKLIST]
 
 
-# Cap on how many keywords go into the first-generation checklist (M3,
-# docs/LLM_COST_REDUCTION_PLAN.md) — keeps the prompt addition small even for
-# a keyword-dense posting.
-_ATS_CHECKLIST_CAP = 30
-
-
 def build_ats_keyword_checklist(job_text: str) -> str:
     """Deterministic (regex-only, $0.00) keyword checklist for the FIRST
     generation prompt.
@@ -80,7 +79,11 @@ def build_ats_keyword_checklist(job_text: str) -> str:
     keywords = _filter_self_description_keywords(extract_job_keywords(job_text))
     if not keywords:
         return ""
-    keywords = keywords[:_ATS_CHECKLIST_CAP]
+    # Cap on how many keywords go into the checklist (M3, docs/
+    # LLM_COST_REDUCTION_PLAN.md) — keeps the prompt addition small even for
+    # a keyword-dense posting.
+    checklist_cap = gen_profile.get("ats.checklist_cap", 30)
+    keywords = keywords[:checklist_cap]
     bullet_list = "\n".join(f"- {k}" for k in keywords)
     return (
         "\n\n## ATS keyword checklist (deterministic scan of this posting)\n"
@@ -186,7 +189,9 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     from hunter import ats_checker
     from hunter.apply_shared import _filter_self_description_keywords
 
-    _TOTAL_ROUNDS = 5  # rewrite rounds before final check
+    _ATS_THRESHOLD = gen_profile.get("ats.threshold", 95.0)
+    _ATS_MAX_ROUNDS = gen_profile.get("ats.honest_rounds", 2)
+    _TOTAL_ROUNDS = gen_profile.get("ats.total_rounds", 5)  # rewrite rounds before final check
 
     resume_en = content.get("resume_en", "")
     if not resume_en:

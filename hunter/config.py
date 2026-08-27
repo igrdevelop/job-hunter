@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+from hunter import gen_profile  # noqa: E402 — after load_dotenv so env vars are set first
+
 # ── Multi-user ────────────────────────────────────────────────────────────────
 # Owner's user id (matches users.id in the API's app.sqlite). Required for B1
 # so every tracker write is stamped and dedup is scoped correctly. Until Phase
@@ -46,10 +48,10 @@ APPLY_USE_CLI: bool = os.getenv("APPLY_USE_CLI", "false").lower() in ("true", "1
 # JUDGE_MODE rollout stages: "report" (write judge_report.json only),
 # "warn" (also Telegram-notify on findings), "block" (additionally abort
 # delivery when a fabrication survives repair — mirrors the language gate).
-JUDGE_ENABLED: bool = os.getenv("JUDGE_ENABLED", "true").lower() in ("true", "1", "yes")
+JUDGE_ENABLED: bool = gen_profile.get("judge.enabled", True)
 JUDGE_MODEL: str = os.getenv("JUDGE_MODEL", "claude-haiku-4-5-20251001")
-JUDGE_MODE: str = os.getenv("JUDGE_MODE", "warn").strip().lower()
-JUDGE_MAX_REPAIR_ROUNDS: int = int(os.getenv("JUDGE_MAX_REPAIR_ROUNDS", "1"))
+JUDGE_MODE: str = gen_profile.get("judge.mode", "warn")
+JUDGE_MAX_REPAIR_ROUNDS: int = gen_profile.get("judge.max_repair_rounds", 1)
 # The judge always uses a cheap Anthropic model (Haiku), independent of the main
 # LLM provider. When LLM_PROVIDER=openrouter, the main key is an OpenRouter key
 # which doesn't accept Anthropic model IDs — so the judge needs its own provider
@@ -89,7 +91,7 @@ TRANSLATE_API_KEY: str = (
 # job posting. Informational only (shown in Telegram, stored on content.json),
 # never blocks delivery. The in-loop LLM review it replaces was removed from
 # _ats_check_loop.
-ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in ("true", "1", "yes")
+ATS_VERDICT_ENABLED: bool = gen_profile.get("verdict.enabled", True)
 
 # Verdict refine loop (hunter.verdict_refine): when the independent verdict
 # score is below ATS_VERDICT_TARGET, rewrite resume_en against the verdict's
@@ -102,8 +104,8 @@ ATS_VERDICT_ENABLED: bool = os.getenv("ATS_VERDICT_ENABLED", "true").lower() in 
 # extra rounds are ~free, and CLI-served runs were landing well short of
 # ATS_VERDICT_TARGET; supersedes the 3-round default of 2026-07-07).
 # See docs/VERDICT_REFINE_PLAN.md.
-ATS_VERDICT_TARGET: float = float(os.getenv("ATS_VERDICT_TARGET", "95"))
-ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "5"))
+ATS_VERDICT_TARGET: float = gen_profile.get("verdict.target", 95.0)
+ATS_VERDICT_MAX_REFINES: int = gen_profile.get("verdict.max_refines", 5)
 
 # ── Doomed-vacancy gate (docs/DOOMED_GATE_PLAN.md) ───────────────────────────
 # Deterministic (regex-only, zero LLM cost) full-text screen run right after
@@ -114,11 +116,11 @@ ATS_VERDICT_MAX_REFINES: int = int(os.getenv("ATS_VERDICT_MAX_REFINES", "5"))
 # abort generation for $0.00; SOFT findings (e.g. stack mismatch) just warn in
 # Telegram and generation continues. Force-mode/manual-paste always degrades
 # HARD to warn (the owner explicitly asked to generate this one).
-DOOMED_GATE_ENABLED: bool = os.getenv("DOOMED_GATE_ENABLED", "true").lower() in ("true", "1", "yes")
+DOOMED_GATE_ENABLED: bool = gen_profile.get("gates.doomed_enabled", True)
 # "skip" (default) aborts generation on a HARD finding; "warn" is an emergency
 # lever to downgrade every HARD finding to a warning without disabling the
 # gate entirely, e.g. if live-data precision turns out worse than calibration.
-DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").strip().lower()
+DOOMED_GATE_HARD_ACTION: str = gen_profile.get("gates.doomed_hard_action", "skip")
 
 # Re-post gate (hunter/repost_gate.py, Step 1.5g): when a freshly fetched
 # posting is a near-verbatim re-post of a vacancy applied to in the last
@@ -133,7 +135,7 @@ DOOMED_GATE_HARD_ACTION: str = os.getenv("DOOMED_GATE_HARD_ACTION", "skip").stri
 # exists because `is_react_only_job_text` is blind by contract to a react-first
 # posting that mentions Angular in passing: over the seven August postings that
 # reached generation on a React stack it would have caught zero.
-PRESCREEN_ENABLED: bool = os.getenv("PRESCREEN_ENABLED", "true").lower() in ("true", "1", "yes")
+PRESCREEN_ENABLED: bool = gen_profile.get("gates.prescreen_enabled", True)
 # report -> log only · warn -> + Telegram · skip -> SKIP row and no generation.
 # Ships at `warn` (owner decision 2026-08-24: a week of `warn`, then `skip`).
 # NOT `report`: in that mode the call is paid for and changes nothing the owner
@@ -141,17 +143,13 @@ PRESCREEN_ENABLED: bool = os.getenv("PRESCREEN_ENABLED", "true").lower() in ("tr
 # would never be triggered. A Telegram line per react-first posting IS the
 # observation loop -- and the calibration measured zero false skips over 81 real
 # postings, so a warning is the cheapest honest thing to show.
-PRESCREEN_MODE: str = os.getenv("PRESCREEN_MODE", "warn").strip().lower()
+PRESCREEN_MODE: str = gen_profile.get("gates.prescreen_mode", "warn")
 # Every skip in the 81-posting calibration scored >= 0.95, so this floor costs
 # nothing today and refuses a shakier verdict tomorrow.
-PRESCREEN_MIN_CONFIDENCE: float = float(os.getenv("PRESCREEN_MIN_CONFIDENCE", "0.9"))
+PRESCREEN_MIN_CONFIDENCE: float = gen_profile.get("gates.prescreen_min_confidence", 0.9)
 
-REPOST_GATE_ENABLED: bool = os.getenv("REPOST_GATE_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-)
-REPOST_WINDOW_DAYS: int = int(os.getenv("REPOST_WINDOW_DAYS", "60"))
+REPOST_GATE_ENABLED: bool = gen_profile.get("gates.repost_enabled", True)
+REPOST_WINDOW_DAYS: int = gen_profile.get("gates.repost_window_days", 60)
 
 # ── Resume generation ─────────────────────────────────────────────────────────
 GENERATE_PL_RESUME: bool = os.getenv("GENERATE_PL_RESUME", "false").lower() in ("true", "1", "yes")
@@ -167,7 +165,7 @@ GENERATE_ABOUT_ME_PL: bool = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() i
 # generate_docs short-mode routing). A PL posting (primary_lang == "PL") or a
 # full-mode run (--full) is unaffected and always gets the full bilingual set.
 # docs/LLM_COST_REDUCTION_PLAN.md M4.
-GEN_SKIP_PL_FOR_EN: bool = os.getenv("GEN_SKIP_PL_FOR_EN", "true").lower() in ("true", "1", "yes")
+GEN_SKIP_PL_FOR_EN: bool = gen_profile.get("generation.skip_pl_for_en", True)
 # GDPR/RODO consent clause appended at the bottom of the CV body (not in a footer,
 # so ATS parsers still read it). "both" = PL + EN CVs, "pl" = PL CV only, "none" = off.
 CV_GDPR_CLAUSE: str = os.getenv("CV_GDPR_CLAUSE", "both").strip().lower()

@@ -269,9 +269,18 @@ def test_ats_verdict_max_refines_default_is_five() -> None:
     """Owner decision 2026-08-10: max 5 rounds — three honest visibility
     passes, stretch (openly add posting skills) on rounds 4-5. Supersedes the
     3-round default of 2026-07-07: prod now serves refine calls through the
-    flat-cost CLI subscription, so extra rounds are ~free."""
-    src = _source_of("hunter.config")
-    assert 'os.getenv("ATS_VERDICT_MAX_REFINES", "5")' in src
+    flat-cost CLI subscription, so extra rounds are ~free.
+
+    Checks the runtime value, not source text: since docs/
+    GENERATION_ARCHITECTURE_ANALYSIS.md wave 3, the default lives in
+    hunter.gen_profile.builtin_defaults() (verdict.max_refines) and reaches
+    hunter.config through gen_profile.get(), not a literal os.getenv() call —
+    the config.py line this test used to grep for no longer exists, but the
+    resolved value is unchanged."""
+    import importlib
+
+    config = importlib.import_module("hunter.config")
+    assert config.ATS_VERDICT_MAX_REFINES == 5
 
 
 # ── Cost re-stamp: tracker row must get the post-refine total ────────────────

@@ -959,8 +959,8 @@ def _run_main_api(
     if gen_ok:
         try:
             from hunter.ats_pdf_roundtrip import (
-                HEAL_DELTA_PP,
                 format_summary,
+                heal_delta_pp,
                 nbsp_patch_missing_keywords,
                 run_pdf_roundtrip,
             )
@@ -972,7 +972,7 @@ def _run_main_api(
             )
 
             delta = pdf_check.get("delta_from_json") if pdf_check else None
-            if pdf_check and delta is not None and delta <= -HEAL_DELTA_PP:
+            if pdf_check and delta is not None and delta <= -heal_delta_pp():
                 missing = pdf_check.get("missing_keywords") or []
                 patches = nbsp_patch_missing_keywords(content, missing)
                 if patches:
