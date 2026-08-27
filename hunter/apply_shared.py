@@ -10,131 +10,47 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import date
 from pathlib import Path
 
-import requests
+import requests  # noqa: F401 — kept for `apply_shared.requests.post` backward compat
 
 from hunter import candidate, text_repair
 from hunter.best_effort import best_effort
-import os
 
-from hunter.config import (
+# Kept as DIRECT (not re-exported) imports: hunter.pipeline.notify / .folders
+# read these back from hunter.apply_shared dynamically at call time (see the
+# docstrings there), so this module must stay their live source of truth —
+# it's also the attribute path several tests monkeypatch
+# (tests/conftest.py's autouse `_no_telegram` fixture, tests/test_apply_shared.py,
+# tests/test_repost_gate.py, tests/test_cli_empty_run.py, the golden E2E tests).
+from hunter.config import (  # noqa: F401
     APPLICATIONS_DIR,
-    GENERATE_PL_RESUME,
-    PROJECT_DIR,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_SEND_DOCS,
 )
 
-# ── LLM profile helper ───────────────────────────────────────────────────────
-
-
-def _llm_p():
-    """Return the currently active LLM profile. Resolved fresh each call so a
-    /llm switch in Telegram takes effect on the next vacancy without restart."""
-    from hunter.llm_profiles import get_active
-
-    return get_active()
-
-
-def _translate_p():
-    """Resolve the translate profile (Haiku-tier by default — mechanical
-    PL<->EN translation, not worth the main profile's $/output-token rate).
-    See docs/LLM_COST_REDUCTION_PLAN.md M5. Falls back to the main LLM
-    profile when no translate key resolves (TRANSLATE_API_KEY unset AND no
-    ANTHROPIC_API_KEY/LLM_API_KEY fallback) — a translation call must never
-    fail outright just because the cheaper profile has no key configured."""
-    from hunter.config import TRANSLATE_API_KEY, TRANSLATE_MODEL, TRANSLATE_PROVIDER
-
-    if not TRANSLATE_API_KEY:
-        return _llm_p()
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        provider=TRANSLATE_PROVIDER, model=TRANSLATE_MODEL, api_key=TRANSLATE_API_KEY
-    )
-
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-
-PROMPTS_DIR = PROJECT_DIR / "prompts"
-_cyz = os.getenv("CANDIDATE_YAML_PATH")
-CANDIDATE_DIR = Path(_cyz).parent if _cyz else PROJECT_DIR / "candidate"
-
-REQUIRED_JSON_KEYS: list[str] = [
-    "company_name",
-    "stack",
-    "lang",
-    "job_title",
-    "resume_en",
-    "cover_letter_en",
-    "cover_letter_pl",
-    "about_me_en",
-    "about_me_pl",
-]
-if GENERATE_PL_RESUME:
-    REQUIRED_JSON_KEYS.append("resume_pl")
-
-# Exit code: JobLeads fetch blocked — MANUAL tracker row + stub job_posting.txt written
-APPLY_MANUAL_EXIT_CODE = 44
-
-# Exit code: fetch hit a transient rate limit (HTTP 429). The caller should retry
-# later WITHOUT escalating the permanent fail counter — the offer is likely fine.
-APPLY_RATE_LIMITED_EXIT_CODE = 45
-
-# Exit code: LLM account-level outage (drained balance / bad key — llm_client.
-# LLMOutageError). Global state, not the vacancy's fault: the caller must stop
-# the batch immediately, write NO tracker row and never escalate fail_count
-# (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M1).
-APPLY_LLM_OUTAGE_EXIT_CODE = 46
-
-# Placeholder URL used when user pastes job text into Telegram without any link.
-PASTE_NO_URL_PLACEHOLDER = "paste://no-url"
-
-
-def is_rate_limit_error(exc: Exception) -> bool:
-    """True if an exception represents an HTTP 429 / rate-limit response.
-
-    Checks a requests/cloudscraper-style ``exc.response.status_code`` first, then
-    falls back to scanning the message for a 429 / "too many requests" signal.
-    """
-    resp = getattr(exc, "response", None)
-    if resp is not None and getattr(resp, "status_code", None) == 429:
-        return True
-    msg = str(exc).lower()
-    return "429" in msg or "too many requests" in msg
-
-
-# Hosts behind anti-bot / CDN protection where a 403 / blocked fetch means
-# "blocked right now, retry later" rather than a permanent failure. Treating their
-# blocks as transient keeps the job in the retry queue instead of escalating to a
-# permanent "gave up" FAIL row that pollutes the tracker.
-_ANTIBOT_HOSTS = ("pracuj.pl", "linkedin.com", "theprotocol.it")
-
-
-def is_transient_fetch_error(exc: Exception, url: str = "") -> bool:
-    """True for fetch failures that are transient anti-bot blocks (retry later),
-    not permanent failures.
-
-    Covers HTTP 429 everywhere (``is_rate_limit_error``), plus 403 / Cloudflare /
-    cloudscraper blocks on known anti-bot hosts (``_ANTIBOT_HOSTS``). A generic 403
-    on an arbitrary host is NOT treated as transient (it may be a genuinely gone
-    page) — only blocks on hosts we know front their listings with anti-bot CDNs.
-    """
-    if is_rate_limit_error(exc):
-        return True
-    from urllib.parse import urlparse
-
-    msg = str(exc).lower()
-    host = (urlparse(url).hostname or "").lower() if url else ""
-    on_antibot = any(h in host for h in _ANTIBOT_HOSTS) or any(h in msg for h in _ANTIBOT_HOSTS)
-    return bool(
-        on_antibot
-        and ("403" in msg or "forbidden" in msg or "cloudscraper" in msg or "cloudflare" in msg)
-    )
-
+# ── Re-exports (docs/GENERATION_ARCHITECTURE_ANALYSIS.md wave 1) ────────────
+# These symbols now live in hunter/pipeline/*; re-exported here for backward
+# compat (32 call sites across the repo import them from hunter.apply_shared).
+from hunter.pipeline.errors import (  # noqa: F401
+    APPLY_LLM_OUTAGE_EXIT_CODE,
+    APPLY_MANUAL_EXIT_CODE,
+    APPLY_RATE_LIMITED_EXIT_CODE,
+    PASTE_NO_URL_PLACEHOLDER,
+    ApplyError,
+    is_rate_limit_error,
+    is_transient_fetch_error,
+)
+from hunter.pipeline.folders import (  # noqa: F401
+    CANDIDATE_DIR,
+    PROMPTS_DIR,
+    _sanitize_folder_company,
+    compute_output_folder,
+)
+from hunter.pipeline.notify import notify, send_telegram_documents  # noqa: F401
+from hunter.pipeline.profiles import _llm_p, _translate_p  # noqa: F401
+from hunter.pipeline.validate import REQUIRED_JSON_KEYS, validate_content  # noqa: F401
 
 # Shown after React-only auto-skip.
 _REACT_SKIP_FORCE_HINT = (
@@ -200,13 +116,6 @@ def is_backend_only_job_text(text: str) -> bool:
     if not _BE_REQUIRED_LANG_RE.search(text):
         return False
     return bool(_BE_REQUIRED_QUALIFIER_RE.search(text))
-
-
-# ── Exceptions ────────────────────────────────────────────────────────────────
-
-
-class ApplyError(RuntimeError):
-    """Raised when an apply attempt fails and fallback should be tried."""
 
 
 # ── Tracker dedup ─────────────────────────────────────────────────────────────
@@ -319,99 +228,6 @@ def run_doomed_gate(
     )
     print(f"[apply_agent] WARN (doomed gate) — {len(warn_findings)} finding(s): {url}")
     return False
-
-
-# ── Telegram helpers ──────────────────────────────────────────────────────────
-
-# Formatting tags this module itself puts into notify() messages — stripped
-# for the plain-text fallback resend below.
-_NOTIFY_TAG_RE = re.compile(r"</?(?:b|i|u|s|a|code|pre)(?:\s[^<>]*)?>")
-
-
-def notify(message: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        resp = requests.post(
-            api_url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            return
-        # Telegram rejects the WHOLE message (400 "can't parse entities") when
-        # interpolated content — an LLM error snippet, a quoted posting line —
-        # breaks HTML parsing. That silently ate failure notifications: the
-        # owner saw a bare "apply_agent failed" with no reason (2026-07-11).
-        # Resend once as plain text with our own formatting tags stripped.
-        print(
-            f"[apply_agent] Telegram rejected HTML message (HTTP {resp.status_code}) — resending plain"
-        )
-        requests.post(
-            api_url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": _NOTIFY_TAG_RE.sub("", message),
-                "disable_web_page_preview": True,
-            },
-            timeout=10,
-        )
-    except Exception as e:
-        print(f"[apply_agent] Telegram error: {e}")
-
-
-# Telegram Bot API: max document size 50MB
-_TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024
-_TELEGRAM_SEND_DOC_TIMEOUT = 120
-
-
-def send_telegram_documents(paths: list[Path]) -> None:
-    """Send generated files to Telegram as documents (separate from notify text)."""
-    if not TELEGRAM_SEND_DOCS or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    if not paths:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
-    failed: list[str] = []
-    sent = 0
-    for p in sorted(paths, key=lambda x: x.name):
-        if not p.is_file():
-            continue
-        try:
-            size = p.stat().st_size
-            if size > _TELEGRAM_DOC_MAX_BYTES:
-                print(f"[apply_agent] Skipping Telegram doc (over 50MB): {p.name}")
-                failed.append(f"{p.name} (over 50MB cap)")
-                continue
-            with p.open("rb") as f:
-                r = requests.post(
-                    url,
-                    data={"chat_id": TELEGRAM_CHAT_ID},
-                    files={"document": (p.name, f, "application/octet-stream")},
-                    timeout=_TELEGRAM_SEND_DOC_TIMEOUT,
-                )
-            data = r.json() if r.content else {}
-            if r.status_code != 200 or not data.get("ok"):
-                desc = data.get("description", r.text[:200])
-                print(f"[apply_agent] sendDocument failed for {p.name}: {desc}")
-                failed.append(p.name)
-            else:
-                sent += 1
-        except Exception as e:
-            print(f"[apply_agent] sendDocument error for {p.name}: {e}")
-            failed.append(p.name)
-    if failed:
-        short = "\n".join(f"  • {x}" for x in failed[:15])
-        more = f"\n  … +{len(failed) - 15} more" if len(failed) > 15 else ""
-        notify(f"⚠️ <b>Some files were not sent to Telegram</b>\n{short}{more}")
-    elif sent:
-        print(f"[apply_agent] Sent {sent} file(s) to Telegram")
 
 
 def stack_gate_allows_manual(is_manual: bool, url: str, what: str) -> bool:
@@ -1691,34 +1507,6 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     return content
 
 
-# ── Output folder logic ───────────────────────────────────────────────────────
-
-
-def compute_output_folder(company_name: str) -> Path:
-    """Compute Applications/{date}/{Company} with _2, _3 suffixes if needed."""
-    today = date.today().strftime("%Y-%m-%d")
-    date_dir = APPLICATIONS_DIR / today
-    base = date_dir / company_name
-    if not base.exists():
-        return base
-    suffix = 2
-    while True:
-        candidate = date_dir / f"{company_name}_{suffix}"
-        if not candidate.exists():
-            return candidate
-        suffix += 1
-
-
-_INVALID_FOLDER_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
-def _sanitize_folder_company(name: str) -> str:
-    """Safe folder segment from company name (Windows / macOS)."""
-    s = _INVALID_FOLDER_CHARS.sub("_", (name or "").strip())
-    s = s.strip("._ ")[:120] or "Unknown"
-    return s
-
-
 # ── JobLeads MANUAL flow ──────────────────────────────────────────────────────
 
 
@@ -1794,50 +1582,3 @@ def _handle_jobleads_fetch_blocked(url: str, err: str, company: str = "", title:
     )
     print(f"[apply_agent] MANUAL_PENDING exit={APPLY_MANUAL_EXIT_CODE} tracker_row={written}")
     sys.exit(APPLY_MANUAL_EXIT_CODE)
-
-
-# ── Content validation ────────────────────────────────────────────────────────
-
-# The three _pl fields the M4 skip-instruction (build_pl_skip_instruction)
-# asks the generator to return empty for an EN posting. They're deliberately
-# grouped: a repair-round-trip is only worth avoiding when the LLM omitted
-# ALL three the same way an intentional skip would — one present and two
-# missing is a real inconsistency, not a skip, and must still error.
-_PL_SKIPPABLE_KEYS = ("resume_pl", "cover_letter_pl", "about_me_pl")
-
-
-def validate_content(data: dict, *, pl_optional: bool = False) -> list[str]:
-    """Return list of missing/invalid fields.
-
-    `pl_optional=True` (only ever passed by the caller that actually issued
-    the M4 skip-instruction — i.e. an EN posting, short mode, flag on) also
-    tolerates the LLM omitting the three _pl keys entirely instead of
-    returning them as explicit empty values ({}/"", which already pass the
-    `is None` check below regardless of this flag). Default False keeps
-    every other caller (CLI pipeline, verdict refine rounds, dual-apply,
-    tests) exactly as strict as before — a PL posting or a full-mode run
-    missing its _pl fields is still a real bug, not an intentional skip.
-    """
-    errors = []
-    pl_all_missing = pl_optional and all(
-        key not in data or not data[key] for key in _PL_SKIPPABLE_KEYS
-    )
-    for key in REQUIRED_JSON_KEYS:
-        if key in _PL_SKIPPABLE_KEYS and pl_all_missing:
-            continue
-        if key not in data or data[key] is None:
-            errors.append(f"Missing field: {key}")
-
-    resume = data.get("resume_en")
-    if isinstance(resume, dict):
-        for sub in ("summary", "skills", "experience", "education"):
-            if sub not in resume:
-                errors.append(f"resume_en missing: {sub}")
-        if isinstance(resume.get("experience"), list) and len(resume["experience"]) < 7:
-            errors.append(
-                f"resume_en.experience has only {len(resume['experience'])} jobs (expected 7 — ALL roles required)"
-            )
-    else:
-        errors.append("resume_en is not a dict")
-
-    return errors
