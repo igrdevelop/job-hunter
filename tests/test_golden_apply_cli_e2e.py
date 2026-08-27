@@ -27,6 +27,8 @@ LibreOffice. Everything between them is the real `main_cli`.
 """
 
 import json
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -71,12 +73,24 @@ class FakeClaudeSkill:
         self.applications_dir = applications_dir
         self.gen_runner = gen_runner
         self.claude_calls = 0
+        # Captured before the fixture monkeypatches subprocess.run onto this
+        # instance -- the real function, for delegating anything that isn't
+        # actually a `claude -p ...` call.
+        self._real_run = subprocess.run
 
     def __call__(self, cmd, **kwargs):
-        import subprocess
-
         if any("generate_docs" in str(part) for part in cmd):
             return self.gen_runner(cmd, **kwargs)
+
+        if not cmd or str(cmd[0]) != "claude":
+            # subprocess.run is patched process-wide (hunter.apply_cli.subprocess
+            # is the same module object as subprocess), so any unrelated
+            # subprocess.run call made while this fixture is active -- e.g.
+            # sklearn's lazy import shelling out to `ver` via
+            # platform.win32_ver() on Windows -- would otherwise be miscounted
+            # as a `claude -p` invocation. Only a genuine claude invocation is
+            # ours to fake; everything else runs for real.
+            return self._real_run(cmd, **kwargs)
 
         self.claude_calls += 1
         folder = self.applications_dir / date.today().strftime("%Y-%m-%d") / "NordicFrontendLabs"
@@ -271,6 +285,21 @@ class TestPostGenerationAbortsUndoTheRow:
 
         assert folder is not None, "/force means generate this one anyway"
         assert _row(url).get("ats", "").strip().endswith("%")
+
+
+def test_fake_claude_skill_does_not_miscount_unrelated_subprocess_calls(tmp_path):
+    # subprocess.run is patched process-wide by the cli_env fixture (see its
+    # docstring), so anything else that shells out while the fixture is active
+    # -- e.g. sklearn's lazy import triggering platform.win32_ver(), which on
+    # Windows shells out to `ver` -- must not be counted as a `claude -p`
+    # invocation. Any command whose argv[0] isn't literally "claude" is not
+    # ours to fake.
+    skill = FakeClaudeSkill(content={}, applications_dir=tmp_path, gen_runner=lambda *a, **k: None)
+
+    result = skill([sys.executable, "-c", "pass"], capture_output=True, text=True)
+
+    assert skill.claude_calls == 0
+    assert result.returncode == 0
 
 
 class TestTheSkillIsCalledOnce:
