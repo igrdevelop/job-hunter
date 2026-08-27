@@ -12,12 +12,7 @@ from hunter.apply_shared import (
     PASTE_NO_URL_PLACEHOLDER,
     ApplyError,
     _already_processed,
-    _count_body_paragraphs,
-    _count_metrics,
-    _count_words,
-    _cta_banlist_hits,
     _filter_self_description_keywords,
-    _last_paragraph_text,
     _sanitize_folder_company,
     build_ats_keyword_checklist,
     build_pl_skip_instruction,
@@ -447,59 +442,6 @@ def test_strip_compliance_does_not_match_isolated() -> None:
     assert fixes == []
 
 
-# ── Cover letter review helpers ───────────────────────────────────────────────
-
-
-def test_count_words_empty() -> None:
-    assert _count_words("") == 0
-
-
-def test_count_words_sentence() -> None:
-    assert _count_words("hello world foo") == 3
-
-
-def test_count_metrics_percentages() -> None:
-    assert _count_metrics("Improved performance by 40% across 3 teams") >= 2
-
-
-def test_count_metrics_excludes_10_years() -> None:
-    # "10+ years" should be excluded per the regex
-    count_with = _count_metrics("10+ years of experience")
-    count_without = _count_metrics("five years of experience")
-    assert count_with == count_without
-
-
-def test_last_paragraph_text_blank_line_split() -> None:
-    letter = "First paragraph.\n\nSecond paragraph."
-    assert _last_paragraph_text(letter) == "Second paragraph."
-
-
-def test_last_paragraph_text_empty() -> None:
-    assert _last_paragraph_text("") == ""
-
-
-def test_count_body_paragraphs_with_salutation() -> None:
-    letter = "Dear Hiring Manager,\n\nFirst body.\n\nSecond body.\n\nThird body."
-    assert _count_body_paragraphs(letter) == 3
-
-
-def test_count_body_paragraphs_no_salutation() -> None:
-    letter = "First.\n\nSecond.\n\nThird."
-    assert _count_body_paragraphs(letter) == 3
-
-
-def test_cta_banlist_hits_banned_phrase() -> None:
-    letter = "Best regards.\n\nI look forward to hearing from you."
-    hits = _cta_banlist_hits(letter)
-    assert hits
-
-
-def test_cta_banlist_allowed_cta() -> None:
-    letter = "Best regards.\n\nI look forward to discussing the role."
-    hits = _cta_banlist_hits(letter)
-    assert hits == []
-
-
 # ── notify (smoke — no real Telegram call) ───────────────────────────────────
 
 
@@ -520,13 +462,6 @@ def test_apply_agent_reexports_already_processed() -> None:
 
     assert hasattr(apply_agent, "_already_processed")
     assert callable(apply_agent._already_processed)
-
-
-def test_apply_agent_reexports_banlist_functions() -> None:
-    import apply_agent
-
-    assert hasattr(apply_agent, "_body_banlist_hits")
-    assert hasattr(apply_agent, "_opener_banlist_hits")
 
 
 def test_apply_agent_reexports_constants() -> None:

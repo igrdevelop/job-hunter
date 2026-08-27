@@ -20,7 +20,7 @@ Usage:
   python apply_agent.py --paste-file posting.txt "https://..."  # URL + pasted text
 
 Architecture (Phase 4):
-  hunter/apply_shared.py — shared helpers (constants, Telegram, CL review, etc.)
+  hunter/apply_shared.py — shared helpers (constants, Telegram, gates, scrubs, etc.)
   hunter/apply_api.py    — API pipeline (fetch → LLM → generate_docs)
   hunter/apply_cli.py    — CLI pipeline (claude -p /apply → post-process)
   apply_agent.py         — this file: arg parsing, dispatch, backward-compat re-exports
@@ -45,10 +45,6 @@ from hunter.apply_shared import (  # noqa: F401
     PASTE_NO_URL_PLACEHOLDER,
     ApplyError,
     _already_processed,
-    _body_banlist_hits,
-    _cover_letter_review,
-    _cover_letter_review_loop,
-    _opener_banlist_hits,
     compute_output_folder,
     notify,
     send_telegram_documents,

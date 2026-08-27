@@ -18,7 +18,12 @@ code only through `candidate.get(dotpath, <neutral default>)`.
 
 Scope note: docs/ and tests/ are excluded. docs/AGENT_LOG.md is a historical
 record that legitimately quotes past incidents, and this very file has to name
-the strings it forbids.
+the strings it forbids. `prompts/*.md` and `.claude/commands/*.md` ARE in
+scope for the personal-data check below (unlike the rest of `.claude/`, which
+is agent tooling): both are the live LLM prompt for the generation pipeline
+(`.claude/commands/apply.md` is what `claude -p` actually runs — see CLAUDE.md
+"Repository Layout"), so personal data there reaches the LLM and the generated
+documents exactly like personal data in `hunter/*.py` would.
 """
 
 from __future__ import annotations
@@ -31,10 +36,29 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Production code only: the packages that ship in the Docker image and run
-# against real vacancies. tools/ is developer-local and .claude/ is agent
-# tooling, both out of scope.
+# against real vacancies. tools/ is developer-local, both out of scope.
 SCANNED_ROOTS = ("hunter",)
 SCANNED_FILES = ("generate_docs.py", "apply_agent.py", "llm_client.py", "hunter.py")
+
+# The live prompt sources read by both apply pipelines / the CLI skill.
+SCANNED_MD_GLOBS = ("prompts/*.md", ".claude/commands/*.md")
+
+# docs/GENERATION_ARCHITECTURE_ANALYSIS.md §5.2-§5.3 found personal data in
+# these two tracked prompt files (a 7-employer table with exact periods,
+# per-employer backend rules, university, course list, real client names) —
+# the readiness test above never saw them because it scanned only *.py. The
+# fix is to render the personal block into the prompt from candidate.yaml at
+# runtime, the pattern hunter/verdict_refine.py:60-67 already uses for its
+# own prompt blocks — that is wave 2 of the analysis document's §6 and is not
+# done yet. This allowlist exists so CI can go green NOW without hiding the
+# finding: it is scoped to these two exact paths, so any OTHER file under
+# prompts/ or .claude/commands/ carrying the same forbidden strings still
+# fails the test below (see test_legacy_allowlist_does_not_hide_new_offender).
+# Shrink this set as wave 2 lands; it must reach empty.
+LEGACY_PERSONAL_DATA_ALLOWLIST = {
+    "prompts/generation_rules.md",
+    "prompts/judge_rules.md",
+}
 
 # Patterns that must never appear as literals in production code. Each entry is
 # (label, compiled regex). Kept deliberately narrow — this test must not fire on
@@ -69,19 +93,70 @@ def _production_files() -> list[Path]:
     return [f for f in files if "__pycache__" not in f.parts]
 
 
-@pytest.mark.parametrize("label,pattern", FORBIDDEN, ids=[label for label, _ in FORBIDDEN])
-def test_no_personal_data_in_production_code(label: str, pattern: re.Pattern[str]) -> None:
+def _prompt_files() -> list[Path]:
+    files: list[Path] = []
+    for pattern in SCANNED_MD_GLOBS:
+        files.extend(sorted(PROJECT_ROOT.glob(pattern)))
+    return files
+
+
+def _hits_for_pattern(
+    paths: list[Path], pattern: re.Pattern[str], root: Path, allowlist: set[str]
+) -> list[str]:
+    """Pure scan used by both the real readiness check and its own regression
+    test below — kept file-system-root-agnostic so the regression test can
+    exercise it against synthetic tmp_path files instead of the real repo."""
     hits: list[str] = []
-    for path in _production_files():
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        if rel in allowlist:
+            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):
             if pattern.search(line):
-                rel = path.relative_to(PROJECT_ROOT).as_posix()
                 hits.append(f"{rel}:{lineno}: {line.strip()[:120]}")
+    return hits
+
+
+@pytest.mark.parametrize("label,pattern", FORBIDDEN, ids=[label for label, _ in FORBIDDEN])
+def test_no_personal_data_in_production_code(label: str, pattern: re.Pattern[str]) -> None:
+    hits = _hits_for_pattern(
+        _production_files() + _prompt_files(), pattern, PROJECT_ROOT, LEGACY_PERSONAL_DATA_ALLOWLIST
+    )
     assert not hits, (
         f"Personal data ({label}) hardcoded in production code.\n"
         "Move it to candidate/candidate.yaml and read it via "
         "candidate.get(dotpath, <neutral default>):\n  " + "\n  ".join(hits)
+    )
+
+
+def test_legacy_allowlist_does_not_hide_new_offender(tmp_path: Path) -> None:
+    """LEGACY_PERSONAL_DATA_ALLOWLIST must be scoped to exact paths, not to the
+    whole prompts/ or .claude/commands/ directory. Prove a NEW file carrying
+    the same personal data is still caught, while the two allowlisted legacy
+    files are not — otherwise the allowlist could silently widen over time
+    instead of shrinking towards empty as docs/GENERATION_ARCHITECTURE_ANALYSIS.md
+    wave 2 lands."""
+    owner_employer_pattern = dict(FORBIDDEN)["owner employer"]
+
+    (tmp_path / "prompts").mkdir()
+    new_offender = tmp_path / "prompts" / "some_new_prompt.md"
+    new_offender.write_text("Worked at Fairmarkit for two years.\n", encoding="utf-8")
+    legacy_offender = tmp_path / "prompts" / "generation_rules.md"
+    legacy_offender.write_text("Worked at Fairmarkit for two years.\n", encoding="utf-8")
+
+    hits = _hits_for_pattern(
+        [new_offender, legacy_offender],
+        owner_employer_pattern,
+        tmp_path,
+        {"prompts/generation_rules.md"},
+    )
+
+    assert any("some_new_prompt.md" in h for h in hits), (
+        "a new prompts/ file with personal data must still fail the readiness check"
+    )
+    assert not any("generation_rules.md" in h for h in hits), (
+        "the allowlisted legacy file must stay skipped"
     )
 
 
