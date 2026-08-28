@@ -297,6 +297,38 @@ def _run_safety_stages(content: dict, job_text: str, base_cv: str) -> tuple[dict
     return content, blocked, report
 
 
+def _round_entry(
+    round_num: int,
+    kind: str | None,
+    score_before: float | None,
+    score_after: float | None,
+    outcome: str,
+    reason: str | None,
+) -> dict:
+    """One row of the refine loop's own history, persisted to
+    content["verdict_history"] and rendered by
+    hunter.ats_pdf_roundtrip.format_verdict_history.
+
+    `outcome` is one of:
+      - "accepted"  — the round's new verdict strictly beat the current best
+        and was kept.
+      - "rejected"  — a new verdict WAS computed but didn't beat the current
+        best; the keep-best guard rolled the round back. These are the
+        rounds that show where the loop hits its ceiling.
+      - "discarded" — the round never produced a comparable score at all
+        (a bad rewrite, a blocked safety stage, or an unexpected error) —
+        `score_after` is None.
+    """
+    return {
+        "round": round_num,
+        "kind": kind,
+        "score_before": score_before,
+        "score_after": score_after,
+        "outcome": outcome,
+        "reason": reason,
+    }
+
+
 def _rollback(
     content_path: Path, best_content: dict, folder: Path, regenerate_docs: Callable[[Path], None]
 ) -> None:
@@ -340,6 +372,13 @@ def refine_loop(
 
     Returns (final_content, final_verdict). A no-op (verdict already at
     target, or max_rounds <= 0) makes zero LLM calls.
+
+    Every attempted round (accepted, rejected by the keep-best guard, or
+    discarded before a score was even produced) is appended to a history
+    list and, if non-empty, stamped on the returned content as
+    ``content["verdict_history"]`` — see ``_round_entry`` for the shape and
+    ``hunter.ats_pdf_roundtrip.format_verdict_history`` for the Telegram
+    rendering. A no-op run leaves the key absent entirely.
     """
     if max_rounds <= 0 or not isinstance(verdict, dict):
         return content, verdict
@@ -360,15 +399,26 @@ def refine_loop(
     # no further round can help (same input either way) — stop the loop.
     last_round_failed = False
 
+    # Per-round audit trail, persisted to content["verdict_history"] (see
+    # _round_entry) so the score's journey survives past logs/apply_stdout/'s
+    # 7-day retention. Rolled-back rounds are recorded too — they're what
+    # shows where the loop hits its ceiling.
+    history: list[dict] = []
+
+    # Whether this call wrote content_path at least once. A round discarded
+    # before reaching the write point (no actionable feedback, a bad
+    # rewrite, dropped roles, a blocked safety stage, an unexpected error)
+    # never touches disk — several tests pin that exact behavior (no
+    # content.json is created when nothing was ever accepted). The final
+    # verdict_history stamp below must not be the thing that creates it.
+    wrote_to_disk = False
+
     for round_num in range(1, max_rounds + 1):
+        score: float | None = None
+        kind: str | None = None
         try:
             score = float(best_verdict.get("score") or 0)
             if score >= target:
-                break
-
-            feedback = build_refine_feedback(best_verdict)
-            if feedback is None:
-                print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
                 break
 
             natural_kind = "stretch" if round_num >= stretch_from_round else "honest"
@@ -380,6 +430,17 @@ def refine_loop(
                 )
             else:
                 kind = natural_kind
+
+            feedback = build_refine_feedback(best_verdict)
+            if feedback is None:
+                print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
+                history.append(
+                    _round_entry(
+                        round_num, kind, score, None, "discarded", "no actionable feedback"
+                    )
+                )
+                break
+
             print(
                 f"[verdict_refine] round {round_num} ({kind}): "
                 f"verdict {score} < target {target} — rewriting..."
@@ -392,6 +453,16 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: rewrite returned no usable resume — stopping"
                 )
+                history.append(
+                    _round_entry(
+                        round_num,
+                        kind,
+                        score,
+                        None,
+                        "discarded",
+                        "rewrite returned no usable resume",
+                    )
+                )
                 break
 
             candidate = copy.deepcopy(best_content)
@@ -400,6 +471,9 @@ def refine_loop(
             if _exp_len(candidate["resume_en"]) < _exp_len(best_content.get("resume_en")):
                 print(
                     f"[verdict_refine] round {round_num}: rewrite dropped roles — discarding round"
+                )
+                history.append(
+                    _round_entry(round_num, kind, score, None, "discarded", "rewrite dropped roles")
                 )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
@@ -417,6 +491,9 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: language gate blocked — discarding round"
                 )
+                history.append(
+                    _round_entry(round_num, kind, score, None, "discarded", "language gate blocked")
+                )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
                     break
@@ -427,6 +504,11 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round"
                 )
+                history.append(
+                    _round_entry(
+                        round_num, kind, score, None, "discarded", "rewrite broke validation"
+                    )
+                )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
                     break
@@ -436,6 +518,7 @@ def refine_loop(
             content_path.write_text(
                 json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            wrote_to_disk = True
             regenerate_docs(folder)
             new_verdict = run_llm_verdict(folder=folder, job_text=job_text)
             new_score = float(new_verdict.get("score")) if isinstance(new_verdict, dict) else None
@@ -444,12 +527,18 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: verdict improved {score} -> {new_score} — accepted"
                 )
+                history.append(_round_entry(round_num, kind, score, new_score, "accepted", None))
                 best_content, best_verdict = candidate, new_verdict
                 last_round_failed = False
             else:
                 print(
                     f"[verdict_refine] round {round_num}: verdict did not improve "
                     f"({score} -> {new_score}) — rolling back"
+                )
+                history.append(
+                    _round_entry(
+                        round_num, kind, score, new_score, "rejected", "verdict did not improve"
+                    )
                 )
                 _rollback(content_path, best_content, folder, regenerate_docs)
                 if last_round_failed and kind == "stretch":
@@ -458,7 +547,29 @@ def refine_loop(
                 last_round_failed = True
         except Exception as e:  # noqa: BLE001 — best-effort: stop, keep current best
             print(f"[verdict_refine] round {round_num} failed unexpectedly (keeping best): {e}")
+            history.append(
+                _round_entry(round_num, kind, score, None, "discarded", f"unexpected error: {e}")
+            )
             break
+
+    if history:
+        best_content["verdict_history"] = history
+        # The round loop above already wrote content_path at least once for
+        # this call (an accepted round, or a rejected one rolled back to the
+        # pre-round version) — bring that on-disk copy up to date with the
+        # full history too. A round discarded before ever reaching the write
+        # point leaves content_path untouched on purpose (several tests pin
+        # that no content.json exists at all in that case); the caller
+        # re-persists the returned dict regardless, so this is a convenience
+        # for anyone reading content.json straight off disk, not the only
+        # path the field reaches the caller through.
+        if wrote_to_disk:
+            try:
+                content_path.write_text(
+                    json.dumps(best_content, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            except Exception as e:  # noqa: BLE001 — best-effort
+                print(f"[verdict_refine] could not persist verdict_history: {e}")
 
     # PL mirror — ONCE, after the loop, and only if at least one round was
     # actually accepted (best_content is no longer the object the caller

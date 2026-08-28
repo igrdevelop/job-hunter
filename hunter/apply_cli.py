@@ -995,6 +995,14 @@ def main_cli(
                 json.dumps(_cli_content, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # Refine-loop score progression (mirror of apply_api Step 8) — the
+            # refine loop above (if it ran) already persisted verdict_history
+            # onto this same content.json, so _cli_content already carries it.
+            from hunter.ats_pdf_roundtrip import format_verdict_history
+
+            history_text = format_verdict_history(_cli_content)
+            if history_text:
+                pdf_summary += "\n" + history_text
         except Exception as e:
             print(f"[apply_agent] Warning: could not stamp verdict/cost on content.json: {e}")
 
