@@ -19,7 +19,13 @@ Layer 1 as-is, byte-for-byte.
 Layer 3 — env var override, for the subset of keys that already had an env
 var before this module existed (``ATS_VERDICT_TARGET``, ``JUDGE_MODE``, ...).
 A brand-new YAML-only knob has no env fallback by design — env stays the
-emergency lever it always was, not a second way to set every new knob.
+emergency lever it always was, not a second way to set every new knob. A
+malformed env value RAISES (``GenProfileEnvError``, see
+``_apply_env_overrides``) rather than warning and falling back — unlike a
+bad YAML value, which never raises. Env is what an operator reaches for when
+something needs to change immediately; silently ignoring a typo there is
+strictly worse than crashing loudly, and matches the pre-gen_profile
+behavior these 15 vars already had as bare ``int(os.getenv(...))`` casts.
 
 Priority: env > YAML > builtin.
 
@@ -362,7 +368,26 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+class GenProfileEnvError(ValueError):
+    """A generation.yaml env var override (Layer 3) is malformed."""
+
+
 def _apply_env_overrides(profile: dict[str, Any]) -> None:
+    """Apply Layer 3 (env var) overrides.
+
+    Unlike a bad YAML value (warn + keep builtin, never raise — see
+    _validate_leaf/_merge_document_section), a malformed env value RAISES.
+    Env is the emergency lever an operator reaches for when something needs
+    to change RIGHT NOW; a typo that silently falls back to the builtin
+    default is the worst possible failure mode for that lever, not the
+    safest one. This restores the pre-gen_profile behavior: every one of
+    these 15 vars used to be a bare `int(os.getenv(...))`/`float(os.getenv(
+    ...))` inline in hunter/config.py, which raised ValueError and crashed
+    the process at import time on a bad value — loud, not silent. Only
+    _cast_int/_cast_float can actually raise; _cast_bool/_cast_str_lower
+    accept any string (matching what the old inline casts did too, since
+    neither was ever validated against a fixed set).
+    """
     for dotpath, (env_name, caster) in _ENV_OVERRIDES.items():
         raw = os.environ.get(env_name)
         if raw is None:
@@ -370,14 +395,9 @@ def _apply_env_overrides(profile: dict[str, Any]) -> None:
         try:
             value = caster(raw)
         except (TypeError, ValueError) as exc:
-            logger.warning(
-                "generation profile: env %s=%r invalid for %s (%s) — ignored",
-                env_name,
-                raw,
-                dotpath,
-                exc,
-            )
-            continue
+            raise GenProfileEnvError(
+                f"generation profile: env {env_name}={raw!r} is invalid for {dotpath} ({exc})"
+            ) from exc
         _set_nested(profile, dotpath, value)
 
 

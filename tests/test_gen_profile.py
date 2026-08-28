@@ -14,6 +14,7 @@ import time
 import pytest
 import yaml
 
+from hunter import gen_profile
 from hunter.gen_profile import (
     builtin_defaults,
     clear_gen_profile_cache,
@@ -143,12 +144,23 @@ def test_env_override_takes_effect_without_cache_clear(tmp_path, monkeypatch):
     assert second["gates"]["repost_window_days"] == 10
 
 
-def test_bad_env_value_falls_back_with_warning(tmp_path, caplog, monkeypatch):
+def test_bad_env_value_raises(tmp_path, monkeypatch):
+    """Unlike a bad YAML value (warn + keep default), a malformed env
+    override is fatal — env is the emergency lever, and a silently-ignored
+    typo there is worse than crashing loudly."""
     monkeypatch.setenv("ATS_VERDICT_MAX_REFINES", "not-an-int")
-    with caplog.at_level(logging.WARNING, logger="hunter.gen_profile"):
-        profile = load_gen_profile(tmp_path / "nope.yaml")
-    assert profile["verdict"]["max_refines"] == 5
-    assert any("invalid" in r.message for r in caplog.records)
+    with pytest.raises(gen_profile.GenProfileEnvError, match="ATS_VERDICT_MAX_REFINES"):
+        load_gen_profile(tmp_path / "nope.yaml")
+
+
+def test_bad_bool_env_value_does_not_raise(tmp_path, monkeypatch):
+    """Bool/str env casters accept any string (matching the pre-gen_profile
+    inline `os.getenv(...).lower() in (...)` casts, which were never
+    validated against a fixed set either) — only int/float casters can fail
+    and raise."""
+    monkeypatch.setenv("JUDGE_ENABLED", "definitely-not-a-bool")
+    profile = load_gen_profile(tmp_path / "nope.yaml")
+    assert profile["judge"]["enabled"] is False
 
 
 def test_mtime_cache_invalidation(tmp_path):

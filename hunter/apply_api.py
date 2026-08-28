@@ -945,7 +945,7 @@ def _run_main_api(
     # a line wrap, lost bullets, table reordering) that the JSON ATS score
     # can't see.
     #
-    # If the PDF score is ≥ HEAL_DELTA_PP below the JSON score, the loss is
+    # If the PDF score is ≥ heal_delta_pp() below the JSON score, the loss is
     # almost certainly a multi-word keyword breaking on a wrap ("performance
     # optimization" → "performance\noptimization"). Patch each affected
     # phrase with NBSP in content.json, regenerate the docs, re-score once.

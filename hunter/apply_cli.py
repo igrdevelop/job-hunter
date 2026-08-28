@@ -772,7 +772,7 @@ def main_cli(
 
         # PDF roundtrip + NBSP self-heal — mirror of the API pipeline.
         # See hunter/apply_api.py for the full rationale: re-score the
-        # rendered EN CV PDF, and if Δ ≥ HEAL_DELTA_PP below the JSON score
+        # rendered EN CV PDF, and if Δ ≥ heal_delta_pp() below the JSON score
         # patch each multi-word missing keyword with NBSP and regen once.
         # Best-effort — failures log + continue, never block delivery.
         pdf_summary = ""
