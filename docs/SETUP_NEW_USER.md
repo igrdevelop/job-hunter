@@ -57,6 +57,10 @@ Edit the files in `candidate/` with your real data — see
 4. **(Optional) `candidate/filters.yaml`** — copy from `filters.example.yaml`
    to tune what the bot hunts for (stack, levels, hybrid rules). No file =
    shared defaults. Changes apply on the next `/hunt`.
+5. **(Optional) `candidate/generation.yaml`** — copy from
+   `generation.example.yaml` to tune what the bot writes into a CV
+   (ATS-loop thresholds, verdict/refine rounds, gate modes, document
+   layout). No file = shared defaults. Changes apply on the next apply run.
 
 **This step is not optional.** The `.example` files are templates, not
 fallbacks — nothing loads them automatically. Without your own
@@ -146,6 +150,11 @@ The three files to edit (plus an optional fourth for hunt policy):
    `candidate/filters.example.yaml`. Missing file = shared defaults
    (today's Angular/Wrocław owner behavior). Edit + `/hunt` — no
    deploy needed. See [docs/FILTERS_YAML_PLAN.md](FILTERS_YAML_PLAN.md).
+5. **(Optional) `candidate/generation.yaml`** — CV-content policy
+   (ATS-loop thresholds, verdict/refine rounds, judge/gate modes,
+   document layout). Copy from `candidate/generation.example.yaml`.
+   Missing file = shared defaults. Edit + next apply — no deploy needed.
+   See [docs/GENERATION_ARCHITECTURE_ANALYSIS.md](GENERATION_ARCHITECTURE_ANALYSIS.md) §6.
 
 **This step is not optional.** The `.example` files are templates you copy
 and edit — nothing loads them automatically. Hunting, filtering and Telegram

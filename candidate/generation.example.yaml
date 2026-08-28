@@ -1,0 +1,93 @@
+# generation.example.yaml — copy to generation.yaml next to candidate.yaml
+# (or users/{uid}/candidate/generation.yaml once multi-user B3.5 is live).
+#
+# Docs: docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6 (wave 3)
+# Every key below is optional — omit a key to keep the shared builtin default.
+# Missing file entirely = today's behavior byte-for-byte.
+#
+# Scope: this file controls WHAT the pipeline writes into a CV — thresholds,
+# round counts, gate modes, document layout. HOW the system is wired (LLM
+# models, timeouts, schedule, queue) stays in .env / hunter/config.py.
+#
+# Priority when a key is set in more than one place: env var > this file >
+# builtin default. The matching env var (where one exists, see the comments
+# below) still works exactly as before this file existed — it's the
+# emergency lever, not replaced by generation.yaml.
+#
+# After editing: the next apply picks the change up (mtime cache). No deploy.
+#
+# --- defaults below match hunter.gen_profile.builtin_defaults() ---
+
+ats:
+  # Combined score (keyword + TF-IDF) the deterministic ATS loop targets
+  # before it stops rewriting resume_en. Env: none (new in generation.yaml).
+  threshold: 95
+  # Rewrite rounds that stay strictly honest ("do NOT invent facts") before
+  # the loop escalates to a soft, then aggressive, keyword-injection pass.
+  honest_rounds: 2
+  # Total rewrite rounds (honest + soft + aggressive) before the loop gives
+  # up and keeps whatever score the last rewrite reached.
+  total_rounds: 5
+  # Max keywords handed to the FIRST generation prompt as a deterministic
+  # checklist (keeps the prompt addition small on a keyword-dense posting).
+  checklist_cap: 30
+
+verdict:
+  # Run the independent post-render PDF verdict at all. Env: ATS_VERDICT_ENABLED.
+  enabled: true
+  # Target score (%) for the verdict refine loop — a verdict at or above
+  # this is left alone. Env: ATS_VERDICT_TARGET.
+  target: 95
+  # Max escalating refine rounds when the verdict is below target (0 disables
+  # the loop, reproducing the old one-shot-verdict behavior). Env:
+  # ATS_VERDICT_MAX_REFINES.
+  max_refines: 5
+  # First refine round allowed to add posting technologies absent from the
+  # candidate profile (rounds below this stay honest/visibility-only). Env: none.
+  stretch_from_round: 4
+  # Trigger the NBSP self-heal pass (rendering damage, not real content loss)
+  # when the rendered-PDF score is this many percentage points below the
+  # JSON score. Env: none.
+  heal_delta_pp: 5.0
+
+judge:
+  # Run the LLM-as-judge CV verification pass. Env: JUDGE_ENABLED.
+  enabled: true
+  # report (write judge_report.json only) | warn (+Telegram) | block (+abort
+  # delivery when a fabrication survives repair). Env: JUDGE_MODE.
+  mode: warn
+  # Repair rounds before warn/block. Env: JUDGE_MAX_REPAIR_ROUNDS.
+  max_repair_rounds: 1
+
+gates:
+  # Run the deterministic doomed-vacancy gate at all. Env: DOOMED_GATE_ENABLED.
+  doomed_enabled: true
+  # skip (abort generation on a HARD finding) | warn (downgrade every HARD
+  # finding to a warning without disabling the gate). Env: DOOMED_GATE_HARD_ACTION.
+  doomed_hard_action: skip
+  # Run the stack pre-screen (one cheap-model call reading which framework a
+  # posting is actually for). Env: PRESCREEN_ENABLED.
+  prescreen_enabled: true
+  # report (log only) | warn (+Telegram) | skip (SKIP row, no generation).
+  # Env: PRESCREEN_MODE.
+  prescreen_mode: warn
+  # Floor under the model's own confidence for a prescreen skip verdict.
+  # Env: PRESCREEN_MIN_CONFIDENCE.
+  prescreen_min_confidence: 0.9
+  # Run the re-post (CV reuse) gate. Env: REPOST_GATE_ENABLED.
+  repost_enabled: true
+  # How far back the re-post gate looks for donor applications (days). Env:
+  # REPOST_WINDOW_DAYS. NOTE: the SIMILARITY thresholds themselves
+  # (hunter/repost_gate.py) are calibrated against the real corpus via
+  # tools/reuse_calibrate.py and are deliberately NOT configurable here.
+  repost_window_days: 60
+  # Minimum "react" mentions (with zero "angular" mentions) to auto-skip
+  # pre-LLM without calling the model at all. Env: none.
+  react_skip_min_mentions: 3
+
+generation:
+  # Skip generating resume_pl/cover_letter_pl/about_me_pl on the FIRST
+  # generation call for an English-language posting in short mode (they are
+  # never delivered for an EN posting anyway). A PL posting or --full run is
+  # unaffected. Env: GEN_SKIP_PL_FOR_EN.
+  skip_pl_for_en: true

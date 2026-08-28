@@ -35,15 +35,25 @@ from html import escape as html_escape
 from pathlib import Path
 from typing import Optional
 
-from hunter import ats_checker
+from hunter import ats_checker, gen_profile
 from hunter.pdf_text import extract_pdf_text
 
 logger = logging.getLogger(__name__)
 
-# Trigger the NBSP self-heal pass when the PDF score is this many percentage
-# points below the JSON score. 5pp catches real rendering damage without
-# triggering on every "performance optimization" split.
-HEAL_DELTA_PP = 5.0
+# Default trigger for the NBSP self-heal pass when the PDF score is this many
+# percentage points below the JSON score. 5pp catches real rendering damage
+# without triggering on every "performance optimization" split. Callers read
+# the live value via heal_delta_pp() (generation.yaml verdict.heal_delta_pp)
+# — this constant is only the fallback default and the doc-comment anchor.
+_HEAL_DELTA_PP_DEFAULT = 5.0
+
+
+def heal_delta_pp() -> float:
+    """Current NBSP self-heal trigger (generation.yaml verdict.heal_delta_pp,
+    default 5.0pp). Read at call time, not cached as a module constant, so a
+    profile change within the same process takes effect immediately."""
+    return gen_profile.get("verdict.heal_delta_pp", _HEAL_DELTA_PP_DEFAULT)
+
 
 # A space-separating character that LibreOffice cannot break a line at.
 # Used by nbsp_patch_missing_keywords to keep multi-word ATS keywords
