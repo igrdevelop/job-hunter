@@ -701,6 +701,39 @@ server {
 
 ---
 
+## Disk hygiene (one-time host setup)
+
+The deploy workflow prunes images on every run, but that only fires **when this
+repo deploys**. This host's Docker daemon is shared with `job-hunter-api`,
+`arifma` and `psybook`, whose deploys leave images here and do **not** prune —
+so if job-hunter goes quiet while the siblings keep shipping, nothing reclaims
+anything. That asymmetry is what a host-level timer covers.
+
+Measured 2026-08-29, when the disk hit 100% and broke the deploy: 17 images,
+72.65 GB total, **63.92 GB reclaimable**. Everything else on the box was
+noise by comparison — `users/` 127 MB (100 application folders over 3.5
+months), `logs/` 52 MB and already bounded by rotation, `backups/` + `db/`
+14 MB. Images are the only thing worth automating.
+
+Install once, as the `deploy` user (`crontab -e`):
+
+```cron
+# Reclaim unused Docker images older than a week, daily at 04:17.
+# -a is required: deploy images are TAGGED by commit SHA, so a bare
+# `docker image prune -f` (dangling only) never removes any of them.
+# Images in use by a running container are always kept, and anything
+# removed is re-pullable from GHCR. `>` (not `>>`) keeps the log to the
+# last run so it cannot itself become a disk problem.
+17 4 * * * docker image prune -a -f --filter "until=168h" > /home/deploy/docker-prune.log 2>&1
+```
+
+Verify it took effect, and check what the last run reclaimed:
+
+```bash
+crontab -l | grep prune
+cat /home/deploy/docker-prune.log
+```
+
 ## Server command reference
 
 ```bash
