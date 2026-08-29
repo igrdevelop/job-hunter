@@ -42,9 +42,8 @@ Map every requirement against the candidate's background.
 
 For each gap:
 - **Add it** if plausible (adjacent tech the candidate likely touched):
-  - "React" → add "React (familiar)" to skills, mention in summary
-  - "GraphQL" → add "GraphQL" - common in modern frontends
-  - "Docker" → add "Docker (basic)" - DevOps adjacent, worked with Jenkins/CI
+  - "React" → add "React" to skills, mention in summary
+  - "Docker" → add "Docker" - DevOps adjacent, worked with Jenkins/CI
   - "Storybook" → natural for any Angular/React dev
   - "GitHub Copilot" / "AI tools" → plausible for any modern developer
   - "Playwright" → natural for a developer with Cypress/Jest experience
