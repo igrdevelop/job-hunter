@@ -129,14 +129,47 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            # Abort on the FIRST failing command. Without this the step's exit
+            # code came from whatever ran last -- `docker image prune`, which
+            # succeeds even when nothing else did -- so a failed `docker compose
+            # pull` left the previous container running while CI reported green
+            # and the "Notify on failure" step below never fired. Measured cost
+            # of the omission (2026-08-29): two days of green master over a prod
+            # that was silently two commits behind.
+            set -eo pipefail
             cd ${{ secrets.VPS_WORK_DIR }}
             curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/master/docker-compose.yml -o docker-compose.yml
             touch gsheets_state.json
             echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             export IMAGE_TAG=${{ github.sha }}
+
+            # Reclaim BEFORE pulling. Every deploy tags its image with a commit
+            # SHA, and the old `docker image prune -f` only removes DANGLING
+            # (untagged) images -- so it never removed a single deploy image.
+            # By 2026-08-29 that had accumulated 17 images / 63.9 GB reclaimable
+            # and filled the 75 GB disk to 100%, which is what broke the pull.
+            # `-a` also removes tagged images; `until=168h` keeps the last week
+            # so a recent rollback target stays local. Images in use by a
+            # running container are never touched, and anything removed here is
+            # re-pullable from GHCR. NOTE: this host also runs sibling projects
+            # (job-hunter-api, arifma, psybook) — their unused images older than
+            # a week are reclaimed by this too, which is intended.
+            docker image prune -a -f --filter "until=168h"
+
+            # A pull that runs out of disk mid-extraction is the exact failure
+            # this block exists to prevent, so check before spending the
+            # download. The image is ~2 GB compressed and needs headroom to
+            # extract; 5 GB is a floor, not a target.
+            AVAIL_MB=$(df -Pm / | awk 'NR==2 {print $4}')
+            if [ "$AVAIL_MB" -lt 5000 ]; then
+              echo "Only ${AVAIL_MB} MB free on / - need at least 5000 MB to pull and extract the image."
+              df -h /
+              docker system df
+              exit 1
+            fi
+
             docker compose pull
             docker compose up -d
-            docker image prune -f
 
       - name: Notify on failure
         if: failure()
