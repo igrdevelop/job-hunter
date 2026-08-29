@@ -298,6 +298,54 @@ hunter/
                             `_merge_document_section` validates per-FIELD (not the whole
                             section at once) so one bad margin doesn't discard an
                             otherwise-valid font override.
+  gen_prompt.py              Assembles the generation + claim-judge SYSTEM PROMPTS from
+                            the tracked, candidate-agnostic `prompts/generation_rules.md` /
+                            `prompts/judge_rules.md` plus a block of the active candidate's
+                            own employment facts, rendered at call time from
+                            `candidate.yaml` (docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6
+                            wave 2). Those two files used to hardcode the project owner's
+                            real 7-employer table, per-role backend, years-of-experience and
+                            university/course list directly in a TRACKED git file — the
+                            single biggest blocker to publishing the repo and to a second
+                            user changing their own history without editing shared code.
+                            `build_generation_prompt()` replaces the
+                            `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` marker in
+                            `generation_rules.md` with a rendered table + backend/legacy-
+                            stack/track-title rules from `candidate.get("employers.history")`
+                            + `experience.years_label`/`since_year`, then appends an optional
+                            `{cand_dir}/generation_rules.local.md` tail (gitignored personal
+                            narrative — cover-letter story bank, tone notes — that doesn't
+                            fit YAML structure; see candidate/README.md). `build_judge_prompt()`
+                            does the same for `judge_rules.md`'s smaller
+                            `<!-- CANDIDATE_GROUND_TRUTH -->` marker (real employers +
+                            years, for the fabrication-detection rules). Both degrade to a
+                            generic, unconstrained paragraph — never raise — when
+                            `employers.history`/`employers.protected` is empty, the same
+                            pattern `hunter/verdict_refine.py:60-71` already used for its own
+                            smaller prompt fragments. `base_cv_files()` is the other thing
+                            unified here: stack key -> base-CV filename, merging
+                            `candidate.yaml`'s `tracks.base_cv` over the built-in defaults —
+                            `hunter/apply_api.py`'s `_BASE_CV_FILES` now imports this instead
+                            of keeping its own copy. **Two pipelines, one prompt:**
+                            `apply_api.py` / `dual_apply.py` / `verdict_refine.py` /
+                            `claim_judge.py` call the builder functions in-process; the CLI
+                            skill (`.claude/commands/apply.md`) cannot import Python, so its
+                            Step 1 shells out to `python -m hunter.gen_prompt` (default
+                            subcommand `generation`; `judge` and `base-cv-map` also exist,
+                            the latter read by apply.md so the CLI skill's stack->file lookup
+                            stops ignoring a user's `tracks.base_cv` override) and uses
+                            stdout verbatim — both branches see byte-identical prompt text
+                            for the same `candidate.yaml`, closing the class of drift that
+                            broke the CLI's Polish-CV instruction for months (see "Doc
+                            generation modes" below). Also closes two §3 discrepancies as
+                            part of the same prompt-source unification: `apply_cli.py` now
+                            computes `build_ats_keyword_checklist()` /
+                            `build_pl_skip_instruction()` itself (same functions
+                            `apply_api.py` calls) and appends their output after the job
+                            posting text it hands the skill, so a CLI-mode apply gets the
+                            same deterministic keyword checklist and Polish-CV-skip
+                            instruction an API-mode apply does, instead of the skill running
+                            on its own hand-copied logic.
   models.py                 Job dataclass
   filters.py                Central filter: keywords, level, location, patterns, React-only, German.
                             Public APIs (`classify_job` / `apply_filters_with_stats` /
@@ -863,9 +911,18 @@ hunter/
 
 prompts/                        System-level LLM instructions (see prompts/README.md).
                                 Candidate-personal files moved to candidate/ (see above).
+                                Both .md files below are candidate-AGNOSTIC since wave 2 —
+                                neither is read as raw text anymore; both go through
+                                hunter/gen_prompt.py, which splices in the active
+                                candidate's own employment facts at call time.
   README.md                     What lives here vs candidate/
-  generation_rules.md           LLM instructions for resume/CL generation [tracked]
-  judge_rules.md                Claim-judge instructions [tracked]
+  generation_rules.md           LLM instructions for resume/CL generation [tracked]. Personal
+                                facts (employer table, backend-per-role, years of experience)
+                                live in candidate.yaml and render into the
+                                `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` marker — see gen_prompt.py
+  judge_rules.md                Claim-judge instructions [tracked]. Same pattern: real
+                                employers/years render into the
+                                `<!-- CANDIDATE_GROUND_TRUTH -->` marker
 
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
@@ -887,9 +944,14 @@ tests/test_handoff_readiness.py CI gate that keeps ONE person's personal data ou
                             shared code (added 2026-08-12). Three checks: (a) no owner
                             name / phone / email / LinkedIn handle / employer / school /
                             VPS address as a literal anywhere in `hunter/` +
-                            the root entry scripts — docs/ and tests/ are exempt
+                            the root entry scripts + `prompts/*.md` + `.claude/commands/*.md`
+                            (the live LLM prompt sources, both pipelines — see
+                            hunter/gen_prompt.py) — docs/ and tests/ are exempt
                             (AGENT_LOG legitimately quotes past incidents, and this file
-                            must name the strings it forbids); (b) every variable
+                            must name the strings it forbids). No allowlist remains
+                            (docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6 wave 2 rendered the
+                            personal facts out of `prompts/generation_rules.md` /
+                            `judge_rules.md` at runtime instead); (b) every variable
                             docs/SETUP_NEW_USER.md tells a user to set is actually present
                             in `.env.example`; (c) every `candidate.get("a.b")` dotpath in
                             production code exists in `candidate/candidate.yaml.example`.
@@ -1057,7 +1119,13 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             short "offer expired" marker still wins): with no job text,
                             the expired check, doomed gate, re-post gate and ATS verdict
                             are ALL skipped, so a run that reached the skill on a bare
-                            URL had no screens at all
+                            URL had no screens at all. Step 1 (docs/
+                            GENERATION_ARCHITECTURE_ANALYSIS.md §6 wave 2) shells out to
+                            `python -m hunter.gen_prompt` instead of reading
+                            `prompts/generation_rules.md` directly — the raw file's
+                            `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` marker is only meaningful
+                            once rendered, and this keeps the CLI skill on the exact same
+                            candidate-specific text `apply_api.py` builds in-process
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → English-only
@@ -1107,9 +1175,14 @@ requirements.lock            GENERATED (`uv pip compile pyproject.toml --all-ext
                             prod and CI always run the exact same transitive versions. Replaces
                             the old hand-maintained, mostly-unpinned `requirements.txt`.
 candidate/                  All candidate-personal files (see candidate/README.md):
-                            candidate.yaml (identity/location/languages/employers, gitignored),
+                            candidate.yaml (identity/location/languages/employers incl.
+                            employers.history + experience, wave 2 — see hunter/gen_prompt.py;
+                            gitignored),
                             candidate_profile.md (career narrative for LLM, gitignored),
                             base_cv_*.md (pre-polished bullets per stack, gitignored),
+                            generation_rules.local.md (optional free-text tail for the
+                            generation prompt — story bank / tone notes that don't fit
+                            candidate.yaml's structure; gitignored, absent by default),
                             *.example.md / *.example (placeholder templates, tracked),
                             examples/ (few-shot cover letters / about-me),
                             notes/ (private interview notes, gitignored)
@@ -1378,7 +1451,8 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
    — bad call, malformed shape, non-verbatim evidence quote — lets the vacancy
    through; the whole stage is wrapped in `best_effort("apply.prescreen")`.
 
-4. LLM call: `candidate_profile.md` + `generation_rules.md` + job text -> `content.json`
+4. LLM call: `candidate_profile.md` + the rendered generation prompt (`hunter.gen_prompt.build_generation_prompt()` —
+   `generation_rules.md` + the active candidate's employment facts) + job text -> `content.json`
    **Company+title dedup gate** (`apply_api.py` Step 4.55 / `apply_cli.py`'s
    post-generation equivalent, added 2026-08-20): the manual entry points (URL
    paste, LinkedIn batch, forwarded text) call this pipeline directly with only a
@@ -2168,8 +2242,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-29 | sonnet | **Wave 2 of docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6: removed the project owner's personal data from the tracked prompt files (#235).** `prompts/generation_rules.md` and `prompts/judge_rules.md` used to hardcode the owner's real 7-employer table, per-role backend, years-of-experience and a "story bank" of real project narrative directly in git — the single biggest blocker to publishing the repo, and something a second user (or the owner himself) couldn't change without editing shared code. New module `hunter/gen_prompt.py` renders the personal facts from `candidate.yaml` (`employers.history`, `experience.years_label`/`since_year`, prepared in a prior commit) into `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` / `<!-- CANDIDATE_GROUND_TRUTH -->` markers at call time — same pattern `hunter/verdict_refine.py:60-71` already used for its own smaller fragments; both degrade to a generic paragraph (never raise) when `candidate.yaml` has no history. `apply_api.py`/`dual_apply.py`/`verdict_refine.py`/`claim_judge.py` call the renderer in-process; the CLI skill (`.claude/commands/apply.md`) can't import Python, so its Step 1 shells out to `python -m hunter.gen_prompt` — both branches now see byte-identical prompt text for the same candidate, closing the class of drift that broke the CLI's Polish-CV instruction for months. Also unified the base-CV stack map (`gen_prompt.base_cv_files()`, read by the CLI skill via a new `base-cv-map` subcommand instead of a hardcoded 5-file list) and closed two more §3 discrepancies: `apply_cli.py` now computes `build_ats_keyword_checklist()`/`build_pl_skip_instruction()` itself (same functions `apply_api.py` calls) and appends them to what the skill receives, instead of the skill running its own hand-copied PL-skip logic (the one that sent 15 English CVs to Polish employers). The real "story bank" narrative moved to a new gitignored `candidate/generation_rules.local.md` (optional per-user tail, template at `candidate/generation_rules.local.example.md`). `tests/test_handoff_readiness.py`'s `LEGACY_PERSONAL_DATA_ALLOWLIST` removed — the personal-data check now runs with an empty exclusion set. New golden test `tests/test_gen_prompt.py` (11 tests) proves the renderer against a fictional-candidate fixture and that no owner data leaks into a second user's prompt. One real behavior change flagged for owner review: the title-variation RED LINE now also allows a `title_by_track` override (needed because `candidate.yaml` already has one on role 1 for the `ai` track), not just the Angular/React framework swap. Full suite 2892 green, both golden E2E pass, ruff clean, mypy baseline unchanged at 217 (isolated via a temp `origin/master` worktree), project-invariants-review 0 violations. Found but not fixed (out of scope, flagged as a follow-up): `tools/regen_covers_v2_last3.py` and `tools/generate_sample_classic_cover.py` still read `prompts/generation_rules.md` raw and will now embed the unresolved marker instead of the real employer table. |
 | 2026-08-29 | opus | **Deploy had been silently failing for two days: the VPS disk was full and the workflow reported success anyway.** Found while checking whether the merged waves were actually live — they were not. The container had been up 27h on `b3710fd` while master was at `7d08677`, so #231 (proficiency-qualifier fix) and #232 (verdict history) were merged but not running. **Two defects in `.github/workflows/deploy.yml`.** (1) No `set -e`, so the step's exit code came from the last command — `docker image prune -f`, which always succeeds — and a `docker compose pull` dying with `no space left on device` produced a GREEN job with the "Notify on failure" Telegram step never firing. (2) The disk filled *because of* that same prune: it reclaims only DANGLING images, while every deploy tags its image by commit SHA, so no deploy image was ever removed — 17 images / 72.65 GB / **63.92 GB reclaimable (87%)** on a 75 GB volume at 100%. Fixes: `set -eo pipefail`; prune widened to `-a -f --filter "until=168h"` and moved BEFORE the pull; explicit pre-pull free-space gate (<5000 MB fails the job with `df -h` + `docker system df`). The gate's `df -Pm` parsing was verified against the real host, not assumed. `docs/DEPLOY.md` updated (its copy of the script had drifted independently), and the obsolete `version: "3.9"` key dropped from `docker-compose.yml` — Compose v2 warns on every command, burying real output mid-incident. Sibling projects share this host's Docker daemon, so the widened prune now reclaims their week-old unused images too (intended; all re-pullable). Full writeup in docs/AGENT_LOG.md. Follow-up in the same PR: the workflow-level prune only fires WHEN THIS REPO DEPLOYS, and this host's Docker daemon is shared with job-hunter-api / arifma / psybook, whose deploys leave images here and never prune — so a quiet job-hunter plus active siblings refills the disk with nobody at fault. docs/DEPLOY.md gains a one-time host-level daily cron (`docker image prune -a -f --filter "until=168h"`, output truncated to the last run) that is independent of any repo's deploy cadence. Measured first rather than assumed: images were 99.7% of the problem — `users/` is 127 MB for 100 application folders over 3.5 months (~36 MB/month, irrelevant on 75 GB), `logs/` 52 MB and already capped by rotation, `backups/`+`db/` 14 MB, and `deploy` had no crontab at all. |
 | 2026-08-29 | sonnet | **Verdict-refine loop now keeps its own history** (owner ask 2026-08-28, alongside the same measurement pass that drove the generation/judge prompt fix: `hunter/verdict_refine.py::refine_loop` already printed round-by-round progress, but only to stdout, which lands in `logs/apply_stdout/` with a 7-day retention and no structure — no way to answer "do refine rounds pay off" after the fact). `refine_loop` now builds a `history: list[dict]` of every ATTEMPTED round (`round`, `kind`, `score_before`, `score_after`, `outcome`, `reason`) via a new `_round_entry` helper, and stamps it onto the returned content as `content["verdict_history"]` (present only when at least one round was attempted — a no-op run at/above target adds nothing). `outcome` is one of `accepted` (kept), `rejected` (a new score WAS computed but the keep-best guard rolled it back — deliberately included per the owner's ask, since these are exactly the rounds that show where the loop hits its ceiling), or `discarded` (never produced a comparable score — bad rewrite, dropped roles, blocked safety stage, broken validation, or an unexpected exception). A `wrote_to_disk` flag gates the final on-disk rewrite of `content.json` so a round discarded before ever reaching the write point still leaves no file behind (several existing tests pin that exact behavior). New `hunter.ats_pdf_roundtrip.format_verdict_history(content)` renders the compact Telegram line `ATS: 80 → 90 → 95 (3 rounds)` — the chain shows only the accepted-round score progression (a rejected/discarded round is invisible in the chain but still counted in the round total, which is the point: it shows what a jump actually cost). Wired into both `apply_api.py` (next to the existing `ats_line`) and `apply_cli.py` (appended to `pdf_summary`, read back from the same content.json the refine loop already persisted) — and, since `dual_apply.py`'s shadow run calls the same `refine_loop` and re-serializes `content` whole, the shadow's own content.json picks up `verdict_history` for free with no code change there. No new LLM calls; round count/thresholds unchanged (still YAML-configurable via `generation.yaml`, wave 3). 9 new tests (`test_ats_pdf_roundtrip.py` formatting incl. empty/no-accepted-round cases, `test_verdict_refine.py` incl. a rolled-back round landing in history and a full 4-round accepted journey matching the owner's example format byte-for-byte). Full suite 2881 green, both golden E2E pass, ruff clean, mypy baseline confirmed unchanged at 217 (via `git stash` isolation — caught and fixed one real new error along the way: a `float()` call on an `object`-typed parameter in the new `_fmt_score` helper, narrowed to `float \| int \| str \| None`). |
 | 2026-08-29 | sonnet | **Removed the generation/judge contradiction on proficiency-level skill qualifiers** (owner decision 2026-08-28, based on live measurement: 361 `judge_report.json` files, 2564 findings). `prompts/generation_rules.md` Step 2 told the generator to mirror an ATS keyword WITH a proficiency qualifier ("React" → add "React (familiar)", "Docker" → add "Docker (basic)"), while `prompts/judge_rules.md` explicitly allows only a BARE skill-list mirror ("Do NOT flag a bare skill-list entry (no years claimed, no specific project...)") — the qualifier is exactly what made the judge (running at `JUDGE_MODE=warn` in prod, which REPAIRS/removes fabrication findings before render) treat its own mirrored keyword as an unsupported claim. Fixed by removing the qualifier from those two examples (mirror bare, matching what the judge already allows — a stronger claim, not weaker, per the owner's explicit call) and deleting the `"GraphQL" → add "GraphQL"` example entirely (owner confirmed 2026-08-28 the candidate has no GraphQL background; it was the second most frequent judge flag at 40 mentions and the prompt itself was generating the finding). Left untouched on purpose: the jQuery `"(familiar)"` rule (employer-specific bindings — Fairmarkit/Venture Labs/SII/Alten Poland — scheduled to move out as personal data in the candidate.yaml wave 2, not a proficiency-qualifier issue) and `judge_rules.md` itself (owner explicitly did not want the judge narrowed). Both golden E2E green with zero fixture changes needed, confirming the edit didn't reach further than the two lines it targeted. Full suite 2872 green, ruff clean. |
 | 2026-08-27 | sonnet | **Wave 3 PR 2 of docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6: extended `hunter/gen_profile.py` with a `document` section and wired `generate_docs.py`'s hardcoded font/sizes/margins/section labels/skill categories to it.** Stacks on PR 1 (#229). New builtin-defaults keys: `font`, `sizes` (name/headline/body/small — the GDPR clause's own 7.5pt deliberately excluded), `margins_cm`, `sections` (5-element list of heading LABELS at FIXED structural positions — only the text is configurable, never which content renders where; position 2 stays "EXPERIENCE" on purpose, Taleo classifies "WORK EXPERIENCE" as "Other" and drops the whole parsed array), `skill_categories` (list of `{key, label}` — unlike `sections`, safely reorderable since each entry is keyed by name against `resume_en.skills[key]`), `gdpr_clause` (replaces `config.py`'s old direct `os.getenv("CV_GDPR_CLAUSE", ...)`, same env-still-wins wiring). `generate_docs.py`'s `set_font`/`set_margins` use a `None`-sentinel default resolved from `gen_profile.get()` INSIDE the function body — every existing call site already omits those args, so ~18 call sites became profile-driven with zero per-call-site changes. New `hunter.gen_profile._merge_document_section` validates per-FIELD, not the whole section at once. Golden-snapshot test (`tests/test_generate_docs_document_profile.py` + fixture captured from the pre-PR2 code via `git show HEAD:`) proves byte-for-byte paragraph/run parity with no `generation.yaml` present, plus 7 tests proving each knob actually changes rendered output. mypy baseline confirmed unchanged at 217 (via `git stash` isolation). Full suite 2871 green, both golden E2E pass, ruff clean. Full writeup in docs/AGENT_LOG.md. |
-| 2026-08-27 | sonnet | **Addressed 3 owner review comments on PR #229 (wave 3 PR 1).** (1) `tests/test_apply_api.py::test_ats_verdict_max_refines_default_is_five` now asserts `gen_profile.builtin_defaults()["verdict"]["max_refines"]`, not `hunter.config`'s live resolved value — the live value honors an `ATS_VERDICT_MAX_REFINES` env var, so the test could fail against a developer's own `.env` (reproduced with `ATS_VERDICT_MAX_REFINES=3` set). (2) **Design decision (owner):** a malformed env var for one of the 15 gen_profile-routed keys used to crash the process loudly at import time (`ATS_VERDICT_TARGET=abc` → inline `float("abc")` raised); the wave-3 refactor had softened that into a warning + silent fallback. Restored the loud-crash behavior: `hunter.gen_profile._apply_env_overrides` now raises `GenProfileEnvError` when an env value fails to cast — env is the emergency lever, and a silently-ignored typo there is worse than a crash. Only `_cast_int`/`_cast_float` can raise; bool/str casters accept any string, matching pre-wave-3 behavior. YAML-sourced values are unaffected — still warn + keep default, never raise. (3) Fixed two stale `HEAL_DELTA_PP` comments (now `heal_delta_pp()`) in `apply_api.py`/`apply_cli.py`. Full suite 2863 green, ruff clean, mypy 217. Full writeup in docs/AGENT_LOG.md. |

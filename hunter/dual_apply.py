@@ -154,10 +154,10 @@ def _generate_shadow(
 ) -> Path | None:
     """Core shadow pipeline (override already active). Best-effort."""
     from llm_client import LLMError, call_llm
+    from hunter import gen_prompt
     from hunter.apply_api import _detect_stack_hint, _load_base_cv
     from hunter.apply_shared import (
         CANDIDATE_DIR,
-        PROMPTS_DIR,
         _ats_check_loop,
         _dedup_skill_glosses,
         _strip_compliance_claims,
@@ -171,7 +171,7 @@ def _generate_shadow(
     prof = get_active()  # == shadow profile (override is set)
 
     # System prompt: candidate profile + generation rules (same as apply_api).
-    instructions = (PROMPTS_DIR / "generation_rules.md").read_text(encoding="utf-8")
+    instructions = gen_prompt.build_generation_prompt()
     profile_path = CANDIDATE_DIR / "candidate_profile.md"
     system_prompt = (
         profile_path.read_text(encoding="utf-8") + "\n\n---\n\n" + instructions
