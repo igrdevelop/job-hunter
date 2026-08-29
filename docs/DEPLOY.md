@@ -724,7 +724,10 @@ Install once, as the `deploy` user (`crontab -e`):
 # Images in use by a running container are always kept, and anything
 # removed is re-pullable from GHCR. `>` (not `>>`) keeps the log to the
 # last run so it cannot itself become a disk problem.
-17 4 * * * docker image prune -a -f --filter "until=168h" > /home/deploy/docker-prune.log 2>&1
+# Absolute path on purpose: cron runs with a minimal PATH, and a bare
+# `docker` that resolves in your login shell is the classic way for a
+# scheduled job to fail silently at 04:17 forever.
+17 4 * * * /usr/bin/docker image prune -a -f --filter until=168h > /home/deploy/docker-prune.log 2>&1
 ```
 
 Verify it took effect, and check what the last run reclaimed:
