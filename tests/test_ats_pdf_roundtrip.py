@@ -289,3 +289,98 @@ def test_format_gap_report_empty_for_missing_gap() -> None:
 
     assert format_gap_report({}) == ""
     assert format_gap_report({"gap_report": None}) == ""
+
+
+# ── format_verdict_history: the refine loop's score progression ──────────────
+
+
+def test_format_verdict_history_chains_accepted_rounds() -> None:
+    from hunter.ats_pdf_roundtrip import format_verdict_history
+
+    content = {
+        "verdict_history": [
+            {
+                "round": 1,
+                "kind": "honest",
+                "score_before": 80,
+                "score_after": 90,
+                "outcome": "accepted",
+                "reason": None,
+            },
+            {
+                "round": 2,
+                "kind": "honest",
+                "score_before": 90,
+                "score_after": 88,
+                "outcome": "rejected",
+                "reason": "verdict did not improve",
+            },
+            {
+                "round": 3,
+                "kind": "stretch",
+                "score_before": 90,
+                "score_after": 95,
+                "outcome": "accepted",
+                "reason": None,
+            },
+        ]
+    }
+    out = format_verdict_history(content)
+    # The rejected round 2 is invisible in the chain (best stayed at 90) but
+    # still counted in the round total.
+    assert out == "ATS: 80 → 90 → 95 (3 rounds)"
+
+
+def test_format_verdict_history_trims_whole_number_scores() -> None:
+    from hunter.ats_pdf_roundtrip import format_verdict_history
+
+    content = {
+        "verdict_history": [
+            {
+                "round": 1,
+                "kind": "honest",
+                "score_before": 80.0,
+                "score_after": 87.5,
+                "outcome": "accepted",
+                "reason": None,
+            },
+        ]
+    }
+    assert format_verdict_history(content) == "ATS: 80 → 87.5 (1 round)"
+
+
+def test_format_verdict_history_empty_when_no_history_key() -> None:
+    from hunter.ats_pdf_roundtrip import format_verdict_history
+
+    assert format_verdict_history({}) == ""
+    assert format_verdict_history({"verdict_history": []}) == ""
+    assert format_verdict_history({"verdict_history": "not-a-list"}) == ""
+
+
+def test_format_verdict_history_empty_when_nothing_accepted() -> None:
+    """Every round discarded/rejected -> the chain never grows past the
+    single starting score, so there's nothing to show beyond the plain
+    ATS line format_verdict already renders."""
+    from hunter.ats_pdf_roundtrip import format_verdict_history
+
+    content = {
+        "verdict_history": [
+            {
+                "round": 1,
+                "kind": "honest",
+                "score_before": 80,
+                "score_after": None,
+                "outcome": "discarded",
+                "reason": "language gate blocked",
+            },
+            {
+                "round": 2,
+                "kind": "stretch",
+                "score_before": 80,
+                "score_after": 78,
+                "outcome": "rejected",
+                "reason": "verdict did not improve",
+            },
+        ]
+    }
+    assert format_verdict_history(content) == ""

@@ -242,6 +242,180 @@ def test_refine_loop_rolls_back_when_verdict_does_not_improve(tmp_path, monkeypa
     assert saved["resume_en"]["summary"] == original_summary
 
 
+def test_refine_loop_records_accepted_round_in_history(tmp_path, monkeypatch):
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+
+    revised = _resume()
+    revised["skills"]["frontend"] += ", Docker"
+    monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": revised})
+    monkeypatch.setattr(ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: _v(90))
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, _ = refine_loop(
+        content,
+        "job needs Docker",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
+    )
+
+    history = out_content["verdict_history"]
+    assert history == [
+        {
+            "round": 1,
+            "kind": "honest",
+            "score_before": 80.0,
+            "score_after": 90.0,
+            "outcome": "accepted",
+            "reason": None,
+        }
+    ]
+    saved = json.loads((tmp_path / "content.json").read_text(encoding="utf-8"))
+    assert saved["verdict_history"] == history
+
+
+def test_refine_loop_records_rejected_round_in_history(tmp_path, monkeypatch):
+    """A round the keep-best guard rolls back still lands in the history —
+    those are exactly the rounds that show where the loop hits its ceiling."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+    monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
+
+    worse_verdict = _v(75)
+    monkeypatch.setattr(
+        ats_pdf_roundtrip, "run_llm_verdict", lambda folder, job_text: worse_verdict
+    )
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
+    )
+
+    assert out_content["verdict_history"] == [
+        {
+            "round": 1,
+            "kind": "honest",
+            "score_before": 80.0,
+            "score_after": 75.0,
+            "outcome": "rejected",
+            "reason": "verdict did not improve",
+        }
+    ]
+    assert out_verdict == verdict  # rolled back — old verdict kept
+
+
+def test_refine_loop_history_records_discarded_round_on_language_block(tmp_path, monkeypatch):
+    _patch_safety_stages(monkeypatch, blocked=True)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+    monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
+
+    content = _base_content()
+    verdict = _v(80, missing=["Docker"])
+    out_content, _ = refine_loop(
+        content,
+        "job",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=1,
+    )
+
+    assert out_content["verdict_history"] == [
+        {
+            "round": 1,
+            "kind": "honest",
+            "score_before": 80.0,
+            "score_after": None,
+            "outcome": "discarded",
+            "reason": "language gate blocked",
+        }
+    ]
+
+
+def test_refine_loop_no_history_key_when_noop(tmp_path, monkeypatch):
+    """A no-op run (already at target) makes zero LLM calls and must not
+    stamp an empty verdict_history — there is nothing to report."""
+
+    def _boom(*a, **k):
+        raise AssertionError("call_llm must not be called when verdict already at target")
+
+    monkeypatch.setattr(llm_client, "call_llm", _boom)
+    content = _base_content()
+    verdict = _v(96, missing=["Docker"])
+    out_content, _ = refine_loop(
+        content,
+        "job text",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=2,
+    )
+    assert "verdict_history" not in out_content
+
+
+def test_refine_loop_history_spans_full_multi_round_journey(tmp_path, monkeypatch):
+    """4 accepted rounds (3 honest + 1 stretch) -> a 4-entry history whose
+    chain, rendered via format_verdict_history, matches the owner's example
+    format (score progression + total round count)."""
+    _patch_safety_stages(monkeypatch)
+    monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())
+    monkeypatch.setattr(llm_client, "call_llm", lambda *a, **k: {"resume_en": _resume()})
+
+    verdict_sequence = iter(
+        [
+            _v(80, missing=["Docker"]),
+            _v(85, missing=["Docker"]),
+            _v(87, missing=["Docker"]),
+            _v(90),
+        ]
+    )
+    monkeypatch.setattr(
+        ats_pdf_roundtrip,
+        "run_llm_verdict",
+        lambda folder, job_text: next(verdict_sequence),
+    )
+
+    content = _base_content(to_learn="")
+    verdict = _v(70, missing=["Docker"])
+    out_content, out_verdict = refine_loop(
+        content,
+        "job needs Docker",
+        "",
+        tmp_path,
+        verdict,
+        regenerate_docs=lambda f: None,
+        target=95,
+        max_rounds=4,
+    )
+
+    kinds = [r["kind"] for r in out_content["verdict_history"]]
+    outcomes = [r["outcome"] for r in out_content["verdict_history"]]
+    assert kinds == ["honest", "honest", "honest", "stretch"]
+    assert outcomes == ["accepted"] * 4
+    assert out_verdict["score"] == 90
+
+    from hunter.ats_pdf_roundtrip import format_verdict_history
+
+    assert format_verdict_history(out_content) == "ATS: 70 → 80 → 85 → 87 → 90 (4 rounds)"
+
+
 def test_refine_loop_discards_round_on_language_block(tmp_path, monkeypatch):
     _patch_safety_stages(monkeypatch, blocked=True)
     monkeypatch.setattr(llm_profiles, "get_active", lambda: _fake_profile())

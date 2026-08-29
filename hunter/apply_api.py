@@ -1148,13 +1148,20 @@ def _run_main_api(
         # The verdict's gap_report rides along as its own line — the owner
         # asked to see WHY the score isn't higher, not just the number.
         gap_line = ""
+        history_line = ""
         if verdict is not None:
             ats_line = f"ATS: {verdict.get('score')}% (independent, PDF)"
-            from hunter.ats_pdf_roundtrip import format_gap_report
+            from hunter.ats_pdf_roundtrip import format_gap_report, format_verdict_history
 
             gap = format_gap_report(verdict)
             if gap:
                 gap_line = f"{gap}\n"
+            # Refine-loop score progression (rejected/discarded rounds are
+            # invisible in the chain but counted in the round total) — empty
+            # when the loop never ran or made zero accepted rounds.
+            history_text = format_verdict_history(content)
+            if history_text:
+                history_line = f"{history_text}\n"
         else:
             ats_line = f"ATS: {content.get('ats_score', '?')}%"
         cost_line = ""
@@ -1179,6 +1186,7 @@ def _run_main_api(
             f"📁 <code>Applications/{output_folder.parent.name}/{output_folder.name}/</code>\n\n"
             f"{file_names}\n\n"
             f"{ats_line}{pdf_summary} | Stack: {content.get('stack', '?')}\n"
+            f"{history_line}"
             f"{gap_line}"
             f"{permalink_line}"
             f"Via: API ({_llm_prof.model}){cost_line}\n"

@@ -181,6 +181,59 @@ def format_verdict(verdict: dict) -> str:
     return text
 
 
+def _fmt_score(score: float | int | str | None) -> str:
+    """Render a verdict score without a distracting ``.0`` on whole numbers
+    (90.0 -> "90"), but keep a real fraction (87.5 -> "87.5")."""
+    if score is None:
+        return str(score)
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return str(score)
+    if value == int(value):
+        return str(int(value))
+    return f"{value:g}"
+
+
+def format_verdict_history(content: dict) -> str:
+    """Compact ATS-score progression line for the Telegram success message,
+    e.g. "ATS: 80 -> 90 -> 95 (3 rounds)" — built from
+    content["verdict_history"] (hunter.verdict_refine.refine_loop's per-round
+    record: round/kind/score_before/score_after/outcome/reason).
+
+    The chain shows only the ACCEPTED-round score progression (the numbers
+    that actually shipped); the round count in parentheses is every round
+    the loop ATTEMPTED, accepted or not — a rejected/discarded round is
+    invisible in the chain but still counted, which is the point: it shows
+    what a jump in the chain actually cost.
+
+    Empty string when no refine rounds ran, or the chain has fewer than two
+    points (nothing to show beyond the single score `format_verdict` already
+    renders).
+    """
+    history = content.get("verdict_history")
+    if not isinstance(history, list) or not history:
+        return ""
+
+    chain: list[str] = []
+    start = history[0].get("score_before")
+    if start is not None:
+        chain.append(_fmt_score(start))
+    for round_entry in history:
+        if (
+            isinstance(round_entry, dict)
+            and round_entry.get("outcome") == "accepted"
+            and round_entry.get("score_after") is not None
+        ):
+            chain.append(_fmt_score(round_entry["score_after"]))
+
+    if len(chain) < 2:
+        return ""
+
+    count = len(history)
+    return f"ATS: {' → '.join(chain)} ({count} round{'s' if count != 1 else ''})"
+
+
 def format_gap_report(verdict: dict, max_chars: int = 350) -> str:
     """The verdict's gap_report as one trimmed, HTML-escaped Telegram line
     (empty string when the verdict carries none)."""
