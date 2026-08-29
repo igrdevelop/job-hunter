@@ -30,7 +30,7 @@
 | 0.5 — CLI выровнен по API | ⚠️ частично | #223 | 4 стадии из 5; `_ats_check_loop` ждёт решения владельца |
 | 1 — разбор `apply_shared.py` | ✅ | #227 | — |
 | 3 — `generation.yaml` | ✅ | `0d366af`, `b3710fd` | — |
-| 2 — деперсонализация промптов | ❌ | — | 32 строки личных данных в `generation_rules.md`; allowlist в CI |
+| 2 — деперсонализация промптов | ✅ | #WAVE2_PR | — |
 | 4 — унификация пайплайнов | ❌ | — | заблокирована одним решением (см. ниже) |
 
 **Сделано сверх плана**, по ходу измерений и инцидентов:
@@ -447,25 +447,53 @@ rewrite→re-render, и добавление ATS-loop упирается в пр
 
 ### Волна 2 — деперсонализация промптов
 
-> **❌ Не сделано. Данные подготовлены 2026-08-29: `employers.history` в `candidate.yaml`**
-
-1. Разделить `prompts/generation_rules.md` на два:
-   - tracked, общий, **без единого личного факта** — структура, RED LINES про
-     язык / выдумки / прославление, JSON-схема с обезличенным примером;
-   - блок, **рендерящийся в рантайме** из `candidate.yaml`: таблица
-     работодателей с периодами, правила «какой стек у какой роли», годы опыта,
-     формат версии основного фреймворка. Ровно тем же способом, что уже
-     работает в `verdict_refine.py:60-67`.
-2. Опциональный per-user хвост `{cand_dir}/generation_rules.local.md`,
-   приклеиваемый после общей части — для правил, которые не выражаются
-   структурой (личный тон cover letter, персональные табу).
-3. То же для `prompts/judge_rules.md` (реальные клиенты → из `candidate.yaml`).
-4. Свести выбор base CV к одному источнику: `.claude/commands/apply.md` должен
-   получать карту стеков **из `candidate.yaml`**, а не хранить свою.
-
-**Критерий готовности:** readiness-тест из волны 0 зелёный; smoke-прогон с
-вымышленным `candidate.yaml` даёт CV без единого упоминания реальных
-работодателей владельца.
+> **✅ Сделано — #WAVE2_PR.** Новый модуль `hunter/gen_prompt.py`: собранный
+> промпт = tracked `prompts/generation_rules.md` (личных фактов не осталось —
+> проверено `test_no_personal_data_in_production_code`) с блоком
+> `<!-- CANDIDATE_EMPLOYMENT_FACTS -->`, отрендеренным из `candidate.yaml`
+> (`employers.history` + `experience.years_label`/`since_year`) тем же
+> паттерном, что `verdict_refine.py:60-67` уже применяет к своим фрагментам,
+> плюс опциональный хвост `{cand_dir}/generation_rules.local.md` (пример —
+> `candidate/generation_rules.local.example.md`). То же для
+> `prompts/judge_rules.md` (`<!-- CANDIDATE_GROUND_TRUTH -->`). Оба
+> рендер-хелпера деградируют до общей нейтральной параграфа, а не падают,
+> когда `candidate.yaml` пуст. `LEGACY_PERSONAL_DATA_ALLOWLIST` в
+> `tests/test_handoff_readiness.py` удалён — тест проходит с пустым списком
+> исключений.
+>
+> **CLI и API получают ОДИН И ТОТ ЖЕ текст** (не «эквивалентный», а
+> байт-в-байт): `apply_api.py`/`dual_apply.py`/`verdict_refine.py`/
+> `claim_judge.py` зовут `gen_prompt.build_generation_prompt()`/
+> `build_judge_prompt()` в процессе; `.claude/commands/apply.md` Step 1 —
+> `python -m hunter.gen_prompt` (CLI-скилл не может импортировать Python, а
+> читать сырой файл с маркером бессмысленно без рендера). Заодно закрыты два
+> расхождения §3: `apply_cli.py` теперь сам вычисляет
+> `build_ats_keyword_checklist()`/`build_pl_skip_instruction()` (те же
+> функции, что и API-ветка) и добавляет их к тексту, который получает скилл —
+> вместо того чтобы CLI-скилл держал свою логику PL-skip (та самая, что была
+> сломана и дала 15 английских CV польским работодателям).
+>
+> Карта стеков base CV тоже сведена к одному источнику:
+> `gen_prompt.base_cv_files()` (учитывает `candidate.yaml → tracks.base_cv`),
+> `apply_api._BASE_CV_FILES` теперь импортирует её, а
+> `.claude/commands/apply.md` получает её через `python -m hunter.gen_prompt
+> base-cv-map` вместо захардкоженного списка из пяти имён файлов.
+>
+> **Осознанное решение по дизайну (не то, что предполагалось в п.1 выше):**
+> вместо разбиения `generation_rules.md` на несколько отдельных маркеров
+> in-place (по одному на каждое упоминание таблицы/backend/лет), личные факты
+> собраны в ОДИН раздел «Candidate Employment Facts», на который остальные
+> RED LINES ссылаются генерически. Причина: рендерер должен одинаково хорошо
+> работать для ЛЮБОГО `candidate.yaml` (второй пользователь, golden-фикстура
+> с вымышленными именами) — а точное воспроизведение исторической прозы ОДНОГО
+> человека (обороты вроде «(2022-2026)», конкретное «Altoros e-commerce») и
+> универсальность рендерера тянут в разные стороны. Следствие: диф
+> `prompts/generation_rules.md` большой (реструктуризация прозы), а не
+> точечный — см. PR-описание.
+>
+> Golden-тест рендерера — `tests/test_gen_prompt.py` +
+> `tests/fixtures/gen_prompt/` (вымышленный `candidate.yaml`, эталонные
+> `expected_generation_prompt.md`/`expected_judge_prompt.md`).
 
 ### Волна 3 — `generation.yaml` (профиль генерации)
 

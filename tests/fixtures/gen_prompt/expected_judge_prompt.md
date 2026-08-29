@@ -19,7 +19,11 @@ suggest improvements. You only flag unsupported or inflated claims.
    posting is NEVER a source of the candidate's *achievements, employers,
    metrics, client names, or prestige*.
 
-<!-- CANDIDATE_GROUND_TRUTH -->
+## Candidate Ground Truth (from candidate.yaml)
+
+The candidate's REAL, verifiable employers/clients are: Acme Corp, Globex, Initech Agency. Any client name, prestige claim, or scale beyond what the candidate profile documents for these is fabricated.
+
+The candidate has 8+ years of experience — this, and any other numeric claim actually stated in the profile (team/org sizes, counts, percentages), is real and must be preserved, never flagged.
 
 ## Violation taxonomy
 

@@ -396,6 +396,24 @@ def main_cli(
         ):
             return
 
+    # Deterministic prompt additions (docs/GENERATION_ARCHITECTURE_ANALYSIS.md
+    # §3/§6, wave 2): the API pipeline appends these to the generation user
+    # message (see apply_api.py's Step 3), but the CLI skill never got them —
+    # a discrepancy §3 flagged, and §5.3 traces the PL-skip half of it to 15
+    # English CVs sent to Polish employers over several months. Computed here
+    # in Python, from the SAME functions apply_api.py calls, and appended to
+    # the skill's own input: the skill treats everything after the job
+    # posting text as generation instructions (see Step 2 of apply.md), so
+    # both pipelines end up handing the model byte-identical additions for
+    # the same posting instead of the CLI skill maintaining its own copy.
+    if job_text:
+        from hunter.apply_shared import build_ats_keyword_checklist, build_pl_skip_instruction
+        from hunter.lang_guard import detect_posting_language
+
+        _cli_posting_lang = detect_posting_language(job_text)
+        apply_input += build_ats_keyword_checklist(job_text)
+        apply_input += build_pl_skip_instruction(_cli_posting_lang, full_mode=full_mode)
+
     cmd = ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
     print("[apply_agent] Running claude CLI...\n")
 

@@ -18,7 +18,31 @@ If the input contains a "## Base CV" section, use it as your starting point for 
 
 ---
 
-<!-- CANDIDATE_EMPLOYMENT_FACTS -->
+## Candidate Employment Facts (from candidate.yaml)
+
+This is the authoritative, ordered list of the candidate's real employers. The RED LINES and Step 3 below refer back to it — do not invent, reorder, merge, or omit any entry.
+
+| # | company (exact) | title (exact) | period |
+|---|----------------|---------------|--------|
+| 1 | Acme Corp | Senior Frontend Developer (Angular) | Jan 2022 - Present |
+| 2 | Globex | Senior Frontend Developer (Angular) | Feb 2020 - Dec 2021 |
+| 3 | Initech Agency | Frontend Developer | Mar 2016 - Jan 2020 |
+
+**Total experience:** always state "8+ years" (since 2016) in summaries and cover letters — never round down to a lower number.
+
+**Backend per role** (never invent a different backend on a `stack_line`):
+- Globex: Java
+- Initech Agency: .NET
+
+**Bullet budget for compression** (fit 2 pages without dropping a role):
+- Initech Agency: 2 bullets
+
+**Era-appropriate stack (jQuery and other pre-2022 tech):** only realistic on Initech Agency. NEVER add legacy-era tech to Acme Corp, Globex — those are modern roles that do not use it.
+
+**Track-specific title overrides** (the ONLY variation to a role's `title` besides the Angular/React framework swap — see the RED LINE above):
+- Acme Corp: on the `ai` track, use "AI Tooling Engineer" instead of "Senior Frontend Developer (Angular)"
+
+**Flexible-employer sub-projects:** Initech Agency covered several client projects (Retail, Logistics) — a sub-project's `stack_line` may show React OR Angular depending on track, never both in the same one.
 
 ---
 

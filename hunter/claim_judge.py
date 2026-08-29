@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from hunter import text_repair
@@ -42,8 +41,6 @@ from hunter.config import (
 )
 
 from hunter.apply_shared import CANDIDATE_DIR
-
-PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 # Severities that justify a repair / block. `style` is report-only — the
 # deterministic gloss-dedup owns it.
@@ -213,8 +210,9 @@ def quote_survives(content: dict[str, Any], path: str, quote: str) -> bool:
 
 
 def _load_rules() -> str:
-    path = PROMPTS_DIR / "judge_rules.md"
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+    from hunter import gen_prompt
+
+    return gen_prompt.build_judge_prompt()
 
 
 def _load_profile() -> str:

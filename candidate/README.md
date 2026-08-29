@@ -8,8 +8,9 @@ needed for CV generation.
 
 | File | Required? | Purpose |
 |------|-----------|---------|
-| `candidate.yaml` | Yes | Structured identity: name, city, languages, employers. Drives filters, QA checks and LLM prompts. |
+| `candidate.yaml` | Yes | Structured identity: name, city, languages, employers, and (`employers.history`, `experience`) the exact employer/title/period table + years-of-experience label the generation prompt enforces as RED LINES. Drives filters, QA checks and LLM prompts. |
 | `candidate_profile.md` | Yes | Free-text career history: contact, stack, work experience, education. The LLM reads this + the job posting to generate your CV. |
+| `generation_rules.local.md` | Optional | Free-text narrative the generation prompt can't express as YAML structure — a personal cover-letter "story bank" (which achievement to cite for which posting theme), tone notes, personal writing taboos. Appended after the tracked prompt by `hunter/gen_prompt.py`; absent by default. |
 | `filters.yaml` | No | Job-intake policy overrides (title keywords, exclude patterns, hybrid rules, AI-mill blocklist additions…). Copy from `filters.example.yaml`. Missing = shared Layer-1 defaults (`hunter.filter_profile.builtin_defaults()`). Edit + next `/hunt` — no deploy. See [docs/FILTERS_YAML_PLAN.md](../docs/FILTERS_YAML_PLAN.md). |
 | `filters.example.yaml` | Tracked template | Today's default knobs + merge notes. Do not edit in place for personal policy — copy to `filters.yaml`. |
 | `base_cv_angular.md` | Per track | Pre-polished resume bullets for the Angular track. The LLM uses these as a starting point instead of inventing from scratch. |
@@ -29,7 +30,11 @@ needed for CV generation.
    cp base_cv_angular.example.md base_cv_angular.md
    cp filters.example.yaml filters.yaml   # optional — tune hunt policy
    ```
-2. Open `candidate.yaml` and fill in your name, city, languages and employers.
+2. Open `candidate.yaml` and fill in your name, city, languages and employers —
+   including `employers.history` (your real employers, titles and periods, in
+   reverse-chronological order) and `experience.years_label`/`since_year`. The
+   generation prompt renders this into its RED LINES at call time
+   (`hunter/gen_prompt.py`), so this is the ONLY place that table needs to be edited.
 3. Open `candidate_profile.md` and replace the example experience with yours.
 4. Open `base_cv_angular.md` (or whichever track you target) and write your
    real pre-polished bullets. Dates and companies must match

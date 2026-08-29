@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from hunter import candidate
+from hunter import candidate, gen_prompt
 from hunter.config import (
     GENERATE_DOCS_PATH,
     PROJECT_DIR,
@@ -48,17 +48,10 @@ from hunter.apply_shared import (
 )
 from hunter.services.apply_service import build_generate_docs_cmd
 
-_DEFAULT_BASE_CV_FILES = {
-    "angular": "base_cv_angular.md",
-    "react": "base_cv_react.md",
-    "javascript": "base_cv_react.md",
-    "fullstack_angular_nest": "base_cv_fullstack_angular_nest.md",
-    "fullstack_react_next": "base_cv_fullstack_react_next.md",
-    "ai": "base_cv_ai.md",
-}
-# candidate.yaml's tracks.base_cv can add/override stack keys on top of the
-# project owner's original defaults.
-_BASE_CV_FILES = {**_DEFAULT_BASE_CV_FILES, **candidate.get("tracks.base_cv", {})}
+# Stack key -> base-CV filename. Single source shared with the CLI skill
+# (.claude/commands/apply.md reads the same map via `python -m
+# hunter.gen_prompt base-cv-map`) — see hunter/gen_prompt.py.
+_BASE_CV_FILES = gen_prompt.base_cv_files()
 
 _AI_KEYWORDS = {
     "llm",
@@ -432,7 +425,7 @@ def _run_main_api(
     if not prompt_path.exists():
         print(f"[apply_agent] ERROR: {prompt_path} not found")
         sys.exit(1)
-    instructions = prompt_path.read_text(encoding="utf-8")
+    instructions = gen_prompt.build_generation_prompt()
     if profile_path.exists():
         profile = profile_path.read_text(encoding="utf-8")
         system_prompt = profile + "\n\n---\n\n" + instructions

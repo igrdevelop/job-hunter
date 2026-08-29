@@ -44,21 +44,17 @@ SCANNED_FILES = ("generate_docs.py", "apply_agent.py", "llm_client.py", "hunter.
 SCANNED_MD_GLOBS = ("prompts/*.md", ".claude/commands/*.md")
 
 # docs/GENERATION_ARCHITECTURE_ANALYSIS.md §5.2-§5.3 found personal data in
-# these two tracked prompt files (a 7-employer table with exact periods,
-# per-employer backend rules, university, course list, real client names) —
-# the readiness test above never saw them because it scanned only *.py. The
-# fix is to render the personal block into the prompt from candidate.yaml at
-# runtime, the pattern hunter/verdict_refine.py:60-67 already uses for its
-# own prompt blocks — that is wave 2 of the analysis document's §6 and is not
-# done yet. This allowlist exists so CI can go green NOW without hiding the
-# finding: it is scoped to these two exact paths, so any OTHER file under
-# prompts/ or .claude/commands/ carrying the same forbidden strings still
-# fails the test below (see test_legacy_allowlist_does_not_hide_new_offender).
-# Shrink this set as wave 2 lands; it must reach empty.
-LEGACY_PERSONAL_DATA_ALLOWLIST = {
-    "prompts/generation_rules.md",
-    "prompts/judge_rules.md",
-}
+# prompts/generation_rules.md and prompts/judge_rules.md (a 7-employer table
+# with exact periods, per-employer backend rules, university, course list,
+# real client names) — the readiness test above never saw them because it
+# scanned only *.py. Wave 2 of the analysis document's §6 renders the
+# personal facts into both prompts from candidate.yaml at runtime
+# (hunter/gen_prompt.py), the pattern hunter/verdict_refine.py:60-67 already
+# used for its own smaller prompt blocks — so both tracked files are now
+# clean and no allowlist is needed. See
+# test_legacy_allowlist_does_not_hide_new_offender below for a regression
+# test of the allowlist MECHANISM itself, kept in case a future prompt file
+# needs one again.
 
 # Patterns that must never appear as literals in production code. Each entry is
 # (label, compiled regex). Kept deliberately narrow — this test must not fire on
@@ -120,9 +116,7 @@ def _hits_for_pattern(
 
 @pytest.mark.parametrize("label,pattern", FORBIDDEN, ids=[label for label, _ in FORBIDDEN])
 def test_no_personal_data_in_production_code(label: str, pattern: re.Pattern[str]) -> None:
-    hits = _hits_for_pattern(
-        _production_files() + _prompt_files(), pattern, PROJECT_ROOT, LEGACY_PERSONAL_DATA_ALLOWLIST
-    )
+    hits = _hits_for_pattern(_production_files() + _prompt_files(), pattern, PROJECT_ROOT, set())
     assert not hits, (
         f"Personal data ({label}) hardcoded in production code.\n"
         "Move it to candidate/candidate.yaml and read it via "

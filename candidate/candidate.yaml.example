@@ -50,9 +50,51 @@ employers:
     - "senior frontend developer"
     - "frontend developer"
 
+  # Ordered employment history, newest first — the single source of truth
+  # for the generation prompt's RED LINES table (rendered at call time by
+  # hunter/gen_prompt.py; see prompts/generation_rules.md's
+  # <!-- CANDIDATE_EMPLOYMENT_FACTS --> marker). `company` / `title` /
+  # `period` are reproduced VERBATIM in every generated CV.
+  #   backend         — what the backend actually was, so stack_line
+  #                     enrichment cannot invent Node/NestJS where it was
+  #                     something else. Omit when there's nothing to pin.
+  #   bullets_max     — compression budget for older roles, so a 2-page CV
+  #                     never drops a role entirely. Omit for no cap.
+  #   legacy_stack_ok — true for era-appropriate 2010s-tech roles (jQuery
+  #                     and similar) — an explicit flag, not derived from
+  #                     dates.
+  #   title_by_track  — optional per-track title override for THIS role
+  #                     only (e.g. an AI-focused track naming this role
+  #                     differently). This is the ONLY title variation the
+  #                     prompt allows besides the Angular/React framework
+  #                     swap — do not use it to adopt a job posting's own
+  #                     label for the role.
+  history:
+    - company: "Company A"
+      title: "Senior Frontend Developer (Angular)"
+      period: "Jan 2023 - Present"
+      title_by_track:
+        ai: "AI Tooling Engineer"
+    - company: "Company B"
+      title: "Senior Frontend Developer (Angular)"
+      period: "Mar 2021 - Dec 2022"
+      backend: "Java"
+    - company: "Agency X"
+      title: "Frontend Developer"
+      period: "Jun 2018 - Feb 2021"
+      backend: ".NET"
+      bullets_max: "2-3"
+      legacy_stack_ok: true
+
 education:
   school_keyword: "university of warsaw"   # lowercase substring used by the education QA check
   expected_role_count: 5                   # how many roles the generated resume_en should list
+
+# Total experience as stated in summaries and cover letters. The generation
+# prompt forbids rounding this down (e.g. never "9+" when this says "10+").
+experience:
+  years_label: "10+"
+  since_year: 2015
 
 tracks:
   base_cv:                          # stack key -> prompt filename (relative to candidate/)

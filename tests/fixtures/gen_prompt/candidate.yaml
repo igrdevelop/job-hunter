@@ -1,0 +1,44 @@
+# Fictional candidate.yaml fixture for tests/test_gen_prompt.py.
+# None of these names are real; used to prove the renderer produces a
+# working prompt for a SECOND user's own data, and that no trace of the
+# project owner's real employers ever appears in the output.
+
+identity:
+  full_name: "Fixture Candidate"
+
+employers:
+  protected:
+    - "Acme Corp"
+    - "Globex"
+  flexible:
+    name: "Initech Agency"
+    period: "2016-2019"
+    projects:
+      - "Retail"
+      - "Logistics"
+  history:
+    - company: "Acme Corp"
+      title: "Senior Frontend Developer (Angular)"
+      period: "Jan 2022 - Present"
+      title_by_track:
+        ai: "AI Tooling Engineer"
+    - company: "Globex"
+      title: "Senior Frontend Developer (Angular)"
+      period: "Feb 2020 - Dec 2021"
+      backend: "Java"
+    - company: "Initech Agency"
+      title: "Frontend Developer"
+      period: "Mar 2016 - Jan 2020"
+      backend: ".NET"
+      bullets_max: "2"
+      legacy_stack_ok: true
+
+experience:
+  years_label: "8+"
+  since_year: 2016
+
+tracks:
+  base_cv:
+    angular: "base_cv_angular.md"
+    react: "base_cv_react.md"
+    ai: "base_cv_ai.md"
