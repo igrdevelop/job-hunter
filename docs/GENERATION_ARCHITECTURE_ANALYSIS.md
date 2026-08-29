@@ -30,7 +30,7 @@
 | 0.5 — CLI выровнен по API | ⚠️ частично | #223 | 4 стадии из 5; `_ats_check_loop` ждёт решения владельца |
 | 1 — разбор `apply_shared.py` | ✅ | #227 | — |
 | 3 — `generation.yaml` | ✅ | `0d366af`, `b3710fd` | — |
-| 2 — деперсонализация промптов | ✅ | #WAVE2_PR | — |
+| 2 — деперсонализация промптов | ✅ | #235 | — |
 | 4 — унификация пайплайнов | ❌ | — | заблокирована одним решением (см. ниже) |
 
 **Сделано сверх плана**, по ходу измерений и инцидентов:
@@ -133,8 +133,8 @@
 | dedup по URL, expired-чек, floor длины | ✅ | ✅ | — | |
 | doomed gate / repost gate / prescreen | ✅ | ✅ | — | |
 | до-LLM `is_react_only` / `is_backend_only` | ✅ | ✅ | — | ✅ закрыто волной 0.5 (#223) — теперь отсекает ДО генерации |
-| `build_ats_keyword_checklist` в первый промпт | ✅ | ❌ | ✅ | CLI-скилл его не получает |
-| `build_pl_skip_instruction` | ✅ | ❌ | ✅ | у CLI своя (сломанная в прошлом) логика в `apply.md` |
+| `build_ats_keyword_checklist` в первый промпт | ✅ | ✅ | ✅ | ✅ закрыто волной 2 (#235) — `apply_cli.py` вычисляет его сам и добавляет к тексту, который получает скилл |
+| `build_pl_skip_instruction` | ✅ | ✅ | ✅ | ✅ закрыто волной 2 (#235), тем же способом |
 | `_ats_check_loop` (до 5 раундов rewrite) | ✅ | ❌ | ✅ | CLI полагается на self-score скилла + verdict-refine |
 | `sanitize_content` | ✅ | ⚠️ | ✅ | CLI получает его косвенно, из `generate_docs.py:412` |
 | `_strip_compliance_claims` (DORA/RODO/ISO) | ✅ | ✅ | ✅ | ✅ закрыто волной 0.5 (#223) |
@@ -447,7 +447,7 @@ rewrite→re-render, и добавление ATS-loop упирается в пр
 
 ### Волна 2 — деперсонализация промптов
 
-> **✅ Сделано — #WAVE2_PR.** Новый модуль `hunter/gen_prompt.py`: собранный
+> **✅ Сделано — #235.** Новый модуль `hunter/gen_prompt.py`: собранный
 > промпт = tracked `prompts/generation_rules.md` (личных фактов не осталось —
 > проверено `test_no_personal_data_in_production_code`) с блоком
 > `<!-- CANDIDATE_EMPLOYMENT_FACTS -->`, отрендеренным из `candidate.yaml`
