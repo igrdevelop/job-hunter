@@ -103,6 +103,30 @@ CREATE TABLE IF NOT EXISTS telegram_link_codes (
 );
 """
 
+# Resume-profile-store render/parse job queue (docs/RESUME_PROFILE_STORE_PLAN.md
+# step 4b). Contract owned by job-hunter-api/docs/RESUME_PROFILE_STORE.md's
+# "Shared contract" section — the API writes a row here (PUT /api/profile ->
+# kind='render', POST /api/profile/uploads -> kind='parse') and this repo's
+# drain (hunter/profile_jobs.py + hunter/schedules/profile_jobs.py) is the
+# sole consumer. Same precedent as telegram_link_codes above: API writes, bot
+# claims and resolves. DDL must not change unilaterally on this side.
+_PROFILE_JOBS_DDL = """
+CREATE TABLE IF NOT EXISTS profile_jobs (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    payload    TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    result     TEXT NOT NULL DEFAULT '',
+    error      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_jobs_status
+    ON profile_jobs(status, created_at);
+"""
+
 # Backs hunter.best_effort — consecutive-failure counters for best-effort
 # subsystems (Sheets mirror, Drive upload, delivery, outreach, dual-shadow,
 # cost/verdict writers). One row per subsystem name; `consecutive_failures`
@@ -347,6 +371,7 @@ def init_db(
         _ensure_columns(conn)
         ensure_subsystem_health_table(conn)
         conn.executescript(_MULTI_USER_DDL)
+        conn.executescript(_PROFILE_JOBS_DDL)
         # Deduplicate existing rows before applying the unique (user_id, url_norm)
         # constraint — _ensure_user_url_index must run AFTER this.
         n_dedup = _dedup_url_norm(conn)

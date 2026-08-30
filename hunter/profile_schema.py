@@ -143,6 +143,15 @@ class Role:
     # for a track ⇒ the renderer falls back to filtering `bullets` by their
     # own `tracks` tag.
     bullets_by_track: dict[str, list[str]] = field(default_factory=dict)
+    # Presentation-only visibility gate (docs/RESUME_PROFILE_STORE_PLAN.md
+    # step 2d): an empty list means the role is visible on every track's
+    # base CV (same shared-unless-tagged contract as Bullet.tracks); a
+    # non-empty list hides the role entirely from any track not listed.
+    # Deliberately NOT read by render_profile_md() or the employers.history
+    # projection — those are facts (candidate_profile.md's narrative superset,
+    # the judge's RED LINES ground truth), and a role hidden from one track's
+    # CV is still a real, true fact about the candidate's history.
+    tracks: list[str] = field(default_factory=list)
     origin: str = ORIGIN_PARSED
 
 
@@ -192,6 +201,12 @@ class Variant:
     headline: str = ""
     summary: str = ""
     skills: list[SkillCategory] = field(default_factory=list)
+    # Free-text behavioral instruction for THIS track's base_cv, rendered
+    # verbatim as the file's first block, before the headline (step 2d) —
+    # e.g. the react track's "never write 'Angular' in a role title" rule,
+    # which had no home in the schema before this and was silently lost on
+    # render (see the #239 review finding).
+    notes: str = ""
 
 
 @dataclass

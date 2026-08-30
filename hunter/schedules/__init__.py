@@ -42,6 +42,7 @@ from hunter.schedules.email_responses import scheduled_check_email_responses
 from hunter.schedules.daily_summary import scheduled_daily_summary
 from hunter.schedules.normalize_sent import scheduled_normalize_sent
 from hunter.schedules.apply_queue import scheduled_reset_stale_claims
+from hunter.schedules.profile_jobs import scheduled_profile_jobs_drain
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ __all__ = [
     "scheduled_daily_summary",
     "scheduled_normalize_sent",
     "scheduled_reset_stale_claims",
+    "scheduled_profile_jobs_drain",
 ]
 
 
@@ -248,3 +250,13 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             name="reset_stale_claims",
         )
         logger.info("[Schedule] reset_stale_claims every 15 min")
+
+    # ── Resume profile store: render/parse queue drain every ~20s (docs/
+    # RESUME_PROFILE_STORE_PLAN.md step 4b) ──────────────────────────────────
+    app.job_queue.run_repeating(
+        callback=scheduled_profile_jobs_drain,
+        interval=20,
+        first=20,
+        name="profile_jobs_drain",
+    )
+    logger.info("[Schedule] profile_jobs_drain every 20s")

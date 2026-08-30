@@ -313,6 +313,119 @@ class TestRenderBaseCv:
         assert render_base_cv(profile, "angular") == render_base_cv(profile, "angular")
 
 
+class TestRoleTracksVisibility:
+    """docs/RESUME_PROFILE_STORE_PLAN.md M2, step 2d — Role.tracks hides a
+    role from OTHER tracks' base CVs while remaining a fact everywhere else."""
+
+    def _profile_with_tagged_role(self):
+        return from_dict(
+            {
+                "core": {
+                    "identity": {"full_name": "X", "contact": "y", "cv_filename_prefix": "z"},
+                    "roles": [
+                        {"company": "Visible Co", "title": "Dev", "period": "2020"},
+                        {
+                            "company": "Hidden Co",
+                            "title": "Contractor",
+                            "period": "2019",
+                            "tracks": ["angular"],
+                        },
+                    ],
+                },
+            }
+        )
+
+    def test_tagged_role_present_in_its_own_track_base_cv(self):
+        profile = self._profile_with_tagged_role()
+        rendered = render_base_cv(profile, "angular")
+        assert "Hidden Co" in rendered
+
+    def test_tagged_role_absent_from_other_track_base_cv(self):
+        profile = self._profile_with_tagged_role()
+        rendered = render_base_cv(profile, "react")
+        assert "Hidden Co" not in rendered
+        assert "Visible Co" in rendered  # untagged role stays visible everywhere
+
+    def test_tagged_role_still_in_candidate_profile_md(self):
+        """profile_md is the narrative superset of FACTS — role visibility is
+        a base_cv presentation concern only."""
+        profile = self._profile_with_tagged_role()
+        rendered = render_profile_md(profile)
+        assert "Hidden Co" in rendered
+
+    def test_tagged_role_still_in_rendered_employers_history(self):
+        """employers.history feeds the judge's RED LINES ground truth — a
+        role hidden from one track's CV is still a true fact."""
+        profile = self._profile_with_tagged_role()
+        rendered = yaml.safe_load(render_candidate_yaml(profile))
+        companies = {entry["company"] for entry in rendered["employers"]["history"]}
+        assert "Hidden Co" in companies
+        assert "Visible Co" in companies
+
+    def test_example_profile_beta_role_tagged_angular_only(self):
+        """profile.example.json's Beta Solutions role carries tracks:
+        [\"angular\"] — present in the angular base CV, absent from react's."""
+        profile = _load_example_profile()
+        angular_render = render_base_cv(profile, "angular")
+        react_render = render_base_cv(profile, "react")
+        assert "Beta Solutions" in angular_render
+        assert "Beta Solutions" not in react_render
+
+
+class TestVariantNotes:
+    """docs/RESUME_PROFILE_STORE_PLAN.md M2, step 2d — a free-text per-track
+    instruction rendered as the base_cv's very first block."""
+
+    def test_notes_rendered_as_first_block_before_headline(self):
+        profile = from_dict(
+            {
+                "core": {
+                    "identity": {
+                        "full_name": "X",
+                        "contact": "y",
+                        "cv_filename_prefix": "z",
+                        "headline": "Senior Developer",
+                    },
+                },
+                "variants": {"react": {"notes": 'Do NOT write "Angular" in any role title.'}},
+            }
+        )
+        rendered = render_base_cv(profile, "react")
+        assert rendered.startswith('Do NOT write "Angular" in any role title.')
+
+    def test_notes_do_not_leak_into_other_tracks(self):
+        profile = from_dict(
+            {
+                "core": {"identity": {"full_name": "X", "contact": "y", "cv_filename_prefix": "z"}},
+                "variants": {"react": {"notes": "React-only instruction."}},
+            }
+        )
+        angular_render = render_base_cv(profile, "angular")
+        assert "React-only instruction." not in angular_render
+
+    def test_empty_notes_render_no_extra_block(self):
+        profile = from_dict(
+            {
+                "core": {
+                    "identity": {
+                        "full_name": "X",
+                        "contact": "y",
+                        "cv_filename_prefix": "z",
+                        "headline": "Senior Developer",
+                    },
+                },
+            }
+        )
+        rendered = render_base_cv(profile, "angular")
+        assert rendered.startswith("# Senior Developer")
+
+    def test_example_angular_variant_notes_rendered(self):
+        profile = _load_example_profile()
+        assert profile.variants["angular"].notes
+        rendered = render_base_cv(profile, "angular")
+        assert rendered.startswith(profile.variants["angular"].notes)
+
+
 class TestRenderAll:
     """docs/RESUME_PROFILE_STORE_PLAN.md M2, step 2c."""
 

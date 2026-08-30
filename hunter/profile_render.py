@@ -244,6 +244,15 @@ def _filter_by_track(items: list[Bullet] | list[SkillCategory], track: str) -> l
     return [item for item in items if not item.tracks or track in item.tracks]
 
 
+def _visible_roles_for_track(core: Core, track: str) -> list[Role]:
+    """Role-level visibility gate for base_cv (step 2d): same shared-unless-
+    tagged contract as `_filter_by_track`, but this ONLY controls base_cv —
+    render_profile_md() and the employers.history projection in
+    render_candidate_yaml() deliberately ignore Role.tracks and always
+    include every role (they are facts, not a track's presentation)."""
+    return [role for role in core.roles if not role.tracks or track in role.tracks]
+
+
 def _variant_skills(profile: Profile, track: str) -> list[SkillCategory]:
     """A variant with its OWN `skills` list wins wholesale (M0b: the owner's
     per-track skills are full lists with their own labels, not a reordering
@@ -265,8 +274,10 @@ def _role_bullets_for_track(role: Role, track: str) -> list[str]:
 
 
 def render_base_cv(profile: Profile, track: str) -> str:
-    """Render `base_cv_<track>.md`: track-filtered bullets/skills, plus the
-    variant's own headline/summary (falling back to core when absent)."""
+    """Render `base_cv_<track>.md`: track-filtered bullets/skills/roles, plus
+    the variant's own headline/summary (falling back to core when absent) and
+    `notes` — a free-text behavioral instruction rendered as the very first
+    block, before the headline (step 2d)."""
     core = profile.core
     variant = profile.variants.get(track)
     headline = (variant.headline if variant else "") or core.identity.headline
@@ -274,6 +285,10 @@ def render_base_cv(profile: Profile, track: str) -> str:
     skills = _variant_skills(profile, track)
 
     lines: list[str] = []
+    variant_notes = (variant.notes if variant else "").strip()
+    if variant_notes:
+        lines.append(variant_notes)
+        lines.append("")
     if headline.strip():
         lines.append(f"# {headline.strip()}")
         lines.append("")
@@ -289,10 +304,11 @@ def render_base_cv(profile: Profile, track: str) -> str:
                 lines.append(f"**{category.category}**: {', '.join(category.items)}")
         lines.append("")
 
-    if core.roles:
+    visible_roles = _visible_roles_for_track(core, track)
+    if visible_roles:
         lines.append("## Experience")
         lines.append("")
-        for i, role in enumerate(core.roles, start=1):
+        for i, role in enumerate(visible_roles, start=1):
             title = role.title_by_track.get(track, role.title)
             subtitle = role.subtitle_by_track.get(track, role.subtitle)
             stack_line = role.stack_line_by_track.get(track, role.stack_line)
