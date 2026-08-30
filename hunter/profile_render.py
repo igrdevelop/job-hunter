@@ -140,3 +140,80 @@ def render_candidate_yaml(profile: Profile) -> str:
         },
     }
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+
+def _role_bullets(role: Role) -> list[str]:
+    """The narrative superset for candidate_profile.md: ALL bullets, never
+    filtered by track (that's base_cv's job — see render_base_cv, step 2c)."""
+    return [bullet.text for bullet in role.bullets if bullet.text.strip()]
+
+
+def _render_role_md(role: Role) -> list[str]:
+    lines: list[str] = [f"**{role.title} | {role.company}** - {role.period}"]
+    # May be "" — this line's mere presence (not its content) is what keeps
+    # candidate_profile.md parseable by hunter/resume_sanitizer.py's role
+    # regex, which expects exactly one line between the header and the body.
+    lines.append(role.subtitle)
+    if role.description.strip():
+        lines.append("")
+        lines.append(role.description.strip())
+    bullets = _role_bullets(role)
+    if bullets:
+        lines.append("")
+        lines.extend(f"- {text}" for text in bullets)
+    if role.stack_line.strip():
+        lines.append(f"Stack: {role.stack_line.strip()}.")
+    return lines
+
+
+def render_profile_md(profile: Profile) -> str:
+    """Render `candidate_profile.md`: the free-text career narrative fed to
+    the generation LLM. Pure concatenation of whatever the profile holds —
+    no text is invented, and an empty section is skipped silently."""
+    core = profile.core
+    lines: list[str] = ["## Candidate Profile", ""]
+
+    header_lines: list[str] = []
+    if core.identity.full_name.strip():
+        header_lines.append(f"**Name**: {core.identity.full_name}")
+    if core.identity.headline.strip():
+        header_lines.append(f"**Headline**: {core.identity.headline}")
+    if core.identity.contact.strip():
+        header_lines.append(f"**Contact**: {core.identity.contact}")
+    if header_lines:
+        lines.extend(header_lines)
+        lines.append("")
+
+    if core.summary.strip():
+        lines.append(core.summary.strip())
+        lines.append("")
+
+    if core.roles:
+        lines.append("---")
+        lines.append("")
+        lines.append("### Work Experience")
+        lines.append("")
+        for i, role in enumerate(core.roles):
+            if i:
+                lines.append("")
+            lines.extend(_render_role_md(role))
+        lines.append("")
+
+    education_text = "; ".join(e.text for e in core.education.entries if e.text.strip())
+    if education_text:
+        lines.append("---")
+        lines.append("")
+        lines.append(f"**Education**: {education_text}")
+        lines.append("")
+
+    if core.languages.spoken:
+        lines.append(f"**Languages**: {', '.join(core.languages.spoken)}")
+        lines.append("")
+
+    extras_text = [extra.text for extra in core.extras if extra.text.strip()]
+    if extras_text:
+        lines.append("**Additional**:")
+        lines.extend(f"- {text}" for text in extras_text)
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"

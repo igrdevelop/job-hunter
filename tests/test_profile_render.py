@@ -16,10 +16,13 @@ from pathlib import Path
 import yaml
 
 from hunter import candidate, gen_prompt
-from hunter.profile_render import render_candidate_yaml
+from hunter.profile_render import render_candidate_yaml, render_profile_md
 from hunter.profile_schema import from_dict
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "candidate" / "profile.example.json"
+GOLDEN_PROFILE_MD_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "profile_render" / "candidate_profile.golden.md"
+)
 
 # Same 24 M0a dotpaths as tests/test_profile_example.py, now checked against
 # the actual RENDERED candidate.yaml (loaded back with yaml.safe_load)
@@ -191,3 +194,35 @@ class TestWave2Compatibility:
 
         assert "No fixed employer list is configured" not in ground_truth
         assert "Acme Corp" in ground_truth
+
+
+class TestRenderProfileMd:
+    """docs/RESUME_PROFILE_STORE_PLAN.md M2, step 2b."""
+
+    def test_matches_golden_snapshot(self):
+        profile = _load_example_profile()
+        rendered = render_profile_md(profile)
+        expected = GOLDEN_PROFILE_MD_PATH.read_text(encoding="utf-8")
+        assert rendered == expected
+
+    def test_empty_profile_renders_without_raising(self):
+        from hunter.profile_schema import Profile
+
+        rendered = render_profile_md(Profile())
+        assert isinstance(rendered, str)
+        assert rendered.startswith("## Candidate Profile")
+        # No roles/education/languages/extras — only the bare heading survives.
+        assert "Work Experience" not in rendered
+        assert "Education" not in rendered
+
+    def test_role_bullets_are_never_track_filtered(self):
+        """candidate_profile.md is the narrative superset — a bullet tagged
+        for only one track must still appear here (base_cv is where track
+        filtering happens, step 2c)."""
+        profile = _load_example_profile()
+        rendered = render_profile_md(profile)
+        assert "Introduced NgRx state management" in rendered  # tagged ["angular"]
+
+    def test_render_is_deterministic(self):
+        profile = _load_example_profile()
+        assert render_profile_md(profile) == render_profile_md(profile)
