@@ -1,0 +1,23 @@
+Jane Doe
+Senior Frontend Developer
+jane.doe@example.com | +1 555 000 1234 | linkedin.com/in/janedoe
+
+Summary
+Senior frontend engineer with 6+ years building Angular and React applications
+for fintech and e-commerce products.
+
+Experience
+
+Acme Corp — Senior Frontend Developer (Jan 2024 - Present)
+- Built and maintained a payments dashboard used by 50+ enterprise clients.
+- Migrated the codebase from Angular 15 to 19 with zero-downtime releases.
+
+Beta Solutions — Frontend Developer (Mar 2020 - Dec 2023)
+- Developed a reusable component library shared across 5 product teams.
+- Covered critical checkout flows with Jest unit tests and Cypress E2E tests.
+
+Education
+Example University — Bachelor, Computer Science
+
+I hereby give consent for my personal data to be processed for the purposes
+of this recruitment process.
