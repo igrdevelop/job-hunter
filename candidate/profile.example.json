@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "core": {
+    "identity": {
+      "full_name": "Jane Doe",
+      "aka": "",
+      "headline": "Senior Frontend Developer",
+      "contact": "+1 555 000 1234 | jane.doe@example.com | linkedin.com/in/janedoe | Remote",
+      "cv_filename_prefix": "Jane_Doe_CV"
+    },
+    "location": {
+      "home_city": "Warsaw",
+      "home_city_aliases": ["warszawa", "warsaw"],
+      "acceptable_hybrid": ["Warsaw"],
+      "weekly_hybrid": ["Krakow"],
+      "work_authorization": "EU"
+    },
+    "languages": {
+      "spoken": ["en", "pl"],
+      "cv_languages": ["en", "pl"],
+      "disqualify_required": ["de", "fr"]
+    },
+    "employers": {
+      "protected": ["Acme Corp"],
+      "flexible": {
+        "name": "Beta Solutions",
+        "period": "Mar 2020 - Dec 2023",
+        "projects": ["E-commerce Platform", "Marketing Website Revamp"]
+      }
+    },
+    "education": {
+      "entries": [
+        { "text": "Example University — Bachelor, Computer Science", "origin": "parsed" },
+        { "text": "Angular Advanced Course", "origin": "parsed" }
+      ],
+      "school_keyword": "example university",
+      "expected_role_count": 2
+    },
+    "experience": {
+      "years_label": "6+",
+      "since_year": 2018
+    },
+    "summary": "Senior frontend engineer with 6+ years building Angular and React applications for fintech and e-commerce products.",
+    "roles": [
+      {
+        "id": "role-acme",
+        "company": "Acme Corp",
+        "title": "Senior Frontend Developer",
+        "period": "Jan 2024 - Present",
+        "subtitle": "FinTech, Payments Platform",
+        "description": "Leading frontend development for a payments dashboard used by enterprise clients, migrating the codebase to the latest Angular releases and modernizing state management.",
+        "backend": "Node.js / NestJS",
+        "bullets_max": "",
+        "legacy_stack_ok": false,
+        "title_by_track": { "ai": "AI Tooling Engineer" },
+        "subtitle_by_track": {},
+        "stack_line": "Angular 17-19, TypeScript, NgRx, RxJS, SCSS",
+        "stack_line_by_track": { "react": "React 18, TypeScript, Redux Toolkit, SCSS" },
+        "bullets": [
+          {
+            "text": "Built and maintained a payments dashboard used by 50+ enterprise clients.",
+            "origin": "parsed",
+            "tracks": []
+          },
+          {
+            "text": "Migrated the codebase from Angular 15 to 19 with zero-downtime releases.",
+            "origin": "parsed",
+            "tracks": ["angular"]
+          },
+          {
+            "text": "Introduced NgRx state management and cut page-load time by 40%.",
+            "origin": "edited",
+            "tracks": ["angular"]
+          }
+        ],
+        "bullets_by_track": {
+          "react": [
+            "Built and maintained a payments dashboard used by 50+ enterprise clients.",
+            "Migrated the codebase from a legacy stack to React 18 with zero-downtime releases.",
+            "Introduced Redux Toolkit state management and cut page-load time by 40%."
+          ]
+        },
+        "origin": "edited"
+      },
+      {
+        "id": "role-beta",
+        "company": "Beta Solutions",
+        "title": "Frontend Developer",
+        "period": "Mar 2020 - Dec 2023",
+        "subtitle": "E-commerce, Multi-tenant Shop Platform",
+        "description": "Developed a reusable component library shared across several product teams and covered critical checkout flows with automated tests.",
+        "backend": "Java",
+        "bullets_max": "2-3",
+        "legacy_stack_ok": true,
+        "title_by_track": {},
+        "subtitle_by_track": {},
+        "stack_line": "Angular 9-14, TypeScript, RxJS, SCSS, Node.js",
+        "stack_line_by_track": {},
+        "bullets": [
+          {
+            "text": "Developed a reusable component library shared across 5 product teams.",
+            "origin": "parsed",
+            "tracks": []
+          },
+          {
+            "text": "Covered critical checkout flows with Jest unit tests and Cypress E2E tests.",
+            "origin": "parsed",
+            "tracks": []
+          }
+        ],
+        "bullets_by_track": {},
+        "origin": "parsed"
+      }
+    ],
+    "skills": [
+      {
+        "category": "Core Stack",
+        "items": ["Angular (2-19)", "TypeScript", "NgRx", "RxJS", "SCSS"],
+        "origin": "edited",
+        "tracks": []
+      },
+      {
+        "category": "Tools",
+        "items": ["Jest", "Cypress", "Git", "Webpack"],
+        "origin": "parsed",
+        "tracks": []
+      },
+      {
+        "category": "AI Dev Tools",
+        "items": ["GitHub Copilot", "Claude Code"],
+        "origin": "parsed",
+        "tracks": ["ai"]
+      }
+    ],
+    "extras": [
+      { "kind": "certification", "text": "Certified Scrum Developer (CSD)", "origin": "parsed" },
+      { "kind": "link", "text": "github.com/janedoe", "origin": "parsed" }
+    ],
+    "generation_notes": ""
+  },
+  "variants": {
+    "angular": {
+      "headline": "Senior Frontend Developer (Angular)",
+      "summary": "Senior Angular engineer with 6+ years shipping payments and e-commerce products, focused on state management and performance.",
+      "skills": [
+        {
+          "category": "Core Stack",
+          "items": ["Angular (2-19)", "TypeScript", "NgRx", "RxJS", "SCSS"],
+          "origin": "edited",
+          "tracks": []
+        }
+      ]
+    }
+  },
+  "leftovers": [
+    {
+      "text": "I hereby give consent for my personal data to be processed for the purposes of this recruitment process.",
+      "source_upload_id": "upload-1"
+    }
+  ],
+  "uploads": [
+    {
+      "id": "upload-1",
+      "filename": "jane_doe_resume.pdf",
+      "sha256": "deadbeefcafebabe0000000000000000000000000000000000000000000000",
+      "parsed_at": "2026-08-30T12:00:00Z"
+    }
+  ]
+}
