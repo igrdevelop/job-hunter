@@ -352,3 +352,34 @@ class TestRenderAll:
         profile = _load_example_profile()
         render_all(profile, tmp_path)
         assert "stale_key" not in stale_path.read_text(encoding="utf-8")
+
+    def test_stale_base_cv_removed_when_track_dropped(self, tmp_path):
+        """A track removed from `variants` must not leave its old
+        base_cv_<track>.md behind — an unlisted file on disk that nothing
+        in the returned `written` list accounts for."""
+        profile = _load_example_profile()
+        profile.variants["react"] = profile.variants["angular"]
+        render_all(profile, tmp_path)
+        assert (tmp_path / "base_cv_react.md").exists()
+
+        del profile.variants["react"]
+        written = render_all(profile, tmp_path)
+        assert not (tmp_path / "base_cv_react.md").exists()
+        assert (tmp_path / "base_cv_angular.md") in written
+        assert "base_cv_react.md" not in {p.name for p in written}
+
+    def test_stale_generation_rules_local_removed_when_notes_cleared(self, tmp_path):
+        """Clearing generation_notes back to empty must delete the file, not
+        just stop returning it in `written` — otherwise hunter/gen_prompt.py's
+        _local_tail() (which only checks file existence) keeps splicing a
+        narrative the user explicitly removed into every future prompt."""
+        profile = _load_example_profile()
+        profile.core.generation_notes = "Story bank: cite the Acme dashboard project."
+        render_all(profile, tmp_path)
+        local_tail_path = tmp_path / "generation_rules.local.md"
+        assert local_tail_path.exists()
+
+        profile.core.generation_notes = ""
+        written = render_all(profile, tmp_path)
+        assert not local_tail_path.exists()
+        assert local_tail_path not in written

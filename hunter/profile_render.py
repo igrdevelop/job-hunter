@@ -324,7 +324,15 @@ def render_all(profile: Profile, out_dir: Path) -> list[Path]:
     """Render + write candidate.yaml, candidate_profile.md, one
     base_cv_<track>.md per variant key, and — only when non-empty —
     generation_rules.local.md (the wave-2 optional prompt tail). Always a
-    full overwrite, never a merge. Returns the paths actually written."""
+    full overwrite, never a merge. Returns the paths actually written.
+
+    "Full overwrite" also means a file this render no longer needs is
+    REMOVED, not left behind: a base_cv_<track>.md for a track dropped from
+    `variants`, or a generation_rules.local.md left over from a
+    generation_notes that has since been cleared. Without this, a stale
+    generation_rules.local.md keeps being spliced into every future
+    generation prompt (hunter/gen_prompt.py::_local_tail only checks the
+    file's existence, not whether the current profile still wants it)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -337,15 +345,22 @@ def render_all(profile: Profile, out_dir: Path) -> list[Path]:
     profile_md_path.write_text(render_profile_md(profile), encoding="utf-8")
     written.append(profile_md_path)
 
+    current_base_cv_names = {f"base_cv_{track}.md" for track in profile.variants}
+    for stale_base_cv in out_dir.glob("base_cv_*.md"):
+        if stale_base_cv.name not in current_base_cv_names:
+            stale_base_cv.unlink()
+
     for track in profile.variants:
         base_cv_path = out_dir / f"base_cv_{track}.md"
         base_cv_path.write_text(render_base_cv(profile, track), encoding="utf-8")
         written.append(base_cv_path)
 
     generation_notes = profile.core.generation_notes.strip()
+    local_tail_path = out_dir / "generation_rules.local.md"
     if generation_notes:
-        local_tail_path = out_dir / "generation_rules.local.md"
         local_tail_path.write_text(generation_notes + "\n", encoding="utf-8")
         written.append(local_tail_path)
+    elif local_tail_path.exists():
+        local_tail_path.unlink()
 
     return written

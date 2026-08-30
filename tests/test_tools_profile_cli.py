@@ -71,7 +71,7 @@ class TestParseResumeCli:
         result = _run("tools/parse_resume.py", str(tmp_path / "missing.pdf"), "--no-llm")
 
         assert result.returncode == 1
-        assert result.stderr.strip()
+        assert "not found" in result.stderr
 
 
 class TestRenderProfileCli:
@@ -103,6 +103,44 @@ class TestRenderProfileCli:
 
         assert result.returncode == 1
         assert result.stderr.strip()
+
+    def test_utf8_bom_profile_is_read_correctly(self, tmp_path: Path) -> None:
+        """A profile.json saved with a UTF-8 BOM (e.g. via Windows PowerShell's
+        default text encoding) must still parse — not fail with a confusing
+        "Expecting value" JSON error over an otherwise-valid file."""
+        bom_profile = tmp_path / "bom.json"
+        bom_profile.write_bytes(b"\xef\xbb\xbf" + EXAMPLE_PROFILE.read_bytes())
+
+        result = _run("tools/render_profile.py", str(bom_profile), str(tmp_path / "out"))
+
+        assert result.returncode == 0, result.stderr
+
+    def test_empty_profile_still_renders_but_warns(self, tmp_path: Path) -> None:
+        """An empty/malformed profile must not render silently — the CLI
+        still renders (this isn't a content-quality gate, that's the site's
+        confirmation screen's job) but a caller must see a warning instead
+        of mistaking a blank candidate.yaml for a clean success."""
+        empty = tmp_path / "empty.json"
+        empty.write_text("{}", encoding="utf-8")
+
+        result = _run("tools/render_profile.py", str(empty), str(tmp_path / "out"))
+
+        assert result.returncode == 0
+        assert "WARNING" in result.stderr
+        assert "full_name" in result.stderr
+
+    def test_out_dir_collision_exits_1_with_clean_message(self, tmp_path: Path) -> None:
+        """out_dir pointing at an existing regular file must produce the
+        same clean "ERROR: ..." + exit 1 contract as every other failure
+        path here, not an uncaught traceback."""
+        blocking_file = tmp_path / "blocked"
+        blocking_file.write_text("not a directory", encoding="utf-8")
+
+        result = _run("tools/render_profile.py", str(EXAMPLE_PROFILE), str(blocking_file))
+
+        assert result.returncode == 1
+        assert result.stderr.strip().startswith("ERROR:")
+        assert "Traceback" not in result.stderr
 
 
 class TestParseThenRenderChain:

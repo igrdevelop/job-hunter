@@ -34,6 +34,15 @@ from hunter.profile_parse import (  # noqa: E402 — after sys.path setup
 )
 from hunter.profile_schema import to_dict  # noqa: E402
 
+# Force UTF-8 stdout/stderr on Windows (console defaults to cp1252, which
+# can't encode a non-ASCII resume filename or profile field and would crash
+# the print instead of reporting the actual error — see tools/preview_judge.py
+# for the same guard on stdout; here stderr needs it too, since the error
+# path below prints an untrusted exception message there).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
@@ -65,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         llm = call_llm
 
     profile = parse_resume_text(text, llm=llm, source_upload_id=args.upload_id)
-    print(json.dumps(to_dict(profile), indent=2))
+    print(json.dumps(to_dict(profile), indent=2, ensure_ascii=False))
     return 0
 
 
