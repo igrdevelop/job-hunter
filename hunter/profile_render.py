@@ -21,12 +21,29 @@ render_candidate_yaml()'s docstring.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 
 import yaml
 
 from hunter.profile_schema import Bullet, Core, Profile, Role, SkillCategory
+
+# Polish letters that do NOT decompose under NFKD (ł most famously), plus the
+# ones that do — kept explicit so the slug for a Polish city is predictable.
+# The source_urls slugs go verbatim into pracuj/theprotocol/jobleads listing
+# URLs, which are ASCII ("wroclaw", "warszawa") — "wrocław" would silently
+# break all three sources' listing fetches.
+_PL_TRANSLIT = str.maketrans(
+    "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ",
+    "acelnoszzACELNOSZZ",
+)
+
+
+def _ascii_city_slug(city: str) -> str:
+    text = city.strip().lower().translate(_PL_TRANSLIT)
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if c.isascii() and not unicodedata.combining(c))
 
 
 def _dedup_preserve_order(items: Iterable[str]) -> list[str]:
@@ -135,9 +152,9 @@ def render_candidate_yaml(profile: Profile) -> str:
             "base_cv": {track: f"base_cv_{track}.md" for track in profile.variants},
         },
         "source_urls": {
-            "pracuj_location": core.location.home_city.strip().lower(),
-            "theprotocol_location": core.location.home_city.strip().lower(),
-            "jobleads_location": core.location.home_city.strip().lower(),
+            "pracuj_location": _ascii_city_slug(core.location.home_city),
+            "theprotocol_location": _ascii_city_slug(core.location.home_city),
+            "jobleads_location": _ascii_city_slug(core.location.home_city),
         },
     }
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)

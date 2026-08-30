@@ -101,6 +101,18 @@ class TestExampleRoundTrip:
         rendered = yaml.safe_load(render_candidate_yaml(profile))
         assert isinstance(rendered, dict)
 
+    def test_source_urls_slug_is_ascii_for_polish_city(self):
+        """pracuj/theprotocol/jobleads listing URLs take ASCII city slugs —
+        "wrocław" (ł does NOT decompose under NFKD) must render "wroclaw",
+        or all three sources' listing fetches silently break at owner
+        migration. The Warsaw example hid this."""
+        profile = _load_example_profile()
+        profile.core.location.home_city = "Wrocław"
+        rendered = yaml.safe_load(render_candidate_yaml(profile))
+        assert rendered["source_urls"]["pracuj_location"] == "wroclaw"
+        assert rendered["source_urls"]["theprotocol_location"] == "wroclaw"
+        assert rendered["source_urls"]["jobleads_location"] == "wroclaw"
+
 
 class TestDerivedFields:
     def test_real_companies_is_lowercase_of_protected_plus_flexible(self):
