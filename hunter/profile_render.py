@@ -22,10 +22,11 @@ render_candidate_yaml()'s docstring.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 
 import yaml
 
-from hunter.profile_schema import Core, Profile, Role
+from hunter.profile_schema import Bullet, Core, Profile, Role, SkillCategory
 
 
 def _dedup_preserve_order(items: Iterable[str]) -> list[str]:
@@ -217,3 +218,117 @@ def render_profile_md(profile: Profile) -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _filter_by_track(items: list[Bullet] | list[SkillCategory], track: str) -> list:
+    """Shared-unless-tagged filter for Bullet/SkillCategory: an item with no
+    `tracks` is included on every track's base CV; one with a `tracks` list
+    is included only when `track` is in it."""
+    return [item for item in items if not item.tracks or track in item.tracks]
+
+
+def _variant_skills(profile: Profile, track: str) -> list[SkillCategory]:
+    """A variant with its OWN `skills` list wins wholesale (M0b: the owner's
+    per-track skills are full lists with their own labels, not a reordering
+    of core's) — otherwise core.skills filtered by tag."""
+    variant = profile.variants.get(track)
+    if variant is not None and variant.skills:
+        return variant.skills
+    return _filter_by_track(profile.core.skills, track)
+
+
+def _role_bullets_for_track(role: Role, track: str) -> list[str]:
+    """Role.bullets_by_track is a full per-track REWRITE (M0b: different
+    wording, different count, not a filtered subset) — it wins wholesale
+    when present; otherwise fall back to filtering core `bullets` by tag."""
+    override = role.bullets_by_track.get(track)
+    if override is not None:
+        return override
+    return [b.text for b in _filter_by_track(role.bullets, track) if b.text.strip()]
+
+
+def render_base_cv(profile: Profile, track: str) -> str:
+    """Render `base_cv_<track>.md`: track-filtered bullets/skills, plus the
+    variant's own headline/summary (falling back to core when absent)."""
+    core = profile.core
+    variant = profile.variants.get(track)
+    headline = (variant.headline if variant else "") or core.identity.headline
+    summary = (variant.summary if variant else "") or core.summary
+    skills = _variant_skills(profile, track)
+
+    lines: list[str] = []
+    if headline.strip():
+        lines.append(f"# {headline.strip()}")
+        lines.append("")
+    if summary.strip():
+        lines.append(summary.strip())
+        lines.append("")
+
+    if skills:
+        lines.append("## Skills")
+        lines.append("")
+        for category in skills:
+            if category.items:
+                lines.append(f"**{category.category}**: {', '.join(category.items)}")
+        lines.append("")
+
+    if core.roles:
+        lines.append("## Experience")
+        lines.append("")
+        for i, role in enumerate(core.roles, start=1):
+            title = role.title_by_track.get(track, role.title)
+            subtitle = role.subtitle_by_track.get(track, role.subtitle)
+            stack_line = role.stack_line_by_track.get(track, role.stack_line)
+            lines.append(f"### Role {i} — {role.company} ({role.period})")
+            lines.append("")
+            head = f"**{title}**"
+            if subtitle.strip():
+                head += f" | {subtitle.strip()}"
+            lines.append(head)
+            lines.append("")
+            for text in _role_bullets_for_track(role, track):
+                lines.append(f"- {text}")
+            if stack_line.strip():
+                lines.append(f"\nStack: {stack_line.strip()}.")
+            lines.append("")
+
+    if core.education.entries:
+        lines.append("## Education & Courses")
+        lines.append("")
+        for entry in core.education.entries:
+            if entry.text.strip():
+                lines.append(f"- {entry.text}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_all(profile: Profile, out_dir: Path) -> list[Path]:
+    """Render + write candidate.yaml, candidate_profile.md, one
+    base_cv_<track>.md per variant key, and — only when non-empty —
+    generation_rules.local.md (the wave-2 optional prompt tail). Always a
+    full overwrite, never a merge. Returns the paths actually written."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    candidate_yaml_path = out_dir / "candidate.yaml"
+    candidate_yaml_path.write_text(render_candidate_yaml(profile), encoding="utf-8")
+    written.append(candidate_yaml_path)
+
+    profile_md_path = out_dir / "candidate_profile.md"
+    profile_md_path.write_text(render_profile_md(profile), encoding="utf-8")
+    written.append(profile_md_path)
+
+    for track in profile.variants:
+        base_cv_path = out_dir / f"base_cv_{track}.md"
+        base_cv_path.write_text(render_base_cv(profile, track), encoding="utf-8")
+        written.append(base_cv_path)
+
+    generation_notes = profile.core.generation_notes.strip()
+    if generation_notes:
+        local_tail_path = out_dir / "generation_rules.local.md"
+        local_tail_path.write_text(generation_notes + "\n", encoding="utf-8")
+        written.append(local_tail_path)
+
+    return written
