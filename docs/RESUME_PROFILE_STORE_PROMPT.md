@@ -72,7 +72,15 @@ history-запись ПЛЮС `description` и `bullets`; рендерер об�
   `period`, опциональные `backend`, `bullets_max`, `legacy_stack_ok`,
   `title_by_track: dict[str, str]` (сверь имена и типы с
   `candidate/candidate.yaml.example` и `hunter/gen_prompt.py` — они уже в
-  проде), плюс `description: str` и `bullets: list[Bullet]`.
+  проде), плюс `subtitle`, `description`, `stack_line`, `bullets: list[Bullet]`
+  (общий нарратив-суперсет для candidate_profile.md) и пер-трековые
+  override-поля НА УРОВНЕ РОЛИ: `bullets_by_track: dict[str, list[str]]`
+  (полная замена списка буллетов для base_cv этого трека — в реальных файлах
+  владельца это ПЕРЕПИСАННЫЕ буллеты с другим фреймингом и другим
+  количеством, не отфильтрованные), `subtitle_by_track`, `stack_line_by_track`.
+  Скилы: `list[SkillCategory]` (`category` + `items: list[str]`) в core, и
+  полный собственный список у каждого варианта (у react-трека свои ярлыки
+  вроде "Angular (background)" — это не переупорядочивание).
 - `Experience`: `years_label: str`, `since_year: int` (wave 2).
 - `Core.generation_notes: str = ""` — необязательный свободный текст
   («story bank», см. `candidate/generation_rules.local.example.md`).
