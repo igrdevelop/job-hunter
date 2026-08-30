@@ -20,6 +20,7 @@ needed for CV generation.
 | `base_cv_fullstack_react_next.md` | Per track | Same, for React + Next.js full-stack roles. |
 | `examples/` | Optional | Few-shot examples: your best cover letters and about-me texts. |
 | `notes/` | Optional | Private interview notes (gitignored, not read by the pipeline). |
+| `profile.example.json` | Tracked template | Neutral example of the structured resume-profile document (see below) — not one of the files you edit by hand today. |
 
 ## How to set up
 
@@ -60,3 +61,16 @@ Only the `.example` / `filters.example.yaml` templates are tracked.
 - **Docker:** `docker-compose.yml` mounts this entire folder read-only into
   the container. Edit the files on the host; the bot picks them up on the
   next run.
+
+## Future: structured profile store
+
+The three-file hand-edit workflow above doesn't scale past one owner running
+their own checkout — [docs/RESUME_PROFILE_STORE_PLAN.md](../docs/RESUME_PROFILE_STORE_PLAN.md)
+designs a structured JSON profile (`hunter/profile_schema.py`) that a resume
+upload can be parsed into (`hunter/profile_parse.py`, `prompts/resume_parse.md`)
+and a site editor can eventually edit, with `hunter/profile_render.py`
+deterministically writing it back out as the same `candidate.yaml` /
+`candidate_profile.md` / `base_cv_<track>.md` files above. `profile.example.json`
+is what that document looks like; nothing in the apply pipeline reads it yet —
+today's three files remain the only thing that matters until a profile is
+actually rendered and swapped in (see the plan's M5).

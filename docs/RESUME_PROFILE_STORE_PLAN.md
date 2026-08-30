@@ -1,6 +1,9 @@
 # RESUME_PROFILE_STORE Plan
 
-**Status:** draft
+**Status:** in progress — M1-M4 shipped in this repo (#238, #239, #240, #241:
+schema, renderer, parser, CLI seam). Remaining: M5 (owner migration, manual on
+the VPS) and the companion api/site work orders (upload endpoint, editor UI,
+revisions) — both explicitly out of this repo's scope, see "Non-goals" below.
 **Date:** 2026-08-29 (revised 2026-08-30 after wave 2, PR #235, merged to master)
 **Motivation:** Owner decision (2026-08-29 discussion): users who upload their original
 resume(s) on the site (https://job-hunter.igrflex.work/) should see everything the

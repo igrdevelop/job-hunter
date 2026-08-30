@@ -212,6 +212,74 @@ hunter/
                             education), filter_config.py/filters.py/apply_shared.py
                             (location + languages), and the pracuj/theprotocol/
                             jobleads sources (listing-URL city slug).
+  profile_schema.py          Structured resume-profile document (docs/
+                            RESUME_PROFILE_STORE_PLAN.md M1): the canonical
+                            store a future site editor will save, which
+                            candidate.yaml/candidate_profile.md/base_cv_*.md
+                            become a deterministic RENDER of (below) — the
+                            apply pipeline itself does not read this yet.
+                            Dataclasses: `Profile.core` (identity/location/
+                            languages/employers/education/experience/roles/
+                            skills/extras) plus per-track `variants` and a
+                            `leftovers` bucket for content a parser couldn't
+                            place. `core.roles` is a superset of a wave-2
+                            `employers.history` entry (company/title/period/
+                            backend/bullets_max/legacy_stack_ok/
+                            title_by_track) plus the narrative
+                            `description`/`bullets` a history entry never
+                            had, and per-role `bullets_by_track`/
+                            `subtitle_by_track`/`stack_line_by_track` full
+                            REWRITE overrides (M0b: the owner's real
+                            per-track bullets differ in wording and count,
+                            not just a filtered subset). `from_dict()` never
+                            raises on malformed input (unknown key -> warn +
+                            drop, wrong shape -> field default) — a resume
+                            upload is untrusted input fed by an LLM parser.
+                            `validate()` is the separate explicit check,
+                            mirroring `candidate.REQUIRED_IDENTITY_FIELDS`.
+  profile_render.py          Deterministic Profile -> candidate.yaml /
+                            candidate_profile.md / base_cv_<track>.md render
+                            (docs/RESUME_PROFILE_STORE_PLAN.md M2) — every
+                            consumer (apply pipeline, filters, gen_prompt.py)
+                            keeps reading the same three files unchanged.
+                            Computes fields the profile deliberately does
+                            NOT store: `employers.real_companies`/
+                            `profile_titles` (derived from
+                            `protected`+`flexible`/role titles) and
+                            `employers.history` (a projection of
+                            `core.roles`, in the exact shape
+                            `gen_prompt.py::render_employment_facts()`
+                            reads) — one place to edit an employer name
+                            instead of three hand-synced copies.
+                            `render_base_cv()` filters bullets/skills by
+                            per-item `tracks` tags, with a role's
+                            `bullets_by_track`/a variant's own `skills`
+                            winning wholesale when present. `render_all()`
+                            is a full overwrite every time, never a merge.
+  profile_parse.py           Resume text extraction + LLM parsing into a
+                            Profile (docs/RESUME_PROFILE_STORE_PLAN.md M3).
+                            `extract_resume_text(path)` reads `.docx`
+                            (python-docx)/`.pdf` (`hunter.pdf_text`, the
+                            same extractor `ats_pdf_roundtrip.py` uses)/
+                            `.txt`/`.md`, raising `ProfileParseError` on
+                            anything unreadable — this layer is allowed to
+                            fail. `parse_resume_text(text, llm=None)` never
+                            hard-fails: with no `llm` (the $0 mode), the
+                            whole text becomes one `leftovers` entry plus a
+                            deterministic phone/email pre-fill via
+                            `hunter.contact_extract` (built for recruiter
+                            contacts in a job posting, but its regexes find
+                            the candidate's own contact line in a resume
+                            header just as well — the candidate's NAME is
+                            never guessed). With an injected `llm` callable
+                            (matching `llm_client.call_llm`'s keyword
+                            signature, resolved via `JUDGE_MODEL`/
+                            `JUDGE_PROVIDER`/`JUDGE_API_KEY` like
+                            `hunter/prescreen.py`), one cheap-model call
+                            (`prompts/resume_parse.md`) attempts a real
+                            parse; any call failure, malformed JSON, or a
+                            response failing `profile_schema.validate()`
+                            degrades to that exact same fallback.
   config.py                 ALL config: env vars, schedule, paths, source toggles.
                             FILTER re-exported from filter_config.py (below) for
                             backward compat — `from hunter.config import FILTER`
@@ -923,6 +991,17 @@ prompts/                        System-level LLM instructions (see prompts/READM
   judge_rules.md                Claim-judge instructions [tracked]. Same pattern: real
                                 employers/years render into the
                                 `<!-- CANDIDATE_GROUND_TRUTH -->` marker
+  resume_parse.md               System prompt for the resume-profile-store parser
+                                (docs/RESUME_PROFILE_STORE_PLAN.md M3,
+                                hunter/profile_parse.py). Candidate-agnostic by
+                                nature — no marker substitution, it parses
+                                whatever resume text is uploaded rather than
+                                generating for one known candidate. Instructs
+                                the model to never invent a fact, file anything
+                                unclear as a leftover, and never add a
+                                proficiency qualifier to a skill (the same
+                                pattern already fixed once in
+                                generation_rules.md)
 
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
@@ -1057,6 +1136,25 @@ tools/reuse_calibrate.py    CV-reuse calibration (measure-first gate for the "re
                             Read-only, zero LLM calls, zero network; shadow subfolders
                             excluded. Decides whether a warm-start/reuse gate is worth
                             building at all — run on the deploy host where the corpus lives
+tools/parse_resume.py       CLI seam for hunter/profile_parse.py (docs/
+                            RESUME_PROFILE_STORE_PLAN.md M4, same pattern as
+                            `python -m hunter.gen_prompt`'s seam for the CLI
+                            apply skill): `python tools/parse_resume.py <file>`
+                            extracts + parses a resume into Profile JSON on
+                            stdout, exit 0 (even a leftovers-only parse —
+                            that distinction is what the site's confirmation
+                            screen is for, not this CLI). `--no-llm` skips
+                            the model call ($0 dry run); `--upload-id` stamps
+                            every leftover produced. Exit 1 + stderr only
+                            when the file itself can't be read
+tools/render_profile.py     CLI seam for hunter/profile_render.py (docs/
+                            RESUME_PROFILE_STORE_PLAN.md M4): `python
+                            tools/render_profile.py <profile.json> <out_dir>`
+                            writes candidate.yaml/candidate_profile.md/
+                            base_cv_<track>.md (+ generation_rules.local.md
+                            when non-empty) and prints `{"written": [...]}`.
+                            Exit 1 + stderr when the input file is missing or
+                            not valid JSON
 
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
@@ -1186,6 +1284,11 @@ candidate/                  All candidate-personal files (see candidate/README.m
                             *.example.md / *.example (placeholder templates, tracked),
                             examples/ (few-shot cover letters / about-me),
                             notes/ (private interview notes, gitignored)
+                            profile.example.json (tracked — neutral example of the
+                            structured resume-profile document, docs/
+                            RESUME_PROFILE_STORE_PLAN.md; hunter/profile_schema.py
+                            is the schema, hunter/profile_render.py renders it into
+                            the four files above)
 tracker.xlsx                Main data store (never commit)
 gsheets_state.json          Active spreadsheet ID (auto-generated; mount in Docker)
 gsheets_credentials.json    OAuth2 client secrets (never commit)
@@ -2242,8 +2345,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-08-30 | sonnet | **M1-M4 of docs/RESUME_PROFILE_STORE_PLAN.md: schema, renderer, parser and CLI seam for a structured resume-profile store (#238, #239, #240, #241).** Today a candidate's identity/career data lives in three hand-maintained files (`candidate.yaml`/`candidate_profile.md`/`base_cv_<track>.md`) that a new user cannot realistically write by hand — the concrete design for Stage 4 of the SAAS pivot plan ("upload -> parse -> our standard structure, with a confirmation screen"). **M1 (#238):** `hunter/profile_schema.py` — dataclasses for the canonical JSON document (`Profile.core` identity/location/languages/employers/education/experience/roles/skills/extras, plus per-track `variants` and a `leftovers` bucket), a tolerant `from_dict()` (unknown key -> warn+drop, wrong shape -> field default, never raises — a resume upload is untrusted, LLM-fed input) and an explicit `validate()` mirroring `candidate.REQUIRED_IDENTITY_FIELDS`; `candidate/profile.example.json` (neutral, fully populated). **M2 (#239):** `hunter/profile_render.py` — deterministic Profile -> `candidate.yaml`/`candidate_profile.md`/`base_cv_<track>.md` render; the apply pipeline is untouched, it keeps reading the same three files. Computes `employers.real_companies`/`profile_titles`/`history` (a projection of `core.roles` in the exact shape `hunter/gen_prompt.py`'s wave-2 employment-facts renderer reads) rather than storing them — one place to edit an employer instead of three hand-synced copies. Role-level `bullets_by_track`/`subtitle_by_track`/`stack_line_by_track` win wholesale over per-item `tracks` tag filtering (M0b finding: the owner's real per-track bullets are REWRITES — different wording, different count — not a filtered subset). **M3 (#240):** `hunter/profile_parse.py` — `extract_resume_text(path)` (.docx via python-docx, .pdf via the same `hunter.pdf_text` extractor `ats_pdf_roundtrip.py` uses, .txt/.md as-is; raises `ProfileParseError` on anything unreadable) and `parse_resume_text(text, llm=None)`, which never hard-fails: with no `llm` the whole text becomes one `leftovers` entry plus a deterministic phone/email pre-fill via `hunter.contact_extract` (built for recruiter contacts in a job posting, but its regexes find the candidate's own contact line in a resume header just as well — the candidate's NAME is never guessed); with an injected `llm` callable (`JUDGE_MODEL`/`JUDGE_PROVIDER`/`JUDGE_API_KEY`, same DI shape `hunter/prescreen.py` uses) one cheap call against the new `prompts/resume_parse.md` attempts a real parse, and any call failure/malformed JSON/failed `validate()` degrades to that identical fallback — never half-structured data silently passed off as confirmed. **M4 (#241, this entry):** `tools/parse_resume.py`/`tools/render_profile.py`, thin argparse wrappers with no logic of their own (same pattern as `python -m hunter.gen_prompt`'s CLI seam), tested via real subprocess runs (`tests/test_tools_profile_cli.py`) since no prior tools/ script had one — includes the exact parse(--no-llm) -> render -> `candidate.get()` chain from the milestone's definition of done. Companion API/site work (upload endpoint, editor UI, revisions) is explicitly out of scope for this repo per the plan. Full suite 2975 green (was 2956 before M1), ruff clean, mypy baseline confirmed unchanged at 217 (isolated `origin/master` worktree comparison after each milestone). |
 | 2026-08-29 | sonnet | **Wave 2 of docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6: removed the project owner's personal data from the tracked prompt files (#235).** `prompts/generation_rules.md` and `prompts/judge_rules.md` used to hardcode the owner's real 7-employer table, per-role backend, years-of-experience and a "story bank" of real project narrative directly in git — the single biggest blocker to publishing the repo, and something a second user (or the owner himself) couldn't change without editing shared code. New module `hunter/gen_prompt.py` renders the personal facts from `candidate.yaml` (`employers.history`, `experience.years_label`/`since_year`, prepared in a prior commit) into `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` / `<!-- CANDIDATE_GROUND_TRUTH -->` markers at call time — same pattern `hunter/verdict_refine.py:60-71` already used for its own smaller fragments; both degrade to a generic paragraph (never raise) when `candidate.yaml` has no history. `apply_api.py`/`dual_apply.py`/`verdict_refine.py`/`claim_judge.py` call the renderer in-process; the CLI skill (`.claude/commands/apply.md`) can't import Python, so its Step 1 shells out to `python -m hunter.gen_prompt` — both branches now see byte-identical prompt text for the same candidate, closing the class of drift that broke the CLI's Polish-CV instruction for months. Also unified the base-CV stack map (`gen_prompt.base_cv_files()`, read by the CLI skill via a new `base-cv-map` subcommand instead of a hardcoded 5-file list) and closed two more §3 discrepancies: `apply_cli.py` now computes `build_ats_keyword_checklist()`/`build_pl_skip_instruction()` itself (same functions `apply_api.py` calls) and appends them to what the skill receives, instead of the skill running its own hand-copied PL-skip logic (the one that sent 15 English CVs to Polish employers). The real "story bank" narrative moved to a new gitignored `candidate/generation_rules.local.md` (optional per-user tail, template at `candidate/generation_rules.local.example.md`). `tests/test_handoff_readiness.py`'s `LEGACY_PERSONAL_DATA_ALLOWLIST` removed — the personal-data check now runs with an empty exclusion set. New golden test `tests/test_gen_prompt.py` (11 tests) proves the renderer against a fictional-candidate fixture and that no owner data leaks into a second user's prompt. One real behavior change flagged for owner review: the title-variation RED LINE now also allows a `title_by_track` override (needed because `candidate.yaml` already has one on role 1 for the `ai` track), not just the Angular/React framework swap. Full suite 2892 green, both golden E2E pass, ruff clean, mypy baseline unchanged at 217 (isolated via a temp `origin/master` worktree), project-invariants-review 0 violations. Found but not fixed (out of scope, flagged as a follow-up): `tools/regen_covers_v2_last3.py` and `tools/generate_sample_classic_cover.py` still read `prompts/generation_rules.md` raw and will now embed the unresolved marker instead of the real employer table. |
 | 2026-08-29 | opus | **Deploy had been silently failing for two days: the VPS disk was full and the workflow reported success anyway.** Found while checking whether the merged waves were actually live — they were not. The container had been up 27h on `b3710fd` while master was at `7d08677`, so #231 (proficiency-qualifier fix) and #232 (verdict history) were merged but not running. **Two defects in `.github/workflows/deploy.yml`.** (1) No `set -e`, so the step's exit code came from the last command — `docker image prune -f`, which always succeeds — and a `docker compose pull` dying with `no space left on device` produced a GREEN job with the "Notify on failure" Telegram step never firing. (2) The disk filled *because of* that same prune: it reclaims only DANGLING images, while every deploy tags its image by commit SHA, so no deploy image was ever removed — 17 images / 72.65 GB / **63.92 GB reclaimable (87%)** on a 75 GB volume at 100%. Fixes: `set -eo pipefail`; prune widened to `-a -f --filter "until=168h"` and moved BEFORE the pull; explicit pre-pull free-space gate (<5000 MB fails the job with `df -h` + `docker system df`). The gate's `df -Pm` parsing was verified against the real host, not assumed. `docs/DEPLOY.md` updated (its copy of the script had drifted independently), and the obsolete `version: "3.9"` key dropped from `docker-compose.yml` — Compose v2 warns on every command, burying real output mid-incident. Sibling projects share this host's Docker daemon, so the widened prune now reclaims their week-old unused images too (intended; all re-pullable). Full writeup in docs/AGENT_LOG.md. Follow-up in the same PR: the workflow-level prune only fires WHEN THIS REPO DEPLOYS, and this host's Docker daemon is shared with job-hunter-api / arifma / psybook, whose deploys leave images here and never prune — so a quiet job-hunter plus active siblings refills the disk with nobody at fault. docs/DEPLOY.md gains a one-time host-level daily cron (`docker image prune -a -f --filter "until=168h"`, output truncated to the last run) that is independent of any repo's deploy cadence. Measured first rather than assumed: images were 99.7% of the problem — `users/` is 127 MB for 100 application folders over 3.5 months (~36 MB/month, irrelevant on 75 GB), `logs/` 52 MB and already capped by rotation, `backups/`+`db/` 14 MB, and `deploy` had no crontab at all. |
 | 2026-08-29 | sonnet | **Verdict-refine loop now keeps its own history** (owner ask 2026-08-28, alongside the same measurement pass that drove the generation/judge prompt fix: `hunter/verdict_refine.py::refine_loop` already printed round-by-round progress, but only to stdout, which lands in `logs/apply_stdout/` with a 7-day retention and no structure — no way to answer "do refine rounds pay off" after the fact). `refine_loop` now builds a `history: list[dict]` of every ATTEMPTED round (`round`, `kind`, `score_before`, `score_after`, `outcome`, `reason`) via a new `_round_entry` helper, and stamps it onto the returned content as `content["verdict_history"]` (present only when at least one round was attempted — a no-op run at/above target adds nothing). `outcome` is one of `accepted` (kept), `rejected` (a new score WAS computed but the keep-best guard rolled it back — deliberately included per the owner's ask, since these are exactly the rounds that show where the loop hits its ceiling), or `discarded` (never produced a comparable score — bad rewrite, dropped roles, blocked safety stage, broken validation, or an unexpected exception). A `wrote_to_disk` flag gates the final on-disk rewrite of `content.json` so a round discarded before ever reaching the write point still leaves no file behind (several existing tests pin that exact behavior). New `hunter.ats_pdf_roundtrip.format_verdict_history(content)` renders the compact Telegram line `ATS: 80 → 90 → 95 (3 rounds)` — the chain shows only the accepted-round score progression (a rejected/discarded round is invisible in the chain but still counted in the round total, which is the point: it shows what a jump actually cost). Wired into both `apply_api.py` (next to the existing `ats_line`) and `apply_cli.py` (appended to `pdf_summary`, read back from the same content.json the refine loop already persisted) — and, since `dual_apply.py`'s shadow run calls the same `refine_loop` and re-serializes `content` whole, the shadow's own content.json picks up `verdict_history` for free with no code change there. No new LLM calls; round count/thresholds unchanged (still YAML-configurable via `generation.yaml`, wave 3). 9 new tests (`test_ats_pdf_roundtrip.py` formatting incl. empty/no-accepted-round cases, `test_verdict_refine.py` incl. a rolled-back round landing in history and a full 4-round accepted journey matching the owner's example format byte-for-byte). Full suite 2881 green, both golden E2E pass, ruff clean, mypy baseline confirmed unchanged at 217 (via `git stash` isolation — caught and fixed one real new error along the way: a `float()` call on an `object`-typed parameter in the new `_fmt_score` helper, narrowed to `float \| int \| str \| None`). |
 | 2026-08-29 | sonnet | **Removed the generation/judge contradiction on proficiency-level skill qualifiers** (owner decision 2026-08-28, based on live measurement: 361 `judge_report.json` files, 2564 findings). `prompts/generation_rules.md` Step 2 told the generator to mirror an ATS keyword WITH a proficiency qualifier ("React" → add "React (familiar)", "Docker" → add "Docker (basic)"), while `prompts/judge_rules.md` explicitly allows only a BARE skill-list mirror ("Do NOT flag a bare skill-list entry (no years claimed, no specific project...)") — the qualifier is exactly what made the judge (running at `JUDGE_MODE=warn` in prod, which REPAIRS/removes fabrication findings before render) treat its own mirrored keyword as an unsupported claim. Fixed by removing the qualifier from those two examples (mirror bare, matching what the judge already allows — a stronger claim, not weaker, per the owner's explicit call) and deleting the `"GraphQL" → add "GraphQL"` example entirely (owner confirmed 2026-08-28 the candidate has no GraphQL background; it was the second most frequent judge flag at 40 mentions and the prompt itself was generating the finding). Left untouched on purpose: the jQuery `"(familiar)"` rule (employer-specific bindings — Fairmarkit/Venture Labs/SII/Alten Poland — scheduled to move out as personal data in the candidate.yaml wave 2, not a proficiency-qualifier issue) and `judge_rules.md` itself (owner explicitly did not want the judge narrowed). Both golden E2E green with zero fixture changes needed, confirming the edit didn't reach further than the two lines it targeted. Full suite 2872 green, ruff clean. |
-| 2026-08-27 | sonnet | **Wave 3 PR 2 of docs/GENERATION_ARCHITECTURE_ANALYSIS.md §6: extended `hunter/gen_profile.py` with a `document` section and wired `generate_docs.py`'s hardcoded font/sizes/margins/section labels/skill categories to it.** Stacks on PR 1 (#229). New builtin-defaults keys: `font`, `sizes` (name/headline/body/small — the GDPR clause's own 7.5pt deliberately excluded), `margins_cm`, `sections` (5-element list of heading LABELS at FIXED structural positions — only the text is configurable, never which content renders where; position 2 stays "EXPERIENCE" on purpose, Taleo classifies "WORK EXPERIENCE" as "Other" and drops the whole parsed array), `skill_categories` (list of `{key, label}` — unlike `sections`, safely reorderable since each entry is keyed by name against `resume_en.skills[key]`), `gdpr_clause` (replaces `config.py`'s old direct `os.getenv("CV_GDPR_CLAUSE", ...)`, same env-still-wins wiring). `generate_docs.py`'s `set_font`/`set_margins` use a `None`-sentinel default resolved from `gen_profile.get()` INSIDE the function body — every existing call site already omits those args, so ~18 call sites became profile-driven with zero per-call-site changes. New `hunter.gen_profile._merge_document_section` validates per-FIELD, not the whole section at once. Golden-snapshot test (`tests/test_generate_docs_document_profile.py` + fixture captured from the pre-PR2 code via `git show HEAD:`) proves byte-for-byte paragraph/run parity with no `generation.yaml` present, plus 7 tests proving each knob actually changes rendered output. mypy baseline confirmed unchanged at 217 (via `git stash` isolation). Full suite 2871 green, both golden E2E pass, ruff clean. Full writeup in docs/AGENT_LOG.md. |
