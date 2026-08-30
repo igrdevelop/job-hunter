@@ -109,6 +109,7 @@
           }
         ],
         "bullets_by_track": {},
+        "tracks": ["angular"],
         "origin": "parsed"
       }
     ],
@@ -142,6 +143,7 @@
     "angular": {
       "headline": "Senior Frontend Developer (Angular)",
       "summary": "Senior Angular engineer with 6+ years shipping payments and e-commerce products, focused on state management and performance.",
+      "notes": "Lead every bullet with the Angular framework name; do not soften it to a generic \"frontend framework\" phrasing.",
       "skills": [
         {
           "category": "Core Stack",

@@ -140,6 +140,43 @@ class TestTolerance:
         assert profile.uploads == []
 
 
+class TestRoleTracksAndVariantNotes:
+    """docs/RESUME_PROFILE_STORE_PLAN.md M2, step 2d."""
+
+    def test_role_tracks_and_variant_notes_round_trip(self):
+        data = {
+            "core": {
+                "identity": {"full_name": "Jane"},
+                "roles": [{"company": "Acme", "tracks": ["angular"]}],
+            },
+            "variants": {"angular": {"notes": "Lead with Angular achievements."}},
+        }
+        profile = from_dict(data)
+        assert profile.core.roles[0].tracks == ["angular"]
+        assert profile.variants["angular"].notes == "Lead with Angular achievements."
+        assert from_dict(to_dict(profile)) == profile
+
+    def test_role_tracks_defaults_to_empty_list(self):
+        profile = from_dict({"core": {"roles": [{"company": "Acme"}]}})
+        assert profile.core.roles[0].tracks == []
+
+    def test_variant_notes_defaults_to_empty_string(self):
+        profile = from_dict({"variants": {"angular": {}}})
+        assert profile.variants["angular"].notes == ""
+
+    def test_role_tracks_wrong_shape_falls_back_to_empty_list(self):
+        data = {"core": {"roles": [{"company": "Acme", "tracks": "not-a-list"}]}}
+        profile = from_dict(data)
+        assert profile.core.roles[0].tracks == []
+
+    def test_variant_notes_non_string_value_does_not_raise(self):
+        """Matches _coerce_field's existing str-field contract (str(raw)) —
+        garbage input is stringified, never raised on."""
+        data = {"variants": {"angular": {"notes": {"not": "a-string"}}}}
+        profile = from_dict(data)
+        assert isinstance(profile.variants["angular"].notes, str)
+
+
 class TestValidate:
     def test_empty_profile_reports_missing_identity(self):
         problems = validate(Profile())
