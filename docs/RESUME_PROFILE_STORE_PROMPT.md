@@ -175,6 +175,32 @@ history-запись ПЛЮС `description` и `bullets`; рендерер об�
 После этого шага прогони skill `mutation-verify` на логике производных полей
 (сломай lowercase в `real_companies` → тест должен упасть осмысленно).
 
+## Шаг 2d — видимость роли по трекам + преамбула варианта (owner ask 2026-08-30)
+
+Два маленьких расширения схемы+рендерера, найденные на ревью #239. Один коммит.
+
+- **`Role.tracks: list[str]`** (пустой = роль видна во всех треках — тот же
+  контракт, что у `Bullet.tracks`): `render_base_cv` ПРОПУСКАЕТ роль целиком,
+  когда у неё непустой `tracks` без текущего трека. Это «скрыть роль в одной
+  из личностей» (например, ai-трек не показывает самую старую роль).
+  ВАЖНО, две несимметрии: (a) `render_profile_md` — суперсет-нарратив и
+  role.tracks ИГНОРИРУЕТ (все роли всегда); (b) `employers.history` в
+  candidate.yaml тоже включает ВСЕ роли — это факты биографии для RED LINES
+  судьи/генерации, а не презентация; скрытая в base_cv роль остаётся фактом.
+- **`Variant.notes: str`** (пустая по умолчанию): свободный текст-инструкция
+  трека, рендерится ПЕРВЫМ блоком `base_cv_<track>.md` (до headline) как есть.
+  Зачем: у владельца react-трек несёт преамбулу «Do NOT write 'Angular' in
+  any role title… positions as a JavaScript/React developer» — поведенческая
+  инструкция генерации, у которой до сих пор не было места в схеме и которая
+  терялась при рендере (см. ревью-коммент в #239).
+- `candidate/profile.example.json`: добавь в пример `notes` у одного варианта
+  и `tracks` у одной роли (нейтральный текст).
+
+**Тесты**: роль с `tracks: ["angular"]` есть в angular-рендере, отсутствует в
+react-рендере, НО присутствует и в `render_profile_md`, и в
+`employers.history` рендеренного yaml; `variant.notes` попадает в начало
+base_cv и только этого трека; голден-снапшоты обнови осознанно.
+
 ## Шаг 3a — извлечение текста из docx/pdf
 
 `hunter/profile_parse.py`, функция `extract_resume_text(path: Path) -> str`.
@@ -235,10 +261,44 @@ contact; результат проходит `from_dict(to_dict(...))`.
 **Тесты**: subprocess-прогон обоих CLI на фикстурах (см. как гоняются другие
 tools-скрипты в tests/, если прецедента нет — `subprocess.run([sys.executable, ...])`).
 
-## Шаг 4b — документация
+## Шаг 4b — очередь profile_jobs (шов с job-hunter-api)
+
+Контракт-источник: `job-hunter-api/docs/RESUME_PROFILE_STORE.md` («Shared
+contract» → `profile_jobs` DDL) — прочитай его ПЕРВЫМ, DDL не менять
+односторонне. Суть: API кладёт джобы в общий tracker.db (паттерн
+`telegram_link_codes` — API пишет, бот потребляет), бот их разгребает.
+
+- `hunter/db.py`: идемпотентное зеркало DDL таблицы `profile_jobs` (стиль —
+  как зеркала MULTI_USER-таблиц; API мог применить схему первым).
+- `hunter/tracker.py` (или новый маленький `hunter/profile_jobs.py`):
+  `claim_next_profile_job()` (атомарный `UPDATE … RETURNING`, как
+  `claim_pending`), `finish_profile_job(id, result)` /
+  `fail_profile_job(id, error)`, `reset_stale_profile_jobs(10)` (running
+  старше 10 мин → pending; упавший процесс не хоронит джобу).
+- `hunter/schedules/profile_jobs.py`: `scheduled_profile_jobs_drain` каждые
+  ~20 сек (паттерн `scheduled_reset_stale_claims`; зарегистрируй в
+  `schedules/__init__.py::register`). Один тик = разгрести все pending:
+  - `kind='render'`: payload = полный profile JSON → `from_dict` →
+    `profile_render.render_all(profile, users/{user_id}/candidate/)` — И
+    ДОПОЛНИТЕЛЬНО записать сам `profile.json` рядом с рендерами (это задел
+    Wave 2 «прямое чтение структуры»; путь юзера — через
+    `hunter.users.user_paths`). `result` = JSON-список записанных путей.
+  - `kind='parse'`: payload = путь файла ОТНОСИТЕЛЬНО `users/{user_id}/`
+    (валидируй, что он не выходит из каталога юзера!) →
+    `profile_parse.extract_resume_text` + `parse_resume_text` (LLM-режим,
+    фолбэк из 3b сам сработает) → `result` = JSON профиля-черновика.
+  - Любая ошибка → `fail_profile_job` со строкой ошибки; джоба терминальна,
+    ретрай — это новый PUT/аплоад со стороны API. Обёртка
+    `best_effort("profile.jobs")` вокруг тика — деградация должна алертить.
+- Тесты: tmp tracker.db — claim/finish/fail/reset_stale; render-джоба пишет
+  файлы + profile.json; parse-джоба с фейковым LLM кладёт черновик в result;
+  путь с `..` в payload — отказ, файлы не тронуты.
+
+## Шаг 4c — документация (последний)
 
 - CLAUDE.md: строки в Repository Layout про `hunter/profile_schema.py`,
   `hunter/profile_render.py`, `hunter/profile_parse.py`,
+  `hunter/schedules/profile_jobs.py` (+ его claim/finish-функции),
   `tools/parse_resume.py`, `tools/render_profile.py`,
   `candidate/profile.example.json`, `prompts/resume_parse.md`; запись в Agent
   Work Log.
