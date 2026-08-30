@@ -1,10 +1,14 @@
 # RESUME_PROFILE_STORE Plan
 
 **Status:** in progress — M1-M4 shipped in this repo (#238, #239, #240, #241:
-schema, renderer, parser, CLI seam). Remaining: M5 (owner migration, manual on
-the VPS) and the companion api/site work orders (upload endpoint, editor UI,
-revisions) — both explicitly out of this repo's scope, see "Non-goals" below.
-**Date:** 2026-08-29 (revised 2026-08-30 after wave 2, PR #235, merged to master)
+schema, renderer, parser, CLI seam), plus the two work-order steps added after
+M4 landed: step 2d (role.tracks visibility + variant.notes preamble) and step
+4b (the `profile_jobs` queue drain — the runtime half of M4's service seam).
+Remaining: M5 (owner migration, manual on the VPS) and the companion api/site
+work orders (upload endpoint, editor UI, revisions) — both explicitly out of
+this repo's scope, see "Non-goals" below.
+**Date:** 2026-08-29 (revised 2026-08-30 after wave 2, PR #235, merged to master;
+steps 2d/4b landed 2026-08-31)
 **Motivation:** Owner decision (2026-08-29 discussion): users who upload their original
 resume(s) on the site (https://job-hunter.igrflex.work/) should see everything the
 parser extracted as editable fields — and be able to ADD skills, roles, and anything

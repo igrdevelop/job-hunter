@@ -121,6 +121,34 @@ def test_init_db_creates_multi_user_tables(db_path: Path) -> None:
     assert "telegram_link_codes" in tables
 
 
+def test_init_db_creates_profile_jobs_table(db_path: Path) -> None:
+    """docs/RESUME_PROFILE_STORE_PLAN.md step 4b — mirrors
+    job-hunter-api/docs/RESUME_PROFILE_STORE.md's DDL exactly; the API writes
+    rows here, hunter/profile_jobs.py is the sole consumer."""
+    with get_db(db_path) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "profile_jobs" in tables
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(profile_jobs)")}
+        assert cols == {
+            "id",
+            "user_id",
+            "kind",
+            "payload",
+            "status",
+            "result",
+            "error",
+            "created_at",
+            "updated_at",
+        }
+        indexes = {
+            r[1]
+            for r in conn.execute(
+                "SELECT * FROM sqlite_master WHERE type='index' AND tbl_name='profile_jobs'"
+            )
+        }
+    assert "idx_profile_jobs_status" in indexes
+
+
 # ── get_db context manager ───────────────────────────────────────────────────
 
 
