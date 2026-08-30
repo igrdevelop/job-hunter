@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hunter import contact_extract, profile_schema
+
 _TEXT_EXTENSIONS = {".txt", ".md"}
 
 
@@ -75,3 +77,55 @@ def extract_resume_text(path: Path) -> str:
     if not text.strip():
         raise ProfileParseError(f"No extractable text in {path.name}")
     return text
+
+
+# ── Text -> Profile ─────────────────────────────────────────────────────────
+
+
+def _contact_line(text: str) -> str:
+    """Best-effort "phone | email" line, deterministic, $0.
+
+    `contact_extract.extract_contacts` was built for finding a RECRUITER's
+    contact inside a job posting, but its email/phone regexes are generic —
+    over a resume's own header (no "recruiter"/"kontakt" label to match) it
+    still finds the candidate's own email and, if present, attaches the
+    first phone number to it. Good enough for a pre-fill the user reviews
+    on the confirmation screen; the candidate's own name is deliberately
+    NOT guessed from this (see parse_resume_text's docstring)."""
+    contacts = contact_extract.extract_contacts(text)
+    if not contacts:
+        return ""
+    parts = [p for p in (contacts[0].phone, contacts[0].email) if p]
+    return " | ".join(parts)
+
+
+def parse_resume_text(
+    text: str,
+    llm: object | None = None,
+    *,
+    source_upload_id: str = "",
+) -> profile_schema.Profile:
+    """Turn resume text into a structured Profile.
+
+    Never hard-fails: any LLM call this eventually makes (a later step) is
+    wrapped so a failure degrades to the same fallback used here — the whole
+    input text as one leftover, plus a deterministic email/phone pre-fill.
+    The candidate's own NAME is never guessed from free text; it is either
+    supplied by an LLM parse the user confirms, or left for the user to type.
+    """
+    text = (text or "").strip()
+    return _fallback_profile(text, source_upload_id=source_upload_id)
+
+
+def _fallback_profile(text: str, *, source_upload_id: str = "") -> profile_schema.Profile:
+    """The parse-never-fails branch: no structure extracted, just a contact
+    pre-fill and the raw text preserved as a single leftover for the user to
+    reassign by hand."""
+    profile = profile_schema.Profile()
+    if not text:
+        return profile
+    contact = _contact_line(text)
+    if contact:
+        profile.core.identity.contact = contact
+    profile.leftovers = [profile_schema.Leftover(text=text, source_upload_id=source_upload_id)]
+    return profile
