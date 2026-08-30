@@ -1,5 +1,5 @@
-"""hunter/profile_parse.py — resume text extraction into a structured Profile
-(hunter/profile_schema.py).
+"""hunter/profile_parse.py — resume text extraction + LLM parsing into a
+structured Profile (hunter/profile_schema.py).
 
 docs/RESUME_PROFILE_STORE_PLAN.md M3. Two layers:
 
@@ -7,19 +7,40 @@ docs/RESUME_PROFILE_STORE_PLAN.md M3. Two layers:
      .pdf / .txt / .md file. This step CAN fail (a corrupt file, an unknown
      extension) and raises `ProfileParseError` when it does — there is no
      text to hand the rest of the pipeline.
-  2. `parse_resume_text(text, llm=...)` (added in a later step) — turn that
-     text into a Profile. That step must NEVER hard-fail: a resume upload is
-     an onboarding event, and a parse failure there must degrade to "put it
-     all in leftovers", not break the flow.
+  2. `parse_resume_text(text, llm=...)` — turn that text into a Profile.
+     This step must NEVER hard-fail: a resume upload is an onboarding
+     event, and a bad LLM call/response/validation result degrades to the
+     same fallback `parse_resume_text(text)` produces with no `llm` at all
+     (the whole text as one leftover) rather than raising or losing data.
+
+The `llm` parameter is a plain injected callable matching
+`llm_client.call_llm`'s keyword signature (system_prompt, user_message,
+provider, model, api_key, ...) -> dict — the same dependency-injection shape
+`hunter/prescreen.py` uses internally, except here the caller supplies it
+(so `tools/parse_resume.py --no-llm` can simply pass `llm=None` for a $0
+run, and tests can inject a stub without touching a real model).
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 from pathlib import Path
+from typing import Any, Callable
 
 from hunter import contact_extract, profile_schema
+from hunter.config import JUDGE_API_KEY, JUDGE_MODEL, JUDGE_PROVIDER
+from hunter.pipeline.folders import PROMPTS_DIR
+
+logger = logging.getLogger(__name__)
 
 _TEXT_EXTENSIONS = {".txt", ".md"}
+
+LLMCallable = Callable[..., dict]
+
+_PROMPT_PATH = PROMPTS_DIR / "resume_parse.md"
+_MAX_INPUT_CHARS = 20000
 
 
 class ProfileParseError(RuntimeError):
@@ -101,19 +122,27 @@ def _contact_line(text: str) -> str:
 
 def parse_resume_text(
     text: str,
-    llm: object | None = None,
+    llm: LLMCallable | None = None,
     *,
     source_upload_id: str = "",
 ) -> profile_schema.Profile:
     """Turn resume text into a structured Profile.
 
-    Never hard-fails: any LLM call this eventually makes (a later step) is
-    wrapped so a failure degrades to the same fallback used here — the whole
-    input text as one leftover, plus a deterministic email/phone pre-fill.
-    The candidate's own NAME is never guessed from free text; it is either
-    supplied by an LLM parse the user confirms, or left for the user to type.
+    With `llm=None`, no model call is made at all: the whole text lands in
+    leftovers plus a deterministic email/phone pre-fill (this is the `$0
+    --no-llm` mode). With an `llm` callable, one cheap model call attempts a
+    real parse; any call failure, malformed response, or failed
+    `profile_schema.validate()` degrades to that exact same fallback — the
+    parse never hard-fails and never returns half a document silently
+    passed off as fully structured. The candidate's own NAME is never
+    guessed by the fallback path; only a validated LLM response may set it,
+    and the user still confirms it on the editor's confirmation screen.
     """
     text = (text or "").strip()
+    if llm is not None and text:
+        parsed = _try_llm_parse(text, llm, source_upload_id=source_upload_id)
+        if parsed is not None:
+            return parsed
     return _fallback_profile(text, source_upload_id=source_upload_id)
 
 
@@ -128,4 +157,108 @@ def _fallback_profile(text: str, *, source_upload_id: str = "") -> profile_schem
     if contact:
         profile.core.identity.contact = contact
     profile.leftovers = [profile_schema.Leftover(text=text, source_upload_id=source_upload_id)]
+    return profile
+
+
+# ── LLM-assisted parse ───────────────────────────────────────────────────────
+
+
+def _system_prompt() -> str:
+    return _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _user_message(text: str) -> str:
+    return "--- RESUME TEXT ---\n" + text[:_MAX_INPUT_CHARS]
+
+
+def _normalize_leftovers(raw: Any) -> list[dict]:
+    """Accept either the documented `[{"text": "..."}]` shape or a plain
+    `["...", "..."]` list of strings — models drift toward the simpler shape
+    despite the prompt, and a leftover is exactly the kind of content we
+    must not silently drop for being shaped slightly wrong."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if isinstance(item, str):
+            if item.strip():
+                out.append({"text": item})
+        elif isinstance(item, dict) and str(item.get("text", "")).strip():
+            out.append(item)
+    return out
+
+
+def _profile_dict_from_llm_response(raw: Any) -> dict | None:
+    """Tolerant reshape of the model's raw JSON into the
+    `{"schema_version", "core", "leftovers"}` document `profile_schema.from_dict`
+    expects. Returns None for anything that isn't at least a dict with a
+    `core` object — that's the minimum a caller can trust."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(raw, dict):
+        return None
+    core = raw.get("core")
+    if not isinstance(core, dict):
+        return None
+    return {
+        "schema_version": profile_schema.SCHEMA_VERSION,
+        "core": core,
+        "leftovers": _normalize_leftovers(raw.get("leftovers")),
+    }
+
+
+def _ensure_cv_filename_prefix(profile: profile_schema.Profile) -> None:
+    """Derive a filename-safe slug from the extracted name when the model
+    didn't set one — this is a rendering detail, not a fact about the
+    candidate, so deriving it deterministically isn't "guessing a fact"."""
+    identity = profile.core.identity
+    if identity.cv_filename_prefix.strip() or not identity.full_name.strip():
+        return
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", identity.full_name.strip()).strip("_")
+    if slug:
+        identity.cv_filename_prefix = f"{slug}_CV"
+
+
+def _try_llm_parse(
+    text: str, llm: LLMCallable, *, source_upload_id: str
+) -> profile_schema.Profile | None:
+    """One cheap-model parse attempt. Returns None — never raises — on any
+    call failure, malformed response, or failed identity validation, so the
+    caller can fall back to the deterministic leftovers-only branch."""
+    try:
+        raw = llm(
+            system_prompt=_system_prompt(),
+            user_message=_user_message(text),
+            provider=JUDGE_PROVIDER,
+            model=JUDGE_MODEL,
+            api_key=JUDGE_API_KEY,
+            max_tokens=4096,
+        )
+    except Exception as e:  # noqa: BLE001 — logged here, caller falls back
+        logger.warning("profile_parse: LLM call failed, falling back to leftovers: %s", e)
+        return None
+
+    doc = _profile_dict_from_llm_response(raw)
+    if doc is None:
+        logger.warning("profile_parse: LLM response malformed, falling back to leftovers")
+        return None
+
+    profile = profile_schema.from_dict(doc)
+    for leftover in profile.leftovers:
+        if not leftover.source_upload_id:
+            leftover.source_upload_id = source_upload_id
+
+    _ensure_cv_filename_prefix(profile)
+    if not profile.core.identity.contact.strip():
+        contact = _contact_line(text)
+        if contact:
+            profile.core.identity.contact = contact
+
+    problems = profile_schema.validate(profile)
+    if problems:
+        logger.warning("profile_parse: LLM response failed validation: %s", problems)
+        return None
     return profile
