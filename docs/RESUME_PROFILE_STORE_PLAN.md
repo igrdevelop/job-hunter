@@ -143,12 +143,17 @@ per stack). Evidence that this cannot onboard anyone but the owner:
                    "stack_line", "stack_line_by_track": { },
                    "bullets": [ { "text", "origin": "parsed|edited" } ],   // core narrative, superset
                    "bullets_by_track": { "react": ["polished bullet", "..."] },
+                   "tracks": [],   // 2d: non-empty = base CVs of these tracks only;
+                                   // profile_md + employers.history ALWAYS include the role
                    "origin": "parsed|edited" } ],
       "skills": [ { "category", "items": ["Angular (2-22)", "..."], "origin" } ],
       "extras":  [ { "kind": "certification|link|award|other", "text", "origin" } ],
       "generation_notes": "free text, optional — the story-bank prompt tail"
     },
     "variants": { "angular": { "headline", "summary",
+                               "notes": "free-text track instruction, rendered as the
+                                         base_cv preamble (2d — e.g. the react track's
+                                         'never write Angular in a role title')",
                                "skills": [ { "category", "items": [] } ] } },
     "leftovers": [ { "text", "source_upload_id" } ],
     "uploads":   [ { "id", "filename", "sha256", "parsed_at" } ]
@@ -272,9 +277,11 @@ cost was $0.
 ## M1..Mn — Milestones (this repo; one commit each)
 
 > Executor breakdown: `docs/RESUME_PROFILE_STORE_PROMPT.md` splits these
-> milestones into 9 one-commit steps sized for a Sonnet-tier agent, with per-step
+> milestones into 12 one-commit steps sized for a Sonnet-tier agent, with per-step
 > file lists, tests and guardrails. That file is the work order; this one is the
-> argument.
+> argument. (Grew from 9: step 2d — per-track role visibility + variant preamble,
+> owner ask + #239 review finding, 2026-08-30 — and step 4b — the `profile_jobs`
+> queue drain whose contract lives in `job-hunter-api/docs/RESUME_PROFILE_STORE.md`.)
 
 **M1 — Schema module.** `hunter/profile_schema.py`: dataclass/pydantic models +
 JSON-Schema export, `schema_version: 1`, validation helpers, and
@@ -308,7 +315,13 @@ side (subprocess CLI first; folds into the SAAS Stage 1 HTTP service when that
 lands — do not build a parallel transport here). Contract: input path / profile
 JSON in, JSON out on stdout, non-zero exit + stderr on failure. The api repo's
 companion work order wires upload → parse → editor → save → render into
-`users/{uid}/candidate/`.
+`users/{uid}/candidate/`. M4 also carries the runtime half of that seam: the
+`profile_jobs` queue drain (work-order step 4b; DDL and semantics are owned by
+`job-hunter-api/docs/RESUME_PROFILE_STORE.md`'s Shared contract — API writes jobs
+into the shared tracker.db, the bot drains them every ~20 s). The render job also
+writes `profile.json` itself next to the rendered files — groundwork for a later
+"wave 2" where consumers read the structure directly and the rendered files
+retire one by one.
 Rollback: API feature-flags the editor; hand-placed files keep working throughout —
 render output is indistinguishable from hand-written files to the pipeline.
 
