@@ -79,6 +79,14 @@ def extract_resume_text(path: Path) -> str:
     uploaded it.
     """
     path = Path(path)
+    if not path.exists():
+        # extract_pdf_text is best-effort and swallows every exception into
+        # "" (by design — ats_pdf_roundtrip.py's other caller must never
+        # raise over a missing/corrupt CV PDF), so a missing .pdf silently
+        # fell through to the generic "no extractable text" message below
+        # with no trace of the real reason. Checked once, up front, for
+        # every extension uniformly.
+        raise ProfileParseError(f"File not found: {path}")
     suffix = path.suffix.lower()
 
     try:

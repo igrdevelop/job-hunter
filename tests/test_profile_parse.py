@@ -70,8 +70,17 @@ def test_extract_text_unreadable_pdf(tmp_path: Path) -> None:
 
 
 def test_extract_text_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(ProfileParseError):
+    with pytest.raises(ProfileParseError, match="not found"):
         extract_resume_text(tmp_path / "missing.docx")
+
+
+def test_extract_text_missing_pdf_says_not_found_not_no_text(tmp_path: Path) -> None:
+    """A missing .pdf must not be masked as "no extractable text" — that
+    message is indistinguishable from a genuinely corrupt/scanned PDF and
+    gives a user debugging a failed upload no actionable signal (extract_pdf_text
+    is best-effort and swallows the real FileNotFoundError into "")."""
+    with pytest.raises(ProfileParseError, match="not found"):
+        extract_resume_text(tmp_path / "missing.pdf")
 
 
 def test_extract_text_empty_txt_raises(tmp_path: Path) -> None:
@@ -152,6 +161,21 @@ def test_parse_with_llm_valid_response_extracts_structure(fake_llm) -> None:
     assert profile.leftovers[0].source_upload_id == "upload-1"
     # The model left contact empty — the deterministic pre-fill still runs.
     assert "jane.doe@example.com" in profile.core.identity.contact
+
+
+def test_parse_with_llm_stamps_every_leftover_not_just_the_first(fake_llm) -> None:
+    """The stamping loop is `for leftover in profile.leftovers: ...` — a
+    resume that legitimately produces several leftovers must have EVERY one
+    stamped, not just leftovers[0]."""
+    fake_llm.judge_response = {
+        "core": {"identity": {"full_name": "Jane Doe", "contact": "jane@example.com"}},
+        "leftovers": ["First unclear fragment.", "Second unclear fragment."],
+    }
+
+    profile = parse_resume_text(JANE_TEXT, llm=fake_llm, source_upload_id="upload-1")
+
+    assert len(profile.leftovers) == 2
+    assert all(leftover.source_upload_id == "upload-1" for leftover in profile.leftovers)
 
 
 def test_parse_with_llm_garbage_response_falls_back(fake_llm) -> None:
