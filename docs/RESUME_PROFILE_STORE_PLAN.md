@@ -133,22 +133,36 @@ per stack). Evidence that this cannot onboard anyone but the owner:
       "education": { "entries": [...], "school_keyword", "expected_role_count" },
       "experience": { "years_label", "since_year" },          // wave 2 hard fields
       "summary":   "free text",
-      "roles": [ { "id", "company", "title", "period", "description",
+      "roles": [ { "id", "company", "title", "period", "subtitle", "description",
                    "backend", "bullets_max", "legacy_stack_ok",   // wave 2 history fields
-                   "title_by_track": { "ai": "AI Tooling Engineer" },
-                   "bullets": [ { "text", "tracks": ["angular"], "origin": "parsed|edited" } ],
+                   "title_by_track":     { "ai": "AI Tooling Engineer" },
+                   "subtitle_by_track":  { },
+                   "stack_line", "stack_line_by_track": { },
+                   "bullets": [ { "text", "origin": "parsed|edited" } ],   // core narrative, superset
+                   "bullets_by_track": { "react": ["polished bullet", "..."] },
                    "origin": "parsed|edited" } ],
-      "skills": [ { "name", "category", "tracks": [], "origin" } ],
+      "skills": [ { "category", "items": ["Angular (2-22)", "..."], "origin" } ],
       "extras":  [ { "kind": "certification|link|award|other", "text", "origin" } ],
       "generation_notes": "free text, optional — the story-bank prompt tail"
     },
-    "variants": { "angular": { "headline", "summary", "skills_order" } },
+    "variants": { "angular": { "headline", "summary",
+                               "skills": [ { "category", "items": [] } ] } },
     "leftovers": [ { "text", "source_upload_id" } ],
     "uploads":   [ { "id", "filename", "sha256", "parsed_at" } ]
   }
   ```
 
-  Element without a `tracks` tag = present in every track. `employers.real_companies`
+  *M0b finding (2026-08-30), first schema revision:* the owner's per-track base CVs
+  are REWRITES, not subsets — the same achievement is rephrased per track
+  ("Angular templates" → "TypeScript/JavaScript templates"), bullet counts per role
+  differ across tracks, roles carry `subtitle` and `stack_line` lines the first
+  sketch lacked, and per-track skills are full lists with their own labels
+  ("Angular (background)"), not a reordering. Per-element `tracks` tags could not
+  express any of that, so the model is now **role-level `*_by_track` overrides**
+  (the idiom wave 2 already established with `title_by_track`): a role's
+  `bullets_by_track[track]` replaces the core bullet list wholesale for that
+  track's base CV; absent = the core list is used. Core `bullets` remain the
+  narrative superset that renders into `candidate_profile.md`. `employers.real_companies`
   and `employers.profile_titles` are NOT stored — they are derived at render time
   from `protected` + `flexible.name` and from role titles, killing today's
   keep-in-sync-by-hand duplication. `employers.history` is not stored either — a
@@ -216,6 +230,14 @@ M0b re-run BEFORE any site/API work starts.** Formatting-only diffs (heading sty
 ordering the owner accepts) pass. This is the gate on "over-normalization kills the
 prose".
 
+*Result (run 2026-08-30):* **PASSED after one schema revision.** The first sketch
+(per-element `tracks` tags) could not express the owner's files — that revision is
+recorded in the Shared contract section above. Under the revised role-level
+`*_by_track` model, all FIVE base CVs (angular, react, ai, fullstack×2) round-trip
+with **zero changed substance lines** (93–96 lines each), and `candidate.yaml`
+reconstructs by construction (history is a projection of roles). Owner confirmed
+the revision same day.
+
 **M0c — parser accuracy probe (a few LLM calls, cents; the one deliberately non-free
 check).** Run a draft parse prompt (resume text → schema JSON + leftovers) over the
 owner's real original resume (docx/pdf → text via the existing `python-docx` /
@@ -226,6 +248,23 @@ Decision rule: **≥ 80% of hard fields correct on conventional layouts → buil
 parser + confirmation screen as designed. Below 80% → the site ships a wizard form
 first and the parser becomes a later enhancement** — the confirmation screen cannot
 carry a parser that is mostly wrong.
+
+*Result (run 2026-08-30, `claude-haiku-4-5-20251001`, 6 documents):* **PASSED —
+build.** Conventional layouts: 4 freshly generated CV PDFs scored **132/132 hard
+fields (100%)** against their own content.json (identity, role count, per-role
+company/title/period/bullet-count, education; periods compared semantically —
+the PDF prints "04/2026 – 05/2026" where content.json says "Apr 2026"), and the
+owner's clean 2026 original .docx parsed at ~100% (identity 7/7, 6/6 roles with
+verbatim NDA-masked companies, RODO clause correctly binned into leftovers). The
+deliberately hard case — a 2025 CorelDRAW-exported two-column PDF whose extracted
+text interleaves the courses column into the experience section — still scored
+~83%: all periods/titles correct, 4/6 companies, and every failure surfaced as an
+explicit leftover ("company unclear", "no dates provided") instead of a
+fabrication, which is exactly the behavior the confirmation screen is designed to
+absorb. All six parses returned valid JSON on the first attempt. Note: the probe
+ran through the `claude -p` CLI fallback pinned to the same model (API balance was
+drained at run time — the same outage path prod was on that day), so the marginal
+cost was $0.
 
 ## M1..Mn — Milestones (this repo; one commit each)
 
