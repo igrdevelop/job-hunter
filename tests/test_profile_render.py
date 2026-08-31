@@ -115,19 +115,32 @@ class TestExampleRoundTrip:
 
 
 class TestDerivedFields:
-    def test_real_companies_is_lowercase_of_protected_plus_flexible(self):
+    def test_real_companies_covers_protected_flexible_and_role_companies(self):
+        """Owner-data finding (2026-08-31, seeding dry run): `protected` holds
+        end CLIENTS, while the actual agency employers appear only as role
+        companies — real_companies must union all three sources, or content_qa
+        flags every agency employer in a generated CV as unknown."""
         profile = _load_example_profile()
+        profile.core.roles[0].company = "Agency Employer sp. z o.o."
         rendered = yaml.safe_load(render_candidate_yaml(profile))
         protected = profile.core.employers.protected
         flexible_name = profile.core.employers.flexible.name
-        expected = {c.lower() for c in [*protected, flexible_name] if c}
+        role_companies = [r.company for r in profile.core.roles]
+        expected = {c.strip().lower() for c in [*protected, flexible_name, *role_companies] if c}
         assert set(rendered["employers"]["real_companies"]) == expected
+        assert "agency employer sp. z o.o." in rendered["employers"]["real_companies"]
 
-    def test_profile_titles_is_normalized_unique_role_titles(self):
+    def test_profile_titles_includes_title_by_track_values(self):
+        """The react track's title exists only in title_by_track — content_qa
+        must accept it as a known title (same seeding dry-run finding)."""
         profile = _load_example_profile()
+        profile.core.roles[0].title_by_track["react"] = "Senior Frontend Developer (React)"
         rendered = yaml.safe_load(render_candidate_yaml(profile))
         expected = {r.title.strip().lower() for r in profile.core.roles if r.title.strip()}
+        for r in profile.core.roles:
+            expected.update(t.strip().lower() for t in r.title_by_track.values())
         assert set(rendered["employers"]["profile_titles"]) == expected
+        assert "senior frontend developer (react)" in rendered["employers"]["profile_titles"]
 
     def test_history_projects_roles_without_description_or_bullets(self):
         profile = _load_example_profile()
