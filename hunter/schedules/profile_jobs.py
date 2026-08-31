@@ -24,19 +24,37 @@ API) over a shared DB row and must not be trusted at face value. Extracts +
 parses into a draft Profile; the parser's own fallback covers a missing or
 failing LLM call (hunter/profile_parse.py never hard-fails).
 
-Any failure — bad JSON, an unsafe path, an extraction error, an unexpected
-exception — calls fail_profile_job() with the error message; the job is
-terminal, and a retry is a new PUT/upload from the client, not a bot-side
-mechanism. The scheduled tick itself is wrapped in
-best_effort("profile.jobs") so repeated DRAIN failures (as opposed to one
-user's bad upload, handled per-job above) alert instead of degrading
-silently forever.
+kind='preview' (docs/PROFILE_PAGE_TABS_WORKORDER.md, the bot-repo work
+item): payload is JSON `{"profile": <full profile document>, "track": "<key
+or 'core'>"}` — self-contained like 'render', the bot never reads the API's
+app.sqlite. Deterministic, $0, NO LLM call anywhere (hunter.profile_preview
+owns that contract). Renders a generic no-vacancy CV via generate_docs.py
+(--no-tracker: never a tracker row, never Sheets/Drive/Telegram delivery —
+a preview is not an application) into its own dated subfolder
+users/{user_id}/candidate/preview/<track>/<UTC timestamp>/ — each run gets a
+fresh folder, kept as history, never overwritten (owner decision
+2026-08-31). `track` is validated against the same simple-slug shape a
+'parse' path is (hunter.profile_preview.validate_track) before it is ever
+used as a path component. Requires the user's candidate.yaml to already
+exist (i.e. the profile was published/rendered at least once) — the PDF's
+identity comes from that file, not from the payload's own core.identity, so
+a preview before the first publish fails with a clear "publish first"
+message instead of half-rendering under a placeholder identity.
+
+Any failure — bad JSON, an unsafe path/track, an extraction error, a
+generate_docs.py failure, an unexpected exception — calls fail_profile_job()
+with the error message; the job is terminal, and a retry is a new
+PUT/upload/preview-request from the client, not a bot-side mechanism. The
+scheduled tick itself is wrapped in best_effort("profile.jobs") so repeated
+DRAIN failures (as opposed to one user's bad upload/profile, handled
+per-job above) alert instead of degrading silently forever.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +67,7 @@ STALE_TIMEOUT_MIN = 10
 
 KIND_RENDER = "render"
 KIND_PARSE = "parse"
+KIND_PREVIEW = "preview"
 
 
 def _resolve_user_relative_path(user_id: str, relpath: str) -> Path:
@@ -112,6 +131,38 @@ def _run_parse_job(user_id: str, payload: str) -> str:
     return json.dumps(to_dict(profile), ensure_ascii=False)
 
 
+def _utc_timestamp() -> str:
+    """Dated subfolder name for one preview run — microsecond precision so
+    two runs for the same user+track can never collide, unlike the plain
+    second-resolution timestamps used elsewhere in this codebase (a preview
+    can plausibly be re-requested faster than a real apply)."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f") + "Z"
+
+
+def _run_preview_job(user_id: str, payload: str) -> str:
+    from hunter.profile_preview import render_preview, validate_track
+    from hunter.profile_schema import from_dict
+    from hunter.users import user_env, user_paths
+
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise ValueError("preview job payload must be a JSON object")
+    track = validate_track(str(data.get("track") or ""))
+    profile_data = data.get("profile")
+    profile = from_dict(profile_data if isinstance(profile_data, dict) else {})
+
+    paths = user_paths(user_id)
+    if not paths.candidate_yaml.is_file():
+        raise ValueError(
+            "no candidate.yaml found for this user — publish the profile "
+            "(Editor tab -> Save/Publish) before generating a test resume"
+        )
+
+    out_dir = paths.candidate_dir / "preview" / track / _utc_timestamp()
+    written = render_preview(profile, track, out_dir, extra_env=user_env(user_id))
+    return json.dumps([str(p) for p in written], ensure_ascii=False)
+
+
 def _process_job(row: dict) -> None:
     from hunter import profile_jobs as pj
 
@@ -124,6 +175,8 @@ def _process_job(row: dict) -> None:
             result = _run_render_job(user_id, payload)
         elif kind == KIND_PARSE:
             result = _run_parse_job(user_id, payload)
+        elif kind == KIND_PREVIEW:
+            result = _run_preview_job(user_id, payload)
         else:
             raise ValueError(f"unknown profile_jobs.kind: {kind!r}")
     except Exception as e:  # noqa: BLE001 — a job failure is terminal, not a crash
