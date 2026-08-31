@@ -69,14 +69,27 @@ def _employers_protected(core: Core) -> list[str]:
 
 
 def _real_companies(core: Core, protected: list[str]) -> list[str]:
+    """Every name the content-QA "is this a real employer" check must accept:
+    protected + flexible + EVERY role's company. Protected is not a superset
+    of role companies on real data — the owner's protected list holds end
+    CLIENTS (the names a CV is verified against), while the actual employers
+    (agencies/bodyshops) appear only as role companies; deriving from
+    protected alone made content_qa flag every agency employer as unknown."""
     names = list(protected)
     if core.employers.flexible.name:
         names.append(core.employers.flexible.name)
+    names.extend(role.company for role in core.roles)
     return _dedup_preserve_order(name.strip().lower() for name in names)
 
 
 def _profile_titles(core: Core) -> list[str]:
-    return _dedup_preserve_order(role.title.strip().lower() for role in core.roles)
+    """Canonical role titles incl. every per-track override — the react
+    track's "Senior Frontend Developer (React)" exists only in
+    title_by_track, and content_qa must accept it as a known title."""
+    titles = [role.title for role in core.roles]
+    for role in core.roles:
+        titles.extend(role.title_by_track.values())
+    return _dedup_preserve_order(title.strip().lower() for title in titles)
 
 
 def _history_entry(role: Role) -> dict:
