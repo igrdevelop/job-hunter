@@ -1,5 +1,5 @@
 ---
-description: Open a pull request with this repo's pre-flight checks — branch cut from current origin/master, ruff check + format, pytest, project-invariants-review, English-only body with no attribution lines.
+description: Open a pull request with this repo's pre-flight checks — branch cut from current origin/master, ruff check + format, pytest, project-invariants-review, a code-review pass on the diff, English-only body with no attribution lines.
 argument-hint: [PR title hint or plan-doc name]
 ---
 
@@ -53,7 +53,27 @@ Report the rest to the human and let them decide whether to fix now or file foll
 
 ---
 
-## Step 4 - Compose the PR
+## Step 4 - Code review
+
+Run the `code-review` skill on the branch diff at **medium** effort. Skip only
+if the human explicitly said to, or if this exact diff was already reviewed in
+this session — and say so in the report either way; never imply it ran when it
+did not.
+
+- **CONFIRMED correctness findings are a hard stop:** fix them (or get an
+  explicit "ship anyway") before opening the PR.
+- PLAUSIBLE and quality findings are advisory — list them in the report; fix
+  the cheap, obvious ones, file the rest as follow-ups.
+- After fixing a finding, verify that specific fix (targeted test / re-read);
+  don't re-run the whole review.
+
+This is the pre-publication pass. CodeRabbit (`.coderabbit.yaml`) reviews the
+PR *after* it opens — this step is what catches problems while they are still
+private.
+
+---
+
+## Step 5 - Compose the PR
 
 Language: **English only** — title and body. The repo is public. Quoted data (a Russian regex being added, an owner report, a bot UI string) may stay in its original language; the surrounding prose may not.
 
@@ -84,7 +104,7 @@ Do **not** add `Co-Authored-By` lines. Do not add a "Generated with" footer unle
 
 ---
 
-## Step 5 - Push and open
+## Step 6 - Push and open
 
 ```bash
 git push -u origin HEAD
@@ -95,6 +115,6 @@ Print the PR URL as a markdown link when done.
 
 ---
 
-## Step 6 - Report
+## Step 7 - Report
 
-One short summary: branch, gates (pass/fail), invariant findings count, PR link. If anything was skipped, say which and why — never imply a gate ran when it did not.
+One short summary: branch, gates (pass/fail), invariant findings count, code-review findings count (fixed / follow-up), PR link. If anything was skipped, say which and why — never imply a gate ran when it did not.

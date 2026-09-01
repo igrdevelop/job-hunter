@@ -1387,8 +1387,10 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             candidate-specific text `apply_api.py` builds in-process
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
-                            check + format + pytest → project-invariants-review → English-only
-                            body, no Co-Authored-By → gh pr create
+                            check + format + pytest → project-invariants-review → code-review
+                            skill on the diff (medium effort; CONFIRMED correctness findings
+                            are a hard stop — the pre-publication pass, before CodeRabbit sees
+                            the PR) → English-only body, no Co-Authored-By → gh pr create
     plan-doc.md             Write docs/<NAME>_PLAN.md BEFORE code: check AGENT_LOG for an
                             already-rejected version of the idea, then M0 = a free, read-only
                             measurement with its decision rule stated up front
