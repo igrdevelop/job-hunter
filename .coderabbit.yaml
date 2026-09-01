@@ -14,7 +14,11 @@ tone_instructions: >-
 
 reviews:
   profile: "chill"
-  request_changes_workflow: false
+  # true = CodeRabbit submits a blocking "changes requested" review and lifts
+  # it once its comments are resolved. Combined with master's branch
+  # protection (require conversation resolution), a PR cannot merge while
+  # rabbit findings are unresolved.
+  request_changes_workflow: true
   high_level_summary: true
   poem: false
   auto_review:
