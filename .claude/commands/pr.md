@@ -1,5 +1,5 @@
 ---
-description: Open a pull request with this repo's pre-flight checks — branch cut from current origin/master, ruff check + format, pytest, project-invariants-review, a code-review pass on the diff, English-only body with no attribution lines.
+description: Open a pull request with this repo's pre-flight checks — branch cut from current origin/master, ruff check + format, pytest, project-invariants-review, a code-review pass on the diff, English-only body with no attribution lines — then triage the CodeRabbit review that lands on it (the /rabbit flow).
 argument-hint: [PR title hint or plan-doc name]
 ---
 
@@ -115,6 +115,28 @@ Print the PR URL as a markdown link when done.
 
 ---
 
-## Step 7 - Report
+## Step 7 - CodeRabbit triage
 
-One short summary: branch, gates (pass/fail), invariant findings count, code-review findings count (fixed / follow-up), PR link. If anything was skipped, say which and why — never imply a gate ran when it did not.
+CodeRabbit auto-reviews the PR within a few minutes of opening, and its review
+is **blocking** (`request_changes_workflow: true` + required conversation
+resolution on master) — the PR cannot merge until its threads are resolved.
+
+1. Poll for the review (don't busy-wait — check every ~60s, give up after ~10 min):
+
+```bash
+gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coderabbitai")] | length'
+```
+
+2. When it lands, run the `/rabbit` flow (`.claude/commands/rabbit.md`) on this
+   PR: triage every finding against the code and CLAUDE.md invariants, fix the
+   real ones and push, reply-with-reason to the rest, finish with
+   `@coderabbitai resolve`.
+3. If the review hasn't landed within the wait budget, or the human ends the
+   session first — say so explicitly and note that `/rabbit <N>` can be run
+   later; never leave the impression the triage happened.
+
+---
+
+## Step 8 - Report
+
+One short summary: branch, gates (pass/fail), invariant findings count, code-review findings count (fixed / follow-up), CodeRabbit triage outcome (fixed / skipped counts, blocking review lifted or still pending), PR link. If anything was skipped, say which and why — never imply a gate ran when it did not.
