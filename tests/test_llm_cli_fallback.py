@@ -171,3 +171,112 @@ def test_rate_limit_does_not_trigger_cli(monkeypatch):
     with pytest.raises(llm_client.LLMError):
         llm_client.call_llm("s", "u", provider="anthropic", api_key="k", max_retries=2)
     assert calls == []
+
+
+# ── cli_credentials_present: what counts as "the CLI can authenticate" ────────
+# Two ways in (docs/DEPLOY.md "Claude CLI token"): a long-lived
+# CLAUDE_CODE_OAUTH_TOKEN in the environment (the deploy host since 2026-09-08)
+# or an OAuth login on disk. The disk half is no longer presence-only: a failed
+# refresh rewrites .credentials.json with BLANK tokens instead of deleting it,
+# and calling that "logged in" burned a doomed `claude -p` on every outage-hit
+# call for ~18 h on 2026-09-08.
+
+INCIDENT_BLANK_CREDENTIALS = (
+    '{"claudeAiOauth": {"accessToken": "", "refreshToken": "", "expiresAt": 0, '
+    '"scopes": ["user:inference"], "subscriptionType": "max"}}'
+)
+
+
+@pytest.fixture()
+def _no_ambient_login(monkeypatch, tmp_path):
+    """No env token, no config dir, and an empty HOME — the machine running the
+    suite (dev box vs CI) must not decide the answer."""
+    from pathlib import Path
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    return home
+
+
+def _write_creds(monkeypatch, tmp_path, body: str):
+    cfg = tmp_path / "claude-cli"
+    cfg.mkdir(exist_ok=True)
+    (cfg / ".credentials.json").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    return cfg
+
+
+def test_env_token_alone_is_enough(_no_ambient_login, monkeypatch):
+    """The deploy-host path: token in the environment, nothing on disk."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-abc")
+    assert llm_client.cli_credentials_present() is True
+
+
+def test_blank_env_token_falls_through_to_disk(_no_ambient_login, monkeypatch):
+    """An empty/whitespace value is an unset variable, not an authentication."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "   ")
+    assert llm_client.cli_credentials_present() is False
+
+
+def test_env_token_wins_over_blanked_credentials_file(_no_ambient_login, monkeypatch, tmp_path):
+    """2026-09-08 recovery: the wiped file stays in the volume, the token rules."""
+    _write_creds(monkeypatch, tmp_path, INCIDENT_BLANK_CREDENTIALS)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-abc")
+    assert llm_client.cli_credentials_present() is True
+
+
+def test_credentials_file_with_blank_tokens_is_not_a_login(
+    _no_ambient_login, monkeypatch, tmp_path
+):
+    """The exact shape the 2026-09-08 failed refresh left behind."""
+    _write_creds(monkeypatch, tmp_path, INCIDENT_BLANK_CREDENTIALS)
+    assert llm_client.cli_credentials_present() is False
+
+
+def test_credentials_file_with_real_token_is_a_login(_no_ambient_login, monkeypatch, tmp_path):
+    _write_creds(
+        monkeypatch,
+        tmp_path,
+        '{"claudeAiOauth": {"accessToken": "sk-ant-oat01-live", "refreshToken": "r"}}',
+    )
+    assert llm_client.cli_credentials_present() is True
+
+
+def test_credentials_file_with_only_refresh_token_is_a_login(
+    _no_ambient_login, monkeypatch, tmp_path
+):
+    """An expired access token still refreshes — that is the CLI's business."""
+    _write_creds(
+        monkeypatch,
+        tmp_path,
+        '{"claudeAiOauth": {"accessToken": "", "refreshToken": "sk-ant-ort01-live"}}',
+    )
+    assert llm_client.cli_credentials_present() is True
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "not json at all",
+        "{}",
+        '{"someFutureShape": 1}',
+        # The oauth block is there but carries neither token field: an unknown
+        # shape, NOT a proof of emptiness — a renamed field must not silently
+        # take the fallback down the way a real blank login does.
+        '{"claudeAiOauth": {"subscriptionType": "max"}}',
+    ],
+)
+def test_unrecognised_credentials_file_fails_open(_no_ambient_login, monkeypatch, tmp_path, body):
+    """Only a POSITIVE proof of emptiness disables the fallback: the CLI owns
+    the authoritative answer, and refusing to try on an unknown file shape
+    would take the fallback down for a schema change we have not seen."""
+    _write_creds(monkeypatch, tmp_path, body)
+    assert llm_client.cli_credentials_present() is True
+
+
+def test_no_token_no_file_is_not_a_login(_no_ambient_login):
+    assert llm_client.cli_credentials_present() is False

@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude CLI (Pro subscription path). Only used when a logged-in config dir is
-# mounted (docker-compose: ./.claude-cli:/root/.claude) — the login IS the
-# on/off switch (no feature flag); without credentials on disk,
+# Claude CLI (subscription path). Only used when the CLI can authenticate —
+# CLAUDE_CODE_OAUTH_TOKEN in the environment (deploy host, see docs/DEPLOY.md)
+# or a logged-in config dir mounted at /root/.claude (docker-compose:
+# ./.claude-cli). That IS the on/off switch (no feature flag); with neither,
 # llm_client.cli_credentials_present() keeps the CLI out of the way entirely.
 RUN npm install -g @anthropic-ai/claude-code
 # Keep ALL claude state (config + OAuth credentials) inside the mounted volume —

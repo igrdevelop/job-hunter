@@ -124,8 +124,10 @@ async def _resolve_outcome(context, worker_id: int, job, outcome: str) -> bool:
                 "(M4b) ALSO failed to cover the API outage — normally it absorbs "
                 "one silently. Check both:\n"
                 "1. Anthropic balance/key — console.anthropic.com\n"
-                "2. CLI login on the server — <code>docker compose exec -it "
-                "job-hunter claude</code> → <code>/login</code>\n\n"
+                "2. CLI token on the server — <code>docker compose exec -it "
+                "job-hunter claude setup-token</code>, put it in "
+                "<code>CLAUDE_CODE_OAUTH_TOKEN</code> in .env, "
+                "<code>docker compose up -d</code>\n\n"
                 "This is the only alert for this outage — it won't repeat every "
                 "hour while it continues. <code>/llm outage</code> or "
                 "<code>/status</code> shows the live state.",

@@ -107,7 +107,7 @@ def _find_new_folder(before: set[str], timeout: int = 300) -> str | None:
 
 
 def _cli_credentials_present() -> bool:
-    """True if a Claude CLI login exists on disk.
+    """True if the Claude CLI can authenticate (env token or on-disk login).
 
     `claude --version` prints the version whether or not anyone is logged in
     (live-verified on 2.1.92), so the output grep below can't detect a fresh,

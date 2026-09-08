@@ -737,6 +737,61 @@ crontab -l | grep prune
 cat /home/deploy/docker-prune.log
 ```
 
+## Claude CLI token (LLM-outage fallback)
+
+The subscription fallback (docs/LLM_OUTAGE_RESILIENCE_PLAN.md M4/M4b) needs the
+`claude` CLI inside the container to be authenticated. There is no feature flag:
+`llm_client.cli_credentials_present()` returning True IS the switch.
+
+**On this host authentication is a long-lived token, not an interactive login.**
+The OAuth login writes a rotating refresh token into
+`./.claude-cli/.credentials.json`; when a refresh fails, the CLI does not delete
+that file — it rewrites it with **blank** tokens. That is what happened on
+2026-09-08: the API balance was drained *and* the login was silently dead, so
+both LLM paths were down and auto-apply sat paused for ~18 h. A
+`claude setup-token` token is valid ~1 year, does not rotate, and lives in
+`.env`, so it cannot be blanked by a background refresh.
+
+### Issue / rotate the token
+
+```bash
+cd ~/job-hunter
+docker compose exec -it job-hunter claude setup-token
+```
+
+Follow the printed OAuth URL in a browser, paste the code back, copy the token
+it prints (`sk-ant-oat…`), then:
+
+```bash
+# .env — personal subscription credential, same care as gsheets_token.json
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat...
+```
+
+```bash
+docker compose up -d          # env_file: .env — the container must be recreated
+```
+
+### Verify
+
+```bash
+docker compose exec -T job-hunter sh -lc 'claude -p "reply with exactly: OK" --model claude-haiku-4-5-20251001'
+```
+
+`Failed to authenticate: OAuth session expired and could not be refreshed` means
+the token did not reach the process (check `docker compose exec -T job-hunter
+sh -lc 'echo ${CLAUDE_CODE_OAUTH_TOKEN:+set}'`) or has been revoked.
+
+Then lift the outage pause the failed runs armed — `/llm outage clear` in
+Telegram — and `/retry_reset` if any rows exhausted `MAX_FAIL_RETRIES` while
+both paths were down.
+
+### Disabling the fallback
+
+Unset `CLAUDE_CODE_OAUTH_TOKEN` **and** empty `./.claude-cli/` (or `claude
+/logout` in the container). Either one alone leaves the fallback live.
+
+---
+
 ## Server command reference
 
 ```bash
@@ -770,6 +825,10 @@ docker stats job-hunter
 
 # Status
 docker compose ps
+
+# Claude CLI (LLM-outage fallback) — is it authenticated?
+docker compose exec -T job-hunter sh -lc 'echo ${CLAUDE_CODE_OAUTH_TOKEN:+token set}'
+docker compose exec -T job-hunter sh -lc 'claude -p "reply with exactly: OK" --model claude-haiku-4-5-20251001'
 ```
 
 ---

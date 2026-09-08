@@ -154,9 +154,11 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 # calls just went best-effort-skipped when the Anthropic balance was the one
 # that died. No feature flag (owner decision 2026-07-18: "если закончились
 # деньги — пробуем через cli, если не получилось — стандартный сценарий"):
-# the ON/OFF switch is the LOGIN itself — no `claude` credentials on disk, no
-# fallback. To disable on the deploy host: remove the ./.claude-cli volume
-# contents (or `claude /logout` in the container).
+# the ON/OFF switch is the LOGIN itself — no `claude` credentials reachable, no
+# fallback. "Reachable" means either a CLAUDE_CODE_OAUTH_TOKEN in the
+# environment (the deploy host's long-lived `claude setup-token` token) or an
+# OAuth login on disk. To disable on the deploy host: unset that variable AND
+# empty the ./.claude-cli volume (or `claude /logout` in the container).
 
 # Per-call wall-clock cap for one `claude -p` invocation. Raised 300 → 600
 # (owner decision 2026-08-10: "время есть, пускай ковыряется" — a big
@@ -165,28 +167,72 @@ def is_outage_signature(status_code: int | None, message: str) -> bool:
 CLI_CALL_TIMEOUT_SEC = 600
 
 
+# Long-lived CLI token (`claude setup-token`, ~1 year) — the headless-server
+# alternative to the interactive OAuth login whose refresh token lives in
+# .credentials.json and rotates. Read by the `claude` binary itself; this
+# module only needs to know that its presence means "the CLI can authenticate".
+CLI_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # noqa: S105 — variable NAME, not a secret
+
+
+def _credentials_file_usable(path) -> bool:
+    """True unless the file positively proves the login is empty.
+
+    A failed refresh does not delete .credentials.json — it rewrites it with
+    blank tokens (`accessToken: ""`, `refreshToken: ""`, `expiresAt: 0`), which
+    is what the 2026-09-08 outage looked like on the deploy host. A
+    presence-only check calls that "logged in" and every outage-hit call then
+    burns a doomed `claude -p` attempt. Anything we cannot parse or do not
+    recognise fails OPEN (the old behaviour): the authoritative answer belongs
+    to the CLI, and refusing to try on an unfamiliar file shape would disable
+    the fallback for a schema change we have not seen.
+    """
+    if not path.is_file():
+        return False
+    try:
+        oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+        tokens = [oauth[k] for k in ("accessToken", "refreshToken") if k in oauth]
+    except Exception:  # noqa: BLE001 — unreadable/unknown shape: fail open
+        return True
+    if not tokens:
+        # The block exists but carries neither token field — a shape we don't
+        # know, not a proof of emptiness.
+        return True
+    return any(isinstance(t, str) and t.strip() for t in tokens)
+
+
 def cli_credentials_present() -> bool:
-    """True if a Claude CLI login exists on disk.
+    """True if the Claude CLI can authenticate: env token, or a login on disk.
 
     `claude --version` prints the version whether or not anyone is logged in
     (live-verified on 2.1.92), so probing the binary can't detect a fresh,
     never-logged-in install — exactly the state of a just-rebuilt Docker image
-    before the one-time OAuth login. The OAuth credentials land in
-    $CLAUDE_CONFIG_DIR/.credentials.json (the Dockerfile pins CLAUDE_CONFIG_DIR
-    into the mounted volume) or ~/.claude/.credentials.json on a default
-    install (live-verified on the owner's Windows machine). macOS keeps them in
-    the Keychain (no file), but this project only runs on Windows (owner
-    desktop) and Linux (deploy image). Lives here rather than in apply_cli so
-    the call_llm fallback doesn't have to import the apply stack.
+    before the one-time OAuth login. Two ways to be authenticated:
+
+    * `CLAUDE_CODE_OAUTH_TOKEN` in the environment — a long-lived token from
+      `claude setup-token`, which is what the deploy host uses (docs/DEPLOY.md
+      "Claude CLI token"): it does not rotate, so a failed refresh can't
+      silently take the outage fallback down with it.
+    * `$CLAUDE_CONFIG_DIR/.credentials.json` (the Dockerfile pins
+      CLAUDE_CONFIG_DIR into the mounted volume) or
+      ~/.claude/.credentials.json on a default install (live-verified on the
+      owner's Windows machine) — the interactive OAuth login. macOS keeps
+      those in the Keychain (no file), but this project only runs on Windows
+      (owner desktop) and Linux (deploy image).
+
+    Lives here rather than in apply_cli so the call_llm fallback doesn't have
+    to import the apply stack.
     """
     from pathlib import Path
+
+    if os.environ.get(CLI_TOKEN_ENV, "").strip():
+        return True
 
     cfg = os.environ.get("CLAUDE_CONFIG_DIR")
     candidates = []
     if cfg:
         candidates.append(Path(cfg) / ".credentials.json")
     candidates.append(Path.home() / ".claude" / ".credentials.json")
-    return any(p.is_file() for p in candidates)
+    return any(_credentials_file_usable(p) for p in candidates)
 
 
 def _cli_fallback_enabled() -> bool:

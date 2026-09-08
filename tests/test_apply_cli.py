@@ -184,6 +184,10 @@ def _isolate_home(monkeypatch, tmp_path):
     home.mkdir()
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    # A long-lived token in the environment is a login too (docs/DEPLOY.md
+    # "Claude CLI token") — on the deploy host it is the ONLY one, so a machine
+    # that has it exported must not decide these tests.
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     return home
 
 
