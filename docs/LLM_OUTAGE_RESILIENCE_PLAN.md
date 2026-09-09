@@ -272,11 +272,13 @@ shipped in the same branch:*
 
 **Flag removed (2026-07-18, owner decision: "а зачем флаг? если закончились деньги —
 пробуем через cli, если не получилось — стандартный сценарий").** `LLM_OUTAGE_FALLBACK_CLI`
-is gone; **the CLI login itself is the on/off switch** — credentials on disk
-(`llm_client.cli_credentials_present`: `$CLAUDE_CONFIG_DIR/.credentials.json`, i.e. the
-mounted `./.claude-cli/`) mean the fallback is live; an empty/absent login dir means the
-CLI is invisible and the container behaves exactly like API-only prod. To disable:
-`claude /logout` in the container or empty `./.claude-cli/`. Dispatch semantics in
+is gone; **being able to authenticate is the on/off switch** — `llm_client.cli_credentials_present`
+is True for a long-lived `CLAUDE_CODE_OAUTH_TOKEN` in the environment (prod since
+2026-09-08, see the timeline) or an OAuth login on disk
+(`$CLAUDE_CONFIG_DIR/.credentials.json`, i.e. the mounted `./.claude-cli/`) whose tokens
+are not provably blank; with neither, the CLI is invisible and the container behaves
+exactly like API-only prod. To disable: unset the token AND empty `./.claude-cli/`
+(`claude /logout` in the container). Dispatch semantics in
 `apply_agent.main()` are now fixed rather than flag-dependent: `--cli`/`APPLY_USE_CLI`
 → CLI-only; `LLM_API_KEY` set → **API primary**, CLI only on exit 46; no key → CLI-only
 (the original subscription mode). ⚠️ Behavior change on the owner's DESKTOP: a machine
@@ -353,4 +355,5 @@ stand alone and already answer *"будут ли они обработаны п�
 | 2026-07-18 | M4b: the CLI fallback moved into `llm_client.call_llm` so the cheap stages (judge/verdict/translate/outreach) are covered too, not just the main generation call. Dual-apply shadow never falls back. |
 | 2026-07-18 | `LLM_OUTAGE_FALLBACK_CLI` flag REMOVED (owner: "а зачем флаг?"). The CLI login is the switch: credentials in `./.claude-cli/` = fallback live, empty = off. Dispatch fixed: API primary whenever `LLM_API_KEY` is set (the "CLI detected → try CLI first" auto-preference is gone; desktop subscription-only runs need `--cli`/`APPLY_USE_CLI`; `tools/preview_apply.py` now passes `--cli` explicitly). |
 | 2026-07-29 | M4 activated in prod: OAuth login done inside the container, token persisted in `./.claude-cli/`, `claude -p` stdin/JSON path smoke-tested. The whole plan (M0–M4b) is now closed. |
+| 2026-09-08 | **The OAuth login is not durable enough to BE the switch on a headless host.** Live incident: the API balance drained AND the CLI login died the same night — a failed refresh does not delete `.credentials.json`, it rewrites it with blank `accessToken`/`refreshToken` (`refreshTokenExpiresAt` was still 2026-09-26, so this was not a date expiry). Both LLM paths down from 00:01 UTC, auto-apply paused ~18 h, 3 jobs stuck PENDING; and `cli_credentials_present()` being presence-only reported "logged in" the whole time, so every outage-hit call still burned a doomed `claude -p`. Fix: prod authenticates with a long-lived `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, ~1 year, does not rotate, lives in `.env`), checked BEFORE the disk login; the disk check now requires a token that is not provably blank (unparseable/unknown shapes still fail open — the CLI owns the authoritative answer). Runbook: docs/DEPLOY.md "Claude CLI token". |
 | 2026-07-18 | Owner: "cli дольше отрабатывает, должна поддерживаться очередь." The QUEUE already exists — hunts serialize through `_hunt_lock` FIFO (a slot that fires during a long CLI batch waits, never skips; overflow jobs have no tracker row and return next hunt), nothing to build. What WAS missing: the 900s `APPLY_AGENT_TIMEOUT_SEC` would kill a slow-but-working CLI-served vacancy (~10–20 sequential `claude -p` spawns) and turn it into a FAIL row. New `APPLY_AGENT_CLI_TIMEOUT_SEC` (default 2700): `apply_service._effective_timeout` widens the cap to max(base, cli) whenever the run MAY go through the CLI (explicit `APPLY_USE_CLI` or a login on disk — the parent can't know in advance whether the fallback fires mid-run). Trade-off accepted: a genuinely hung run holds the lock ≤45 min instead of 15; the FIFO queue absorbs it. |

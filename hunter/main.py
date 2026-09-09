@@ -554,8 +554,10 @@ async def _auto_apply_all(context: ContextTypes.DEFAULT_TYPE, jobs: list[Job]) -
                     "fallback (M4b) ALSO failed — normally it absorbs an API "
                     "billing outage silently. Check both:\n"
                     "1. Anthropic balance/key — console.anthropic.com\n"
-                    "2. CLI login on the server — <code>docker compose exec -it "
-                    "job-hunter claude</code> → <code>/login</code>\n\n"
+                    "2. CLI token on the server — <code>docker compose exec -it "
+                    "job-hunter claude setup-token</code>, put it in "
+                    "<code>CLAUDE_CODE_OAUTH_TOKEN</code> in .env, "
+                    "<code>docker compose up -d</code>\n\n"
                     "This is the only alert for this outage — it won't repeat "
                     "every hour while it continues.",
                 )
@@ -742,8 +744,10 @@ async def _retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "fallback (M4b) ALSO failed — normally it absorbs an API "
                     "billing outage silently. Check both:\n"
                     "1. Anthropic balance/key — console.anthropic.com\n"
-                    "2. CLI login on the server — <code>docker compose exec -it "
-                    "job-hunter claude</code> → <code>/login</code>\n\n"
+                    "2. CLI token on the server — <code>docker compose exec -it "
+                    "job-hunter claude setup-token</code>, put it in "
+                    "<code>CLAUDE_CODE_OAUTH_TOKEN</code> in .env, "
+                    "<code>docker compose up -d</code>\n\n"
                     "This is the only alert for this outage — it won't repeat "
                     "every hour while it continues.",
                 )
