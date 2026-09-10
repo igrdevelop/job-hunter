@@ -245,7 +245,17 @@ def test_main_cli_skips_when_already_processed(monkeypatch, capsys) -> None:
     )
 
 
+@pytest.mark.slow
 def test_main_cli_skip_dedup_bypasses_tracker(monkeypatch) -> None:
+    # NOTE (2026-09-10 durations audit): this test only patches
+    # hunter.sources.fetch_job_text to raise, and main_cli() swallows that
+    # exception (job_text stays None, "Pre-fetch failed" is printed) instead
+    # of propagating it — so the run falls through to a REAL, unmocked
+    # `subprocess.run(["claude", "-p", ...])` call, which is what actually
+    # takes ~3.6s here (confirmed via cProfile) rather than test logic. Not
+    # fixed in this PR (out of scope — see the mypy-ratchet/slow-marker PR's
+    # scope fence); marked `slow` so it doesn't sit in the fast pre-commit
+    # subset, but flagged here for a follow-up to mock subprocess.run.
     recorded = []
 
     def fake_already_processed(url, skip_dedup=False):

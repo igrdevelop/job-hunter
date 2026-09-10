@@ -1287,7 +1287,21 @@ docs/improvement-2026-09/   Improvement plan series (2026-09-09): eight-perspect
 tests/                      38+ test files, ~3400 lines (pytest); `pytest tests/ --cov=hunter
                             --cov-report=xml --cov-report=term` for a coverage table (no
                             --cov-fail-under gate yet — docs/quality/04-coverage-and-golden-
-                            e2e.md Part A, map the blind spots for a few weeks first)
+                            e2e.md Part A, map the blind spots for a few weeks first).
+                            **Fast local loop:** `pytest tests/ -m "not slow"` (~40s on the
+                            reference dev box, vs ~50s for the full suite) skips the tests
+                            marked `@pytest.mark.slow` — real-subprocess CLI-seam tests
+                            (`tests/test_tools_profile_cli.py`, `tests/
+                            test_tools_preview_profile_cli.py`, both spawn a child `python
+                            tools/*.py` process per test) plus any other subprocess/
+                            LibreOffice/Playwright-heavy test tagged the same way (see
+                            `[tool.pytest.ini_options] markers` in `pyproject.toml`). CI's
+                            `test` job always runs the FULL suite (the marker only trims the
+                            local/pre-commit loop) with `--durations=20`, whose slowest-tests
+                            table is also echoed into the job's `$GITHUB_STEP_SUMMARY`. The
+                            `.githooks/pre-commit` hook runs the fast subset automatically
+                            when any staged file is Python — see docs/
+                            improvement-2026-09/04-ENGINEERING_PLAN.md M0.2/M3.
 tests/conftest.py           Shared fixtures: `tracker_db` (isolated tmp tracker.db),
                             `fake_llm` (routes llm_client.call_llm by prompt shape to
                             configurable generation/judge/verdict/outreach responses — a
@@ -1524,7 +1538,8 @@ scripts/                    Host-side ops scripts (tracked, sh — LF via .gitat
                             CLAUDE.md rules no linter can check (CLAUDE.md kept in sync,
                             best_effort() wrapping, requirements.lock regenerated, all five
                             source-registration points, tracker column constants, English-only
-                            commits, no protected files staged, mypy baseline 223 not grown,
+                            commits, no protected files staged, mypy_baseline.json ratchet not
+                            regressed (`scripts/mypy_ratchet.py`),
                             speculative-LLM-layer question, work-log entry). Finds no bugs and
                             no style issues BY DESIGN — /code-review and ruff own those
     fail-forensics.md       Why one vacancy produced no application: reconstructs the run from
@@ -2586,12 +2601,24 @@ second `html.unescape()` pass.
   + C4 + SIM + S (bandit); deliberate ignores are documented inline in
   `pyproject.toml` — don't silence a new finding without a rationale comment
 - `mypy hunter/ llm_client.py generate_docs.py apply_agent.py` runs in CI
-  (`typecheck` job) but is `continue-on-error: true` — informational only,
-  does not block deploy yet. Baseline as of 2026-07-15: 223 errors in 54
-  files (mostly PTB `Message | None`/`JobQueue | None` unchecked attribute
-  access — real but pre-existing). Don't let a new change grow that number;
-  fixing it down to zero (and flipping the gate to blocking) is tracked in
-  docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not done in this pass
+  (`typecheck` job) through `scripts/mypy_ratchet.py`, which IS a blocking
+  gate (docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2) — but only on a
+  REGRESSION: it compares the per-file error count against the committed
+  `mypy_baseline.json` and fails only when a file's count goes UP, or a new
+  file (absent from the baseline) has errors. A file's count going DOWN is
+  reported but never fails the build. Baseline as of 2026-09-10: 223 errors
+  in 57 files (mostly PTB `Message | None`/`JobQueue | None` unchecked
+  attribute access — real but pre-existing). Each number is the MAX of what
+  CI (ubuntu, `requirements.lock`) and a developer machine report: the two
+  resolve a few third-party stubs differently (beautifulsoup4, requests),
+  which moves 4 errors across 5 files, and taking the max is what keeps
+  BOTH environments from reporting a false regression while a genuinely new
+  error still pushes its file above the recorded number. When updating the
+  baseline, reconcile against a CI typecheck log, not only a local run. Don't let a new change grow a
+  file's count; deliberately reducing the baseline (fixing real errors) is
+  its own commit: `python scripts/mypy_ratchet.py --update`. Driving it to
+  zero is tracked in docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not
+  done in this pass
 - SonarCloud scan runs as an informational CI job (`sonar-project.properties`);
   it skips itself until `SONAR_TOKEN` is added to the repo secrets and never
   blocks deploy
@@ -2632,7 +2659,7 @@ second `html.unescape()` pass.
 
 ### Code Quality
 
-5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, `continue-on-error: true` — 223-error baseline, informational only until driven to zero; see docs/quality/06-static-gates-mypy-sonar.md).
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, blocking via `scripts/mypy_ratchet.py` — a 223-error baseline that only fails on a regression, not a fixed threshold; see docs/quality/06-static-gates-mypy-sonar.md and docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2).
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
