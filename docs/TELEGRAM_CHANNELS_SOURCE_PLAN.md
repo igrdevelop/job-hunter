@@ -1,6 +1,6 @@
 # Telegram Channels Source — Implementation Plan
 
-**Status:** APPROVED, ready to implement
+**Status:** SHIPPED — source live since 2026-07-12 (CLAUDE.md "Telegram Channels Source", §9–§10 below hold the live-calibration findings). Open plans index: docs/ROADMAP.md
 **Branch:** `feat/telegram-channels-source` (created from `origin/master`)
 **Owner request (2026-07-10/11):** add Telegram job channels as a new source. Idea came
 from https://github.com/strelov1/freehire (`docs/telegram-channels.md`,
