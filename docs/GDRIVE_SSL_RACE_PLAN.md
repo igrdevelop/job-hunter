@@ -1,6 +1,6 @@
 # Google Drive SSL Failures — Concurrent Uploads over One Shared Service
 
-**Status:** PLANNED
+**Status:** SHIPPED — M1–M3 live (backfill re-entrancy guard, `_DRIVE_LOCK` + `_drive_call()`, shadow-upload ledger); see CLAUDE.md `gdrive_sync.py` / `drive_ledger.py` entries. Open plans index: docs/ROADMAP.md
 **Branch:** `claude/gdrive-ssl-error-77e085` (off `origin/master` @ 7c0492a)
 **Author:** opus, 2026-07-29
 **Trigger:** owner report — Telegram alert

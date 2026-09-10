@@ -170,7 +170,8 @@ job postings with a zero-false-positive acceptance bar).
 
 - [CLAUDE.md](CLAUDE.md) — full architecture reference & agent work log
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system overview
-- [docs/review-2026-07/](docs/review-2026-07/README.md) — latest project review & roadmap
+- [docs/ROADMAP.md](docs/ROADMAP.md) — every open plan in one place (status + next step)
+- [docs/review-2026-07/](docs/review-2026-07/README.md) — 2026-07 project review (history; open items folded into ROADMAP.md)
 - [docs/](docs/) — design docs for major features (claim judge, verdict refine loop, doomed-vacancy gate, calibration reports)
 
 ## License
