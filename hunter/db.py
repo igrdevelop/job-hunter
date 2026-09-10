@@ -141,6 +141,22 @@ CREATE TABLE IF NOT EXISTS subsystem_health (
 );
 """
 
+# Per-chat /link brute-force limiter (docs/improvement-2026-09/
+# 05-SECURITY_PLAN.md finding #4/M4). Unlike telegram_link_codes/
+# telegram_links above, this table is owned entirely by THIS repo (the API
+# never reads or writes it) — it exists purely so hunter.users.link_chat can
+# refuse a chat that has racked up too many failed codes within a rolling
+# window WITHOUT even querying telegram_link_codes. One row per chat_id;
+# window_start resets (and attempts goes back to 1) once the window has
+# elapsed, and a successful link deletes the row outright.
+_LINK_ATTEMPTS_DDL = """
+CREATE TABLE IF NOT EXISTS link_attempts (
+    chat_id      INTEGER PRIMARY KEY,
+    window_start TEXT    NOT NULL,
+    attempts     INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 
 def ensure_subsystem_health_table(conn: sqlite3.Connection) -> None:
     """Idempotent CREATE for the `subsystem_health` table.
@@ -153,6 +169,17 @@ def ensure_subsystem_health_table(conn: sqlite3.Connection) -> None:
     pattern for source_runs).
     """
     conn.executescript(_SUBSYSTEM_HEALTH_DDL)
+
+
+def ensure_link_attempts_table(conn: sqlite3.Connection) -> None:
+    """Idempotent CREATE for the `link_attempts` table.
+
+    Called from init_db() at bot startup, and defensively by
+    hunter.users.link_chat itself (same reasoning as
+    ensure_subsystem_health_table above — a bare temp DB in a test or
+    standalone script may never have gone through init_db()).
+    """
+    conn.executescript(_LINK_ATTEMPTS_DDL)
 
 
 # ── Connection factory ────────────────────────────────────────────────────────
@@ -372,6 +399,7 @@ def init_db(
         ensure_subsystem_health_table(conn)
         conn.executescript(_MULTI_USER_DDL)
         conn.executescript(_PROFILE_JOBS_DDL)
+        ensure_link_attempts_table(conn)
         # Deduplicate existing rows before applying the unique (user_id, url_norm)
         # constraint — _ensure_user_url_index must run AFTER this.
         n_dedup = _dedup_url_norm(conn)

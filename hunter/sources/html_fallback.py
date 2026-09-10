@@ -6,7 +6,7 @@ fallback when no source matches a URL.
 
 import logging
 import re
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 
@@ -22,6 +22,9 @@ HEADERS = {
 }
 TIMEOUT = 25
 MAX_TEXT_LEN = 15_000
+# SSRF guard (docs/improvement-2026-09/05-SECURITY_PLAN.md M5): redirects are
+# followed manually, one host-revalidation per hop — see fetch_html().
+MAX_REDIRECTS_FOLLOWED = 3
 
 _TRACKING_PARAMS = {
     "utm_source",
@@ -59,8 +62,35 @@ def fetch_html(url: str) -> str:
 
     Returns plain text suitable for LLM consumption.
     Raises on network errors or empty content.
+
+    This is the one fetcher in the sources package that ever hits an
+    arbitrary, non-hardcoded host (every other source builds its request
+    against its own known API domain). docs/improvement-2026-09/
+    05-SECURITY_PLAN.md finding #6/M5: a validated public URL can still
+    REDIRECT onto a private address, so automatic redirect-following is
+    disabled and each hop is followed manually, revalidating the `Location`
+    with `hunter.url_policy.validate_public_url` before it is fetched. The
+    initial `url` itself is deliberately NOT validated here — this function
+    is called deep inside most scrapers' own `fetch_text()` with a host they
+    already control (see the module docstring on `hunter.url_policy`); the
+    apply pipeline's entry point (`fetch_job_text(..., use_session=True)`)
+    validates the untrusted starting URL before it ever reaches here.
     """
-    resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+    from hunter.url_policy import validate_public_url
+
+    current_url = url
+    resp = None
+    for hop in range(MAX_REDIRECTS_FOLLOWED + 1):
+        resp = requests.get(current_url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=False)
+        if resp.is_redirect and "Location" in resp.headers:
+            if hop == MAX_REDIRECTS_FOLLOWED:
+                raise ValueError(f"Too many redirects fetching {url} (stopped at {current_url})")
+            next_url = validate_public_url(urljoin(current_url, resp.headers["Location"]))
+            logger.debug("[html_fallback] redirect %s -> %s", current_url, next_url)
+            current_url = next_url
+            continue
+        break
+
     resp.raise_for_status()
     html = resp.text
 

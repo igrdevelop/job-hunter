@@ -806,6 +806,29 @@ hunter/
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
                             shared by expired_marker and gmail_enricher to avoid HTTP 429
+  url_policy.py             SSRF guard for user-supplied URLs (docs/improvement-2026-09/
+                            05-SECURITY_PLAN.md finding #6/M5): `validate_public_url(url)`
+                            allows only http(s), rejects `localhost`/`.internal`/`.local`,
+                            and resolves the host (stdlib `socket.getaddrinfo`, mockable in
+                            tests) to reject any IP literal or DNS answer in a loopback/
+                            RFC1918-private/link-local (incl. 169.254.169.254, the cloud
+                            metadata endpoint)/IPv6-unique-local range — raises
+                            `UrlPolicyError(ValueError)`. A DNS lookup that fails outright
+                            (not "resolves to a bad address", just fails) is NOT flagged —
+                            that's left for the real fetch to report as an ordinary network
+                            error, which is what keeps every normal job URL byte-identical.
+                            Wired at the two entry points for untrusted URLs — never deep
+                            inside a scraper, which hits its own hardcoded host —
+                            `hunter.sources.fetch_job_text(url, use_session=True)` (the
+                            apply pipeline's own fetch) and
+                            `hunter/commands/url_message.py::cmd_url` (refuses with a short
+                            reply before an apply subprocess is even spawned). The other
+                            half of the guard lives in `hunter/sources/html_fallback.py::
+                            fetch_html` (the one fetcher that ever hits an arbitrary,
+                            non-hardcoded host): `allow_redirects=False` + manual
+                            redirect-following, revalidating every `Location` with this same
+                            function — closes the "redirect off an already-public host onto
+                            a private one" bypass.
   source_health.py          Per-source yield tracking in SQLite (source_runs table): record_run()
                             after each source.search() in the hunt loop, health_report() for /health,
                             newly_broken() alerts once when a previously-working source goes dry for
@@ -995,7 +1018,30 @@ hunter/
     tracks.py               /tracks [angular|react|both] — show/switch active candidate tracks
                             (docs/quality/09-multi-track-react.md); DB key `tracks_enabled`
                             wins over `CANDIDATE_TRACKS` env, same pattern as `/dual`
-    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
+    link.py                 /link CODE + /unlink. Brute-force limiter (docs/
+                            improvement-2026-09/05-SECURITY_PLAN.md finding #4/M4):
+                            `users.link_chat_with_details()` refuses a chat past
+                            `LINK_ATTEMPT_LIMIT` (5) failed codes within
+                            `LINK_ATTEMPT_WINDOW_MIN` (10) minutes WITHOUT even querying
+                            `telegram_link_codes` — the counter lives in the new
+                            `link_attempts(chat_id, window_start, attempts)` table (DDL
+                            idempotent in `hunter/db.py::ensure_link_attempts_table`, same
+                            lazy-ensure pattern as `subsystem_health`; owned entirely by
+                            this repo, unlike `telegram_link_codes`/`telegram_links` which
+                            the API also writes). A successful link clears the chat's
+                            counter. `/link` accepts a code of any length >= 6 (no hardcoded
+                            length check) so a future longer API-side code works without a
+                            bot change. On a re-link that moves an EXISTING user to a NEW
+                            chat, the OLD chat gets a best-effort one-line notice
+                            (`with best_effort("link.notify_old_chat"):` +
+                            `hunter.bot.notifications._tg_notify`) — the other displacement
+                            direction (this chat reassigned from a different user) has no
+                            channel to notify (that chat_id IS the old user's only known
+                            chat) and is only logged.
+    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip.
+                            The single-URL apply path (owner and linked-non-owner branches)
+                            is guarded by `hunter.url_policy.validate_public_url` before any
+                            apply subprocess is spawned — see `hunter/url_policy.py` above.
   delivery.py               deliver_apply_now(url?) — instant Sheets mirror + Drive upload
                             after EVERY successful apply (auto/manual/paste/LinkedIn batch);
                             targeted fast path by URL, falls back to the idempotent backfills
