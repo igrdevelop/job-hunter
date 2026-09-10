@@ -1,6 +1,6 @@
 # Plan: Move `linkedin_scout/` to Its Own Private Repository
 
-**Status:** Phase 0 DONE (2026-07-08, branch refactor/scout-decouple-phase0) — Phases 1-4 pending.
+**Status:** DONE — scout lives in the private `igrdevelop/linkedin-scout` repo; this repo went through the Phase 3 cleanup on 2026-08-11 (CLAUDE.md "LinkedIn Posts Scout"). Kept for the payload contract history. Open plans index: docs/ROADMAP.md
 **Owner action required:** create the private GitHub repo, desktop cutover (Phase 2).
 
 ---

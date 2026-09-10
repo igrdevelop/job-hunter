@@ -4,7 +4,7 @@ Steps to flip `igrdevelop/job-hunter` from private to public. Items 1–2 are
 already done on the branch; **item 3 (history scrub) is manual and destructive
 — read it fully before running anything.**
 
-## 1. Working tree is clean of personal data ⚠️ (partially done — NOT clean)
+## 1. Working tree is clean of personal data ✅ (done 2026-08-30 — wave 2, PR #235)
 
 - `prompts/candidate_profile.md`, `prompts/base_cv_*.md`, `prompts/candidate/`,
   `prompts/examples/` — untracked + gitignored; `.example` templates +
@@ -14,7 +14,14 @@ already done on the branch; **item 3 (history scrub) is manual and destructive
   longer inside the image).
 - Secrets were never tracked (verified: no `.env`, tokens, tracker data in
   `git ls-files`).
-- **Still tracked and NOT clean:** `prompts/generation_rules.md` (41 of 274
+- **Resolved 2026-08-30 (#235):** the personal block below no longer exists in
+  `prompts/generation_rules.md` / `prompts/judge_rules.md` — both files are
+  candidate-agnostic and `hunter/gen_prompt.py` renders the active candidate's
+  facts into their markers at call time; `tests/test_handoff_readiness.py` now
+  scans them with NO allowlist. The paragraph below is kept as the record of
+  what was found. Remaining work for publication is §3 (history scrub +
+  gitleaks) — tracked in docs/ROADMAP.md row 5.1.
+- **Was tracked and NOT clean (historical):** `prompts/generation_rules.md` (41 of 274
   lines — a 7-employer table with exact periods, per-employer backend rules,
   university, course list, the candidate's language set) and
   `prompts/judge_rules.md` (real client names: Intel, Atruvia AG, "300+ German
