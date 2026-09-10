@@ -167,6 +167,19 @@ the schedule — a retry runs the same apply pipeline as a hunt, and the old
 apply_agent.py              Core apply pipeline: fetch job -> LLM -> content.json -> generate docs
 generate_docs.py            DOCX/PDF generation from content.json (python-docx + LibreOffice)
 hunter.py                   Entry point: starts Telegram bot + scheduler
+hunter/__main__.py          `python -m hunter` entry point + logging setup. Two
+                            secret-hygiene rules live here (2026-09-10): httpx/
+                            httpcore are pinned to WARNING, and `RedactBotToken`
+                            (a logging.Filter on BOTH handlers) scrubs
+                            `bot<id>:<token>` out of `record.msg` AND
+                            `record.args`. python-telegram-bot calls
+                            `api.telegram.org/bot<TOKEN>/<method>` and httpx logs
+                            the full URL at INFO, so every ~10 s long-poll used to
+                            write the live bot token into `logs/hunter_errors.log`
+                            — which `scheduled_gdrive_upload_logs` uploads to Drive
+                            daily and `docker compose logs` prints on demand. The
+                            filter scrubs args because that is where httpx puts the
+                            URL; a formatter-level fix would miss the real case.
 llm_client.py               LLM wrapper: Anthropic + OpenAI with retry + JSON parsing.
                             Anthropic path caches the (large, repeated) system prefix via
                             cache_control=ephemeral, and on effort-capable models (Sonnet 4.6,
