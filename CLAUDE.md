@@ -355,12 +355,55 @@ hunter/
                             `reset_stale_profile_jobs(timeout_min)` recovers a
                             `running` row whose drain tick crashed mid-job.
                             Consumed by hunter/schedules/profile_jobs.py (the
-                            actual render/parse/preview execution — see
-                            Repository Layout's schedules/ entry). Three kinds
-                            share this same primitive: `render`, `parse`, and
+                            actual render/parse/preview/erase execution — see
+                            Repository Layout's schedules/ entry). Four kinds
+                            share this same primitive: `render`, `parse`,
                             `preview` (docs/PROFILE_PAGE_TABS_WORKORDER.md,
                             the bot-repo work item — a deterministic, $0,
-                            no-LLM "test resume" PDF; see hunter/profile_preview.py).
+                            no-LLM "test resume" PDF; see hunter/profile_preview.py)
+                            and `erase` (docs/improvement-2026-09/
+                            07-COMPLIANCE_PLAN.md M1, docs/ERASURE_CONTRACT.md —
+                            right-to-erasure; see hunter/erasure.py).
+  erasure.py                 `erase_user(user_id, *, dry_run=False, force_owner=False,
+                            exclude_job_id=None) -> ErasureReport` (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md risk #1,
+                            milestone M1; docs/ERASURE_CONTRACT.md is the
+                            payload/result contract for the `profile_jobs`
+                            `erase` kind below). In ONE sqlite transaction,
+                            deletes every row scoped to `user_id` from every
+                            table with a `user_id` column — discovered via
+                            `PRAGMA table_info` rather than a hardcoded list,
+                            so a future table is covered automatically
+                            (today: `applications`, `telegram_links`,
+                            `telegram_link_codes`, `user_settings`,
+                            `profile_jobs`) — then `shutil.rmtree`s
+                            `users/{uid}/`, then a best-effort NAME-only sweep
+                            of `logs/` for files whose filename contains the
+                            uid (matches nothing today — log filenames don't
+                            carry a uid yet, that's a separate future
+                            milestone — the sweep exists so it starts working
+                            the moment that changes, with no further edit
+                            here). Also clears `hunter.tracker_cache.cache`
+                            and marks it unloaded when it could hold the
+                            erased user's rows (only true when the erased uid
+                            equals the CURRENT process's own scoped user,
+                            since `read_all_tracker_rows()` filters
+                            `WHERE user_id = current_user_id()`) — every
+                            existing cache reader already reloads on
+                            `if not cache.loaded`, so this is enough without
+                            an `asyncio.run()`/lock dance from a function that
+                            must also work from a bare synchronous CLI.
+                            Refuses an empty/unsafe `user_id` (must be a
+                            single safe path segment — it becomes a
+                            filesystem path) and refuses `DEFAULT_USER_ID`
+                            (the owner) unless `force_owner=True`.
+                            `exclude_job_id` lets the `profile_jobs` kind
+                            below skip deleting its OWN row so the normal
+                            `finish_profile_job()` call afterwards has
+                            something left to stamp `done` onto. Two callers:
+                            `hunter/schedules/profile_jobs.py`'s `erase` kind
+                            (the API is expected to enqueue this) and
+                            `tools/erase_user.py` (owner-run CLI seam).
   config.py                 ALL config: env vars, schedule, paths, source toggles.
                             FILTER re-exported from filter_config.py (below) for
                             backward compat — `from hunter.config import FILTER`
@@ -1037,7 +1080,18 @@ hunter/
                             exist (profile published at least once) — fails
                             with a "publish the profile first" message
                             otherwise rather than half-rendering under a
-                            placeholder identity. Any failure calls
+                            placeholder identity; `kind='erase'` (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
+                            docs/ERASURE_CONTRACT.md) → `hunter.erasure.erase_user()`
+                            deletes every row scoped to the job's `user_id`
+                            across every table with a `user_id` column, plus
+                            the `users/{uid}/` tree. The job's OWN
+                            `profile_jobs` row is excluded from that delete
+                            (`exclude_job_id=job_id`) so the normal
+                            `finish_profile_job()` call right below still has
+                            a row to stamp `done` onto — one status-writing
+                            path for every kind, no special case for this
+                            one. Any failure calls
                             `fail_profile_job()`; the job is terminal, a retry
                             is a new PUT/upload/preview-request from the
                             client. The tick itself runs inside
@@ -1333,6 +1387,22 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             stderr on a missing/malformed profile file, an
                             unsafe `--track` value, or a generate_docs.py
                             failure (e.g. no configured candidate identity).
+tools/erase_user.py         CLI seam for hunter/erasure.py (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
+                            docs/ERASURE_CONTRACT.md): `python
+                            tools/erase_user.py --user <uid> [--dry-run]
+                            [--force-owner] [--yes]`. Prints the erasure
+                            report as JSON. Destructive by default, so a real
+                            (non-`--dry-run`) run additionally requires
+                            `--yes`; `--force-owner` is the same dangerous
+                            override `erase_user()` itself exposes, off by
+                            default. Exit 1 + stderr on a missing `--yes`, an
+                            unsafe/empty `--user`, an owner refusal, or a
+                            filesystem error. The other caller of the same
+                            function is the `profile_jobs` `erase` kind (see
+                            hunter/schedules/profile_jobs.py above) — this CLI
+                            is for a support request handled without an API
+                            round trip.
 
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,

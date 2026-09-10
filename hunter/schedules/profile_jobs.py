@@ -41,6 +41,18 @@ identity comes from that file, not from the payload's own core.identity, so
 a preview before the first publish fails with a clear "publish first"
 message instead of half-rendering under a placeholder identity.
 
+kind='erase' (docs/improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
+docs/ERASURE_CONTRACT.md): payload is JSON `{}` or `{"force_owner": bool}` —
+self-contained, no candidate data needed. Delegates to
+hunter.erasure.erase_user(). The job's OWN row in `profile_jobs` belongs to
+the very user being erased, so it is deliberately excluded from
+erase_user()'s bulk delete (`exclude_job_id=job_id`) rather than pre-empting
+the normal finish_profile_job() call below with a status write of its own —
+one code path writes the terminal status for every kind, not a special case
+for this one. A caller that erases a user id equal to DEFAULT_USER_ID (the
+owner) without `force_owner: true` gets a failed job, not a silent no-op —
+see hunter.erasure's own docstring for why that refusal exists.
+
 Any failure — bad JSON, an unsafe path/track, an extraction error, a
 generate_docs.py failure, an unexpected exception — calls fail_profile_job()
 with the error message; the job is terminal, and a retry is a new
@@ -68,6 +80,7 @@ STALE_TIMEOUT_MIN = 10
 KIND_RENDER = "render"
 KIND_PARSE = "parse"
 KIND_PREVIEW = "preview"
+KIND_ERASE = "erase"
 
 
 def _resolve_user_relative_path(user_id: str, relpath: str) -> Path:
@@ -163,6 +176,22 @@ def _run_preview_job(user_id: str, payload: str) -> str:
     return json.dumps([str(p) for p in written], ensure_ascii=False)
 
 
+def _run_erase_job(job_id: str, user_id: str, payload: str) -> str:
+    from hunter.erasure import erase_user
+
+    force_owner = False
+    if payload:
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            data = {}
+        if isinstance(data, dict):
+            force_owner = bool(data.get("force_owner"))
+
+    report = erase_user(user_id, exclude_job_id=job_id, force_owner=force_owner)
+    return json.dumps(report.to_dict(), ensure_ascii=False)
+
+
 def _process_job(row: dict) -> None:
     from hunter import profile_jobs as pj
 
@@ -177,6 +206,8 @@ def _process_job(row: dict) -> None:
             result = _run_parse_job(user_id, payload)
         elif kind == KIND_PREVIEW:
             result = _run_preview_job(user_id, payload)
+        elif kind == KIND_ERASE:
+            result = _run_erase_job(job_id, user_id, payload)
         else:
             raise ValueError(f"unknown profile_jobs.kind: {kind!r}")
     except Exception as e:  # noqa: BLE001 — a job failure is terminal, not a crash
