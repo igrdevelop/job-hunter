@@ -36,10 +36,10 @@ gh api graphql -F owner='{owner}' -F repo='{repo}' -F pr=<N> -f query='
 
 ### No review at all is NOT "no findings"
 
-CodeRabbit does not review this repository on its own: since ~2026-09-08 the free
-tier skips repos with fewer than 10 GitHub stars (`gh repo view <owner>/<repo>
---json stargazerCount` returns 0 here), regardless of `auto_review.enabled: true`
-in `.coderabbit.yaml`. A PR opened by hand — or one where `/pr` Step 7.0 was
+CodeRabbit does not review this repository on its own: the free tier skips repos
+with fewer than 10 GitHub stars (`gh repo view <owner>/<repo> --json
+stargazerCount` returns 0 here), regardless of `auto_review.enabled: true` in
+`.coderabbit.yaml` — `/pr` Step 7 carries the dates and PR numbers. A PR opened by hand — or one where `/pr` Step 7.0 was
 skipped — therefore carries **no review**, which from the comments endpoint looks
 exactly like a clean one. Separate the two before triaging anything:
 
