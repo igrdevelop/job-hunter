@@ -44,11 +44,17 @@ skipped — therefore carries **no review**, which from the comments endpoint lo
 exactly like a clean one. Separate the two before triaging anything:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<N>/reviews --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | length'
+gh pr view <N> --json headRefOid --jq .headRefOid
+gh api repos/{owner}/{repo}/pulls/<N>/reviews --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | last | .commit_id // "none"'
 ```
 
-- **> 0** — rabbit reviewed the PR. Zero comments then genuinely means no findings; proceed to Step 2.
-- **0** — nothing reviewed it. Post the trigger, wait, and re-run this step:
+Compare the two — a review is only evidence about the commit it was stamped on:
+
+- **equal** — this exact head was reviewed. Zero comments then genuinely means no findings; proceed to Step 2.
+- **`none`** — nothing ever reviewed this PR.
+- **an older sha** — rabbit reviewed an earlier commit, and nothing re-reviews the new ones on its own (same under-10-stars policy), so the current head is unreviewed. This is the normal state right after Step 3 pushes fixes.
+
+In the last two cases post the trigger, wait, and re-run this step:
 
 ```bash
 gh pr comment <N> --body "@coderabbitai review"
