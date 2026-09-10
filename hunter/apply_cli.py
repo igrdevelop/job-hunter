@@ -31,6 +31,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+from hunter import metrics
 from hunter.apply_shared import (
     ApplyError,
     _REACT_SKIP_FORCE_HINT,
@@ -305,6 +306,31 @@ def main_cli(
         print(f"[apply_agent] SKIP — already in tracker: {url}")
         return
 
+    # Metrics (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1) — mirror of
+    # apply_api.py's own start_run: one generation_runs row per apply
+    # attempt, updated as the pipeline learns more and stamped with a
+    # terminal outcome at every exit point below. Best-effort throughout.
+    from hunter.config import JUDGE_MODEL, current_user_id
+    from hunter.tracker import normalize_url
+
+    _is_real_url = bool(url) and "paste://" not in url
+    try:
+        from hunter.funnel import source_for_url
+
+        _metrics_source = source_for_url(url) if _is_real_url else ""
+    except Exception:  # noqa: BLE001 — telemetry must never break an apply
+        _metrics_source = ""
+    run_id = metrics.start_run(
+        user_id=current_user_id(),
+        url_norm=normalize_url(url) if _is_real_url else "",
+        pipeline="cli",
+        profile="cli",
+        judge_model=JUDGE_MODEL,
+        source=_metrics_source,
+        is_manual=is_manual,
+        is_force=skip_dedup,
+    )
+
     folders_before = _get_existing_folders()
 
     # Determine job_text for the CLI skill:
@@ -342,6 +368,7 @@ def main_cli(
                 add_expired(url)
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+            metrics.finish_run(run_id, outcome="expired", exit_code=0)
             return
 
         # Abort if the posting we hold is too short to generate from (parity
@@ -365,6 +392,7 @@ def main_cli(
                 f"[apply_agent] ABORT — job text too short "
                 f"({len((job_text or '').strip())} chars): {url}"
             )
+            metrics.finish_run(run_id, outcome="too_short", exit_code=0)
             return None
 
         # Step 1.5c/1.5d — Pre-LLM stack text checks (mirror of apply_api Steps
@@ -401,6 +429,7 @@ def main_cli(
                 )
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+            metrics.finish_run(run_id, outcome="skip_react_pre_llm", exit_code=0)
             return
 
         if (
@@ -430,6 +459,7 @@ def main_cli(
                 )
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")
+            metrics.finish_run(run_id, outcome="skip_backend_only", exit_code=0)
             return
 
         # Manual-apply "warn but allow" screen (see apply_api Step 1.5e).
@@ -468,6 +498,7 @@ def main_cli(
             url,
             is_force_override=skip_dedup,
         ):
+            metrics.finish_run(run_id, outcome="skip_doomed_gate", exit_code=0)
             return
 
         # Step 1.5g — Re-post gate (mirror of apply_api Step 1.5g): a
@@ -484,6 +515,7 @@ def main_cli(
             permalink=permalink,
             is_force_override=skip_dedup,
         ):
+            metrics.finish_run(run_id, outcome="reused_repost", exit_code=0)
             return
 
         # Step 1.5h — Stack pre-screen (mirror of apply_api Step 1.5h).
@@ -497,6 +529,7 @@ def main_cli(
             is_force_override=skip_dedup,
             is_manual=is_manual,
         ):
+            metrics.finish_run(run_id, outcome="skip_prescreen", exit_code=0)
             return
 
     # Build apply_input: a job posting is never inlined into the prompt (see
@@ -524,6 +557,7 @@ def main_cli(
         from hunter.lang_guard import detect_posting_language
 
         _cli_posting_lang = detect_posting_language(job_text)
+        metrics.update_run(run_id, posting_lang=_cli_posting_lang)
         posting_file = _write_staging_posting(job_text)
         apply_input = _posting_file_prompt_block(posting_file)
         if not paste_text:
@@ -568,6 +602,7 @@ def main_cli(
                 else:
                     notify(f"⏱ <b>apply_agent timeout (20 min)</b>\nURL: {url}")
                     print("\n[apply_agent] Timeout — no folder created.")
+                    metrics.finish_run(run_id, outcome="cli_timeout", exit_code=1)
                     raise ApplyError("CLI timeout — no folder created") from None
 
             if result.returncode == 0:
@@ -601,6 +636,7 @@ def main_cli(
                 + f"\n\n<pre>{error_detail}</pre>"
             )
             print(f"\n[apply_agent] claude exited with code {result.returncode}")
+            metrics.finish_run(run_id, outcome="cli_error", exit_code=result.returncode)
             raise ApplyError(f"CLI exited with code {result.returncode}")
     finally:
         # The staged posting file has served its purpose once the CLI process
@@ -610,6 +646,7 @@ def main_cli(
         if posting_file is not None:
             posting_file.unlink(missing_ok=True)
 
+    metrics.stage(run_id, "generate", "ok")
     if result is not None and result.returncode == 0:
         if result.stdout:
             print(result.stdout)
@@ -671,6 +708,7 @@ def main_cli(
                         telegram_text=_abort_msg,
                         content=_cli_content,
                     )
+                    metrics.finish_run(run_id, outcome="skip_react_post_llm", exit_code=0)
                     return
 
                 # Company+title dedup (post-generation, parity with the API
@@ -706,6 +744,7 @@ def main_cli(
                             telegram_text=_abort_msg,
                             content=_cli_content,
                         )
+                        metrics.finish_run(run_id, outcome="skip_dedup_company_title", exit_code=0)
                         return
 
                 # Language enforce-gate (parity with the API pipeline). The CLI skill
@@ -739,6 +778,7 @@ def main_cli(
                     _scrub_fixes.extend(_gloss_fixes)
                     for _line in _scrub_fixes:
                         print(f"[apply_agent] content-scrub: {_line}")
+                    metrics.update_run(run_id, scrub_fixes=len(_scrub_fixes))
 
                     # Claim judge (parity with the API pipeline): verify claims
                     # against profile + posting between the scrubs and the language
@@ -770,6 +810,13 @@ def main_cli(
                             for _line in _outcome.fixes:
                                 print(f"[apply_agent] judge-repair: {_line}")
                             _scrub_fixes.extend(_outcome.fixes)
+                            metrics.update_run(
+                                run_id,
+                                judge_violations=len(_outcome.report.violations),
+                                judge_repaired=len(_outcome.fixes),
+                                judge_surviving=len(_outcome.survivors),
+                            )
+                            metrics.stage(run_id, "judge", "blocked" if _outcome.blocked else "ok")
                             if JUDGE_MODE in ("warn", "block") and _outcome.report.actionable:
                                 notify(_outcome.report.telegram_summary(url))
                             if _outcome.blocked:
@@ -788,6 +835,7 @@ def main_cli(
                                     telegram_text=_abort_msg,
                                     content=_cli_content,
                                 )
+                                metrics.finish_run(run_id, outcome="blocked_judge", exit_code=0)
                                 return
                         except Exception as _je:
                             print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
@@ -796,6 +844,10 @@ def main_cli(
                     _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:
                         print(f"[apply_agent] lang-gate: {_line}")
+                    metrics.update_run(
+                        run_id, lang_gate_hits=len(_report), lang_gate_blocked=_blocked
+                    )
+                    metrics.stage(run_id, "lang_gate", "blocked" if _blocked else "ok")
 
                     # A Polish posting must ship a Polish CV. The CLI skill returns
                     # "resume_pl": null unless --full, so mirror it from the already
@@ -843,6 +895,7 @@ def main_cli(
                                 telegram_text=_abort_msg,
                                 content=_cli_content,
                             )
+                            metrics.finish_run(run_id, outcome="blocked_lang_gate", exit_code=0)
                             return
                         # Remove the pre-gate (contaminated) docs FIRST, so a failed
                         # regeneration (e.g. LibreOffice down) can't leave a stale
@@ -912,6 +965,7 @@ def main_cli(
                             telegram_text=_abort_msg,
                             content=_cli_content,
                         )
+                        metrics.finish_run(run_id, outcome="bogus_company", exit_code=0)
                         return
 
             except Exception as e:
@@ -1002,6 +1056,7 @@ def main_cli(
                     )
                     pdf_summary = "\n" + format_summary(pdf_check)
                     print(f"[apply_agent] {format_summary(pdf_check)}")
+                    metrics.update_run(run_id, ats_pdf_score=pdf_check.get("score"))
             except Exception as e:
                 print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
 
@@ -1015,6 +1070,7 @@ def main_cli(
 
                 verdict = run_llm_verdict(folder=folder_path, job_text=job_text)
                 if verdict is not None:
+                    metrics.update_run(run_id, verdict_first=verdict.get("score"))
                     # Verdict refine loop (mirror of apply_api Step 7.7b): rewrite
                     # resume_en against the verdict's own feedback when below
                     # target, re-render, re-verdict — keeping only strict
@@ -1132,6 +1188,18 @@ def main_cli(
             _cli_content = json.loads(content_json_path.read_text(encoding="utf-8"))
             if verdict is not None:
                 _cli_content["ats_verdict"] = verdict
+                _verdict_history = _cli_content.get("verdict_history") or []
+                _accepted_rounds = [h for h in _verdict_history if h.get("outcome") == "accepted"]
+                metrics.update_run(
+                    run_id,
+                    verdict_final=verdict.get("score"),
+                    refine_rounds=len(_verdict_history),
+                    refine_accepted=len(_accepted_rounds),
+                    best_round_kind=(
+                        _accepted_rounds[-1].get("kind") if _accepted_rounds else None
+                    ),
+                )
+                metrics.stage(run_id, "verdict", "ok", payload={"score": verdict.get("score")})
             _cli_content["cost"] = {"mode": "cli", "total_usd": None}
             if permalink:
                 # Real, clickable link (e.g. a captured LinkedIn Scout post
@@ -1175,6 +1243,16 @@ def main_cli(
             print(
                 f"\n[apply_agent] Done! Folder: Applications/{new_folder}/ ({len(created_files)} files)"
             )
+            _row_id_for_metrics = None
+            try:
+                if _is_real_url:
+                    from hunter.tracker import lookup_url as _lookup_url_for_metrics
+
+                    _rows_for_metrics = _lookup_url_for_metrics(url)
+                    _row_id_for_metrics = _rows_for_metrics[0]["id"] if _rows_for_metrics else None
+            except Exception:  # noqa: BLE001 — telemetry must never break an apply
+                _row_id_for_metrics = None
+            metrics.finish_run(run_id, outcome="ok", exit_code=0, row_id=_row_id_for_metrics)
             # Success: return the folder so apply_agent.main() can run the
             # dual-apply shadow comparison (if enabled).
             return folder_path
@@ -1200,6 +1278,7 @@ def main_cli(
                 content=_cli_content if isinstance(_cli_content, dict) else None,  # may be None
             )
             print("\n[apply_agent] ABORT: folder created but no .docx/.pdf files found.")
+            metrics.finish_run(run_id, outcome="no_docs", exit_code=0)
             return None
     else:
         stdout_preview = (result.stdout or "").strip()[:600] if result else ""
@@ -1213,4 +1292,5 @@ def main_cli(
             )
         )
         print("\n[apply_agent] FAIL: claude exited 0 but no new folder was created.")
+        metrics.finish_run(run_id, outcome="cli_no_folder", exit_code=1)
         raise ApplyError("No output folder created")
