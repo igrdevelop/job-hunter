@@ -111,6 +111,11 @@ def _resolve_host_ips(host: str) -> list:
     resolved = []
     for info in infos:
         raw_ip = info[4][0]
+        # A sockaddr's first element is the address string for AF_INET/AF_INET6,
+        # but the stubs type it as `str | int` because other families exist.
+        # Anything non-string is not an address we can check — skip it.
+        if not isinstance(raw_ip, str):
+            continue
         try:
             # Strip an IPv6 zone id (fe80::1%eth0) before parsing.
             resolved.append(ipaddress.ip_address(raw_ip.split("%", 1)[0]))

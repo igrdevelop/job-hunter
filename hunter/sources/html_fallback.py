@@ -79,7 +79,7 @@ def fetch_html(url: str) -> str:
     from hunter.url_policy import validate_public_url
 
     current_url = url
-    resp = None
+    resp: requests.Response
     for hop in range(MAX_REDIRECTS_FOLLOWED + 1):
         resp = requests.get(current_url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=False)
         if resp.is_redirect and "Location" in resp.headers:
