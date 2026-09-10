@@ -23,9 +23,9 @@ pipeline DSL; do not touch `tracker.py`/`filters.py` under a generation change.
 | # | Item | Plan | Next step | Size |
 |---|------|------|-----------|------|
 | 1.1 | **Flip `PRESCREEN_MODE` warn → skip** | [STACK_PRESCREEN_PLAN M5](STACK_PRESCREEN_PLAN.md) | Owner decision 2026-08-24 was "one week of warn, then skip"; it has been two. One line in the prod `.env`, rollback is the same line. Glance at the Telegram warnings of the last two weeks first — any warn on a vacancy the owner actually sent = don't flip, open a regression test instead | minutes |
-| 1.2 | **Oracle Always Free — M0 probe** | [ORACLE_FREE_TIER_PLAN](ORACLE_FREE_TIER_PLAN.md) | M0a: yield of pracuj/theprotocol/linkedin from an Oracle IP vs prod `/health` median (rule: ≥ 70 % on 3 runs or close the plan). M0b: `docker buildx --platform linux/arm64` test build. M0c: the Hetzner invoice + peak RAM during a CLI apply | one evening |
+| 1.2 | **Oracle Always Free — M0 probe** | [ORACLE_FREE_TIER_PLAN](ORACLE_FREE_TIER_PLAN.md) | M0a: yield of pracuj/theprotocol/linkedin from an Oracle IP vs the prod `/health` 20-run median, three runs ~20 min apart (rule: ≥ 70 % on all three passes; one run below → one re-run; two below → fail, and any fail closes the plan). M0b: `docker buildx --platform linux/arm64` test build. M0c: the Hetzner invoice + peak RAM during a CLI apply | one evening |
 | 1.3 | **Post-generation block unification (`hunter/apply_post.py`)** | [STACK_PRESCREEN_PLAN M8](STACK_PRESCREEN_PLAN.md) | Not started; file does not exist. Strangler, one stage per PR, from the tail: outreach → verdict+refine → render → gates → judge → scrubs. Golden E2E for both branches is the safety net (assertions never edited) | ~1 PR/stage |
-| 1.4 | **Plan-doc hygiene** | this file | `PUBLIC_RELEASE_CHECKLIST.md` item 1 is closed by wave 2 (#235) but still reads "NOT clean"; `DEPLOY.md` Status checklist is all unchecked while prod has been live since June. Fix the lines, don't rewrite the docs | minutes |
+| 1.4 | **Plan-doc hygiene** | this file | `DEPLOY.md`'s Status checklist is all unchecked while prod has been live since June. Fix the lines, don't rewrite the doc (the other three stale Status lines and `PUBLIC_RELEASE_CHECKLIST` item 1 were corrected in the PR that created this file) | minutes |
 
 ## 2. Blocked on ONE owner decision
 

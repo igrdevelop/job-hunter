@@ -6,18 +6,24 @@
 Always Free tier as a way to cut hosting spend for AI/agent side projects. The bot
 and the api run on one Hetzner CX22 (2 shared x86 vCPU, 4 GB RAM, €4.35/month,
 docs/DEPLOY.md §2.2) plus a 75 GB volume. The interesting part is NOT the €52/year —
-it is that the free tier's headline shape (up to 4 Ampere A1 OCPUs + 24 GB RAM,
-200 GB block storage) is several times the box we run on, and the box is already
-tight: on 2026-08-29 the deploy reported success for two days while the 75 GB
+it is that the free tier's compute allocation (1,500 OCPU-hours + 9,000 GB-hours
+per month of Ampere A1 — for an Always Free tenancy, 2 OCPUs + 12 GB RAM as one
+instance or two 1-OCPU ones — plus 200 GB block storage) gives the same core
+count and 3× the RAM of the box we run on, and the box is already tight: on 2026-08-29 the deploy reported success for two days while the 75 GB
 volume sat at 100 % (63.92 GB of untagged deploy images, 271 MB free —
 docs/AGENT_LOG.md 2026-08-29). This plan asks whether the free tier is a real
 upgrade for THIS workload or a trap, and answers it with one evening of
 measurement before anything moves.
 
-> Free-tier limits quoted here are as of the author's knowledge (mid-2026) and are
-> exactly the kind of thing a provider changes without notice. M0 step 0 is to
-> re-read the current Always Free page; a changed limit changes the arithmetic,
-> not the method.
+> Free-tier limits quoted here were re-read from Oracle's Always Free page on
+> 2026-09-10 (the first draft said 4 OCPUs / 24 GB from memory — wrong, and caught
+> in review). They are exactly the kind of thing a provider changes without
+> notice; M0 step 0 is to re-read that page again, because a changed limit
+> changes the arithmetic, not the method. Two constraints from the same page that
+> shape M2: Always Free compute must live in the tenancy's **home region** (chosen
+> at signup, cannot be changed — pick Frankfurt), and an instance idle for 7 days
+> (CPU 95th percentile < 20 % AND network < 20 % AND, on A1, memory < 20 %) may be
+> reclaimed.
 
 ## Problem
 
@@ -82,7 +88,17 @@ not need it; `hunter.config` validation is only run by `hunter.py`, not by impor
 the hunt loop calls — read-only HTTP, nothing written anywhere:
 
 ```bash
-python -c "from hunter.sources import ALL_SOURCES as S; [print(f'{s.name:14s}', len(s.search())) for s in S if s.name in ('pracuj','theprotocol','builtin','linkedin','jobleads','inhire','justjoin','nofluffjobs')]"
+python - <<'PY'
+from hunter.sources import ALL_SOURCES
+PROBE = {"pracuj", "theprotocol", "builtin", "linkedin", "jobleads", "inhire", "justjoin", "nofluffjobs"}
+for src in ALL_SOURCES:
+    if src.name not in PROBE:
+        continue
+    try:  # one source's 403/timeout must not abort the rest — same boundary the hunt loop keeps
+        print(f"{src.name:14s} {len(src.search()):4d}")
+    except Exception as exc:  # noqa: BLE001 — a probe records the error, it does not handle it
+        print(f"{src.name:14s} ERR  {type(exc).__name__}: {str(exc)[:120]}")
+PY
 ```
 
 Run it three times, ~20 minutes apart (Cloudflare decisions are per-session and a
@@ -161,26 +177,60 @@ amd64 image is unchanged by this step. Prod does not notice M1 at all.
 `docker compose` layout, same volumes (`users/`, `tracker.db`, `.claude-cli/`,
 token files, `gsheets_state.json`), same `deploy` user + SSH key, same host-cron
 from docs/DEPLOY.md (the 2026-08-29 prune + free-space gate). Ubuntu 24.04 aarch64
-image. Firewall: Oracle's VCN security list blocks everything inbound by default —
-open 22 only; the api's port is whatever the sibling compose exposes today, mirror
-it. If the account is Always Free–only, upgrade it to Pay-As-You-Go (the free
-resources stay free; it lifts the A1 capacity lottery and, per Oracle's own
-documentation, exempts the instance from idle reclamation — the one free-tier rule
-that can kill a 24/7 bot). Set a budget alert at $1 so a mis-sized resource is
-noticed before an invoice. Rollback: terminate the instance. Prod untouched.
+image, in the tenancy's home region (Always Free compute cannot be created
+anywhere else). Firewall: Oracle's VCN security list blocks everything inbound by
+default — open 22 only; the api's port is whatever the sibling compose exposes
+today, mirror it.
 
-**M3 — Shadow run: hunt-only on Oracle for one week.** Copy the data volumes,
-start the bot on Oracle with a SEPARATE test bot token (a Telegram bot token can be
-polled by one process only — the prod token must never run on two hosts at once),
-`AUTO_APPLY=false`, `GSHEETS_ENABLED=false`, `GDRIVE_ENABLED=false`, all schedule
-slots on. This exercises every scraper on the new IP for a week of real slots,
+**Sizing is the idle-reclamation control, not billing mode.** Oracle reclaims an
+Always Free instance idle for 7 days, where idle = CPU 95th percentile < 20 % AND
+network < 20 % AND (A1 only) memory < 20 %; the page says nothing about a
+Pay-As-You-Go upgrade changing that, so the plan must not rely on one. The
+criteria are *percentages of the instance's own size*: bot + api together sit
+around 1–1.5 GB RSS (M0c measures the real number), which on the full 12 GB is
+~10 % — idle by the memory criterion — but on a 1 OCPU / 6 GB instance is ~25 %,
+above the threshold. So: create the instance at **1 OCPU / 6 GB** (half the
+allocation, still 1.5× the CX22's RAM), confirm after the first week that the
+OCI console's utilization graphs show memory above 20 %, and grow it only if
+M0c's peak says it must. The residual risk — Oracle reclaiming anyway, or
+tightening the rule — stays and is stated in Risks; the rollback for it is the
+same redeploy path as for any host loss.
+
+Upgrading the account to Pay-As-You-Go is still worth doing for a different,
+documented reason: it unlocks more compute shapes and, anecdotally, escapes the
+"out of host capacity" lottery on A1; Oracle states Always Free resources stay
+free after the upgrade and only usage above the limits is charged. Set a budget
+alert at $1 so a mis-sized resource is noticed before an invoice. Rollback:
+terminate the instance. Prod untouched.
+
+**M3 — Shadow run: hunt-only on Oracle for one week.** Copy NOTHING from prod
+except what a hunt needs to run: the owner's `candidate.yaml` (the filters read
+home-city aliases and languages from it) and a `.env` holding a SEPARATE test bot
+token + the admin chat id (a Telegram bot token can be polled by one process only
+— the prod token must never run on two hosts at once). No `users/**/Applications`,
+no `tracker.db` (yield is `source_health`'s pre-dedup count, so dedup state does
+not change the measurement), no Google/Gmail/Drive tokens, no `.secrets/`, no
+`.claude-cli/` — none of them are needed with `AUTO_APPLY=false`,
+`GSHEETS_ENABLED=false`, `GDRIVE_ENABLED=false`, `GMAIL_ENABLED=false`, all
+schedule slots on. An empty tracker means every found job is "new" and arrives
+as a card on the test bot; that noise is the point (it is the yield), and the
+cards' Apply buttons hit a bot with no LLM key and no CLI login, so nothing can
+be generated by accident. At the end of the week the shadow volumes are wiped
+(`docker compose down -v` + delete the compose dir) — M4 starts from a fresh copy,
+never from the shadow's. This exercises every scraper on the new IP for a week of real slots,
 which M0a's three samples cannot — and it is the only way to see a slow
 reputation decline. Read `/health` on both bots daily. Decision rule: same 70 %
 median rule as M0a, over the week. Fail → stop here, terminate, record. Prod
 untouched throughout.
 
-**M4 — Cutover.** One maintenance window: stop the Hetzner bot, `rsync` the volumes
-one final time (tracker.db, users/, tokens), start on Oracle with the PROD token,
+**M4 — Cutover.** One maintenance window: stop EVERY writer on Hetzner — the bot
+AND `job-hunter-api` (they share `tracker.db`, whose `profile_jobs` /
+`telegram_link_codes` tables the api writes, and the `users/` mount; an rsync
+under a live writer can miss WAL-backed rows or copy `tracker.db` and its `-wal` /
+`-shm` sidecars from different instants). Then either `rsync` the volumes one
+final time with all three SQLite files together, or take `sqlite3 tracker.db
+".backup tracker.snapshot.db"` and ship the snapshot — plus `users/`, tokens,
+`.secrets/`, `.claude-cli/`. Start on Oracle with the PROD token,
 switch `VPS_HOST` in the GitHub secrets, verify `/status` + one `/hunt` + one
 manual paste apply end-to-end (docs, Sheets row, Drive folder). Keep the Hetzner
 box **stopped, not deleted, for 30 days** — the rollback is "start it again and
@@ -195,11 +245,16 @@ CLAUDE.md's deploy notes.
   the existing `source_health.newly_broken()` alert (3 consecutive dry runs on a
   previously-working source) is the rail, and the 30-day stopped Hetzner box is the
   rollback.
-- **Instance reclaimed / capacity revoked.** Mitigated by the PAYG upgrade in M2;
-  residual risk is an account-level action, against which the only defence is the
-  same one as today for a Hetzner outage: `backups/`, Sheets, Drive, and the
-  redeploy path. Nothing in this plan makes that worse, but nothing makes it better
-  either — a free tier has no SLA and the plan should say so plainly.
+- **Instance reclaimed as idle / capacity revoked.** The documented idle rule is
+  three utilization thresholds over 7 days; M2 sizes the instance so real usage
+  stays above them (memory is the binding one on A1) and the first week's console
+  graphs confirm it. Billing mode is NOT a mitigation — Oracle's page does not say
+  a PAYG upgrade exempts Always Free instances, and the first draft of this plan
+  wrongly assumed it did. Residual risk (Oracle reclaims anyway, tightens the rule,
+  or acts at account level) has the same defence as a Hetzner outage today:
+  `backups/`, Sheets, Drive, and the redeploy path. Nothing in this plan makes that
+  worse, but nothing makes it better either — a free tier has no SLA and the plan
+  should say so plainly.
 - **arm64-only behaviour differences** (LibreOffice rendering, font metrics,
   Chromium). `tests/test_golden_apply_e2e.py` + the CLI golden run in CI on amd64
   only; M3's shadow week catches scraper differences but NOT rendering ones, since
