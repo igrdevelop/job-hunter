@@ -2397,9 +2397,15 @@ second `html.unescape()` pass.
   REGRESSION: it compares the per-file error count against the committed
   `mypy_baseline.json` and fails only when a file's count goes UP, or a new
   file (absent from the baseline) has errors. A file's count going DOWN is
-  reported but never fails the build. Baseline as of 2026-09-10: 218 errors
-  in 54 files (mostly PTB `Message | None`/`JobQueue | None` unchecked
-  attribute access — real but pre-existing). Don't let a new change grow a
+  reported but never fails the build. Baseline as of 2026-09-10: 223 errors
+  in 57 files (mostly PTB `Message | None`/`JobQueue | None` unchecked
+  attribute access — real but pre-existing). Each number is the MAX of what
+  CI (ubuntu, `requirements.lock`) and a developer machine report: the two
+  resolve a few third-party stubs differently (beautifulsoup4, requests),
+  which moves 4 errors across 5 files, and taking the max is what keeps
+  BOTH environments from reporting a false regression while a genuinely new
+  error still pushes its file above the recorded number. When updating the
+  baseline, reconcile against a CI typecheck log, not only a local run. Don't let a new change grow a
   file's count; deliberately reducing the baseline (fixing real errors) is
   its own commit: `python scripts/mypy_ratchet.py --update`. Driving it to
   zero is tracked in docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not
@@ -2444,7 +2450,7 @@ second `html.unescape()` pass.
 
 ### Code Quality
 
-5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, blocking via `scripts/mypy_ratchet.py` — a 218-error baseline that only fails on a regression, not a fixed threshold; see docs/quality/06-static-gates-mypy-sonar.md and docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2).
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, blocking via `scripts/mypy_ratchet.py` — a 223-error baseline that only fails on a regression, not a fixed threshold; see docs/quality/06-static-gates-mypy-sonar.md and docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2).
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
