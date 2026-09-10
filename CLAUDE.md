@@ -733,7 +733,31 @@ hunter/
                             never resolving). `add_manual_jobleads_pending` already did its
                             own URL-only check and was unaffected.
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
-  tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
+  tracker_backup.py         Timestamped daily LOCAL snapshots (docs/improvement-2026-09/
+                            06-OPS_PLAN.md M1). Three independent families, each pruned to
+                            `TRACKER_BACKUP_KEEP_FILES` on its own: `tracker_db_*.db` —
+                            `tracker.db`, the real live data store, via
+                            `sqlite3.Connection.backup()` (NEVER `shutil.copy2` of a live
+                            WAL db — a byte-copy of the main file while pages sit
+                            uncommitted in the `-wal` sidecar is a torn snapshot that opens
+                            fine and is missing recent writes or outright corrupt;
+                            `Connection.backup()` drives SQLite's own backup API instead,
+                            safe against a database being written to concurrently by the
+                            bot process itself); `app_sqlite_*.db` — job-hunter-api's
+                            `app.sqlite` (users/auth/profiles), only when `APP_SQLITE_PATH`
+                            is set and the file exists — this process doesn't own that db,
+                            so the source is opened via a read-only URI
+                            (`file:...?mode=ro`); `tracker_*.xlsx` — legacy, best-effort:
+                            prod only writes `tracker.xlsx` on `/export`, so its usual
+                            absence is not an error. Every produced `.db` copy is verified
+                            with `PRAGMA integrity_check` right after the backup — failure
+                            flips `ok=False` into `result["errors"]`, which
+                            `scheduled_tracker_backup` already turns into a Telegram alert
+                            (unchanged contract, no `best_effort()` needed here — the
+                            failure has nowhere silent to hide). These are still LOCAL
+                            snapshots on the same disk as the live data — `scripts/
+                            offhost_backup.sh` (restic, host cron, not run by any agent) is
+                            the off-host half; see docs/DEPLOY.md "Backups".
   lang_guard.py             Language routing + contamination guard: detect_posting_language()
                             (PL/EN by token density) + Polish-in-English / English-in-Polish
                             detection (diacritics + lexicon + suffix + bilingual gloss). Feeds
@@ -1334,6 +1358,29 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             unsafe `--track` value, or a generate_docs.py
                             failure (e.g. no configured candidate identity).
 
+scripts/                    Host-side ops scripts (tracked, sh — LF via .gitattributes),
+                            NOT executed by any agent or by the app itself; the owner
+                            installs them via host cron. See docs/DEPLOY.md "Backups".
+  offhost_backup.sh          restic backup of the bot's `{db,users,backups}` dirs (+
+                            optional `API_DATA_DIR`) to an S3-compatible bucket, then
+                            `restic forget --keep-daily 30 --keep-weekly 12 --prune`.
+                            Parametrised entirely by env (`RESTIC_REPOSITORY`,
+                            `RESTIC_PASSWORD_FILE`, `BOT_DATA_DIR`, `API_DATA_DIR`,
+                            `KEEP_DAILY`/`KEEP_WEEKLY`); exits non-zero on any restic
+                            failure. Optional dead-man's-switch ping (`BACKUP_PING_URL`,
+                            curl, best-effort — never fails the backup itself). This is
+                            the OFF-HOST half of docs/improvement-2026-09/06-OPS_PLAN.md
+                            M1 — `hunter/tracker_backup.py` above only ever writes local
+                            snapshots on the same disk as the live data.
+  restore_drill.sh           Proves the restic backup is actually restorable: `restic
+                            restore` of the latest (or `$SNAPSHOT`) snapshot into a
+                            scratch temp dir, then `sqlite3 ... "PRAGMA
+                            integrity_check"` on every `.db` file found — the same check
+                            `hunter/tracker_backup.py::_verify_integrity` runs on the
+                            LOCAL copy at backup time, but here against what restic
+                            actually has in the bucket. Read-only against the repo,
+                            deletes its own scratch dir on exit.
+
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
                             slash commands in .claude/commands/*.md, hooks in .claude/hooks/*.py
@@ -1574,7 +1621,8 @@ Applications/               Generated documents (gitignored)
 | `LINKEDIN_STORAGE_STATE` | — | Path to a Playwright session JSON from `python tools/linkedin_login.py`. Used by the apply pipeline only (`fetch_job_text(url, use_session=True)` → `LinkedInSource.fetch_text_with_session`) so the logged-in page reveals "No longer accepting applications" and `expired_check` aborts before any LLM spend (~$0.31 saved per dead LinkedIn URL). **Must be a path INSIDE the container** (`/app/.secrets/...`); a stale value silently degrades to the guest fetch — `_storage_state_path()` returns None for a non-existent file, and `fetch_text_with_session` falls back without raising. Since 2026-08-22 that fallback is no longer blind: `linkedin.guest_html_expired()` reads the closed-posting signature out of guest HTML (see the Scraper Health Notes row), so a dead posting is still a $0 EXPIRED skip. `/check_expired` / gmail enricher intentionally do **not** use the session (they get the same guest-HTML check instead). Once set, drop `linkedin.com` from `GMAIL_ENRICH_SKIP_HOSTS`. |
 | `LINKEDIN_TPR` | `r604800` | LinkedIn guest-search recency window (`r86400` = 24h, `r604800` = 7 days). Widened from a hardcoded 24h on 2026-08-12: the two windows return genuinely different sets (only 14 shared ids of 57/69 measured) and the 7-day set is far more on-target (49% of rows carry "angular" in the title vs 11% for 24h). URL dedup in the hunt loop makes the wider window free. Unlike `f_E`/`f_WT` (both silently ignored by this endpoint) this parameter is really honoured. |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
-| `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
+| `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue — see `hunter/tracker_backup.py` above |
+| `APP_SQLITE_PATH` | — | Optional path to job-hunter-api's own `app.sqlite` (users/auth/profiles). When set and the file exists, `hunter/tracker_backup.py` backs it up alongside `tracker.db` on the same daily schedule (read-only source connection — this process doesn't own that database). Unset (default) = skipped; most bot-only deployments don't have this file reachable. |
 | `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
 | `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
 | `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |

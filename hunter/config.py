@@ -249,6 +249,14 @@ TRACKER_BACKUP_DIR: Path = Path(
 ).expanduser()
 TRACKER_BACKUP_KEEP_FILES: int = max(0, int(os.getenv("TRACKER_BACKUP_KEEP_FILES", "90")))
 TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
+# Optional: path to job-hunter-api's own SQLite data store (users, auth,
+# profiles). Unset (default) = skipped — most deployments of this bot don't
+# also run job-hunter-api, and even when they do it's a separate compose
+# stack with its own volume, not automatically visible in this container.
+# When set and the file exists, hunter/tracker_backup.py backs it up
+# alongside tracker.db (read-only source connection — this process doesn't
+# own that database). See docs/improvement-2026-09/06-OPS_PLAN.md M1.
+APP_SQLITE_PATH: str = os.getenv("APP_SQLITE_PATH", "")
 APPLICATIONS_DIR: Path = Path(
     os.getenv("APPLICATIONS_DIR", str(PROJECT_DIR / "Applications"))
 ).expanduser()
