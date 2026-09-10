@@ -1427,7 +1427,7 @@ def job_from_pending_row(row: dict) -> Job:
     )
 
 
-def claim_pending() -> dict | None:
+def claim_pending(claimed_by: str = "") -> dict | None:
     """Atomically claim the oldest PENDING row: ats_status -> IN_PROGRESS + claimed_at.
 
     A single UPDATE...RETURNING statement (SQLite >= 3.35) — the row selection
@@ -1439,13 +1439,22 @@ def claim_pending() -> dict | None:
     sequential one, so sorting by it would NOT give FIFO. Returns the full
     row as a dict (including `pending_meta`), or None when the queue is
     empty.
+
+    `claimed_by` stamps who holds the claim (`hunter.apply_worker.claimed_by_tag()`,
+    `hostname:pid` — docs/improvement-2026-09/06-OPS_PLAN.md M3). Empty by
+    default so every other caller/test is unaffected. Used at startup
+    (`telegram_bot._post_init`) to release only the rows THIS host claimed
+    on its previous life, independent of `APPLY_CLAIM_TIMEOUT_MIN` — a
+    container restart means no worker of this host survived to finish them,
+    while a row genuinely claimed by another host stays untouched (the
+    cross-host case is still covered by `reset_stale_claims`' timeout sweep).
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_db(DB_PATH) as conn:
         row = conn.execute(
             f"""
             UPDATE applications
-            SET ats_status='{IN_PROGRESS_ATS}', claimed_at=?
+            SET ats_status='{IN_PROGRESS_ATS}', claimed_at=?, claimed_by=?
             WHERE rowid = (
                 SELECT rowid FROM applications
                 WHERE ats_status='{PENDING_ATS}'
@@ -1454,25 +1463,27 @@ def claim_pending() -> dict | None:
             )
             RETURNING *
             """,  # noqa: S608 — no interpolated user input, both constants are module-level literals
-            (now,),
+            (now, claimed_by),
         ).fetchone()
     return dict(row) if row else None
 
 
 def release_claim(url: str) -> None:
-    """IN_PROGRESS -> PENDING, clearing claimed_at.
+    """IN_PROGRESS -> PENDING, clearing claimed_at/claimed_by.
 
     Used for outcomes that are infrastructure hiccups, not the vacancy's
     fault (cli_timeout, llm_outage) — the row goes back to the front of the
-    queue instead of being marked FAIL.
+    queue instead of being marked FAIL. Also the graceful-shutdown release
+    path (hunter.apply_worker.shutdown_workers / apply_worker_loop's own
+    CancelledError handling) — see docs/improvement-2026-09/06-OPS_PLAN.md M3.
     """
     norm = normalize_url(url)
     if not norm:
         return
     with get_db(DB_PATH) as conn:
         conn.execute(
-            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL "  # noqa: S608
-            f"WHERE ats_status='{IN_PROGRESS_ATS}' AND url_norm=?",
+            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL, "  # noqa: S608
+            f"claimed_by='' WHERE ats_status='{IN_PROGRESS_ATS}' AND url_norm=?",
             (norm,),
         )
 
@@ -1485,15 +1496,47 @@ def reset_stale_claims(timeout_min: int) -> int:
     it re-enters the queue instead of being lost. Returns the number of rows
     reset. A row with a NULL `claimed_at` (should not happen via
     claim_pending, but defensive) is left alone — there's no age to compare.
+    Cross-host safety net: covers a row claimed by ANY host, including one
+    that no longer exists. `release_claims_by_host` below is the faster,
+    immediate counterpart for THIS host's own rows at startup.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     with get_db(DB_PATH) as conn:
         cur = conn.execute(
-            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL "  # noqa: S608
-            f"WHERE ats_status='{IN_PROGRESS_ATS}' AND claimed_at IS NOT NULL AND claimed_at < ?",
+            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL, "  # noqa: S608
+            f"claimed_by='' WHERE ats_status='{IN_PROGRESS_ATS}' AND claimed_at IS NOT NULL "
+            f"AND claimed_at < ?",
             (cutoff,),
+        )
+        return cur.rowcount
+
+
+def release_claims_by_host(hostname: str) -> int:
+    """IN_PROGRESS -> PENDING for every row whose `claimed_by` names this HOST.
+
+    Startup counterpart to `reset_stale_claims`'s timeout sweep (docs/
+    improvement-2026-09/06-OPS_PLAN.md M3): a container restart means no
+    worker process of THIS host survived to finish what it claimed, so
+    those rows are safe to release immediately — no need to wait out
+    `APPLY_CLAIM_TIMEOUT_MIN`. Matched by hostname only (not the full
+    `hostname:pid` tag `claimed_by` stores) because a restarted container
+    gets a new pid; matching by host is the correct rule here. A row
+    legitimately claimed by a DIFFERENT host is left alone — that is what
+    `reset_stale_claims`'s timeout sweep is for. Returns the number of rows
+    reset. A no-op (0) when `hostname` is empty, so a caller that can't
+    resolve its own hostname never mass-releases every row via a blank-vs-
+    blank `LIKE` match.
+    """
+    if not hostname:
+        return 0
+    escaped = hostname.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL, "  # noqa: S608
+            f"claimed_by='' WHERE ats_status='{IN_PROGRESS_ATS}' AND claimed_by LIKE ? ESCAPE '\\'",
+            (f"{escaped}:%",),
         )
         return cur.rowcount
 

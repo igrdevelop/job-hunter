@@ -221,6 +221,17 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # claimed (including all non-PENDING/IN_PROGRESS statuses). Used only
         # by reset_stale_claims() to detect a worker that crashed mid-apply.
         ("claimed_at", "TEXT"),
+        # M3 (docs/improvement-2026-09/06-OPS_PLAN.md): claimed_by identifies
+        # WHICH worker process holds an IN_PROGRESS claim — "hostname:pid"
+        # (hunter.apply_worker.claimed_by_tag()), stamped by claim_pending()
+        # in the same atomic UPDATE as claimed_at. Empty for every row that
+        # was never claimed, or that has been released/resolved since.
+        # Read once, at startup, by tracker.release_claims_by_host(): a
+        # container restart means no worker of THIS host survived, so those
+        # rows are released immediately instead of waiting out
+        # APPLY_CLAIM_TIMEOUT_MIN like reset_stale_claims()'s cross-host
+        # sweep still does.
+        ("claimed_by", "TEXT NOT NULL DEFAULT ''"),
         # pending_meta is a JSON blob of the full Job the hunt loop found
         # (source, location, salary, raw dict incl. permalink/post_text) —
         # everything apply_worker needs to reconstruct a Job object without
