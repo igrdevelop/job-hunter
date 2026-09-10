@@ -198,3 +198,25 @@ def test_candidate_example_covers_every_dotpath_used_in_code():
         "candidate/candidate.yaml.example does not document these keys that the "
         f"code reads: {missing}"
     )
+
+
+def test_dockerignore_excludes_sensitive_paths():
+    """A local `docker build` (Dockerfile's `COPY . .`) must never bake secrets
+    or per-tenant runtime data into the image — docs/improvement-2026-09/
+    05-SECURITY_PLAN.md finding #10 / M1 / M7: `.dockerignore` didn't exclude
+    gsheets_token.json / gsheets_credentials.json / .claude-cli/ / candidate/ /
+    users/ / db/ / logs/ at all, so any of those present in the build context
+    (the normal state on the deploy host, which builds from the same checkout
+    it runs from) shipped straight into the image."""
+    dockerignore = (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8")
+    required = [
+        "gsheets_token.json",
+        "gsheets_credentials.json",
+        ".claude-cli/",
+        "candidate/",
+        "users/",
+        "db/",
+        "logs/",
+    ]
+    missing = [p for p in required if p not in dockerignore]
+    assert not missing, f".dockerignore is missing entries for: {missing}"

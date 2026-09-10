@@ -15,6 +15,7 @@ Import strategy:
     `from hunter.telegram_bot import _parse_hunt_source_args` etc.
 """
 
+import asyncio
 import logging
 
 from telegram.constants import ParseMode
@@ -47,6 +48,7 @@ __all__ = [
     "_extract_url",
     "build_application",
     "_post_init",
+    "_post_shutdown",
 ]
 
 logger = logging.getLogger(__name__)
@@ -185,9 +187,37 @@ async def _post_init(app: Application) -> None:
     from hunter.config import APPLY_QUEUE_ENABLED
 
     if APPLY_QUEUE_ENABLED:
-        from hunter.apply_worker import apply_worker_loop
+        import socket
 
-        app.create_task(apply_worker_loop(app, worker_id=0), name="apply_worker_0")
+        from hunter import tracker
+        from hunter.apply_worker import apply_worker_loop, register_worker_task
+
+        # Startup safety net (M3, docs/improvement-2026-09/06-OPS_PLAN.md):
+        # a row this exact HOST claimed on a previous life of the process
+        # (container restart) has no surviving worker to finish it — release
+        # it immediately instead of waiting out APPLY_CLAIM_TIMEOUT_MIN. A
+        # row claimed by a DIFFERENT host is left alone (reset_stale_claims'
+        # timeout sweep, scheduled separately, remains the cross-host net).
+        try:
+            released = await asyncio.to_thread(tracker.release_claims_by_host, socket.gethostname())
+            if released:
+                logger.warning(
+                    "[apply_worker] startup: released %d IN_PROGRESS row(s) claimed by "
+                    "this host's previous run",
+                    released,
+                )
+        except Exception as e:
+            logger.warning("[apply_worker] startup claim release failed: %s", e)
+
+        # A PLAIN asyncio.create_task, NOT app.create_task(): PTB's
+        # Application.stop() awaits every app.create_task() task to
+        # completion (asyncio.gather, no cancellation) before post_stop/
+        # post_shutdown ever run — an infinite while-True loop would hang
+        # stop() forever. Kept off PTB's own bookkeeping and handed instead
+        # to hunter.apply_worker's own registry, which the post_shutdown
+        # hook below drains with a bounded timeout.
+        task = asyncio.create_task(apply_worker_loop(app, worker_id=0), name="apply_worker_0")
+        register_worker_task(0, task)
         logger.info("[apply_worker] background task started (APPLY_QUEUE_ENABLED=true)")
 
     # Bootstrap / validate Google Sheets on startup.
@@ -262,6 +292,27 @@ async def _post_init(app: Application) -> None:
         logger.warning("[startup] tracker_cache load failed: %s", e)
 
 
+async def _post_shutdown(app: Application) -> None:
+    """Post-shutdown hook: drain the apply worker(s) (M3, graceful shutdown).
+
+    Runs after PTB's own `Application.stop()`/`shutdown()` — see
+    docs/improvement-2026-09/06-OPS_PLAN.md M3 for why that ordering is
+    exactly why the worker task is registered separately from PTB's own
+    `app.create_task()` tracking (see `_post_init` above): `stop()` awaits
+    every `app.create_task()` task to completion with no cancellation, so an
+    infinite `while True` loop registered that way would hang `stop()`
+    forever and this hook would never even run. `shutdown_workers()` is a
+    no-op (empty task registry) when `APPLY_QUEUE_ENABLED` was never turned
+    on, so this is safe to call unconditionally.
+    """
+    try:
+        from hunter.apply_worker import shutdown_workers
+
+        await shutdown_workers()
+    except Exception:
+        logger.exception("[apply_worker] shutdown_workers() failed")
+
+
 def build_application() -> Application:
     """Build and configure the Telegram Application instance."""
     import pytz
@@ -301,7 +352,13 @@ def build_application() -> Application:
     from hunter.bot.auth import require_owner, require_user
     from hunter.schedules import register as _register_schedules
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
 
     # Command handlers. Authorization (multi-user B3, hunter/bot/auth.py):
     # /start, /link and /unlink are open to any chat — linking is exactly what

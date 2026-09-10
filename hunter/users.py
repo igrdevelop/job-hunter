@@ -11,12 +11,43 @@ the authoritative schema (docs/MULTI_USER_UPDATE.md, shared contract).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
-from hunter.db import get_db
+from hunter.db import ensure_link_attempts_table, get_db
 
 log = logging.getLogger(__name__)
+
+# Per-chat /link brute-force limiter (docs/improvement-2026-09/
+# 05-SECURITY_PLAN.md finding #4/M4): the API's 6-char link code is only
+# ~24 bits of entropy, and /link had no attempt counter at all — a chat
+# could hammer codes limited only by Telegram's own rate limit. >= this many
+# FAILED attempts within LINK_ATTEMPT_WINDOW_MIN minutes refuses further
+# attempts outright, without even querying telegram_link_codes.
+LINK_ATTEMPT_LIMIT = 5
+LINK_ATTEMPT_WINDOW_MIN = 10
+
+
+class LinkResult(NamedTuple):
+    """Outcome of a link_chat_with_details() call.
+
+    user_id            — the linked user_id, or None on any failure
+                          (blank code, unknown code, expired code, or the
+                          chat is currently rate-limited).
+    rate_limited        — True when this call was refused purely by the
+                          attempt limiter, without touching telegram_link_codes.
+    displaced_chat_id   — set only on a SUCCESSFUL link that moved an
+                          EXISTING user from a different chat (chat_id is
+                          UNIQUE per user_id) — the old chat to notify. None
+                          on failure, and None when the user had no prior
+                          chat or was already linked from this same chat.
+    """
+
+    user_id: str | None
+    rate_limited: bool = False
+    displaced_chat_id: int | None = None
 
 
 def _db_path() -> Path:
@@ -42,39 +73,142 @@ def _parse_expiry(raw: str) -> datetime | None:
     return parsed
 
 
+def _attempts_exceeded(conn: sqlite3.Connection, chat_id: int, now: datetime) -> bool:
+    """True when chat_id has already hit LINK_ATTEMPT_LIMIT failures inside
+    the current (still-open) window."""
+    row = conn.execute(
+        "SELECT window_start, attempts FROM link_attempts WHERE chat_id = ?",
+        (chat_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    window_start = _parse_expiry(row["window_start"])
+    if window_start is None:
+        return False
+    if now - window_start > timedelta(minutes=LINK_ATTEMPT_WINDOW_MIN):
+        return False  # window has elapsed — the next failure starts a fresh one
+    return row["attempts"] >= LINK_ATTEMPT_LIMIT
+
+
+def _record_attempt_failure(conn: sqlite3.Connection, chat_id: int, now: datetime) -> None:
+    """Increment chat_id's failure count, starting a fresh window if the
+    previous one has expired (or none exists yet)."""
+    row = conn.execute(
+        "SELECT window_start, attempts FROM link_attempts WHERE chat_id = ?",
+        (chat_id,),
+    ).fetchone()
+    window_start = _parse_expiry(row["window_start"]) if row else None
+    window_expired = window_start is None or now - window_start > timedelta(
+        minutes=LINK_ATTEMPT_WINDOW_MIN
+    )
+    if row is None:
+        conn.execute(
+            "INSERT INTO link_attempts (chat_id, window_start, attempts) VALUES (?, ?, 1)",
+            (chat_id, now.isoformat()),
+        )
+    elif window_expired:
+        conn.execute(
+            "UPDATE link_attempts SET window_start = ?, attempts = 1 WHERE chat_id = ?",
+            (now.isoformat(), chat_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE link_attempts SET attempts = attempts + 1 WHERE chat_id = ?",
+            (chat_id,),
+        )
+
+
+def _clear_attempts(conn: sqlite3.Connection, chat_id: int) -> None:
+    conn.execute("DELETE FROM link_attempts WHERE chat_id = ?", (chat_id,))
+
+
 def link_chat(chat_id: int, code: str) -> str | None:
     """Consume a link code and bind chat_id to its user_id.
 
-    Returns the linked user_id, or None for an unknown/expired/blank code.
+    Returns the linked user_id, or None for an unknown/expired/blank code —
+    or when this chat is currently rate-limited (see LinkResult / M4). Thin
+    wrapper around link_chat_with_details() kept for the existing simple
+    call sites/tests that only care about the user_id.
+    """
+    return link_chat_with_details(chat_id, code).user_id
+
+
+def link_chat_with_details(chat_id: int, code: str) -> LinkResult:
+    """Full version of link_chat() — also reports rate-limiting and a
+    displaced old chat to notify (docs/improvement-2026-09/
+    05-SECURITY_PLAN.md finding #4/M4).
+
     The code is single-use: deleted on success AND on an expired hit.
     Re-linking is a move, not an error — a user linking from a new chat
     replaces their old chat row, and a chat linking to a new account
-    replaces its old user row (chat_id is PK, user_id is UNIQUE).
+    replaces its old user row (chat_id is PK, user_id is UNIQUE). A failed
+    attempt (blank/unknown/expired code, or an already-rate-limited chat)
+    counts against the per-chat limiter; a successful link clears it.
     """
     normalized = (code or "").strip().upper()
-    if not normalized:
-        return None
     now = _utcnow()
     with get_db(_db_path()) as conn:
+        ensure_link_attempts_table(conn)
+
+        if _attempts_exceeded(conn, chat_id, now):
+            log.warning("link_chat: chat %s refused — too many failed /link attempts", chat_id)
+            return LinkResult(user_id=None, rate_limited=True)
+
+        if not normalized:
+            _record_attempt_failure(conn, chat_id, now)
+            return LinkResult(user_id=None)
+
         row = conn.execute(
             "SELECT user_id, expires_at FROM telegram_link_codes WHERE code = ?",
             (normalized,),
         ).fetchone()
         if row is None:
-            return None
+            _record_attempt_failure(conn, chat_id, now)
+            return LinkResult(user_id=None)
+
         conn.execute("DELETE FROM telegram_link_codes WHERE code = ?", (normalized,))
         expires = _parse_expiry(row["expires_at"])
         if expires is None or expires < now:
             log.info("link code %s rejected: expired at %s", normalized, row["expires_at"])
-            return None
+            _record_attempt_failure(conn, chat_id, now)
+            return LinkResult(user_id=None)
+
         user_id = row["user_id"]
+
+        # Displacement check, BEFORE the writes below overwrite either side:
+        # this user_id may already be linked from a DIFFERENT chat (the
+        # classic "code leaked / device switch" case) — that old chat is
+        # about to lose its link silently, so it's worth a heads-up.
+        prior = conn.execute(
+            "SELECT chat_id FROM telegram_links WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        displaced_chat_id = (
+            prior["chat_id"] if prior is not None and prior["chat_id"] != chat_id else None
+        )
+
+        # The other displacement direction: THIS chat was already linked to
+        # a DIFFERENT user — that old user has no other known chat (chat_id
+        # is their only channel), so there is nowhere to send them a notice;
+        # log it for the audit trail instead.
+        prior_user_here = conn.execute(
+            "SELECT user_id FROM telegram_links WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+        if prior_user_here is not None and prior_user_here["user_id"] != user_id:
+            log.warning(
+                "link_chat: chat %s reassigned from user %s to user %s",
+                chat_id,
+                prior_user_here["user_id"],
+                user_id,
+            )
+
         conn.execute("DELETE FROM telegram_links WHERE user_id = ?", (user_id,))
         conn.execute(
             "INSERT OR REPLACE INTO telegram_links (chat_id, user_id, linked_at) VALUES (?, ?, ?)",
             (chat_id, user_id, now.isoformat()),
         )
+        _clear_attempts(conn, chat_id)
     log.info("chat %s linked to user %s", chat_id, user_id)
-    return user_id
+    return LinkResult(user_id=user_id, displaced_chat_id=displaced_chat_id)
 
 
 def resolve_user(chat_id: int) -> str | None:
