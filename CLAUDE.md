@@ -1483,6 +1483,86 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             stderr on a missing/malformed profile file, an
                             unsafe `--track` value, or a generate_docs.py
                             failure (e.g. no configured candidate identity).
+tools/verdict_vs_outcome.py Read-only M0 measurement (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M0.1): does the independent
+                            ATS verdict actually predict a reply? Sample =
+                            `ats_verdict IS NOT NULL` + `sent_parse.classify
+                            (sent)=="applied"` + sent date aged past
+                            `--min-age-days` (default 21), excluding
+                            `cost_usd IS NULL` rows from the 2026-08-07..
+                            08-10 CLI-outage window (verdict wasn't scored by
+                            Haiku then). Reports a point-biserial correlation,
+                            a bootstrap 90% CI (seeded, sklearn
+                            `LogisticRegression(C=inf)`, no scipy) for the
+                            odds ratio of +10pp verdict adjusted for a
+                            source_bucket confounder (linkedin / polish
+                            boards / ats-direct / other), a Fisher-exact test
+                            (hand-rolled with `math.comb`) on the top vs.
+                            bottom verdict tercile, and a second cut over
+                            every `Applications/**/content.json`'s
+                            `verdict_history` (accepted-round share by
+                            honest/stretch kind, mean accepted delta, share
+                            of runs whose winning round was >=4). Prints the
+                            plan's decision rule and which branch the numbers
+                            land in. `--json` for machine-readable output.
+tools/funnel_sources.py     Read-only M0 measurement (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M0.2): per-source funnel
+                            health over `--days` (default 90). Reuses
+                            `hunter.funnel.compute_funnel()` for tracked/
+                            generated/sent/confirmed/answered so the
+                            definitions never drift from `/funnel`, adds a
+                            Wilson 90% CI on the sent-rate, `sum(cost_usd)/
+                            sent` (a CLI-mode sent row has no cost_usd and is
+                            reported as "unpriced"), FAIL/SKIP counts, and
+                            liveness status from `hunter.source_health.
+                            health_report()`. Applies the plan's decision
+                            table — tracked>=30 and sent==0 -> "ballast"
+                            (prints up to 10 filtered URLs to eyeball before
+                            disabling the source); BROKEN?/ERROR for >=14
+                            days (via `source_health.recent_runs`) -> "broken";
+                            sent>=5, answered==0, window>=21d -> "watch".
+                            `--json` for machine-readable output.
+tools/audit_tenant_scope.py Read-only M0 measurement (docs/improvement-2026-09/
+                            05-SECURITY_PLAN.md M0): static AST scan of every
+                            `.py` under `hunter/` (pre-filtered by a plain
+                            `'execute(' in text` grep, per the plan) for
+                            `.execute()`/`.executescript()` calls touching
+                            the `applications` table that lack a `user_id`
+                            predicate — function name, line, statement type
+                            (SELECT/UPDATE/DELETE/INSERT). SQL text is
+                            recovered from the AST (`sql_text_from_node`),
+                            not string-matched on the source, so a multi-line/
+                            triple-quoted SQL literal needs no special-casing
+                            — `ast` already collapses it to one `Constant`
+                            regardless of how the source wraps it. Also greps
+                            for `--dangerously-skip-permissions`/`IS_SANDBOX`
+                            (the plan's parallel M0 check). Exits 1 when any
+                            WRITE (INSERT/UPDATE/DELETE) on `applications` is
+                            missing `user_id` — written so it can become a CI
+                            gate later without further changes. `--json` for
+                            machine-readable output.
+tools/pii_inventory.py      Read-only M0 measurement (docs/improvement-2026-09/
+                            07-COMPLIANCE_PLAN.md M0): `--user <uid>`
+                            enumerates every place a uid appears — every
+                            tracker.db table with a `user_id` column
+                            (discovered via `PRAGMA table_info`, not
+                            hardcoded), every table in the API's own
+                            `app.sqlite` with a user-referencing column when
+                            `--app-sqlite PATH` is given (heuristic: any
+                            column name normalizing to `userid`, plus
+                            `users.id` itself — this repo doesn't own that
+                            schema), the `users/{uid}/` tree (file count +
+                            bytes), and a best-effort substring grep of
+                            `logs/`/`backups/` file contents for the uid.
+                            Always read-only; `--dry-run` is accepted only
+                            for symmetry with a future `hunter/erasure.py::
+                            erase_user()` — this tool never writes regardless.
+                            Prints the plan's decision rule: more places found
+                            than `admin.deleteUser` already cleans (`users`,
+                            `profiles`, `profile_revisions`, `profile_jobs`,
+                            `users/{uid}/`) means the erasure milestone is
+                            mandatory before the first paying client.
+                            `--json` for machine-readable output.
 tools/erase_user.py         CLI seam for hunter/erasure.py (docs/
                             improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
                             docs/ERASURE_CONTRACT.md): `python
