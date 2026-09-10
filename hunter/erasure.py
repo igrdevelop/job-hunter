@@ -227,6 +227,7 @@ def erase_user(
 
     tables: dict[str, int] = {}
     with get_db(DB_PATH) as conn:
+        params: tuple[str, ...]
         for table in _discover_user_id_tables(conn):
             if table == "profile_jobs" and exclude_job_id:
                 sql_select = f"SELECT COUNT(*) AS n FROM {table} WHERE user_id=? AND id != ?"  # noqa: S608

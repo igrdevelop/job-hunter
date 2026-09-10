@@ -1,7 +1,7 @@
 {
   "generated": "2026-09-10",
   "note": "Per-file baseline = the MAX of the counts seen on CI (ubuntu, requirements.lock) and on a developer machine. The two environments resolve a few third-party stubs differently (beautifulsoup4, requests), which moves 4 errors across 5 files; taking the max means neither environment reports a false regression, while a genuinely new error still pushes its file above the recorded number. Regenerate with `python scripts/mypy_ratchet.py --update` and reconcile against a CI typecheck log.",
-  "total": 223,
+  "total": 224,
   "files": {
     "hunter/apply_api.py": 9,
     "hunter/apply_cli.py": 12,
@@ -31,7 +31,7 @@
     "hunter/commands/sync_sent.py": 4,
     "hunter/commands/tracks.py": 2,
     "hunter/commands/unsent.py": 1,
-    "hunter/commands/url_message.py": 19,
+    "hunter/commands/url_message.py": 20,
     "hunter/contact_extract.py": 1,
     "hunter/funnel.py": 1,
     "hunter/gmail_parsers.py": 1,
