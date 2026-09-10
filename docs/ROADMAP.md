@@ -18,6 +18,21 @@ pipeline DSL; do not touch `tracker.py`/`filters.py` under a generation change.
 
 ---
 
+## 0. Improvement series 2026-09 — the analysis layer above this index
+
+[improvement-2026-09/README.md](improvement-2026-09/README.md) is an eight-perspective
+review (product, marketing, architecture, engineering + security / ops / compliance /
+data audits) with one 26-step execution order and a dependency map. It does not
+replace the rows below — it says in which order to take them and adds what no plan
+here covered. Its own "week 0" items, unblocked and independent of every owner decision:
+
+| # | Item | Plan | Next step | Size |
+|---|------|------|-----------|------|
+| 0.1 | **Isolate the CLI agent** (`claude -p --dangerously-skip-permissions` with scraped job text in the prompt, root, secrets mounted) | [05-SECURITY_PLAN M1](improvement-2026-09/05-SECURITY_PLAN.md) | drop the flag, `--disallowedTools WebFetch,WebSearch` + tool allowlist, job text via file, non-root `USER`; golden CLI E2E with an injection fixture | one day |
+| 0.2 | **Back up the real data** (`tracker.db`, `app.sqlite`, `users/` — today only the `/export` xlsx is snapshotted) | [06-OPS_PLAN M1](improvement-2026-09/06-OPS_PLAN.md) | `Connection.backup()` + restic off-host, restore drill | one day |
+| 0.3 | **Run the two July measurements** | [08-DATA_EVAL_PLAN M0](improvement-2026-09/08-DATA_EVAL_PLAN.md) | same questions as rows 4.1 / 4.3, now with pre-stated decision rules and sample-size caveats; ≈ $1 | half a day on the VPS |
+| 0.4 | **Concierge test on 5 external users** | [01-PRODUCT_PLAN M0.3](improvement-2026-09/01-PRODUCT_PLAN.md) | stop rule: < 3 of 5 send a generated CV → freeze pivot Stages 1–8, work on generation quality instead | two weeks, no code |
+
 ## 1. Actionable now — small, unblocked
 
 | # | Item | Plan | Next step | Size |
