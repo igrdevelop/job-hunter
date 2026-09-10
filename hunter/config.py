@@ -199,6 +199,16 @@ APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", 
 DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "3600"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
+# One-release escape hatch (docs/improvement-2026-09/05-SECURITY_PLAN.md M1):
+# restores the pre-M1 `claude -p --dangerously-skip-permissions` invocation in
+# hunter/apply_cli.py, in case the new explicit --allowedTools/--disallowedTools
+# policy is missing a tool the skill legitimately needs. Default false — the
+# restricted policy is the norm as of this change.
+APPLY_CLI_LEGACY_PERMS: bool = os.getenv("APPLY_CLI_LEGACY_PERMS", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # Hunt / apply split (docs/HUNT_APPLY_SPLIT_PLAN.md M1): feature-gated so the
 # old same-loop behavior is the default. When true, the hunt loop writes new
@@ -249,6 +259,14 @@ TRACKER_BACKUP_DIR: Path = Path(
 ).expanduser()
 TRACKER_BACKUP_KEEP_FILES: int = max(0, int(os.getenv("TRACKER_BACKUP_KEEP_FILES", "90")))
 TRACKER_BACKUP_TIME: str = os.getenv("TRACKER_BACKUP_TIME", "06:05")
+# Optional: path to job-hunter-api's own SQLite data store (users, auth,
+# profiles). Unset (default) = skipped — most deployments of this bot don't
+# also run job-hunter-api, and even when they do it's a separate compose
+# stack with its own volume, not automatically visible in this container.
+# When set and the file exists, hunter/tracker_backup.py backs it up
+# alongside tracker.db (read-only source connection — this process doesn't
+# own that database). See docs/improvement-2026-09/06-OPS_PLAN.md M1.
+APP_SQLITE_PATH: str = os.getenv("APP_SQLITE_PATH", "")
 APPLICATIONS_DIR: Path = Path(
     os.getenv("APPLICATIONS_DIR", str(PROJECT_DIR / "Applications"))
 ).expanduser()

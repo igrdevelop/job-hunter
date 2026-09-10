@@ -701,6 +701,110 @@ server {
 
 ---
 
+## Backups
+
+Two layers (docs/improvement-2026-09/06-OPS_PLAN.md M1). Neither existed before
+2026-09: the only thing backed up daily was `tracker.xlsx`, which prod only
+writes on `/export` — `tracker.db` (the real, live data store), `app.sqlite`
+(job-hunter-api's users/auth/profiles) and `users/` (CVs, profiles,
+Applications documents) had no backup at all.
+
+### Layer 1 — local snapshots (already running, in-container)
+
+`hunter/tracker_backup.py` runs daily via PTB JobQueue
+(`TRACKER_BACKUP_TIME`, default 06:05) — see the `hunter/tracker_backup.py`
+entry in CLAUDE.md for the full mechanism. It copies `tracker.db` via
+`sqlite3.Connection.backup()` (WAL-safe — never a raw file copy of a live
+WAL database), optionally `app.sqlite` when `APP_SQLITE_PATH` points at an
+existing file, and the legacy `tracker.xlsx` when present, into
+`TRACKER_BACKUP_DIR` (default `./backups`, `TRACKER_BACKUP_KEEP_FILES`
+files kept per family, default 90). Every produced `.db` copy is verified
+with `PRAGMA integrity_check` right after the backup; a failure surfaces as
+a Telegram alert (`hunter/schedules/tracker_backup.py`).
+
+**These are local snapshots on the same disk as the live data.** A dead
+disk or a wiped VPS takes both the original and this "backup" with it —
+that's what Layer 2 is for.
+
+### Layer 2 — off-host restic (host cron, one-time setup)
+
+`scripts/offhost_backup.sh` (tracked, not run by any agent) pushes
+`{db,users,backups}` under the bot's working dir — plus job-hunter-api's
+own data dir, when reachable — to an S3-compatible bucket (Backblaze B2,
+Hetzner Object Storage, or anything else restic supports) via `restic
+backup`, then prunes old snapshots with `restic forget --keep-daily 30
+--keep-weekly 12 --prune`.
+
+One-time setup on the VPS, as the `deploy` user:
+
+```bash
+# Install restic (Ubuntu 24.04 ships it in the default repos).
+sudo apt-get install -y restic
+
+# Pick a bucket + credentials with your S3-compatible provider, then:
+mkdir -p /home/deploy/.restic
+echo '<a long random passphrase>' > /home/deploy/.restic/password
+chmod 600 /home/deploy/.restic/password
+
+export RESTIC_REPOSITORY='s3:https://s3.<region>.backblazeb2.com/<bucket>'
+export RESTIC_PASSWORD_FILE=/home/deploy/.restic/password
+export AWS_ACCESS_KEY_ID='...'        # or restic's own -o s3.* flags
+export AWS_SECRET_ACCESS_KEY='...'
+
+# One-time: create the repo (idempotent — safe to skip if it already exists).
+restic init
+```
+
+Install the daily cron job (`crontab -e`, same asymmetry-of-ownership
+reasoning as the Docker-prune timer below — this line is NOT installed by
+any deploy workflow, it's a one-time host step):
+
+```cron
+# Off-host backup, daily at 03:10 (before the 06:05 in-container snapshot
+# so restic always has a fresh local copy to pick up; either order is safe
+# since restic backs up whatever's on disk at run time). Env vars above
+# belong in a sourced file, not inline in the crontab line, so the
+# passphrase/keys never show up in `crontab -l` or process listings.
+10 3 * * * . /home/deploy/.restic/env && /home/deploy/job-hunter/scripts/offhost_backup.sh >> /home/deploy/offhost-backup.log 2>&1
+```
+
+(`/home/deploy/.restic/env` is a small `export RESTIC_REPOSITORY=... ...`
+file, `chmod 600`, sourced by the cron line above — keeps every backend
+credential out of the crontab itself.)
+
+Optional dead-man's-switch: set `BACKUP_PING_URL` in that same env file
+(e.g. a healthchecks.io check URL) — the script pings it on success and on
+`/fail` on failure, best-effort, never itself fails the backup.
+
+### Restore drill
+
+A backup nobody has restored is a hope, not a backup. `scripts/
+restore_drill.sh` restores the latest snapshot into a scratch temp dir and
+runs `PRAGMA integrity_check` against every `.db` file it finds — read-only
+against the repo, deletes its own scratch dir on exit. Run it by hand after
+first setting up Layer 2, and periodically afterward (e.g. monthly, same
+cron pattern as above with `SNAPSHOT` left at its `latest` default):
+
+```bash
+. /home/deploy/.restic/env && /home/deploy/job-hunter/scripts/restore_drill.sh
+```
+
+Non-zero exit = either the restore itself failed, or at least one restored
+`.db` file failed `integrity_check` — treat either as "the backup layer is
+not actually protecting anything" until fixed, not as a routine warning.
+
+### Retention and erasure
+
+Layer 1 keeps `TRACKER_BACKUP_KEEP_FILES` (default 90) most-recent copies
+per family, pruned on every run. Layer 2's `restic forget --keep-daily 30
+--keep-weekly 12` is the effective backup retention ceiling — a user's data
+erased from the live db per `docs/improvement-2026-09/07-COMPLIANCE_PLAN.md`
+still exists in restic snapshots until they age out under this policy;
+that ceiling IS the retention mechanism referenced there, not a gap to
+close separately.
+
+---
+
 ## Disk hygiene (one-time host setup)
 
 The deploy workflow prunes images on every run, but that only fires **when this

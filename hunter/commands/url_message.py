@@ -206,6 +206,24 @@ async def cmd_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Normalize LinkedIn view URLs — strip tracking params (?trk=...&refId=...)
     text = normalize_linkedin_url(text)
 
+    # SSRF guard (docs/improvement-2026-09/05-SECURITY_PLAN.md finding #6/M5):
+    # refuse a private/internal-address URL here, before an apply subprocess
+    # is even spawned, rather than only deep inside fetch_job_text. A normal
+    # public job-board URL resolves fine and hits this check for free.
+    # Run off the event loop — DNS resolution is a blocking call and must
+    # not stall the whole bot on a slow/unresponsive resolver.
+    from hunter.url_policy import UrlPolicyError, validate_public_url
+
+    try:
+        await asyncio.to_thread(validate_public_url, text)
+    except UrlPolicyError as url_err:
+        logger.warning("[URL handler] refused unsafe URL: %s", url_err)
+        await update.message.reply_text(
+            "⚠️ That URL points to a private/internal address and can't be processed. "
+            "Please send a public job posting URL."
+        )
+        return
+
     if caller_id:
         # Non-owner manual tailoring: no bot-process tracker pre-check (it
         # reads the OWNER's rows here — the user's own dedup runs inside

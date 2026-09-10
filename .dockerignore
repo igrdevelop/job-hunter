@@ -20,3 +20,20 @@ gmail_token.json
 drive_token.json
 gmail_credentials.json
 drive_credentials.json
+gsheets_token.json
+gsheets_credentials.json
+gsheets_state.json
+# Personal Claude CLI OAuth/subscription credentials (docker-compose mounts
+# this at runtime; docs/improvement-2026-09/05-SECURITY_PLAN.md M1/M7).
+.claude-cli/
+# Candidate personal data (docker-compose mounts ./candidate:/app/candidate:ro
+# at runtime — a locally `docker build`ed image only needs the tracked
+# placeholder templates, never a real candidate's files).
+candidate/
+!candidate/README.md
+!candidate/*.example*
+# Runtime state that docker-compose bind-mounts in (db/, users/, logs/) and
+# must never be baked into an image built from a dev checkout.
+db/
+users/
+logs/
