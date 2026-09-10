@@ -199,6 +199,16 @@ APPLY_AGENT_CLI_TIMEOUT_SEC: int = int(os.getenv("APPLY_AGENT_CLI_TIMEOUT_SEC", 
 DUAL_SHADOW_TIMEOUT_SEC: int = int(os.getenv("DUAL_SHADOW_TIMEOUT_SEC", "3600"))
 CLI_MAX_RETRIES: int = int(os.getenv("CLI_MAX_RETRIES", "5"))
 CLI_RETRY_DELAY: int = int(os.getenv("CLI_RETRY_DELAY", "60"))
+# One-release escape hatch (docs/improvement-2026-09/05-SECURITY_PLAN.md M1):
+# restores the pre-M1 `claude -p --dangerously-skip-permissions` invocation in
+# hunter/apply_cli.py, in case the new explicit --allowedTools/--disallowedTools
+# policy is missing a tool the skill legitimately needs. Default false — the
+# restricted policy is the norm as of this change.
+APPLY_CLI_LEGACY_PERMS: bool = os.getenv("APPLY_CLI_LEGACY_PERMS", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # Hunt / apply split (docs/HUNT_APPLY_SPLIT_PLAN.md M1): feature-gated so the
 # old same-loop behavior is the default. When true, the hunt loop writes new

@@ -484,7 +484,11 @@ def test_cli_pipeline_gate_runs_after_manual_screen_source_order() -> None:
     src = inspect.getsource(importlib.import_module("hunter.apply_cli"))
     screen_pos = src.index("Step 1.5e")
     gate_pos = src.index("Step 1.5f")
-    subprocess_cmd_pos = src.index('cmd = ["claude"')
+    # The literal `cmd = ["claude", ...]` inline construction was replaced by
+    # `_build_cli_command()` under M1 (docs/improvement-2026-09/
+    # 05-SECURITY_PLAN.md) — an explicit tool policy instead of
+    # --dangerously-skip-permissions. Same source-order guarantee, new marker.
+    subprocess_cmd_pos = src.index("cmd = _build_cli_command(")
     assert screen_pos < gate_pos < subprocess_cmd_pos
     assert "run_doomed_gate(" in src
 
