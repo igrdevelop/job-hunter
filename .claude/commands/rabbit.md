@@ -34,6 +34,32 @@ gh api graphql -F owner='{owner}' -F repo='{repo}' -F pr=<N> -f query='
 
 - Sections rabbit itself labels "Nitpick" are advisory by its own contract — still triage them, but a skipped nitpick needs only a one-line reply.
 
+### No review at all is NOT "no findings"
+
+CodeRabbit does not review this repository on its own: since ~2026-09-08 the free
+tier skips repos with fewer than 10 GitHub stars (`gh repo view <owner>/<repo>
+--json stargazerCount` returns 0 here), regardless of `auto_review.enabled: true`
+in `.coderabbit.yaml`. A PR opened by hand — or one where `/pr` Step 7.0 was
+skipped — therefore carries **no review**, which from the comments endpoint looks
+exactly like a clean one. Separate the two before triaging anything:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<N>/reviews --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | length'
+```
+
+- **> 0** — rabbit reviewed the PR. Zero comments then genuinely means no findings; proceed to Step 2.
+- **0** — nothing reviewed it. Post the trigger, wait, and re-run this step:
+
+```bash
+gh pr comment <N> --body "@coderabbitai review"
+```
+
+A rabbit comment offering a "Trigger review" checkbox is the bot declining to
+start, not a review — count reviews, never comments. Poll with the loop in
+`/pr` Step 7.1 (the same `gh`-failure trap applies: an empty string is `!= "0"`).
+If the review still has not landed inside the budget, report that the triage did
+not happen — never "no findings".
+
 ---
 
 ## Step 2 - Triage (the whole point of this skill)
