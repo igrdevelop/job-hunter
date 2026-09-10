@@ -1256,6 +1256,18 @@ docs/ROADMAP.md             THE index of every open plan (added 2026-09-09): act
                             public-release & infra / issue backlog, plus a Shipped table. Update
                             the row when a milestone lands; the per-plan Status lines drift
                             (three were stale when this was built). README links here.
+docs/DOMAIN_MODEL.md        M1 of `improvement-2026-09/03-ARCHITECTURE_PLAN.md` (docs-only, 0
+                            code): the target domain model (Account/Profile/ProfileRender/
+                            Vacancy/Tailoring/Document/QualityReport/Outcome/Job/Outbox/Event/
+                            MarketSnapshot), a verified column-by-column mapping of today's
+                            `applications`/`profile_jobs`/`telegram_links`/`user_settings`
+                            (this repo) and `users`/`profiles`/`profile_revisions` (API repo)
+                            onto those entities — including the `ats_status`/`sent` overloads —
+                            a proposed Postgres DDL v1 per entity, and a "today → target" module
+                            boundary table. Everything is marked proposed, pending owner answers
+                            to that plan's open questions 1-4; nothing here is implemented. Keep
+                            §2's mapping table in sync with `hunter/db.py` in the same PR that
+                            changes a column, same discipline as tracker.py's column constants.
 docs/ORACLE_FREE_TIER_PLAN.md Measure-first plan for moving bot+api from the Hetzner CX22 to
                             Oracle Always Free (arm64). M0a = scraper yield from an Oracle IP vs
                             the prod `source_runs` median (any fail closes the plan); M0b =
