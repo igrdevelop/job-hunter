@@ -1,4 +1,13 @@
-"""Handoff readiness — keep one person's personal data out of shared code.
+"""Handoff readiness — keep one person's personal data out of shared code, and
+keep the handoff docs (.env.example, candidate.yaml.example) truthful.
+
+Checks in this file: (a) no personal data as a literal in production code
+(the bulk of the file); (b) a short hand-picked list of .env.example vars a
+new user is explicitly told to set (docs/SETUP_NEW_USER.md); (c) every
+`candidate.get()` dotpath used in code is documented in
+candidate/candidate.yaml.example; (d) EVERY env var the code reads anywhere
+(not just the (b) shortlist) is documented in .env.example — see
+tools/list_env_vars.py and docs/improvement-2026-09/06-OPS_PLAN.md M6.
 
 Why this file exists
 --------------------
@@ -28,12 +37,22 @@ documents exactly like personal data in `hunter/*.py` would.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# tools/list_env_vars.py is the env-var collector shared by check (d) below and
+# the standalone `python tools/list_env_vars.py` audit — tools/ isn't a package,
+# so load it the same way tests/test_dedup_sheet.py loads tools/dedup_sheet.py.
+_list_env_vars_spec = importlib.util.spec_from_file_location(
+    "list_env_vars", PROJECT_ROOT / "tools" / "list_env_vars.py"
+)
+list_env_vars = importlib.util.module_from_spec(_list_env_vars_spec)
+_list_env_vars_spec.loader.exec_module(list_env_vars)
 
 # Production code only: the packages that ship in the Docker image and run
 # against real vacancies. tools/ is developer-local, both out of scope.
@@ -220,3 +239,29 @@ def test_dockerignore_excludes_sensitive_paths():
     ]
     missing = [p for p in required if p not in dockerignore]
     assert not missing, f".dockerignore is missing entries for: {missing}"
+
+
+def test_env_example_documents_every_env_var_the_code_reads():
+    """Every environment variable actually read anywhere in production code must
+    be documented in .env.example (as NAME= or a commented-out #NAME=), or a new
+    user/operator has no way to discover it exists.
+
+    docs/improvement-2026-09/06-OPS_PLAN.md's SRE audit found ~55 `os.getenv`
+    names in hunter/config.py alone missing from .env.example (e.g.
+    APPLY_QUEUE_ENABLED, DEFAULT_USER_ID, USERS_ROOT, TRACKER_DB_PATH,
+    GDRIVE_ENABLED, every *_ENABLED source toggle) — a stale reference doc issue
+    check (b) above can't catch, since it only asserts a short hand-picked list
+    IS present, not that the list is EXHAUSTIVE. tools/list_env_vars.py does the
+    collection (regex-based, same production surface as the personal-data scan
+    above); this test just gates it.
+    """
+    names = list_env_vars.collect_env_var_names()
+    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+
+    missing = sorted(
+        n for n in names if not re.search(rf"^#*\s*{re.escape(n)}=", env_example, re.M)
+    )
+    assert not missing, (
+        ".env.example is missing these env vars the code reads (add them, "
+        "commented, with a one-line comment + the code default):\n  " + "\n  ".join(missing)
+    )

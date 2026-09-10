@@ -1311,7 +1311,7 @@ tests/conftest.py           Shared fixtures: `tracker_db` (isolated tmp tracker.
                             test_golden_apply_e2e.py; reusable by any test that needs a real
                             pipeline without a real LLM.
 tests/test_handoff_readiness.py CI gate that keeps ONE person's personal data out of
-                            shared code (added 2026-08-12). Three checks: (a) no owner
+                            shared code (added 2026-08-12). Four checks: (a) no owner
                             name / phone / email / LinkedIn handle / employer / school /
                             VPS address as a literal anywhere in `hunter/` +
                             the root entry scripts + `prompts/*.md` + `.claude/commands/*.md`
@@ -1324,7 +1324,23 @@ tests/test_handoff_readiness.py CI gate that keeps ONE person's personal data ou
                             `judge_rules.md` at runtime instead); (b) every variable
                             docs/SETUP_NEW_USER.md tells a user to set is actually present
                             in `.env.example`; (c) every `candidate.get("a.b")` dotpath in
-                            production code exists in `candidate/candidate.yaml.example`.
+                            production code exists in `candidate/candidate.yaml.example`;
+                            (d) EVERY env var the code reads anywhere (not just (b)'s
+                            hand-picked shortlist) is documented in `.env.example` —
+                            `tools/list_env_vars.py` collects every `os.getenv(...)` /
+                            `os.environ.get(...)` / `os.environ[...]` name (regex-based,
+                            same production surface as check (a); also resolves the two
+                            indirection shapes actually used in this codebase: a
+                            same-file `NAME = "ENV_VAR"` constant read via
+                            `os.environ.get(NAME)`, and `hunter/gen_profile.py`'s
+                            `"dotpath": ("ENV_NAME", caster)` override table). Added
+                            2026-09-10 (docs/improvement-2026-09/06-OPS_PLAN.md M6) after
+                            an SRE audit found ~55 of the ~103 `os.getenv` reads in
+                            `hunter/config.py` alone undocumented (e.g.
+                            `APPLY_QUEUE_ENABLED`, `DEFAULT_USER_ID`, `USERS_ROOT`,
+                            `TRACKER_DB_PATH`, `GDRIVE_ENABLED`, every `*_ENABLED` source
+                            toggle) — a new operator had no way to discover most of the
+                            bot's own configuration surface existed.
                             Exists because the manual readiness audit was run three times
                             in three weeks and found NEW owner defaults every time — not a
                             regression each time, but a rule (`default` reproduces the
@@ -1655,6 +1671,20 @@ tools/market_m0.py          Market-aggregate M0 stability probe (docs/improvemen
                             the plan's decision rule (Jaccard >= 0.7 and Spearman >= 0.6
                             for the main cell -> aggregate stable) and bias caveat
                             verbatim. Read-only, $0, `--json` for per-cell results
+tools/list_env_vars.py      Collects every environment-variable NAME the codebase actually
+                            reads (`hunter/` + the four root entry scripts), by regex over
+                            `os.getenv(...)` / `os.environ.get(...)` / `os.environ[...]`,
+                            plus two indirection shapes: a same-file `NAME = "ENV_VAR"`
+                            constant later read via `os.environ.get(NAME)` (llm_client.py's
+                            `CLI_TOKEN_ENV`, hunter/sources/linkedin.py's
+                            `_STORAGE_STATE_ENV`), and hunter/gen_profile.py's
+                            `"dotpath": ("ENV_NAME", caster)` override table (the actual
+                            `os.environ.get(env_name)` call is one level removed from the
+                            literal name). `python tools/list_env_vars.py` prints the
+                            sorted list standalone; `collect_env_var_names()` is imported by
+                            tests/test_handoff_readiness.py check (d), which gates every
+                            name against `.env.example`. docs/improvement-2026-09/
+                            06-OPS_PLAN.md M6.
 
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
@@ -1884,6 +1914,7 @@ Applications/               Generated documents (gitignored)
 | `LLM_PROVIDER` | `anthropic` | `anthropic`, `openai`, or `openrouter`. **Prefer `/llm <profile>` in Telegram** — the profile system (`hunter/llm_profiles.py`) is the recommended way to switch models at runtime without restart. |
 | `LLM_MODEL` | `claude-sonnet-4-6` | Model for API mode (effort `low` + thinking disabled on supporting models). **Source of truth is this `config.py` default — leave `LLM_MODEL` unset in `.env` so model upgrades ship as a commit, not a manual prod edit.** Set it in `.env` only to override (experiment/temporary). Dated snapshots retire (`claude-sonnet-4-20250514` → 2026-06-15, `claude-3-5-haiku-20241022` → 2026-02-19); prefer non-dated aliases. |
 | `LLM_DEFAULT_PROFILE` | — | Pin a named profile as default (e.g. `deepseek-r1`). Overrides `LLM_PROVIDER+LLM_MODEL`. Persisted per-vacancy selection via `/llm <name>` wins over this. |
+| `LLM_FALLBACK_MODEL` | — | Model `llm_client.call_llm` switches to after half its retries on repeated 429/5xx/529 overload, for the remaining attempts. Optional — no fallback by default. |
 | `DUAL_SHADOW_PROFILE` | `deepseek-v3` | Profile used for the dual-apply shadow comparison run. DB key `dual_shadow_profile` wins over this env fallback — set it at runtime via `/dual shadow <name>` in Telegram (e.g. `/dual shadow deepseek-v4-pro`). Toggle dual mode itself with `/dual on`/`/dual off` (DB key `dual_apply_enabled`). |
 | `CANDIDATE_TRACKS` | `angular` | Which stacks the candidate is applying for (docs/quality/09-multi-track-react.md). Default is today's behavior unchanged — React-only vacancies are filtered at three points (listing filters, apply Step 1.5c pre-LLM check, apply Step 4.5 post-generation check). Set `angular,react` to also apply to React-only roles (uses `candidate/base_cv_react.md`, already-existing infra). Runtime override without a bot restart: `/tracks angular\|react\|both` (DB key `tracks_enabled` wins over this env var, same DB-wins-over-env pattern as `DUAL_SHADOW_PROFILE`). `hunter.config.active_tracks()` is the read helper. |
 | `LLM_API_KEY` | — | API key for LLM provider (fallback; prefer provider-specific vars below) |
@@ -1892,6 +1923,13 @@ Applications/               Generated documents (gitignored)
 | `OPENAI_API_KEY` | — | OpenAI key (for `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`) |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
 | `APPLY_CLI_LEGACY_PERMS` | `false` | One-release escape hatch (docs/improvement-2026-09/05-SECURITY_PLAN.md M1): restores the pre-M1 `claude -p --dangerously-skip-permissions` invocation in `hunter/apply_cli.py` instead of the explicit `--allowedTools`/`--disallowedTools` policy (`_build_cli_command`). Leave `false` unless the restricted policy is missing a tool `.claude/commands/apply.md`'s steps legitimately need. |
+| `SOFFICE_PATH` | `libreoffice` | Path/command for the LibreOffice headless binary used to render DOCX -> PDF. Linux/Docker default is right on PATH; on Windows point it at `soffice.exe`. |
+| `CLI_MAX_RETRIES` | `5` | CLI mode retries on a 529 overloaded response from the Claude subscription. |
+| `CLI_RETRY_DELAY` | `60` | Seconds between CLI-mode 529 retries. |
+| `CANDIDATE_YAML_PATH` | — (next to `candidate/candidate.yaml`) | Single-user override for the candidate.yaml location — see `hunter/candidate.py`. The multi-user path resolves this per-user instead (`hunter/users.py`). |
+| `FILTERS_YAML_PATH` | — (next to `candidate.yaml`, `filters.yaml`) | Single-user override for the optional per-user filter profile (`hunter/filter_profile.py`, docs/FILTERS_YAML_PLAN.md). |
+| `GENERATION_YAML_PATH` | — (next to `candidate.yaml`, `generation.yaml`) | Single-user override for the optional per-user generation profile (`hunter/gen_profile.py`). |
+| `TRACKER_DB_PATH` | `./tracker.db` | SQLite tracker DB path. Env-overridable so Docker can point at a directory-mounted db shared with job-hunter-api — a single-file bind mount gives each container its own -wal/-shm sidecar, which diverges and corrupts the db (2026-08-07 incident). |
 | `JUDGE_ENABLED` | `true` | Run the LLM-as-judge CV verification pass |
 | `JUDGE_MODEL` | `claude-haiku-4-5-20251001` | Cheap model for the judge (independent of generator). Always Anthropic — uses `JUDGE_PROVIDER`/`JUDGE_API_KEY`, not the main profile. |
 | `JUDGE_PROVIDER` | `anthropic` | Judge LLM provider (separate from main provider; Haiku is Anthropic-only) |
@@ -1914,12 +1952,15 @@ Applications/               Generated documents (gitignored)
 | `REPOST_GATE_ENABLED` | `true` | Re-post gate (`hunter/repost_gate.py`, Step 1.5g, $0): when the fetched posting is a near-verbatim re-post of a vacancy applied to in the last `REPOST_WINDOW_DAYS` days (new URL — re-listed after expiry, cross-board dup, agency name variation), REUSE the existing CV: copy the donor folder's docs, write a Re-application tracker row at cost $0, stamp the donor verdict, skip generation and the dual-apply shadow. Ambiguous band (sim 0.85–0.90, agency-boilerplate territory) only warns. `/force` bypasses. Thresholds calibrated 2026-07-20 (tools/reuse_calibrate.py) live as module constants. |
 | `REPOST_WINDOW_DAYS` | `60` | How far back the re-post gate looks for donor applications. |
 | `APPLICATIONS_DIR` | `Applications/` | Output folder override (useful for preview/testing) |
+| `GENERATE_PL_RESUME` | `false` | When true, `resume_pl` becomes a required content.json key (`hunter/pipeline/validate.py`) — i.e. every application, not just PL-language postings, must produce a Polish resume. |
+| `GENERATE_ABOUT_ME_PL` | `true` | Generate the Polish about-me text too (`generate_docs.py`). Forced to `false` by `hunter/profile_preview.py`'s $0 no-LLM preview subprocess. |
 | `CV_GDPR_CLAUSE` | `both` | GDPR/RODO consent clause at CV bottom: `both` (PL+EN), `pl` (PL CV only), `none` |
 | `MAX_JOBS_PER_RUN` | `40` | Cap per hunt cycle (auto-apply only, applied after filter+dedup; raised 20→40 2026-07-10 — a lower value in the prod `.env` overrides this default) |
 | `APPLY_DELAY_SEC` | `30` | Pause between auto-apply jobs |
 | `APPLY_QUEUE_ENABLED` | `false` | Hunt / apply split (docs/HUNT_APPLY_SPLIT_PLAN.md M1): with the flag off (default), the hunt loop calls `_auto_apply_all` inline exactly as before — `_hunt_lock` stays held for the whole apply batch. When on, `_run_hunt_impl`'s AUTO_APPLY branch writes a `PENDING` row per new job (`tracker.add_pending`) and returns immediately (`_hunt_lock` held for seconds, fetch+filter+dedup only); a background `apply_worker_loop` task (`hunter/apply_worker.py`, started from `_post_init`) drains the queue independently — claim (`tracker.claim_pending`, atomic `UPDATE…RETURNING`) → run the same `apply_agent.py` subprocess → resolve the outcome → `deliver_apply_now` → sleep `APPLY_DELAY_SEC` → repeat, forever. `llm_outage`/`cli_timeout` release the claim back to `PENDING` (no FAIL row, same M2/M3 semantics as the old inline path, now living in the worker instead of `_auto_apply_all`); `fail`/`rate_limited` write a normal FAIL row. `/queue` (hunter/commands/queue.py) lists PENDING jobs; `/status` shows PENDING/IN_PROGRESS counts when the flag is on. M2 (N>1 workers) is explicitly deferred — `apply_worker_loop(context, worker_id=0)` already takes a `worker_id` so a future rollout is a config change, not a rewrite. |
 | `APPLY_CLAIM_TIMEOUT_MIN` | `60` | A `PENDING` row claimed by a worker (`ats_status` → `IN_PROGRESS`, `claimed_at` stamped) but never resolved within this many minutes means the worker crashed mid-run — `hunter.schedules.apply_queue.scheduled_reset_stale_claims` (every 15 min, no-op unless `APPLY_QUEUE_ENABLED`) resets it back to `PENDING` (`tracker.reset_stale_claims`) so it isn't stuck forever. |
 | `SCHEDULE_TIMES` | `02:00,05:00,08:00,13:00` | Base trigger times for a full sweep of every source (comma-separated HH:MM, Warsaw). Night-weighted since 2026-08-16 — two of the four cycles start inside 02:00–08:00 and the old 19:00 base is gone. Was a hardcoded list in `config.py`; now env-overridable. With `APPLY_QUEUE_ENABLED` the apply worker claims a queued job within ~15 s, so this grid decides when documents are GENERATED, not just when vacancies are found. |
+| `SCHEDULE_SOURCE_OFFSET_MIN` | `40` | Minutes each source is offset from the `SCHEDULE_TIMES` base — e.g. 4 sources at offset 60 from base 08:00 fire at 08:00/09:00/10:00/11:00. |
 | `SCHEDULE_BLACKOUT` | `18:00-00:00` | Quiet hours: no hunt slot fires inside this window (`HH:MM-HH:MM`, may wrap midnight, end `00:00` = end-of-day; empty disables). Enforced by `hunter/schedules/grid.py::fire_minute`, which walks the per-source offsets through allowed minutes only rather than skipping slots — see the Schedule section for why picking base times cannot express this. Malformed or whole-day values warn and fall back to the plain modulo grid. |
 | `RETRY_FAILED_TIMES` | `02:45,07:45` | When to retry FAILed tracker rows (comma-separated HH:MM, Warsaw). Used to run after EVERY per-source AUTO_APPLY hunt (72×/day), which kept `_hunt_lock` busy past the 40-min slot spacing. Minutes :45 never collide with the hunt grid (fires only at :00/:20/:40). Moved into the night window 2026-08-16 with the rest of the schedule — a retry runs the same apply pipeline, and 18:45 sat inside the new quiet hours. |
 | `LLM_OUTAGE_PAUSE_MIN` | `60` | How long auto-apply pauses after an LLM account outage (drained balance / bad key → `llm_client.LLMOutageError` → exit 46 → outcome `llm_outage`). Time-boxed, not sticky: after expiry the next slot probes with ONE job/API call; still dead → re-arms. One Telegram alert at arm time; paused slots skip silently (fetch/filter/dedup still run, jobs return next hunt). `/llm outage [clear]` inspects/lifts; shown in `/status`. See docs/LLM_OUTAGE_RESILIENCE_PLAN.md M2. |
@@ -1932,6 +1973,9 @@ Applications/               Generated documents (gitignored)
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
 | `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue — see `hunter/tracker_backup.py` above |
 | `APP_SQLITE_PATH` | — | Optional path to job-hunter-api's own `app.sqlite` (users/auth/profiles). When set and the file exists, `hunter/tracker_backup.py` backs it up alongside `tracker.db` on the same daily schedule (read-only source connection — this process doesn't own that database). Unset (default) = skipped; most bot-only deployments don't have this file reachable. |
+| `TRACKER_BACKUP_DIR` | `./backups` | Destination directory for daily tracker snapshots. |
+| `TRACKER_BACKUP_KEEP_FILES` | `90` | How many snapshot files to retain before pruning the oldest. |
+| `TRACKER_BACKUP_TIME` | `06:05` | Time of day (Warsaw) the daily backup job runs. |
 | `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
 | `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
 | `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |
@@ -1945,6 +1989,8 @@ Applications/               Generated documents (gitignored)
 | `GDRIVE_UPLOAD_MISSING_INTERVAL_MIN` | `30` | Drive backfill interval for application folders that missed their instant post-apply upload (`hunter/delivery.py`). Was hardcoded 3 h — the "not on Drive yet" lag the owner reported 2026-07-12. Idempotent (skips rows that already have a Drive URL). |
 | `GMAIL_LOOKBACK_HOURS` | `25` | How far back the Gmail scan reads the inbox (hours) |
 | `GMAIL_MAX_RESULTS` | `100` | Max alert emails per scan; report warns if ceiling hit |
+| `GMAIL_ENRICH_ENABLED` | `true` | Fetch real title/company/location/salary for each URL extracted from alert emails. |
+| `GMAIL_ENRICH_TIMEOUT` | `15` | Per-job HTTP timeout (seconds) for an enrichment fetch. |
 | `GMAIL_ENRICH_CONCURRENCY` | `5` | Global cap on parallel enrichment fetches (all hosts) |
 | `GMAIL_ENRICH_DOMAIN_LIMIT` | `2` | Default per-host concurrent enrichment fetches |
 | `GMAIL_ENRICH_DOMAIN_DELAY` | `0.0` | Default per-host delay (sec) between enrichment fetches |
@@ -1952,8 +1998,16 @@ Applications/               Generated documents (gitignored)
 | `GMAIL_LABEL_PROCESSED` | `true` | Apply a "Job Hunter/Processed" Gmail label to every alert email the bot reads during a hunt. Requires `gmail.modify` scope — re-run `python tools/gmail_auth.py` after upgrading from a pre-labeling install. A pre-labeling `gmail.readonly` token no longer breaks the source (2026-08-06 fix — `get_gmail_service` loads the token with its OWN granted scopes instead of forcing the code's SCOPES, which made the refresh die with `invalid_scope`): reading keeps working, labeling is disabled with a logged warning until re-auth. |
 | `PRACUJ_HOST_CONCURRENCY` | `2` | pracuj.pl per-host concurrency override (Cloudflare 429) |
 | `PRACUJ_HOST_DELAY_SEC` | `1.0` | pracuj.pl per-host delay (sec) override |
+| `EMAIL_RESPONSE_LOOKBACK_DAYS` | `2` | Default look-back window for `/check_responses` and the daily scheduled run. |
+| `EMAIL_RESPONSE_CHECK_TIME` | `09:00` | Time of day (Warsaw) for the daily automatic confirmation check. |
+| `EXPIRED_CHECK_TIME` | `00:00` | Time of day (Warsaw) for the daily `/check_expired` sweep. |
+| `EXPIRED_CHECK_CONCURRENCY` | `10` | Global max parallel requests during `/check_expired`. |
+| `EXPIRED_CHECK_DOMAIN_LIMIT` | `2` | Max simultaneous `/check_expired` requests to the same domain. |
+| `EXPIRED_CHECK_DOMAIN_DELAY` | `1.0` | Delay (sec) between `/check_expired` requests to the same domain. |
+| `EXPIRED_CHECK_FETCH_TIMEOUT` | `35.0` | Hard per-URL fetch timeout (sec) during `/check_expired`, guards against TCP hangs. |
 
 Source toggles (all default `true` except `GMAIL_ENABLED=false`):
+`JUSTJOIN_ENABLED` (+ `JUSTJOIN_MAX_PAGES=3`, pages per workplaceType), `NOFLUFFJOBS_ENABLED`,
 `LINKEDIN_ENABLED`, `BULLDOGJOB_ENABLED`, `PRACUJ_ENABLED`, `THEPROTOCOL_ENABLED`,
 `SOLIDJOBS_ENABLED`, `INHIRE_ENABLED`, `JOBLEADS_ENABLED`, `ARBEITNOW_ENABLED`,
 `REMOTIVE_ENABLED`, `WORKINGNOMADS_ENABLED`, `JOBSPRESSO_ENABLED`, `BUILTIN_ENABLED`,
