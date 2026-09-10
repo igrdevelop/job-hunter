@@ -1333,6 +1333,59 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             stderr on a missing/malformed profile file, an
                             unsafe `--track` value, or a generate_docs.py
                             failure (e.g. no configured candidate identity).
+tools/dual_pairs_stats.py   Dual-apply (A/B) pair statistics (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M2): walks Applications/** for primary/
+                            shadow content.json pairs (shadow dir name = a known
+                            hunter.llm_profiles.PROFILES key), scores each side from
+                            `ats_verdict` (same Haiku judge both sides; `--allow-
+                            deterministic` falls back to `ats_check_pdf`/`ats_check`,
+                            labelled separately in the report). Reports: share
+                            shadow>=primary with a Wilson 90% CI, mean paired delta with a
+                            seeded 2000-resample bootstrap 95% CI, an exact binomial sign
+                            test, the share of pairs whose |delta| is within `--noise-
+                            sigma`*2 (sigma comes from `tools/verdict_noise.py`), and cost
+                            per side from `content["cost"]`. Read-only, $0, `--json` for
+                            per-pair rows
+tools/eval_golden.py        Offline eval harness for prompt/model changes (docs/
+                            improvement-2026-09/08-DATA_EVAL_PLAN.md M2): `build` samples
+                            a source x posting-language x track stratified golden set from
+                            Applications/** into `tests/fixtures/golden_set.json` — ONLY
+                            relative paths + sha256(job_posting.txt), never posting text.
+                            `score --baseline DIR --candidate DIR` compares two generator
+                            runs (each `<relative_path>/content.json`, produced however —
+                            see the docstring for `tools/preview_apply.py` / a modified-
+                            prompt pipeline run into `eval_runs/<tag>/`) over the SAME
+                            golden set: $0 deterministic metrics per folder
+                            (`ats_checker.check(run_llm_review=False)`, `lang_guard.
+                            scan_content` hits, `pipeline.validate.validate_content`
+                            errors, `content_qa.run_qa` warnings, role/bullet counts, text
+                            length), then a paired bootstrap-CI + sign-test comparison and
+                            the plan's accept/reject gate (mean det-score delta CI >=
+                            -1pp, lang-gate hits not increased, candidate validation errors
+                            = 0). `--judge`/`--verdict` add paid metrics (`claim_judge.
+                            judge_content` / `ats_checker.llm_verdict`) — OFF by default,
+                            prints the estimated cost and requires `--yes`
+tools/market_m0.py          Market-aggregate M0 stability probe (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M3.0, explicitly NOT M3.1 — no new DB
+                            tables, no scheduler job): is the Applications/**/
+                            job_posting.txt corpus (shadow subfolders excluded) stable
+                            enough for a term-share "what's in demand" aggregate? Terms =
+                            `ats_checker.extract_job_keywords` unioned with a
+                            `TfidfVectorizer(ngram_range=(1,3), min_df=3)` vocabulary
+                            (EN+PL stopwords). Cell = role_family (regex over the job_title/
+                            first line: angular/react/frontend-generic/fullstack/other) x
+                            region — read from the EXISTING loaders (candidate.yaml home-
+                            city aliases, `hunter.filters._PL_ANTI_HYBRID_CITIES` +
+                            `_anti_hybrid_cities`, `hunter.sources.text_utils.REMOTE_ANY`),
+                            never a hardcoded city list of its own. Dedup: exact hash then
+                            a greedy TF-IDF-cosine >= 0.94 collapse (same idea as
+                            `tools/reuse_calibrate.py`). For every cell with n >= 30:
+                            chronological half-split, top-30 term shares per half, Jaccard
+                            of the two top-30 sets, Spearman rank correlation over their
+                            union (hand-rolled, no scipy), and held-out coverage. Prints
+                            the plan's decision rule (Jaccard >= 0.7 and Spearman >= 0.6
+                            for the main cell -> aggregate stable) and bias caveat
+                            verbatim. Read-only, $0, `--json` for per-cell results
 
 .claude/                    Claude Code tooling for this repo (tracked). Agents live in
                             .claude/agents/*.md, skills in .claude/skills/<name>/SKILL.md,
