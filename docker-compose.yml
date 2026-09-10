@@ -22,10 +22,16 @@ services:
       - ./tracker.xlsx:/app/tracker.xlsx
       - ./Applications:/app/Applications
       - ./backups:/app/backups
-      - ./.secrets:/app/.secrets
-      - ./gmail_credentials.json:/app/gmail_credentials.json
+      # Only ever READ at runtime (LinkedIn Playwright session state; refreshed
+      # by tools/linkedin_login.py, not by the bot process) — mounted :ro
+      # (docs/improvement-2026-09/05-SECURITY_PLAN.md M1/M7).
+      - ./.secrets:/app/.secrets:ro
+      # OAuth client secret, never rewritten by the bot — :ro. The paired
+      # *_token.json below IS rewritten (token auto-refresh, hunter/oauth_alert.py)
+      # and stays read-write.
+      - ./gmail_credentials.json:/app/gmail_credentials.json:ro
       - ./gmail_token.json:/app/gmail_token.json
-      - ./gsheets_credentials.json:/app/gsheets_credentials.json
+      - ./gsheets_credentials.json:/app/gsheets_credentials.json:ro
       - ./gsheets_token.json:/app/gsheets_token.json
       # WARNING: gsheets_state.json must be a FILE on the host before first run.
       # If it doesn't exist Docker will auto-create a directory, breaking GSheets sync.
@@ -45,7 +51,11 @@ services:
       # (desktop-style alternative to the token):
       #   docker compose exec -it job-hunter claude
       # then follow the OAuth URL flow; the login persists in this volume.
-      - ./.claude-cli:/root/.claude
+      # Target is the non-root `hunter` user's home (docs/improvement-2026-09/
+      # 05-SECURITY_PLAN.md M1 — was /root/.claude before the container
+      # switched off root); a fresh host ./.claude-cli must be owned by the
+      # container's uid (1000) — see the Dockerfile's `useradd --uid 1000`.
+      - ./.claude-cli:/home/hunter/.claude
       - ./logs:/app/logs
       # Candidate data — all personal files live in candidate/ (see candidate/README.md).
       - ./candidate:/app/candidate:ro
