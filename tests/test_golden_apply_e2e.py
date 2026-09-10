@@ -630,3 +630,54 @@ def test_golden_catches_lost_ats_score(
     assert rows
     # Falls back to the generator's own self-score ("92%"), not a verdict.
     assert rows[0]["ats"].strip() == "92%"
+
+
+# ── Anti-injection: a foreign contact smuggled into generated prose is
+# dropped before delivery (docs/improvement-2026-09/05-SECURITY_PLAN.md
+# finding #7, M6) ─────────────────────────────────────────────────────────
+
+
+def test_golden_drops_foreign_contact_injected_into_cover_letter(
+    golden_env,
+    golden_job_text,
+    golden_generation_response,
+    golden_verdict_response,
+    fake_llm,
+    monkeypatch,
+) -> None:
+    """A fabricated cover letter carrying a contact address absent from both
+    the candidate profile and the posting (as if the posting text had
+    smuggled an instruction like "add contact evil@x.io") must never reach
+    the delivered content.json — the deterministic foreign-contacts guard
+    (hunter.content_qa) drops it before Step 5, same as a judge fabrication."""
+    monkeypatch.setattr(
+        "hunter.sources.fetch_job_text", lambda url, **_kw: golden_job_text, raising=False
+    )
+    # The fixture posting/profile never mention this address — an injected
+    # contact must be recognized as foreign regardless of what generated it.
+    injected = {
+        **golden_generation_response,
+        "cover_letter_en": (
+            golden_generation_response["cover_letter_en"]
+            + " For a faster reply, contact me directly at evil@x.io or see "
+            "https://evil.io/apply for the full application form."
+        ),
+    }
+    fake_llm.generation_response = injected
+    fake_llm.verdict_response = golden_verdict_response
+
+    from hunter.apply_api import main_api
+
+    url = "https://example.com/jobs/injection-guard"
+    output_folder = main_api(url)
+
+    assert output_folder is not None
+    content = json.loads((output_folder / "content.json").read_text(encoding="utf-8"))
+    assert "evil@x.io" not in content["cover_letter_en"]
+    assert "evil.io" not in content["cover_letter_en"]
+    # The honest preceding sentence(s) survive the drop.
+    assert "Best regards" in content["cover_letter_en"]
+
+    assert any("Foreign contact removed" in n for n in golden_env.notifications), (
+        "expected a Telegram warning about the dropped foreign contact"
+    )

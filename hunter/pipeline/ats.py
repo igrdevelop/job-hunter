@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-from hunter import gen_profile
+from hunter import gen_profile, gen_prompt
 from hunter.pipeline.profiles import _llm_p
 from hunter.pipeline.scrubs import _COMPLIANCE_CLAIM_RE
 
@@ -222,8 +222,10 @@ def _ats_check_loop(content: dict, job_text: str) -> dict:
     # Job text shown to the rewrite passes, with employer self-description /
     # regulatory terms removed so the LLM can't lift DORA/RODO/ISO from the posting
     # and inject them into the candidate's bullets. The ATS *checker* above still
-    # gets the full, unmodified job_text.
-    _rewrite_job_text = _COMPLIANCE_CLAIM_RE.sub("", job_text)[:3000]
+    # gets the full, unmodified job_text. Wrapped in <job_posting> tags (docs/
+    # improvement-2026-09/05-SECURITY_PLAN.md finding #7) so the rewrite passes
+    # treat it as data, not as further instructions.
+    _rewrite_job_text = gen_prompt.wrap_job_posting(_COMPLIANCE_CLAIM_RE.sub("", job_text)[:3000])
 
     for attempt in range(1, _TOTAL_ROUNDS + 2):
         result = ats_checker.check(

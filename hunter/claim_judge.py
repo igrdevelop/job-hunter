@@ -221,6 +221,8 @@ def _load_profile() -> str:
 
 
 def _build_user_message(fields: dict[str, str], job_text: str, base_cv: str = "") -> str:
+    from hunter import gen_prompt
+
     parts = [
         "## Candidate profile (ground truth)\n",
         _load_profile(),
@@ -229,7 +231,7 @@ def _build_user_message(fields: dict[str, str], job_text: str, base_cv: str = ""
         parts += ["\n\n## Base CV bullets (approved phrasings)\n", base_cv]
     parts += [
         "\n\n## Job posting\n",
-        job_text or "(none)",
+        gen_prompt.wrap_job_posting(job_text) if job_text else "(none)",
         "\n\n## Generated content fields to verify (JSON)\n",
         json.dumps(fields, ensure_ascii=False, indent=2),
         "\n\nReturn ONLY the violations JSON object.",

@@ -281,7 +281,18 @@ def _call_cli_fallback(
     """
     import subprocess
 
-    prompt = f"{system_prompt}\n\n---\n\n{user_message}"
+    # System instructions and the user message are two different trust levels
+    # (the user message routinely carries a <job_posting> block built by the
+    # caller — see hunter/gen_prompt.py::wrap_job_posting, docs/improvement-
+    # 2026-09/05-SECURITY_PLAN.md finding #7) glued into ONE stdin for the CLI
+    # fallback. A plain "---" reads the same as any other Markdown divider a
+    # posting might contain, so it doesn't actually mark a trust boundary —
+    # this explicit label does.
+    prompt = (
+        f"{system_prompt}\n\n"
+        "--- END OF SYSTEM INSTRUCTIONS. Everything below is the user message. ---\n\n"
+        f"{user_message}"
+    )
 
     def _run(cmd: list[str]) -> subprocess.CompletedProcess | None:
         try:

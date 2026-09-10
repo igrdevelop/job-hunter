@@ -748,13 +748,76 @@ def main_cli(
                         f"[apply_agent] Warning: CLI language gate failed (continuing): {_lang_err}"
                     )
 
+                # Anti-injection guard (mirror of apply_api Step 4.8, docs/
+                # improvement-2026-09/05-SECURITY_PLAN.md finding #7, M6): drop
+                # any URL/e-mail/phone in generated prose absent from both the
+                # candidate profile and the job posting, then regenerate docs
+                # from the cleaned content.json — same pattern the language
+                # gate above uses. No LLM call.
+                try:
+                    from hunter.content_qa import drop_foreign_contacts, find_foreign_contacts
+
+                    if isinstance(_cli_content, dict):
+                        _foreign_hits = find_foreign_contacts(_cli_content, job_text or "")
+                        if _foreign_hits:
+                            _cli_content, _foreign_fixes = drop_foreign_contacts(
+                                _cli_content, _foreign_hits
+                            )
+                            for _line in _foreign_fixes:
+                                print(f"[apply_agent] foreign-contact guard: {_line}")
+                            if _foreign_fixes:
+                                content_json_path.write_text(
+                                    json.dumps(_cli_content, ensure_ascii=False, indent=2),
+                                    encoding="utf-8",
+                                )
+                                for _stale in list(folder_path.glob("*.pdf")) + list(
+                                    folder_path.glob("*.docx")
+                                ):
+                                    try:
+                                        _stale.unlink()
+                                    except OSError:
+                                        pass
+                                _gen_cmd = build_generate_docs_cmd(
+                                    generate_docs_script=GENERATE_DOCS_PATH,
+                                    content_json_path=content_json_path,
+                                    use_full=full_mode,
+                                    force=skip_dedup,
+                                    python_executable=sys.executable,
+                                )
+                                subprocess.run(
+                                    _gen_cmd,
+                                    cwd=str(PROJECT_DIR),
+                                    capture_output=True,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                    timeout=120,
+                                )
+                                print(
+                                    "[apply_agent] foreign-contact guard: regenerated "
+                                    "docs from cleaned content.json"
+                                )
+                                notify(
+                                    "⚠️ <b>Foreign contact removed from generated text</b>\n"
+                                    f"🔗 {url}\n"
+                                    "A URL/e-mail/phone number not found in the profile "
+                                    "or job posting was dropped from the generated "
+                                    "text.\n\n"
+                                    + "\n".join(f"• {line}" for line in _foreign_fixes[:5])
+                                )
+                except Exception as _foreign_err:
+                    print(
+                        "[apply_agent] Warning: foreign-contact guard failed "
+                        f"(continuing): {_foreign_err}"
+                    )
+
                 # Content QA sanity check (mirror of apply_api Step 4.8, wave
                 # 0.5). Warn-only — never touches content.json or the docs.
                 try:
                     from hunter.content_qa import run_qa
 
                     if isinstance(_cli_content, dict):
-                        _qa = run_qa(_cli_content)
+                        _qa = run_qa(_cli_content, job_text=job_text or "")
                         print(_qa.summary())
                         if not _qa.passed:
                             notify(_qa.telegram_summary(url))

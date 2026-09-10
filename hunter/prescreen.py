@@ -224,15 +224,15 @@ def assess_stack(job_text: str, *, title: str = "", max_chars: int = 20000) -> P
     callers outside the pipeline (tools/prescreen_calibrate.py) own their own
     try/except.
     """
+    from hunter import gen_prompt
+
     text = (job_text or "").strip()
     if len(text) < 200:
         return PrescreenVerdict()
 
     user_message = (
-        (f"Job title (as advertised): {title}\n\n" if title else "")
-        + "--- JOB POSTING ---\n"
-        + text[:max_chars]
-    )
+        f"Job title (as advertised): {title}\n\n" if title else ""
+    ) + gen_prompt.wrap_job_posting(text[:max_chars])
 
     try:
         from llm_client import call_llm

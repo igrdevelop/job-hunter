@@ -462,7 +462,8 @@ def _run_main_api(
             else "(none — text pasted directly by user)"
         )
         user_message = (
-            f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: {url_hint}"
+            "Here is the job posting to analyze:\n\n"
+            f"{gen_prompt.wrap_job_posting(job_text)}\n\nOriginal URL: {url_hint}"
         )
         user_message += build_ats_keyword_checklist(job_text)
         user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)
@@ -600,7 +601,7 @@ def _run_main_api(
                     "Return the same JSON schema with updated fields "
                     "('resume_en', 'resume_pl', 'ats_score', 'stack', 'to_learn'). "
                     "You may also update other fields if needed.\n\n"
-                    f"Job posting:\n{job_text}\n\n"
+                    f"Job posting:\n{gen_prompt.wrap_job_posting(job_text)}\n\n"
                     f"Current resume content (JSON):\n{json.dumps(content, ensure_ascii=False)}"
                 )
                 from llm_client import call_llm
@@ -790,9 +791,29 @@ def _run_main_api(
     # Step 4.8 — Content QA sanity check
     print("[apply_agent] Step 4.9: Running content QA checks...")
     try:
-        from hunter.content_qa import run_qa
+        from hunter.content_qa import drop_foreign_contacts, find_foreign_contacts, run_qa
 
-        qa = run_qa(content)
+        # Anti-injection (docs/improvement-2026-09/05-SECURITY_PLAN.md finding
+        # #7, M6): drop any URL/e-mail/phone in generated prose that is absent
+        # from both the candidate profile and the job posting — treated like a
+        # judge "fabrication" finding, same deterministic quote-drop machinery,
+        # no LLM call. Runs BEFORE run_qa so its own foreign-contacts check
+        # below reports the post-fix state.
+        _foreign_hits = find_foreign_contacts(content, job_text)
+        if _foreign_hits:
+            content, _foreign_fixes = drop_foreign_contacts(content, _foreign_hits)
+            for _line in _foreign_fixes:
+                print(f"[apply_agent] foreign-contact guard: {_line}")
+            if _foreign_fixes:
+                notify(
+                    "⚠️ <b>Foreign contact removed from generated text</b>\n"
+                    f"🔗 {url}\n"
+                    "A URL/e-mail/phone number not found in the profile or job "
+                    "posting was dropped from the generated text.\n\n"
+                    + "\n".join(f"• {line}" for line in _foreign_fixes[:5])
+                )
+
+        qa = run_qa(content, job_text=job_text)
         print(qa.summary())
         if not qa.passed:
             notify(qa.telegram_summary(url))

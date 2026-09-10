@@ -209,12 +209,13 @@ def _llm_review(
 ) -> tuple[float, list[str], list[str], str]:
     """Returns (score 0–100, missing_keywords, recommendations, gap_report)."""
     try:
+        from hunter import gen_prompt
         from llm_client import call_llm
 
         result = call_llm(
             system_prompt=_LLM_SYSTEM,
             user_message=_LLM_PROMPT.format(
-                job_text=job_text[:job_cap],
+                job_text=gen_prompt.wrap_job_posting(job_text[:job_cap]),
                 resume_text=resume_text[:resume_cap],
             ),
             provider=provider,
