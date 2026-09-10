@@ -137,8 +137,24 @@ gh pr comment <N> --body "@coderabbitai review"
 1. Poll for the review (don't busy-wait — check every ~60s, give up after ~10 min):
 
 ```bash
-gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coderabbitai")] | length'
+for i in $(seq 1 10); do
+  n=$(gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coderabbitai")] | length') || n=""
+  case "$n" in
+    ""|*[!0-9]*) echo "poll $i: gh failed, retrying" ;;
+    0)           echo "poll $i: no review yet" ;;
+    *)           echo "review landed ($n)"; break ;;
+  esac
+  if [ "$i" -lt 10 ]; then sleep 60; fi
+done
 ```
+
+**Treat a failed `gh` call as "unknown", never as "landed".** The obvious
+`until [ "$(gh ... --jq '...|length')" != "0" ]` is wrong: a transient API error
+makes the substitution empty, and `"" != "0"` is TRUE, so the loop exits on the
+first hiccup and the run reports a review that does not exist. Match on a digit,
+as above. Note the two APIs spell the bot's login differently — `coderabbitai`
+via `gh pr view` (GraphQL) but `coderabbitai[bot]` via `gh api .../pulls/<N>/...`
+(REST) — so don't copy one filter into the other.
 
 2. When it lands, run the `/rabbit` flow (`.claude/commands/rabbit.md`) on this
    PR: triage every finding against the code and CLAUDE.md invariants, fix the
