@@ -92,9 +92,9 @@ When every thread is answered, post ONE top-level PR comment:
 gh pr comment <N> --body "@coderabbitai resolve"
 ```
 
-This resolves rabbit's threads and lifts its blocking "changes requested" review (`.coderabbit.yaml` sets `request_changes_workflow: true`, and master's branch protection requires conversation resolution — the PR cannot merge until this happens).
+This asks rabbit to resolve its threads (master's branch protection requires conversation resolution — the PR cannot merge until every thread is resolved). Since 2026-09-10 `.coderabbit.yaml` has `request_changes_workflow: false`, so there is no "changes requested" review to lift anymore — only the threads matter.
 
-The resolve comment is a REQUEST, not a result — re-query before claiming success, and until the review shows dismissed/approved and the threads read resolved, report "resolve requested", never "lifted":
+The resolve comment is a REQUEST, not a result, and on the free tier the bot is often rate-limited right after its own review ("Next included review available in N minutes") — then the command silently does nothing. Do not wait on it: once every thread has its reply, resolve them yourself via GraphQL (`reviewThreads { nodes { id isResolved } }` → `resolveReviewThread(input:{threadId:$id})` per unresolved id). Re-query before claiming success; until the threads read resolved, report "resolve requested", never "resolved":
 
 ```bash
 gh pr view <N> --json reviews,mergeStateStatus
@@ -104,4 +104,4 @@ gh pr view <N> --json reviews,mergeStateStatus
 
 ## Step 5 - Report
 
-One table: finding → classification → action (commit sha, or the skip reason in a phrase). Then: gates status, whether the blocking review is lifted, and anything that needs the owner's call (a finding you classified with < high confidence). Never imply a gate or a reply happened when it did not.
+One table: finding → classification → action (commit sha, or the skip reason in a phrase). Then: gates status, whether every thread is resolved, and anything that needs the owner's call (a finding you classified with < high confidence). Never imply a gate or a reply happened when it did not.

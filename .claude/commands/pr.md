@@ -117,9 +117,12 @@ Print the PR URL as a markdown link when done.
 
 ## Step 7 - CodeRabbit triage
 
-CodeRabbit's review is **blocking** (`request_changes_workflow: true` + required
-conversation resolution on master) — the PR cannot merge until its threads are
-resolved. But it no longer starts on its own: since ~2026-09-08 CodeRabbit
+CodeRabbit's findings are comment threads, and master's branch protection
+requires every thread resolved before merge — so each one must be triaged
+(`request_changes_workflow` is `false` since 2026-09-10: the bot no longer
+submits a "changes requested" review, because only the bot can lift that
+state and on the free tier it is rate-limited after one review — #252 sat
+fixed-but-blocked for an hour). It also does not start on its own: since ~2026-09-08 CodeRabbit
 skips automatic reviews on repositories with fewer than 10 GitHub stars,
 regardless of `auto_review.enabled: true` in `.coderabbit.yaml` (#248–#250 were
 auto-reviewed on 2026-09-01..03; #251 and #252 got only the "Trigger review"
