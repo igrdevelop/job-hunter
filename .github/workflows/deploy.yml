@@ -39,7 +39,18 @@ jobs:
       - name: Run tests
         # No --cov-fail-under yet (docs/quality/04-coverage-and-golden-e2e.md
         # Part A): map the blind spots for a few weeks before gating on them.
-        run: pytest tests/ -q --cov=hunter --cov-report=xml --cov-report=term
+        # --durations=20 (docs/improvement-2026-09/04-ENGINEERING_PLAN.md M0.2/M3)
+        # surfaces the slowest tests in the job summary below, so a new slow
+        # test is visible without anyone running --durations locally.
+        run: |
+          pytest tests/ -q --cov=hunter --cov-report=xml --cov-report=term --durations=20 \
+            | tee pytest_output.log
+          {
+            echo "### Slowest tests (--durations=20)"
+            echo '```'
+            awk '/^=+ slowest [0-9]+ durations =+$/,0' pytest_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
@@ -47,11 +58,14 @@ jobs:
           path: coverage.xml
           retention-days: 7
 
-  # Informational only (continue-on-error) — deploy does NOT depend on it yet.
-  # Baseline as of 2026-07-15 (quality-06, docs/quality/06-static-gates-mypy-sonar.md
-  # Этап 0): 223 errors in 54 files across `hunter/ llm_client.py generate_docs.py
-  # apply_agent.py`. Becomes a blocking gate once that baseline is driven to zero
-  # (Этап 1-2 of the plan — not done here).
+  # Blocking since docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2: mypy_baseline.json
+  # (mypy_ratchet.py) tracks a per-file error count and only fails the build on a
+  # REGRESSION — a file's count going up, or a brand-new file carrying errors that
+  # were never baselined. A file's count going down is reported but never fails.
+  # This makes `typecheck` a real gate without first driving the pre-existing
+  # 218-error baseline (54 files, mostly PTB `Message | None` / `JobQueue | None`
+  # unchecked attribute access) to zero. Reduce the baseline deliberately with
+  # `python scripts/mypy_ratchet.py --update` in its own commit.
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -61,9 +75,10 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.lock
-      - name: mypy
-        continue-on-error: true
-        run: mypy hunter/ llm_client.py generate_docs.py apply_agent.py
+      - name: mypy regression ratchet
+        # Runs the same `mypy hunter/ llm_client.py generate_docs.py apply_agent.py`
+        # invocation internally and prints its raw output before the ratchet verdict.
+        run: python scripts/mypy_ratchet.py
 
   # Informational only — deploy does NOT depend on it. Skips itself cleanly
   # until the repo is connected on sonarcloud.io and SONAR_TOKEN is added to

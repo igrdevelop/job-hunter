@@ -6,10 +6,14 @@
 #
 #     git config core.hooksPath .githooks
 #
-# Two guards, both cheap enough to run on every commit:
+# Three guards, all cheap enough to run on every commit:
 #   1. refuse to commit files CLAUDE.md marks as never-commit (secrets, data)
 #   2. ruff check + ruff format --check on the staged Python files
 #      (CI gates on both over the whole repo — this catches it locally first)
+#   3. the fast test subset (`pytest -m "not slow"`, ~40s on the reference dev
+#      box per docs/improvement-2026-09/04-ENGINEERING_PLAN.md M0.2/M3) when
+#      any staged file is Python — full CI still runs the whole suite incl.
+#      the subprocess/LibreOffice-heavy `slow` tests
 #
 # Bypass deliberately with `git commit --no-verify` when you know better.
 
@@ -57,6 +61,25 @@ if [ -n "$py_files" ]; then
         # shellcheck disable=SC2086
         if ! $ruff format --check $py_files; then
             echo "pre-commit: formatting differs — run: ruff format ." >&2
+            fail=1
+        fi
+    fi
+fi
+
+# --- 3. fast test subset (staged Python only) --------------------------------
+if [ -n "$py_files" ]; then
+    if command -v pytest >/dev/null 2>&1; then
+        pytest="pytest"
+    elif python -m pytest --version >/dev/null 2>&1; then
+        pytest="python -m pytest"
+    else
+        pytest=""
+        echo "pre-commit: pytest not found — skipping tests (pip install -e .[dev])" >&2
+    fi
+
+    if [ -n "$pytest" ]; then
+        if ! $pytest tests/ -m "not slow" -q; then
+            echo "pre-commit: fast test subset failed — fix, or run: pytest tests/ -m 'not slow' -q" >&2
             fail=1
         fi
     fi
