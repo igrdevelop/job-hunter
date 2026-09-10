@@ -249,10 +249,23 @@ def fetch_job_text(url: str, *, use_session: bool = False) -> str:
     logged-in page reveals "No longer accepting applications" before any LLM
     spend. Leave ``use_session=False`` for bulk callers (``/check_expired``,
     gmail enricher, repost gate) to avoid loading the LinkedIn session.
+
+    ``use_session=True`` also marks this as the apply pipeline's own fetch —
+    the point where whatever text comes back is handed to an LLM (and, on
+    the CLI path, to an agent with WebFetch) — so the URL is run through
+    ``hunter.url_policy.validate_public_url`` first (docs/improvement-2026-09/
+    05-SECURITY_PLAN.md finding #6/M5): a URL pointing at a loopback/private/
+    link-local address (e.g. the cloud metadata endpoint) raises before any
+    network call. Bulk callers stay unvalidated on purpose — they fetch
+    already-scraped/tracked URLs from known boards, not raw new user input.
     """
     from hunter.sources.html_fallback import clean_url, fetch_html
 
     cleaned = clean_url(url)
+    if use_session:
+        from hunter.url_policy import validate_public_url
+
+        validate_public_url(cleaned)
     for src in _fetch_roster():
         if src.matches_url(cleaned):
             if use_session and hasattr(src, "fetch_text_with_session"):

@@ -157,8 +157,10 @@ Google Sheets / Drive / Gmail APIs · Docker + GitHub Actions → GHCR → VPS
 ## Testing
 
 ```bash
-ruff check .        # lint (CI gate)
-pytest tests/       # 2500+ tests, ~10 min
+ruff check .                        # lint (CI gate)
+pytest tests/                       # full suite, ~50s on the reference dev box
+pytest tests/ -m "not slow"         # fast loop, ~40s — skips subprocess/LibreOffice/
+                                     # Playwright-heavy tests (also run by .githooks/pre-commit)
 ```
 
 Scrapers are covered by fixture-based parsing tests; the quality pipeline by

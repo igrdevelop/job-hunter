@@ -355,12 +355,55 @@ hunter/
                             `reset_stale_profile_jobs(timeout_min)` recovers a
                             `running` row whose drain tick crashed mid-job.
                             Consumed by hunter/schedules/profile_jobs.py (the
-                            actual render/parse/preview execution — see
-                            Repository Layout's schedules/ entry). Three kinds
-                            share this same primitive: `render`, `parse`, and
+                            actual render/parse/preview/erase execution — see
+                            Repository Layout's schedules/ entry). Four kinds
+                            share this same primitive: `render`, `parse`,
                             `preview` (docs/PROFILE_PAGE_TABS_WORKORDER.md,
                             the bot-repo work item — a deterministic, $0,
-                            no-LLM "test resume" PDF; see hunter/profile_preview.py).
+                            no-LLM "test resume" PDF; see hunter/profile_preview.py)
+                            and `erase` (docs/improvement-2026-09/
+                            07-COMPLIANCE_PLAN.md M1, docs/ERASURE_CONTRACT.md —
+                            right-to-erasure; see hunter/erasure.py).
+  erasure.py                 `erase_user(user_id, *, dry_run=False, force_owner=False,
+                            exclude_job_id=None) -> ErasureReport` (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md risk #1,
+                            milestone M1; docs/ERASURE_CONTRACT.md is the
+                            payload/result contract for the `profile_jobs`
+                            `erase` kind below). In ONE sqlite transaction,
+                            deletes every row scoped to `user_id` from every
+                            table with a `user_id` column — discovered via
+                            `PRAGMA table_info` rather than a hardcoded list,
+                            so a future table is covered automatically
+                            (today: `applications`, `telegram_links`,
+                            `telegram_link_codes`, `user_settings`,
+                            `profile_jobs`) — then `shutil.rmtree`s
+                            `users/{uid}/`, then a best-effort NAME-only sweep
+                            of `logs/` for files whose filename contains the
+                            uid (matches nothing today — log filenames don't
+                            carry a uid yet, that's a separate future
+                            milestone — the sweep exists so it starts working
+                            the moment that changes, with no further edit
+                            here). Also clears `hunter.tracker_cache.cache`
+                            and marks it unloaded when it could hold the
+                            erased user's rows (only true when the erased uid
+                            equals the CURRENT process's own scoped user,
+                            since `read_all_tracker_rows()` filters
+                            `WHERE user_id = current_user_id()`) — every
+                            existing cache reader already reloads on
+                            `if not cache.loaded`, so this is enough without
+                            an `asyncio.run()`/lock dance from a function that
+                            must also work from a bare synchronous CLI.
+                            Refuses an empty/unsafe `user_id` (must be a
+                            single safe path segment — it becomes a
+                            filesystem path) and refuses `DEFAULT_USER_ID`
+                            (the owner) unless `force_owner=True`.
+                            `exclude_job_id` lets the `profile_jobs` kind
+                            below skip deleting its OWN row so the normal
+                            `finish_profile_job()` call afterwards has
+                            something left to stamp `done` onto. Two callers:
+                            `hunter/schedules/profile_jobs.py`'s `erase` kind
+                            (the API is expected to enqueue this) and
+                            `tools/erase_user.py` (owner-run CLI seam).
   config.py                 ALL config: env vars, schedule, paths, source toggles.
                             FILTER re-exported from filter_config.py (below) for
                             backward compat — `from hunter.config import FILTER`
@@ -733,7 +776,31 @@ hunter/
                             never resolving). `add_manual_jobleads_pending` already did its
                             own URL-only check and was unaffected.
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
-  tracker_backup.py         Timestamped daily snapshots of tracker.xlsx
+  tracker_backup.py         Timestamped daily LOCAL snapshots (docs/improvement-2026-09/
+                            06-OPS_PLAN.md M1). Three independent families, each pruned to
+                            `TRACKER_BACKUP_KEEP_FILES` on its own: `tracker_db_*.db` —
+                            `tracker.db`, the real live data store, via
+                            `sqlite3.Connection.backup()` (NEVER `shutil.copy2` of a live
+                            WAL db — a byte-copy of the main file while pages sit
+                            uncommitted in the `-wal` sidecar is a torn snapshot that opens
+                            fine and is missing recent writes or outright corrupt;
+                            `Connection.backup()` drives SQLite's own backup API instead,
+                            safe against a database being written to concurrently by the
+                            bot process itself); `app_sqlite_*.db` — job-hunter-api's
+                            `app.sqlite` (users/auth/profiles), only when `APP_SQLITE_PATH`
+                            is set and the file exists — this process doesn't own that db,
+                            so the source is opened via a read-only URI
+                            (`file:...?mode=ro`); `tracker_*.xlsx` — legacy, best-effort:
+                            prod only writes `tracker.xlsx` on `/export`, so its usual
+                            absence is not an error. Every produced `.db` copy is verified
+                            with `PRAGMA integrity_check` right after the backup — failure
+                            flips `ok=False` into `result["errors"]`, which
+                            `scheduled_tracker_backup` already turns into a Telegram alert
+                            (unchanged contract, no `best_effort()` needed here — the
+                            failure has nowhere silent to hide). These are still LOCAL
+                            snapshots on the same disk as the live data — `scripts/
+                            offhost_backup.sh` (restic, host cron, not run by any agent) is
+                            the off-host half; see docs/DEPLOY.md "Backups".
   lang_guard.py             Language routing + contamination guard: detect_posting_language()
                             (PL/EN by token density) + Polish-in-English / English-in-Polish
                             detection (diacritics + lexicon + suffix + bilingual gloss). Feeds
@@ -782,6 +849,29 @@ hunter/
   expired_marker.py         Parallel expired check for unsent rows; writes EXPIRED to tracker
   rate_limiter.py           Per-domain async concurrency + delay limiter (DomainLimiter);
                             shared by expired_marker and gmail_enricher to avoid HTTP 429
+  url_policy.py             SSRF guard for user-supplied URLs (docs/improvement-2026-09/
+                            05-SECURITY_PLAN.md finding #6/M5): `validate_public_url(url)`
+                            allows only http(s), rejects `localhost`/`.internal`/`.local`,
+                            and resolves the host (stdlib `socket.getaddrinfo`, mockable in
+                            tests) to reject any IP literal or DNS answer in a loopback/
+                            RFC1918-private/link-local (incl. 169.254.169.254, the cloud
+                            metadata endpoint)/IPv6-unique-local range — raises
+                            `UrlPolicyError(ValueError)`. A DNS lookup that fails outright
+                            (not "resolves to a bad address", just fails) is NOT flagged —
+                            that's left for the real fetch to report as an ordinary network
+                            error, which is what keeps every normal job URL byte-identical.
+                            Wired at the two entry points for untrusted URLs — never deep
+                            inside a scraper, which hits its own hardcoded host —
+                            `hunter.sources.fetch_job_text(url, use_session=True)` (the
+                            apply pipeline's own fetch) and
+                            `hunter/commands/url_message.py::cmd_url` (refuses with a short
+                            reply before an apply subprocess is even spawned). The other
+                            half of the guard lives in `hunter/sources/html_fallback.py::
+                            fetch_html` (the one fetcher that ever hits an arbitrary,
+                            non-hardcoded host): `allow_redirects=False` + manual
+                            redirect-following, revalidating every `Location` with this same
+                            function — closes the "redirect off an already-public host onto
+                            a private one" bypass.
   source_health.py          Per-source yield tracking in SQLite (source_runs table): record_run()
                             after each source.search() in the hunt loop, health_report() for /health,
                             newly_broken() alerts once when a previously-working source goes dry for
@@ -971,7 +1061,30 @@ hunter/
     tracks.py               /tracks [angular|react|both] — show/switch active candidate tracks
                             (docs/quality/09-multi-track-react.md); DB key `tracks_enabled`
                             wins over `CANDIDATE_TRACKS` env, same pattern as `/dual`
-    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip
+    link.py                 /link CODE + /unlink. Brute-force limiter (docs/
+                            improvement-2026-09/05-SECURITY_PLAN.md finding #4/M4):
+                            `users.link_chat_with_details()` refuses a chat past
+                            `LINK_ATTEMPT_LIMIT` (5) failed codes within
+                            `LINK_ATTEMPT_WINDOW_MIN` (10) minutes WITHOUT even querying
+                            `telegram_link_codes` — the counter lives in the new
+                            `link_attempts(chat_id, window_start, attempts)` table (DDL
+                            idempotent in `hunter/db.py::ensure_link_attempts_table`, same
+                            lazy-ensure pattern as `subsystem_health`; owned entirely by
+                            this repo, unlike `telegram_link_codes`/`telegram_links` which
+                            the API also writes). A successful link clears the chat's
+                            counter. `/link` accepts a code of any length >= 6 (no hardcoded
+                            length check) so a future longer API-side code works without a
+                            bot change. On a re-link that moves an EXISTING user to a NEW
+                            chat, the OLD chat gets a best-effort one-line notice
+                            (`with best_effort("link.notify_old_chat"):` +
+                            `hunter.bot.notifications._tg_notify`) — the other displacement
+                            direction (this chat reassigned from a different user) has no
+                            channel to notify (that chat_id IS the old user's only known
+                            chat) and is only logged.
+    url_message.py          URL/text message handler + button_callback + _handle_apply + _handle_skip.
+                            The single-URL apply path (owner and linked-non-owner branches)
+                            is guarded by `hunter.url_policy.validate_public_url` before any
+                            apply subprocess is spawned — see `hunter/url_policy.py` above.
   delivery.py               deliver_apply_now(url?) — instant Sheets mirror + Drive upload
                             after EVERY successful apply (auto/manual/paste/LinkedIn batch);
                             targeted fast path by URL, falls back to the idempotent backfills
@@ -1037,7 +1150,18 @@ hunter/
                             exist (profile published at least once) — fails
                             with a "publish the profile first" message
                             otherwise rather than half-rendering under a
-                            placeholder identity. Any failure calls
+                            placeholder identity; `kind='erase'` (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
+                            docs/ERASURE_CONTRACT.md) → `hunter.erasure.erase_user()`
+                            deletes every row scoped to the job's `user_id`
+                            across every table with a `user_id` column, plus
+                            the `users/{uid}/` tree. The job's OWN
+                            `profile_jobs` row is excluded from that delete
+                            (`exclude_job_id=job_id`) so the normal
+                            `finish_profile_job()` call right below still has
+                            a row to stamp `done` onto — one status-writing
+                            path for every kind, no special case for this
+                            one. Any failure calls
                             `fail_profile_job()`; the job is terminal, a retry
                             is a new PUT/upload/preview-request from the
                             client. The tick itself runs inside
@@ -1132,6 +1256,18 @@ docs/ROADMAP.md             THE index of every open plan (added 2026-09-09): act
                             public-release & infra / issue backlog, plus a Shipped table. Update
                             the row when a milestone lands; the per-plan Status lines drift
                             (three were stale when this was built). README links here.
+docs/DOMAIN_MODEL.md        M1 of `improvement-2026-09/03-ARCHITECTURE_PLAN.md` (docs-only, 0
+                            code): the target domain model (Account/Profile/ProfileRender/
+                            Vacancy/Tailoring/Document/QualityReport/Outcome/Job/Outbox/Event/
+                            MarketSnapshot), a verified column-by-column mapping of today's
+                            `applications`/`profile_jobs`/`telegram_links`/`user_settings`
+                            (this repo) and `users`/`profiles`/`profile_revisions` (API repo)
+                            onto those entities — including the `ats_status`/`sent` overloads —
+                            a proposed Postgres DDL v1 per entity, and a "today → target" module
+                            boundary table. Everything is marked proposed, pending owner answers
+                            to that plan's open questions 1-4; nothing here is implemented. Keep
+                            §2's mapping table in sync with `hunter/db.py` in the same PR that
+                            changes a column, same discipline as tracker.py's column constants.
 docs/ORACLE_FREE_TIER_PLAN.md Measure-first plan for moving bot+api from the Hetzner CX22 to
                             Oracle Always Free (arm64). M0a = scraper yield from an Oracle IP vs
                             the prod `source_runs` median (any fail closes the plan); M0b =
@@ -1151,7 +1287,21 @@ docs/improvement-2026-09/   Improvement plan series (2026-09-09): eight-perspect
 tests/                      38+ test files, ~3400 lines (pytest); `pytest tests/ --cov=hunter
                             --cov-report=xml --cov-report=term` for a coverage table (no
                             --cov-fail-under gate yet — docs/quality/04-coverage-and-golden-
-                            e2e.md Part A, map the blind spots for a few weeks first)
+                            e2e.md Part A, map the blind spots for a few weeks first).
+                            **Fast local loop:** `pytest tests/ -m "not slow"` (~40s on the
+                            reference dev box, vs ~50s for the full suite) skips the tests
+                            marked `@pytest.mark.slow` — real-subprocess CLI-seam tests
+                            (`tests/test_tools_profile_cli.py`, `tests/
+                            test_tools_preview_profile_cli.py`, both spawn a child `python
+                            tools/*.py` process per test) plus any other subprocess/
+                            LibreOffice/Playwright-heavy test tagged the same way (see
+                            `[tool.pytest.ini_options] markers` in `pyproject.toml`). CI's
+                            `test` job always runs the FULL suite (the marker only trims the
+                            local/pre-commit loop) with `--durations=20`, whose slowest-tests
+                            table is also echoed into the job's `$GITHUB_STEP_SUMMARY`. The
+                            `.githooks/pre-commit` hook runs the fast subset automatically
+                            when any staged file is Python — see docs/
+                            improvement-2026-09/04-ENGINEERING_PLAN.md M0.2/M3.
 tests/conftest.py           Shared fixtures: `tracker_db` (isolated tmp tracker.db),
                             `fake_llm` (routes llm_client.call_llm by prompt shape to
                             configurable generation/judge/verdict/outreach responses — a
@@ -1333,6 +1483,125 @@ tools/preview_profile.py    CLI seam for hunter/profile_preview.py (docs/
                             stderr on a missing/malformed profile file, an
                             unsafe `--track` value, or a generate_docs.py
                             failure (e.g. no configured candidate identity).
+tools/verdict_vs_outcome.py Read-only M0 measurement (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M0.1): does the independent
+                            ATS verdict actually predict a reply? Sample =
+                            `ats_verdict IS NOT NULL` + `sent_parse.classify
+                            (sent)=="applied"` + sent date aged past
+                            `--min-age-days` (default 21), excluding
+                            `cost_usd IS NULL` rows from the 2026-08-07..
+                            08-10 CLI-outage window (verdict wasn't scored by
+                            Haiku then). Reports a point-biserial correlation,
+                            a bootstrap 90% CI (seeded, sklearn
+                            `LogisticRegression(C=inf)`, no scipy) for the
+                            odds ratio of +10pp verdict adjusted for a
+                            source_bucket confounder (linkedin / polish
+                            boards / ats-direct / other), a Fisher-exact test
+                            (hand-rolled with `math.comb`) on the top vs.
+                            bottom verdict tercile, and a second cut over
+                            every `Applications/**/content.json`'s
+                            `verdict_history` (accepted-round share by
+                            honest/stretch kind, mean accepted delta, share
+                            of runs whose winning round was >=4). Prints the
+                            plan's decision rule and which branch the numbers
+                            land in. `--json` for machine-readable output.
+tools/funnel_sources.py     Read-only M0 measurement (docs/improvement-2026-09/
+                            08-DATA_EVAL_PLAN.md M0.2): per-source funnel
+                            health over `--days` (default 90). Reuses
+                            `hunter.funnel.compute_funnel()` for tracked/
+                            generated/sent/confirmed/answered so the
+                            definitions never drift from `/funnel`, adds a
+                            Wilson 90% CI on the sent-rate, `sum(cost_usd)/
+                            sent` (a CLI-mode sent row has no cost_usd and is
+                            reported as "unpriced"), FAIL/SKIP counts, and
+                            liveness status from `hunter.source_health.
+                            health_report()`. Applies the plan's decision
+                            table — tracked>=30 and sent==0 -> "ballast"
+                            (prints up to 10 filtered URLs to eyeball before
+                            disabling the source); BROKEN?/ERROR for >=14
+                            days (via `source_health.recent_runs`) -> "broken";
+                            sent>=5, answered==0, window>=21d -> "watch".
+                            `--json` for machine-readable output.
+tools/audit_tenant_scope.py Read-only M0 measurement (docs/improvement-2026-09/
+                            05-SECURITY_PLAN.md M0): static AST scan of every
+                            `.py` under `hunter/` (pre-filtered by a plain
+                            `'execute(' in text` grep, per the plan) for
+                            `.execute()`/`.executescript()` calls touching
+                            the `applications` table that lack a `user_id`
+                            predicate — function name, line, statement type
+                            (SELECT/UPDATE/DELETE/INSERT). SQL text is
+                            recovered from the AST (`sql_text_from_node`),
+                            not string-matched on the source, so a multi-line/
+                            triple-quoted SQL literal needs no special-casing
+                            — `ast` already collapses it to one `Constant`
+                            regardless of how the source wraps it. Also greps
+                            for `--dangerously-skip-permissions`/`IS_SANDBOX`
+                            (the plan's parallel M0 check). Exits 1 when any
+                            WRITE (INSERT/UPDATE/DELETE) on `applications` is
+                            missing `user_id` — written so it can become a CI
+                            gate later without further changes. `--json` for
+                            machine-readable output.
+tools/pii_inventory.py      Read-only M0 measurement (docs/improvement-2026-09/
+                            07-COMPLIANCE_PLAN.md M0): `--user <uid>`
+                            enumerates every place a uid appears — every
+                            tracker.db table with a `user_id` column
+                            (discovered via `PRAGMA table_info`, not
+                            hardcoded), every table in the API's own
+                            `app.sqlite` with a user-referencing column when
+                            `--app-sqlite PATH` is given (heuristic: any
+                            column name normalizing to `userid`, plus
+                            `users.id` itself — this repo doesn't own that
+                            schema), the `users/{uid}/` tree (file count +
+                            bytes), and a best-effort substring grep of
+                            `logs/`/`backups/` file contents for the uid.
+                            Always read-only; `--dry-run` is accepted only
+                            for symmetry with a future `hunter/erasure.py::
+                            erase_user()` — this tool never writes regardless.
+                            Prints the plan's decision rule: more places found
+                            than `admin.deleteUser` already cleans (`users`,
+                            `profiles`, `profile_revisions`, `profile_jobs`,
+                            `users/{uid}/`) means the erasure milestone is
+                            mandatory before the first paying client.
+                            `--json` for machine-readable output.
+tools/erase_user.py         CLI seam for hunter/erasure.py (docs/
+                            improvement-2026-09/07-COMPLIANCE_PLAN.md M1,
+                            docs/ERASURE_CONTRACT.md): `python
+                            tools/erase_user.py --user <uid> [--dry-run]
+                            [--force-owner] [--yes]`. Prints the erasure
+                            report as JSON. Destructive by default, so a real
+                            (non-`--dry-run`) run additionally requires
+                            `--yes`; `--force-owner` is the same dangerous
+                            override `erase_user()` itself exposes, off by
+                            default. Exit 1 + stderr on a missing `--yes`, an
+                            unsafe/empty `--user`, an owner refusal, or a
+                            filesystem error. The other caller of the same
+                            function is the `profile_jobs` `erase` kind (see
+                            hunter/schedules/profile_jobs.py above) — this CLI
+                            is for a support request handled without an API
+                            round trip.
+
+scripts/                    Host-side ops scripts (tracked, sh — LF via .gitattributes),
+                            NOT executed by any agent or by the app itself; the owner
+                            installs them via host cron. See docs/DEPLOY.md "Backups".
+  offhost_backup.sh          restic backup of the bot's `{db,users,backups}` dirs (+
+                            optional `API_DATA_DIR`) to an S3-compatible bucket, then
+                            `restic forget --keep-daily 30 --keep-weekly 12 --prune`.
+                            Parametrised entirely by env (`RESTIC_REPOSITORY`,
+                            `RESTIC_PASSWORD_FILE`, `BOT_DATA_DIR`, `API_DATA_DIR`,
+                            `KEEP_DAILY`/`KEEP_WEEKLY`); exits non-zero on any restic
+                            failure. Optional dead-man's-switch ping (`BACKUP_PING_URL`,
+                            curl, best-effort — never fails the backup itself). This is
+                            the OFF-HOST half of docs/improvement-2026-09/06-OPS_PLAN.md
+                            M1 — `hunter/tracker_backup.py` above only ever writes local
+                            snapshots on the same disk as the live data.
+  restore_drill.sh           Proves the restic backup is actually restorable: `restic
+                            restore` of the latest (or `$SNAPSHOT`) snapshot into a
+                            scratch temp dir, then `sqlite3 ... "PRAGMA
+                            integrity_check"` on every `.db` file found — the same check
+                            `hunter/tracker_backup.py::_verify_integrity` runs on the
+                            LOCAL copy at backup time, but here against what restic
+                            actually has in the bucket. Read-only against the repo,
+                            deletes its own scratch dir on exit.
 tools/dual_pairs_stats.py   Dual-apply (A/B) pair statistics (docs/improvement-2026-09/
                             08-DATA_EVAL_PLAN.md M2): walks Applications/** for primary/
                             shadow content.json pairs (shadow dir name = a known
@@ -1402,7 +1671,8 @@ tools/market_m0.py          Market-aggregate M0 stability probe (docs/improvemen
                             CLAUDE.md rules no linter can check (CLAUDE.md kept in sync,
                             best_effort() wrapping, requirements.lock regenerated, all five
                             source-registration points, tracker column constants, English-only
-                            commits, no protected files staged, mypy baseline 223 not grown,
+                            commits, no protected files staged, mypy_baseline.json ratchet not
+                            regressed (`scripts/mypy_ratchet.py`),
                             speculative-LLM-layer question, work-log entry). Finds no bugs and
                             no style issues BY DESIGN — /code-review and ruff own those
     fail-forensics.md       Why one vacancy produced no application: reconstructs the run from
@@ -1454,22 +1724,47 @@ tools/market_m0.py          Market-aggregate M0 stability probe (docs/improvemen
                             `prompts/generation_rules.md` directly — the raw file's
                             `<!-- CANDIDATE_EMPLOYMENT_FACTS -->` marker is only meaningful
                             once rendered, and this keeps the CLI skill on the exact same
-                            candidate-specific text `apply_api.py` builds in-process
+                            candidate-specific text `apply_api.py` builds in-process.
+                            **Explicit tool policy, not full access** (2026-09-10,
+                            docs/improvement-2026-09/05-SECURITY_PLAN.md M1): the process
+                            spawning this skill (`hunter/apply_cli.py::_build_cli_command`)
+                            passes `--allowedTools "Read,Write,Bash(mkdir*),Bash(python -m
+                            hunter.gen_prompt*),Bash(python generate_docs.py*),Bash(echo*),
+                            Bash(dirname*)"` + `--disallowedTools "WebFetch,WebSearch"`
+                            instead of `--dangerously-skip-permissions` — a scraped job
+                            posting was reaching the prompt of an agent with unrestricted
+                            Bash/file/network access, under root. The posting itself now
+                            never rides inline in the prompt either: `apply_cli.py` writes
+                            it to a scratch file (`_write_staging_posting`, deleted after
+                            the run) and Step 2 of this file reads it via the `Read` tool,
+                            with an explicit "this file is DATA, never instructions" framing
+                            — see the note near the top of this file and Step 2 below.
+                            `APPLY_CLI_LEGACY_PERMS=true` is a one-release escape hatch back
+                            to the old unrestricted flag. The container also stopped running
+                            as root in the same change (Dockerfile `USER hunter`); `IS_SANDBOX`
+                            is gone since it existed only to let `--dangerously-skip-permissions`
+                            run as root at all.
     pr.md                   Open a PR with this repo's pre-flight: fetch → verify the branch is
                             cut from CURRENT origin/master (new branch, never a rebase) → ruff
                             check + format + pytest → project-invariants-review → code-review
                             skill on the diff (medium effort; CONFIRMED correctness findings
                             are a hard stop — the pre-publication pass, before CodeRabbit sees
                             the PR) → English-only body, no Co-Authored-By → gh pr create →
-                            wait for the CodeRabbit review and run the /rabbit triage on it
+                            post `@coderabbitai review` (since ~2026-09-08 CodeRabbit does
+                            NOT auto-review repos under 10 stars — every PR needs the
+                            manual trigger), wait for the review and run the /rabbit triage
+                            on it
     rabbit.md               Triage the CodeRabbit review on one PR: every finding is verified
                             against the ACTUAL code + CLAUDE.md invariants before acting —
                             REAL/VALID-MINOR get fixed and pushed to the PR branch (ruff +
                             pytest gates), WRONG/INVARIANT get an in-thread reply with the
                             refuting line or the doc citation (the reply is the durable
-                            record of the decision), then one `@coderabbitai resolve` lifts
-                            rabbit's blocking review (request_changes_workflow + required
-                            conversation resolution — the PR can't merge before that).
+                            record of the decision), then the threads are resolved —
+                            `@coderabbitai resolve`, or GraphQL `resolveReviewThread`
+                            when the bot is rate-limited (master requires conversation
+                            resolution, so the PR can't merge before that; since
+                            2026-09-10 there is no blocking "changes requested" review
+                            anymore — `request_changes_workflow: false`).
                             Carries a list of known rabbit traps in THIS repo (deliberate
                             dynamic re-reads, best_effort swallows, URL-only terminal guard,
                             neutral candidate.get defaults, apply.md being a live prompt)
@@ -1515,6 +1810,13 @@ telegram_channels.json      Owner-curated channel list for hunter/sources/telegr
                             the source of truth; the local project-invariants-review
                             agent remains the authoritative pre-PR check — update the
                             digest when an invariant changes, don't grow it into a copy
+                            NOTE: `auto_review.enabled: true` is inert here since ~2026-09-08
+                            — CodeRabbit skips automatic reviews on repos with < 10 stars and only posts
+                            a "Trigger review" checkbox. `/pr` Step 7.0 posts the
+                            `@coderabbitai review` comment; a PR opened by hand needs it too.
+                            `request_changes_workflow: false` (2026-09-10): findings are
+                            threads that must be resolved (branch protection), not a
+                            blocking review only the rate-limited bot could lift
 pyproject.toml               SINGLE source of truth for dependencies (`[project.dependencies]`
                             + `browser`/`scout`/`dev` extras) and tool config (ruff, mypy,
                             pytest). Build backend `setuptools.build_meta` (was the
@@ -1589,6 +1891,7 @@ Applications/               Generated documents (gitignored)
 | `OPENROUTER_API_KEY` | — | OpenRouter key (for `deepseek-r1`, `deepseek-v3`, `deepseek-v4-pro`, `glm-5.2`) |
 | `OPENAI_API_KEY` | — | OpenAI key (for `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`) |
 | `APPLY_USE_CLI` | `false` | Use Claude CLI (Pro subscription) instead of API |
+| `APPLY_CLI_LEGACY_PERMS` | `false` | One-release escape hatch (docs/improvement-2026-09/05-SECURITY_PLAN.md M1): restores the pre-M1 `claude -p --dangerously-skip-permissions` invocation in `hunter/apply_cli.py` instead of the explicit `--allowedTools`/`--disallowedTools` policy (`_build_cli_command`). Leave `false` unless the restricted policy is missing a tool `.claude/commands/apply.md`'s steps legitimately need. |
 | `JUDGE_ENABLED` | `true` | Run the LLM-as-judge CV verification pass |
 | `JUDGE_MODEL` | `claude-haiku-4-5-20251001` | Cheap model for the judge (independent of generator). Always Anthropic — uses `JUDGE_PROVIDER`/`JUDGE_API_KEY`, not the main profile. |
 | `JUDGE_PROVIDER` | `anthropic` | Judge LLM provider (separate from main provider; Haiku is Anthropic-only) |
@@ -1627,7 +1930,8 @@ Applications/               Generated documents (gitignored)
 | `LINKEDIN_STORAGE_STATE` | — | Path to a Playwright session JSON from `python tools/linkedin_login.py`. Used by the apply pipeline only (`fetch_job_text(url, use_session=True)` → `LinkedInSource.fetch_text_with_session`) so the logged-in page reveals "No longer accepting applications" and `expired_check` aborts before any LLM spend (~$0.31 saved per dead LinkedIn URL). **Must be a path INSIDE the container** (`/app/.secrets/...`); a stale value silently degrades to the guest fetch — `_storage_state_path()` returns None for a non-existent file, and `fetch_text_with_session` falls back without raising. Since 2026-08-22 that fallback is no longer blind: `linkedin.guest_html_expired()` reads the closed-posting signature out of guest HTML (see the Scraper Health Notes row), so a dead posting is still a $0 EXPIRED skip. `/check_expired` / gmail enricher intentionally do **not** use the session (they get the same guest-HTML check instead). Once set, drop `linkedin.com` from `GMAIL_ENRICH_SKIP_HOSTS`. |
 | `LINKEDIN_TPR` | `r604800` | LinkedIn guest-search recency window (`r86400` = 24h, `r604800` = 7 days). Widened from a hardcoded 24h on 2026-08-12: the two windows return genuinely different sets (only 14 shared ids of 57/69 measured) and the 7-day set is far more on-target (49% of rows carry "angular" in the title vs 11% for 24h). URL dedup in the hunt loop makes the wider window free. Unlike `f_E`/`f_WT` (both silently ignored by this endpoint) this parameter is really honoured. |
 | `TELEGRAM_SEND_DOCS` | `true` | Send PDF/DOCX via Telegram after apply |
-| `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue |
+| `TRACKER_BACKUP_ENABLED` | `true` | Daily backups via JobQueue — see `hunter/tracker_backup.py` above |
+| `APP_SQLITE_PATH` | — | Optional path to job-hunter-api's own `app.sqlite` (users/auth/profiles). When set and the file exists, `hunter/tracker_backup.py` backs it up alongside `tracker.db` on the same daily schedule (read-only source connection — this process doesn't own that database). Unset (default) = skipped; most bot-only deployments don't have this file reachable. |
 | `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
 | `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
 | `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |
@@ -2430,12 +2734,24 @@ second `html.unescape()` pass.
   + C4 + SIM + S (bandit); deliberate ignores are documented inline in
   `pyproject.toml` — don't silence a new finding without a rationale comment
 - `mypy hunter/ llm_client.py generate_docs.py apply_agent.py` runs in CI
-  (`typecheck` job) but is `continue-on-error: true` — informational only,
-  does not block deploy yet. Baseline as of 2026-07-15: 223 errors in 54
-  files (mostly PTB `Message | None`/`JobQueue | None` unchecked attribute
-  access — real but pre-existing). Don't let a new change grow that number;
-  fixing it down to zero (and flipping the gate to blocking) is tracked in
-  docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not done in this pass
+  (`typecheck` job) through `scripts/mypy_ratchet.py`, which IS a blocking
+  gate (docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2) — but only on a
+  REGRESSION: it compares the per-file error count against the committed
+  `mypy_baseline.json` and fails only when a file's count goes UP, or a new
+  file (absent from the baseline) has errors. A file's count going DOWN is
+  reported but never fails the build. Baseline as of 2026-09-10: 224 errors
+  in 57 files (mostly PTB `Message | None`/`JobQueue | None` unchecked
+  attribute access — real but pre-existing). Each number is the MAX of what
+  CI (ubuntu, `requirements.lock`) and a developer machine report: the two
+  resolve a few third-party stubs differently (beautifulsoup4, requests),
+  which moves 4 errors across 5 files, and taking the max is what keeps
+  BOTH environments from reporting a false regression while a genuinely new
+  error still pushes its file above the recorded number. When updating the
+  baseline, reconcile against a CI typecheck log, not only a local run. Don't let a new change grow a
+  file's count; deliberately reducing the baseline (fixing real errors) is
+  its own commit: `python scripts/mypy_ratchet.py --update`. Driving it to
+  zero is tracked in docs/quality/06-static-gates-mypy-sonar.md Этап 1–2, not
+  done in this pass
 - SonarCloud scan runs as an informational CI job (`sonar-project.properties`);
   it skips itself until `SONAR_TOKEN` is added to the repo secrets and never
   blocks deploy
@@ -2476,7 +2792,7 @@ second `html.unescape()` pass.
 
 ### Code Quality
 
-5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, `continue-on-error: true` — 223-error baseline, informational only until driven to zero; see docs/quality/06-static-gates-mypy-sonar.md).
+5. ~~**No pyproject.toml / setup.py.**~~ ✅ Resolved (Phase 6, 2026-05-31 + quality-02/06, 2026-07-15): `pyproject.toml` is the single dependency + tool-config source of truth; project installs via `pip install -e .`; `requirements.lock` pins the full transitive graph for Docker/CI. `[tool.mypy]` now runs in CI (`typecheck` job, blocking via `scripts/mypy_ratchet.py` — a 224-error baseline that only fails on a regression, not a fixed threshold; see docs/quality/06-static-gates-mypy-sonar.md and docs/improvement-2026-09/04-ENGINEERING_PLAN.md M2).
 
 6. **Filters are 293 lines** with complex German-language detection regex spanning 40+ patterns. Works but hard to maintain.
 
@@ -2599,8 +2915,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-09-10 | opus | **CodeRabbit stopped auto-reviewing this repo (< 10 stars) — `/pr` now triggers it by hand.** On PR #251 (2026-09-08) and #252 the bot posted only its "Trigger review" checkbox with the note that repositories under 10 GitHub stars do not receive automatic reviews; #248–#250 (2026-09-01..03) had still been reviewed automatically (3/8/1 reviews), so this is a CodeRabbit-side policy change, not a config regression — `auto_review.enabled: true` in `.coderabbit.yaml` is now inert here, and `/pr` Step 7's 10-minute poll was waiting for a review that could not arrive. Fix: `.claude/commands/pr.md` Step 7 gains step 0 — `gh pr comment <N> --body "@coderabbitai review"` right after `gh pr create` — plus a note that a lone checkbox comment means the trigger was skipped, never "no findings"; the CLAUDE.md entries for `pr.md` and `.coderabbit.yaml` say the same. The site/api repos have `rabbit.md` but no `/pr` step, so their PRs need the comment posted by hand until they grow one. Same day, owner decision after #252 sat fixed-but-blocked for an hour: `request_changes_workflow: false` in `.coderabbit.yaml` — a "changes requested" review can only be lifted by the bot, and the free tier rate-limits it after one review, so the fixed PR waited on a bot that could not re-check it. Findings keep their teeth through master's required conversation resolution (every thread still gets triaged and resolved by `/rabbit`, via GraphQL when the bot is silent); the merge just no longer hinges on the bot's quota. Docs/skill/config text only; no runtime change. |
 | 2026-09-09 | fable | **Improvement plan series `docs/improvement-2026-09/` (docs-only).** Eight-perspective analysis of the project on its way to SaaS, each written as a plan in the `plan-doc` convention (Problem → Non-goals → M0 free measurement with a stated decision rule → M1..Mn → Risks → Cost → yes/no Open questions): product owner (01), marketing (02), architect (03), lead engineer (04), plus four read-only audits by invited expert agents: security (05), SRE/ops (06), compliance/GDPR/scraping/LLM-terms (07), data & evaluation (08); 09 lists ten further experts worth inviting with mini-plans; README carries a single 26-step execution order and a cross-plan dependency map. It does NOT replace `docs/SAAS_PIVOT_PLAN_supersedes_PYTHON_CORE_PLAN.md` — it puts a product phase 0 (concierge test on 5 external people, the two open July measurements — ROADMAP rows 4.1/4.3) before its Stage 1 and proposes three ordering amendments (Postgres at Stage 2 not 8; API-only LLM path for non-owner users; a single DDL owner). Three findings the audits surfaced that are worth acting on before any other plan, all verified against the tree: (1) **critical** — `hunter/apply_cli.py:417` runs `claude -p --dangerously-skip-permissions` with the scraped job text in the prompt, under root (`Dockerfile:26` `IS_SANDBOX=1`) with `.env`/`db/`/`users/`/`.claude-cli` mounted and no `--allowedTools`/`--disallowedTools` (05.M1); (2) no backup of the real data: `hunter/tracker_backup.py` snapshots `tracker.xlsx`, which prod only writes on `/export`; `tracker.db`, `app.sqlite` and `users/` are backed up nowhere (06.M1); (3) the active LLM profile, the dual-apply shadow and the CLI fallback are all global, so `/llm deepseek-v3` would route every future customer's CV through OpenRouter to a non-EU provider without a DPA (07.M2). The security plan's findings table deliberately omits exploitation scenarios (owner decision, public repo). Indexed in `docs/ROADMAP.md` §0. No code changes. |
 | 2026-09-09 | opus | **docs/ROADMAP.md — one index of every open plan; docs/ORACLE_FREE_TIER_PLAN.md — measure-first plan for a hosting move.** Owner asked (a) to plan a move from the Hetzner CX22 (2 vCPU / 4 GB / €4.35 per month, 75 GB volume that hit 100 % on 2026-08-29) to Oracle Cloud Always Free after a Threads post on it, and (b) whether all the remaining plans already live in one place — they did not: `QUALITY_ROADMAP.md` (2026-07-15, quality only) and `review-2026-07/02-next-steps.md` were both partial and both stale. `ROADMAP.md` now indexes every plan doc by state: actionable now (the overdue `PRESCREEN_MODE` warn→skip flip from the 2026-08-24 decision; STACK_PRESCREEN M8 `apply_post.py`, not started), blocked on one owner decision (`_ats_check_loop` on CLI → wave 4 unification; `JUDGE_MODE=block`), the SaaS product line in dependency order (RESUME_PROFILE_STORE M5 owner migration is the only bot-repo milestone left; profile-page tabs, B3.5 fan-out, FILTERS M4/M5, per-user email M0), the data-deferred questions of 2026-08-29, public-release/infra leftovers (gitleaks over the full history + a CI job — `.github/workflows/` still holds only `deploy.yml`), the two open issues (#141; #138 reduced to its unshipped step 2 `contact_lookup.py`), and a Shipped table so nobody re-plans a landed one. While building it, three plan files carried a false Status line — `GDRIVE_SSL_RACE_PLAN` ("PLANNED", M1–M3 live), `SCOUT_REPO_SPLIT_PLAN` ("Phases 1-4 pending", done 2026-08-11), `TELEGRAM_CHANNELS_SOURCE_PLAN` ("ready to implement", live since 2026-07-12) — and `PUBLIC_RELEASE_CHECKLIST` item 1 still said "NOT clean" a week after #235 emptied the handoff-readiness allowlist; all four corrected in place, historical text kept. The Oracle plan is deliberately NOT a migration yet: the scrapers are IP-sensitive (5 cloudscraper sources + the LinkedIn guest API) and hyperscaler ranges are flagged harder than a generic VPS, so M0a compares yield from an Oracle IP against the prod `source_runs` median already recorded by `hunter/source_health.py` (rule: pracuj/theprotocol/linkedin ≥ 70 % on 3 runs, justjoin/nofluffjobs as no-anti-bot controls, any fail closes the plan — no proxy, no region hunt); M0b is a `buildx --platform linux/arm64` test build (Playwright `--with-deps` on Debian arm64 is the one doubtful step); M0c is the invoice + peak RAM during a CLI apply, because €52/year alone does not justify two days — capacity does or nothing does. M1–M4 (multi-arch CI; a parallel 1 OCPU / 6 GB host — sized so real utilization stays above Oracle's three 7-day idle-reclamation thresholds, since the docs do NOT say a PAYG upgrade exempts Always Free instances; a hunt-only shadow week on a SEPARATE bot token with only candidate.yaml copied, no tokens/tracker/Applications; cutover with bot AND api stopped before the final rsync and the Hetzner box kept stopped 30 days) run only after M0a passes. CodeRabbit's review of the PR corrected two facts the first draft had from memory — the Always Free allocation is 2 OCPU / 12 GB (not 4 / 24), and PAYG is not a reclamation exemption — both re-read from Oracle's page and fixed before merge. No code changed; nothing committed as implementation. |
 | 2026-09-08 | opus | **Prod CLI auth moved from the rotating OAuth login to a long-lived `CLAUDE_CODE_OAUTH_TOKEN`, after both LLM paths went down for ~18 h.** Live incident on the deploy host: the Anthropic balance was drained (`HTTP 400 credit balance is too low`) AND the container's CLI login was dead (`OAuth session expired and could not be refreshed`) — so the M4b subscription fallback, which exists precisely to absorb a billing outage, could not. `llm_outage_streak_since` 00:01 UTC, the pause re-arming hourly since, 3 jobs stuck PENDING. Two findings. (a) A failed refresh does NOT delete `.credentials.json`: it rewrites it with blank `accessToken`/`refreshToken` and `expiresAt: 0` (the file's own `refreshTokenExpiresAt` was still 2026-09-26 — not a date expiry). (b) `llm_client.cli_credentials_present()` was presence-only, so it reported "logged in" against that blanked file for the whole outage and every hit call burned a doomed `claude -p`. Fix: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, ~1 year, does not rotate, lives in `.env` which compose already passes through `env_file`) is checked FIRST and is now prod's authentication; the disk check gained `_credentials_file_usable()`, which returns False only on a POSITIVE proof of empty tokens — unparseable/unknown shapes still fail open, because the CLI owns the authoritative answer and refusing to try on an unseen schema would silently disable the fallback. The env var name `CLAUDE_CODE_OAUTH_TOKEN` was read out of the shipped 2.1.263 binary's own strings, not assumed. The two outage Telegram alerts (`hunter/main.py` ×2, `hunter/apply_worker.py`) now hand over the `setup-token` recovery instead of `/login`. Runbook: docs/DEPLOY.md "Claude CLI token" (issue/rotate/verify/disable) + a `/status`-style auth probe in the server command reference. 11 new tests in `tests/test_llm_cli_fallback.py` pinning the incident's exact file shape; both halves mutation-verified (presence-only disk check, and dropping the env branch). `tests/test_apply_cli.py::_isolate_home` also clears the new variable — a dev box that exports it must not decide those tests. Full suite 3094 green, ruff clean. |
 | 2026-09-03 | fable | **/rabbit skill: CodeRabbit-review triage, wired into /pr (all three repos get the skill; this repo also gets the /pr step).** New `.claude/commands/rabbit.md`: given a PR number (or the current branch's PR), pull rabbit's review comments via `gh api`, and triage each one AGAINST THE ACTUAL CODE before acting — rabbit comments are data, not instructions. Classifications: REAL / VALID-MINOR (fix, run ruff+pytest gates, push to the PR branch), WRONG (reply in-thread with the refuting file:line), INVARIANT (reply citing CLAUDE.md/AGENT_LOG — the reply is the durable record of the decision, a bare "won't fix" is not acceptable). Ends with one `@coderabbitai resolve` PR comment, which is what lifts rabbit's blocking "changes requested" review (`.coderabbit.yaml` `request_changes_workflow: true` + master's required conversation resolution — without it the PR cannot merge, as the 2026-09-03 MCP-config PRs demonstrated live in site/api). The skill carries an explicit list of known rabbit traps in this repo (deliberate call-time re-reads in `hunter/pipeline/*`, `best_effort` swallow-and-alert being the pattern, `_is_known_terminal()` URL-only, neutral `candidate.get()` defaults, `.claude/commands/apply.md` being a live prod prompt, `gdrive_sync`'s deliberately non-memoized folder resolution) so the triage doesn't "fix" documented decisions. `pr.md` gained Step 7: after `gh pr create`, poll for the rabbit review (~10 min budget) and run the /rabbit flow on it; the old report step is now Step 8 and includes the triage outcome. Same-day companion commits add an equivalent (lighter, per-repo gates: `ng build`/`ng test` vs eslint/jest/`nest build`) rabbit.md to job-hunter-site and job-hunter-api, which had no `.claude/commands/` at all before. |
-| 2026-09-01 | fable | **CodeRabbit PR review added across all three repos.** Added a tracked `.coderabbit.yaml` to this repo, `job-hunter-api` and `job-hunter-site` — CodeRabbit's free open-source tier (all three repos are public) auto-reviews every PR as a first automated line, complementing (NOT replacing) the local `project-invariants-review` agent, which stays the authoritative pre-PR check. The bot config carries a DIGEST of CLAUDE.md invariants so PRs opened outside Claude Code get flagged too (candidate.get neutral defaults, best_effort wrapping, lock regeneration, five source-registration points, English-only, CLAUDE.md-in-sync) plus targeted `path_instructions` for `hunter/tracker.py`, `.claude/commands/apply.md` (a LIVE non-interactive prompt) and `tests/**`; style nits deprioritized (ruff owns them), `requirements.lock`/`docs/AGENT_LOG.md`/`tests/fixtures/**` excluded from review. Update the digest when an invariant changes — don't let it grow into a second copy of this file. Activation is a one-time owner step: install the CodeRabbit GitHub App (github.com/apps/coderabbitai) on the three repos. |

@@ -25,6 +25,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+# Every test here spawns a real `python tools/preview_profile.py ...` child
+# process (see the module docstring above) — the slowest file in the suite
+# per-test, dominated by interpreter startup + a real generate_docs.py
+# subprocess. See pyproject.toml's `slow` marker and `pytest -m "not slow"`.
+pytestmark = pytest.mark.slow
+
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 EXAMPLE_PROFILE = PROJECT_DIR / "candidate" / "profile.example.json"
 
