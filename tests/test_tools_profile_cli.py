@@ -15,7 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from hunter import candidate
+
+# Every test here spawns a real `python tools/parse_resume.py` /
+# `tools/render_profile.py` child process (see the module docstring above).
+# See pyproject.toml's `slow` marker and `pytest -m "not slow"`.
+pytestmark = pytest.mark.slow
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 JANE_TXT = PROJECT_DIR / "tests" / "fixtures" / "resumes" / "jane.txt"

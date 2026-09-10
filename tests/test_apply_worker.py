@@ -319,7 +319,7 @@ def test_loop_claims_and_processes_one_pending_job(tracker_db, monkeypatch):
     real_claim = tracker.claim_pending
     calls = {"n": 0}
 
-    def _claim_then_stop():
+    def _claim_then_stop(*_args, **_kwargs):
         calls["n"] += 1
         if calls["n"] > 1:
             raise _StopLoop()
@@ -402,7 +402,7 @@ def test_loop_consecutive_fail_breaker_backs_off_and_resets(tracker_db, monkeypa
     real_claim = tracker.claim_pending
     calls = {"n": 0}
 
-    def _claim_then_stop():
+    def _claim_then_stop(*_args, **_kwargs):
         calls["n"] += 1
         if calls["n"] > 3:
             raise _StopLoop()
@@ -446,7 +446,7 @@ def test_loop_releases_claim_when_duplicate_inflight(tracker_db, monkeypatch):
     real_claim = tracker.claim_pending
     calls = {"n": 0}
 
-    def _claim_then_stop():
+    def _claim_then_stop(*_args, **_kwargs):
         calls["n"] += 1
         if calls["n"] > 1:
             raise _StopLoop()
@@ -483,7 +483,7 @@ def test_processing_notify_failure_runs_job_and_releases_lock(tracker_db, monkey
     real_claim = tracker.claim_pending
     calls = {"n": 0}
 
-    def _claim_then_stop():
+    def _claim_then_stop(*_args, **_kwargs):
         calls["n"] += 1
         if calls["n"] > 1:
             raise _StopLoop()
