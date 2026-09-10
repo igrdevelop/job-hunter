@@ -5,6 +5,15 @@ services:
     image: ghcr.io/igrdevelop/job-hunter:${IMAGE_TAG:-latest}
     container_name: job-hunter
     restart: always
+    # Default (10s) is too short for a graceful stop: an in-flight apply can
+    # legitimately run for hours in CLI mode, and hunter/apply_worker.py's
+    # shutdown_workers() gives it ~20s to notice the stop request before
+    # forcibly cancelling it (docs/improvement-2026-09/06-OPS_PLAN.md M3) —
+    # cancellation itself is fast (proc.kill() + release_claim), but PTB's
+    # own Updater.stop()/job_queue.stop(wait=True) need their own headroom
+    # first. 120s covers that with margin; SIGKILL still lands after this if
+    # something hangs, so worst case is unchanged (just slower).
+    stop_grace_period: 120s
     env_file:
       - .env
     environment:
