@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from hunter import candidate, gen_prompt
+from hunter import candidate, gen_prompt, metrics
 from hunter.config import (
     GENERATE_DOCS_PATH,
     PROJECT_DIR,
@@ -218,6 +218,34 @@ def _run_main_api(
     # on the next vacancy without a bot restart.
     _llm_prof = _get_llm_profile()
 
+    # Metrics (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1): one
+    # generation_runs row per apply attempt, filled in as the pipeline learns
+    # more (track/posting_lang/ats scores/...) and stamped with a terminal
+    # outcome at every exit point below. Best-effort throughout
+    # (hunter.metrics wraps every write in best_effort("metrics")) — a
+    # metrics failure must never change what gets generated or delivered.
+    from hunter.config import JUDGE_MODEL, current_user_id
+    from hunter.tracker import normalize_url
+
+    _is_real_url = bool(url) and url != PASTE_NO_URL_PLACEHOLDER
+    try:
+        from hunter.funnel import source_for_url
+
+        _metrics_source = source_for_url(url) if _is_real_url else ""
+    except Exception:  # noqa: BLE001 — telemetry must never break an apply
+        _metrics_source = ""
+    run_id = metrics.start_run(
+        user_id=current_user_id(),
+        url_norm=normalize_url(url) if _is_real_url else "",
+        pipeline="api",
+        profile=_llm_prof.name,
+        gen_model=_llm_prof.model,
+        judge_model=JUDGE_MODEL,
+        source=_metrics_source,
+        is_manual=is_manual,
+        is_force=skip_dedup,
+    )
+
     # Step 1 — Get job text: either use pasted text or fetch
     if paste_text:
         job_text = paste_text
@@ -243,9 +271,16 @@ def _run_main_api(
                 # retry later WITHOUT escalating the permanent fail counter, so it
                 # never becomes a "gave up" dead row. The offer itself is fine.
                 print(f"[apply_agent] FETCH BLOCKED (transient, retry later): {e}")
+                metrics.stage(run_id, "fetch", "error", payload={"error": str(e)[:200]})
+                metrics.finish_run(
+                    run_id, outcome="fetch_blocked", exit_code=APPLY_RATE_LIMITED_EXIT_CODE
+                )
                 sys.exit(APPLY_RATE_LIMITED_EXIT_CODE)
             print(f"[apply_agent] FETCH ERROR: {e}")
+            metrics.stage(run_id, "fetch", "error", payload={"error": str(e)[:200]})
+            metrics.finish_run(run_id, outcome="fetch_error", exit_code=1)
             sys.exit(1)
+    metrics.stage(run_id, "fetch", "ok", payload={"chars": len(job_text or "")})
 
     # Step 1.5a — Check for expired offer. MUST run before the too-short
     # abort: deleted postings are often served as a short synthetic marker
@@ -264,6 +299,7 @@ def _run_main_api(
             add_expired(url)
         except Exception as e:
             print(f"[apply_agent] Warning: could not write EXPIRED to tracker: {e}")
+        metrics.finish_run(run_id, outcome="expired", exit_code=0)
         return
 
     # Step 1.5b — Abort if fetched text is too short. Scout relay posts get a
@@ -281,6 +317,7 @@ def _run_main_api(
         print(
             f"[apply_agent] ABORT — job text too short ({len((job_text or '').strip())} chars): {url}"
         )
+        metrics.finish_run(run_id, outcome="too_short", exit_code=0)
         sys.exit(0)
 
     # Step 1.5c — Pre-LLM React-only text check (saves LLM call for obvious React jobs)
@@ -306,6 +343,7 @@ def _run_main_api(
             )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+        metrics.finish_run(run_id, outcome="skip_react_pre_llm", exit_code=0)
         return
 
     # Step 1.5d — Pre-LLM backend-only text check (no FE framework + explicit BE required)
@@ -339,6 +377,7 @@ def _run_main_api(
             )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")
+        metrics.finish_run(run_id, outcome="skip_backend_only", exit_code=0)
         return
 
     # Step 1.5e — Manual-apply "warn but allow" screen. A pasted URL bypasses the
@@ -382,6 +421,7 @@ def _run_main_api(
         company=jobleads_company,
         is_force_override=skip_dedup,
     ):
+        metrics.finish_run(run_id, outcome="skip_doomed_gate", exit_code=0)
         return
 
     # Step 1.5g — Re-post gate (hunter/repost_gate.py): if this posting is a
@@ -401,6 +441,7 @@ def _run_main_api(
         permalink=permalink,
         is_force_override=skip_dedup,
     ):
+        metrics.finish_run(run_id, outcome="reused_repost", exit_code=0)
         return
 
     # Step 1.5h — Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M4): one cheap
@@ -417,6 +458,7 @@ def _run_main_api(
         is_force_override=skip_dedup,
         is_manual=is_manual,
     ):
+        metrics.finish_run(run_id, outcome="skip_prescreen", exit_code=0)
         return
 
     # Step 2 — Read system prompt (instructions + candidate profile)
@@ -435,6 +477,7 @@ def _run_main_api(
 
     # Step 2.5 — Load base CV for detected stack (injected into user message)
     stack_hint = _detect_stack_hint(job_text)
+    metrics.update_run(run_id, track=stack_hint)
     base_cv = _load_base_cv(stack_hint)
     if base_cv:
         print(f"[apply_agent] Step 2.5: Loaded base CV for stack '{stack_hint}'")
@@ -450,6 +493,7 @@ def _run_main_api(
     from hunter.lang_guard import detect_posting_language
 
     posting_lang = detect_posting_language(job_text)
+    metrics.update_run(run_id, posting_lang=posting_lang)
 
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
@@ -498,6 +542,8 @@ def _run_main_api(
         # alert is sent once by the batch loop, not per vacancy (M1,
         # docs/LLM_OUTAGE_RESILIENCE_PLAN.md).
         print(f"[apply_agent] LLM OUTAGE (billing/auth) — vacancy untouched: {e}")
+        metrics.stage(run_id, "generate", "error", payload={"error": str(e)[:200]})
+        metrics.finish_run(run_id, outcome="llm_outage", exit_code=APPLY_LLM_OUTAGE_EXIT_CODE)
         sys.exit(APPLY_LLM_OUTAGE_EXIT_CODE)
     except LLMError as e:
         error_type = "rate_limit" if "rate" in str(e).lower() else "llm_error"
@@ -508,11 +554,16 @@ def _run_main_api(
             f"<pre>{str(e)[:500]}</pre>"
         )
         print(f"[apply_agent] LLM ERROR: {e}")
+        metrics.stage(run_id, "generate", "error", payload={"error": str(e)[:200]})
+        metrics.finish_run(run_id, outcome=error_type, exit_code=1)
         sys.exit(1)
     except Exception as e:
         notify(f"❌ <b>Unexpected error in LLM call</b>\n\n<pre>{str(e)[:500]}</pre>")
         print(f"[apply_agent] UNEXPECTED ERROR: {e}")
+        metrics.stage(run_id, "generate", "error", payload={"error": str(e)[:200]})
+        metrics.finish_run(run_id, outcome="error", exit_code=1)
         sys.exit(1)
+    metrics.stage(run_id, "generate", "ok")
 
     # Step 4 — Validate JSON
     print("[apply_agent] Step 3: Validating LLM output...")
@@ -642,6 +693,7 @@ def _run_main_api(
             add_react_skipped(content, url)
         except Exception as e:
             print(f"[apply_agent] Warning: could not write React-skip to tracker: {e}")
+        metrics.finish_run(run_id, outcome="skip_react_post_llm", exit_code=0)
         return
 
     # Step 4.55 — Company+title dedup (post-LLM). The manual entry points (URL
@@ -682,11 +734,19 @@ def _run_main_api(
                 )
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}")
+            metrics.finish_run(run_id, outcome="skip_dedup_company_title", exit_code=0)
             return
 
     # Step 4.6 — Independent ATS check + rewrite loop for resume (target ≥ 95%)
     print("[apply_agent] Step 4.6: Running independent ATS check on resume...")
     content = _ats_check_loop(content, job_text)
+    _ats_check_result = content.get("ats_check") or {}
+    metrics.update_run(
+        run_id,
+        ats_pre_score=_ats_check_result.get("score"),
+        ats_pre_keyword=_ats_check_result.get("keyword_score"),
+    )
+    metrics.stage(run_id, "ats_loop", "ok", payload={"score": _ats_check_result.get("score")})
 
     # Step 4.7 — Sanitize resume
     print("[apply_agent] Step 4.7: Sanitizing resume content...")
@@ -699,6 +759,7 @@ def _run_main_api(
 
     # Strip fabricated regulatory/compliance claims (DORA/RODO/GDPR/ISO/...) that
     # belong to the employer's self-description, not the candidate's expertise.
+    _compliance_fixes: list = []
     try:
         from hunter.apply_shared import _strip_compliance_claims
 
@@ -711,6 +772,8 @@ def _run_main_api(
     # Strip fabricated client-prestige claims ("Fortune 500 clients", "top-tier")
     # the LLM invents despite the RED LINE, and collapse "term / synonym" gloss
     # pairs the ATS rewrite leaves in the skills section.
+    _prestige_fixes: list = []
+    _gloss_fixes: list = []
     try:
         from hunter.apply_shared import _dedup_skill_glosses, _strip_prestige_claims
 
@@ -722,6 +785,11 @@ def _run_main_api(
             print(f"[apply_agent] gloss-dedup: {_fix}")
     except Exception as _ps_err:
         print(f"[apply_agent] Warning: prestige/gloss scrub failed (continuing): {_ps_err}")
+
+    metrics.update_run(
+        run_id,
+        scrub_fixes=len(_compliance_fixes) + len(_prestige_fixes) + len(_gloss_fixes),
+    )
 
     # Step 4.72 — Claim judge: a second cheap model verifies every generated
     # claim against the candidate profile + job posting and returns a structured
@@ -743,6 +811,13 @@ def _run_main_api(
                 print(f"[apply_agent] judge: [{_v.severity}] {_v.field}: {_v.reason}")
             for _fix in _outcome.fixes:
                 print(f"[apply_agent] judge-repair: {_fix}")
+            metrics.update_run(
+                run_id,
+                judge_violations=len(judge_report.violations),
+                judge_repaired=len(_outcome.fixes),
+                judge_surviving=len(_outcome.survivors),
+            )
+            metrics.stage(run_id, "judge", "blocked" if _outcome.blocked else "ok")
             if JUDGE_MODE in ("warn", "block") and judge_report.actionable:
                 notify(judge_report.telegram_summary(url))
             if _outcome.blocked:
@@ -752,6 +827,7 @@ def _run_main_api(
                     + "\n".join(f"• {v.field}: {v.reason[:100]}" for v in _outcome.survivors[:3])
                 )
                 print(f"[apply_agent] ABORT — claim judge blocked delivery: {url}")
+                metrics.finish_run(run_id, outcome="blocked_judge", exit_code=0)
                 sys.exit(0)
         except SystemExit:
             raise
@@ -771,6 +847,12 @@ def _run_main_api(
         content, _lang_blocked, _lang_report = enforce_language_separation(content)
         for _line in _lang_report:
             print(f"[apply_agent] lang-gate: {_line}")
+        metrics.update_run(
+            run_id,
+            lang_gate_hits=len(_lang_report),
+            lang_gate_blocked=_lang_blocked,
+        )
+        metrics.stage(run_id, "lang_gate", "blocked" if _lang_blocked else "ok")
         if _lang_blocked:
             notify(
                 f"⛔ <b>Blocked — Polish leaked into the English CV</b>\n"
@@ -781,6 +863,7 @@ def _run_main_api(
                 + "\n".join(f"• {l}" for l in _lang_report[-3:])
             )
             print(f"[apply_agent] ABORT — language gate blocked delivery: {url}")
+            metrics.finish_run(run_id, outcome="blocked_lang_gate", exit_code=0)
             sys.exit(0)
     except SystemExit:
         raise
@@ -809,6 +892,7 @@ def _run_main_api(
             f"⚠️ <b>Bogus company name — skipped</b>\nLLM returned: <code>{company}</code>\n🔗 {url}"
         )
         print(f"[apply_agent] ABORT — bogus company name {company!r}: {url}")
+        metrics.finish_run(run_id, outcome="bogus_company", exit_code=0)
         sys.exit(0)
 
     output_folder = compute_output_folder(company)
@@ -929,6 +1013,7 @@ def _run_main_api(
     except subprocess.TimeoutExpired:
         gen_ok = False
         print("[apply_agent] generate_docs.py timed out (120s)")
+    metrics.stage(run_id, "render", "ok" if gen_ok else "error")
 
     # Step 7.5 — PDF roundtrip + NBSP self-heal.
     #
@@ -1001,6 +1086,7 @@ def _run_main_api(
                 _persist_content()
                 pdf_summary = " | " + format_summary(pdf_check)
                 print(f"[apply_agent] {format_summary(pdf_check)}")
+                metrics.update_run(run_id, ats_pdf_score=pdf_check.get("score"))
         except Exception as e:
             print(f"[apply_agent] Warning: PDF roundtrip failed (continuing): {e}")
 
@@ -1015,6 +1101,7 @@ def _run_main_api(
 
             verdict = run_llm_verdict(folder=output_folder, job_text=job_text)
             if verdict is not None:
+                metrics.update_run(run_id, verdict_first=verdict.get("score"))
                 # Step 7.7b — Verdict refine loop: if the independent verdict is
                 # below target, rewrite resume_en (honest, then stretch) against
                 # its own feedback, re-render, and re-verdict — keeping only
@@ -1087,6 +1174,18 @@ def _run_main_api(
                             )
                 content["ats_verdict"] = verdict
                 print(f"[apply_agent] {format_verdict(verdict)}")
+                _verdict_history = content.get("verdict_history") or []
+                _accepted_rounds = [h for h in _verdict_history if h.get("outcome") == "accepted"]
+                metrics.update_run(
+                    run_id,
+                    verdict_final=verdict.get("score"),
+                    refine_rounds=len(_verdict_history),
+                    refine_accepted=len(_accepted_rounds),
+                    best_round_kind=(
+                        _accepted_rounds[-1].get("kind") if _accepted_rounds else None
+                    ),
+                )
+                metrics.stage(run_id, "verdict", "ok", payload={"score": verdict.get("score")})
                 # Stamp the score on the tracker row (created by generate_docs
                 # in Step 7, so it already exists). The Sheets column-N cell is
                 # mirrored later by the bot process (gsheets_sync.mirror_new_row
@@ -1192,6 +1291,22 @@ def _run_main_api(
             f"Applications/{output_folder.parent.name}/{output_folder.name}/ "
             f"({len(created_files)} files)"
         )
+        _row_id_for_metrics = None
+        try:
+            if _is_real_url:
+                from hunter.tracker import lookup_url as _lookup_url_for_metrics
+
+                _rows_for_metrics = _lookup_url_for_metrics(url)
+                _row_id_for_metrics = _rows_for_metrics[0]["id"] if _rows_for_metrics else None
+        except Exception:  # noqa: BLE001 — telemetry must never break an apply
+            _row_id_for_metrics = None
+        metrics.finish_run(
+            run_id,
+            outcome="ok",
+            exit_code=0,
+            row_id=_row_id_for_metrics,
+            cost_usd=(cost_dict or {}).get("total_usd"),
+        )
         # Success: hand the folder back so apply_agent.main() can run the
         # dual-apply shadow comparison (if enabled) off the saved job_posting.txt.
         return output_folder
@@ -1202,4 +1317,5 @@ def _run_main_api(
             f'Run manually: python generate_docs.py "{content_path}"'
         )
         print("\n[apply_agent] WARNING: No .docx/.pdf files found, but content.json is saved.")
+        metrics.finish_run(run_id, outcome="no_docs", exit_code=1)
         sys.exit(1)

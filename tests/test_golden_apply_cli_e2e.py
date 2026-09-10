@@ -137,6 +137,10 @@ def cli_env(
     monkeypatch.setattr("hunter.apply_shared.APPLICATIONS_DIR", applications)
     monkeypatch.setattr("hunter.apply_cli.APPLICATIONS_DIR", applications)
     monkeypatch.setattr("hunter.config.JUDGE_API_KEY", "test-judge-key")
+    # hunter.metrics (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1) keeps
+    # its own module-level DB_PATH — point it at the same tmp tracker.db the
+    # `tracker_db` fixture set up (mirrors the API golden suite's own wiring).
+    monkeypatch.setattr("hunter.metrics.DB_PATH", tracker_db)
 
     notifications: list[str] = []
     monkeypatch.setattr("hunter.apply_cli.notify", notifications.append)
@@ -162,6 +166,7 @@ def cli_env(
             self.notifications = notifications
             self.gen_runner = FakeGenerateDocsRunner()
             self.skill = None
+            self.tracker_db = tracker_db
 
         def run(self, url: str, posting: str, content: dict, **kwargs):
             monkeypatch.setattr(
@@ -234,6 +239,23 @@ class TestEnglishPostingIsUnaffected:
         assert written.get("primary_lang") == "EN"
         assert list(folder.glob("*_EN.pdf")), "the English CV is the deliverable"
         assert _row(self.URL).get("ats", "").strip().endswith("%")
+
+        # ── metrics: exactly one generation_runs row, populated (M1) ───────
+        import sqlite3
+
+        conn = sqlite3.connect(str(cli_env.tracker_db))
+        conn.row_factory = sqlite3.Row
+        runs = conn.execute("SELECT * FROM generation_runs WHERE url_norm != ''").fetchall()
+        conn.close()
+        assert len(runs) == 1, "expected exactly one generation_runs row for this URL"
+        run = runs[0]
+        assert run["pipeline"] == "cli"
+        assert run["outcome"] == "ok"
+        assert run["exit_code"] == 0
+        assert run["finished_at"]
+        assert run["verdict_first"] == 96
+        assert run["verdict_final"] == 96
+        assert run["posting_lang"] == "EN"
 
 
 class TestPostGenerationAbortsUndoTheRow:
