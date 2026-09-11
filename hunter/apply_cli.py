@@ -964,6 +964,12 @@ def main_cli(
                                     content_json_path=content_json_path,
                                     use_full=full_mode,
                                     force=skip_dedup,
+                                    # The CLI skill already wrote this vacancy's tracker row;
+                                    # only the documents change here, so never rewrite the row
+                                    # (in force mode that would DELETE+INSERT it: new sync ID,
+                                    # false Re-application flag - same reason the refine loop
+                                    # re-renders with --no-tracker).
+                                    no_tracker=True,
                                     python_executable=sys.executable,
                                 )
                                 subprocess.run(

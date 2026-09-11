@@ -249,3 +249,17 @@ def test_apply_cli_wires_foreign_contact_guard() -> None:
     src = _source_of("hunter.apply_cli")
     assert "find_foreign_contacts" in src
     assert "drop_foreign_contacts" in src
+
+
+def test_apply_cli_foreign_contact_regen_never_rewrites_the_tracker_row() -> None:
+    """The CLI skill already wrote this vacancy's tracker row before the
+    post-processing runs, and dropping a foreign contact only changes the
+    documents. The re-render must therefore pass no_tracker=True: in force mode
+    a tracker write would DELETE+INSERT the row (new sync ID, false
+    Re-application flag) - the same reason the refine loop re-renders with
+    --no-tracker."""
+    src = _source_of("hunter.apply_cli")
+    marker = src.index("foreign-contact guard: regenerated")
+    call = src.rfind("build_generate_docs_cmd(", 0, marker)
+    assert call != -1, "foreign-contact regen no longer builds a generate_docs command"
+    assert "no_tracker=True" in src[call:marker]
