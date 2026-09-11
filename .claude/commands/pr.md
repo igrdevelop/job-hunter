@@ -117,15 +117,44 @@ Print the PR URL as a markdown link when done.
 
 ## Step 7 - CodeRabbit triage
 
-CodeRabbit auto-reviews the PR within a few minutes of opening, and its review
-is **blocking** (`request_changes_workflow: true` + required conversation
-resolution on master) — the PR cannot merge until its threads are resolved.
+CodeRabbit's findings are comment threads, and master's branch protection
+requires every thread resolved before merge — so each one must be triaged
+(`request_changes_workflow` is `false` since 2026-09-10: the bot no longer
+submits a "changes requested" review, because only the bot can lift that
+state and on the free tier it is rate-limited after one review — #252 sat
+fixed-but-blocked for an hour). It also does not start on its own: since ~2026-09-08 CodeRabbit
+skips automatic reviews on repositories with fewer than 10 GitHub stars,
+regardless of `auto_review.enabled: true` in `.coderabbit.yaml` (#248–#250 were
+auto-reviewed on 2026-09-01..03; #251 and #252 got only the "Trigger review"
+checkbox comment). The trigger is a PR comment, so post it yourself.
+
+0. Immediately after `gh pr create`, request the review:
+
+```bash
+gh pr comment <N> --body "@coderabbitai review"
+```
 
 1. Poll for the review (don't busy-wait — check every ~60s, give up after ~10 min):
 
 ```bash
-gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coderabbitai")] | length'
+for i in $(seq 1 10); do
+  n=$(gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coderabbitai")] | length') || n=""
+  case "$n" in
+    ""|*[!0-9]*) echo "poll $i: gh failed, retrying" ;;
+    0)           echo "poll $i: no review yet" ;;
+    *)           echo "review landed ($n)"; break ;;
+  esac
+  if [ "$i" -lt 10 ]; then sleep 60; fi
+done
 ```
+
+**Treat a failed `gh` call as "unknown", never as "landed".** The obvious
+`until [ "$(gh ... --jq '...|length')" != "0" ]` is wrong: a transient API error
+makes the substitution empty, and `"" != "0"` is TRUE, so the loop exits on the
+first hiccup and the run reports a review that does not exist. Match on a digit,
+as above. Note the two APIs spell the bot's login differently — `coderabbitai`
+via `gh pr view` (GraphQL) but `coderabbitai[bot]` via `gh api .../pulls/<N>/...`
+(REST) — so don't copy one filter into the other.
 
 2. When it lands, run the `/rabbit` flow (`.claude/commands/rabbit.md`) on this
    PR: triage every finding against the code and CLAUDE.md invariants, fix the
@@ -133,7 +162,9 @@ gh pr view <N> --json reviews --jq '[.reviews[] | select(.author.login == "coder
    `@coderabbitai resolve`.
 3. If the review hasn't landed within the wait budget, or the human ends the
    session first — say so explicitly and note that `/rabbit <N>` can be run
-   later; never leave the impression the triage happened.
+   later; never leave the impression the triage happened. If the only thing
+   CodeRabbit posted is its "Trigger review" checkbox comment, step 0 was
+   skipped — post the trigger, don't report "no findings".
 
 ---
 

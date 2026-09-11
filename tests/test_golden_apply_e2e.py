@@ -190,6 +190,10 @@ def golden_env(tmp_path, monkeypatch, tracker_db, fake_llm):
     # isolate it onto the same tmp tracker DB the `tracker_db` fixture set up
     # (hunter.tracker.DB_PATH), so the test never touches a real tracker.db.
     monkeypatch.setattr("hunter.config.TRACKER_DB_PATH", tracker_db)
+    # hunter.metrics (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1) keeps
+    # its own module-level DB_PATH, same pattern as hunter.source_health /
+    # hunter.best_effort — point it at the same tmp tracker.db.
+    monkeypatch.setattr("hunter.metrics.DB_PATH", tracker_db)
     # run_llm_verdict early-returns None without a judge API key.
     monkeypatch.setattr("hunter.config.JUDGE_API_KEY", "test-judge-key")
 
@@ -305,6 +309,24 @@ def test_golden_happy_path_en(
 
     # ── LLM calls actually happened (generation + judge + verdict) ─────────
     assert len(fake_llm.calls) >= 3
+
+    # ── metrics: exactly one generation_runs row, populated (M1) ───────────
+    import sqlite3
+
+    conn = sqlite3.connect(str(golden_env.tracker_db))
+    conn.row_factory = sqlite3.Row
+    runs = conn.execute("SELECT * FROM generation_runs WHERE url_norm != ''").fetchall()
+    conn.close()
+    assert len(runs) == 1, "expected exactly one generation_runs row for this URL"
+    run = runs[0]
+    assert run["pipeline"] == "api"
+    assert run["outcome"] == "ok"
+    assert run["exit_code"] == 0
+    assert run["finished_at"]
+    assert run["verdict_first"] == 96
+    assert run["verdict_final"] == 96
+    assert run["judge_violations"] == 0
+    assert run["posting_lang"] == "EN"
 
 
 def test_golden_happy_path_paste_mode(

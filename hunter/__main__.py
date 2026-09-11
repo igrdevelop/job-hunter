@@ -9,6 +9,7 @@ Supports all three invocation styles:
 """
 
 import logging
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 
@@ -17,6 +18,36 @@ from hunter.telegram_bot import build_application
 from hunter.db import init_db, TRACKER_DB_PATH
 
 logger = logging.getLogger("hunter")
+
+# `bot<id>:<token>` as it appears inside a Telegram API URL. python-telegram-bot
+# talks to api.telegram.org/bot<TOKEN>/<method>, and httpx logs the full URL at
+# INFO — so every getUpdates poll (one every ~10 s) used to write the live bot
+# token into logs/hunter_errors.log, which `scheduled_gdrive_upload_logs` then
+# uploaded to Drive daily. Two defences below: httpx is silenced to WARNING
+# (those lines are pure noise anyway), and this filter scrubs the pattern out of
+# whatever any other logger might print.
+_TOKEN_RE = re.compile(r"(bot\d{5,}:)[A-Za-z0-9_-]{20,}")
+_REDACTED = "\\1<redacted>"  # keeps the bot<id>: prefix, drops the secret
+
+
+def _scrub(value: object) -> object:
+    return _TOKEN_RE.sub(_REDACTED, value) if isinstance(value, str) else value
+
+
+class RedactBotToken(logging.Filter):
+    """Strip a Telegram bot token out of a record's message and its args.
+
+    A filter rather than a formatter tweak: httpx passes the URL through
+    `record.args`, so scrubbing only `record.msg` would miss it entirely.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _scrub(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(_scrub(a) for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: _scrub(v) for k, v in record.args.items()}
+        return True
 
 
 def _setup_logging() -> None:
@@ -40,9 +71,19 @@ def _setup_logging() -> None:
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(fmt)
 
+    redact = RedactBotToken()
+    console.addFilter(redact)
+    file_handler.addFilter(redact)
+
     logging.root.setLevel(logging.DEBUG)
     logging.root.addHandler(console)
     logging.root.addHandler(file_handler)
+
+    # httpx logs one INFO line per request with the full URL. For the Telegram
+    # long-poll that is a line every ~10 s carrying the bot token; for the
+    # scrapers it is noise. WARNING keeps the failures and drops the rest.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def _check_config() -> bool:

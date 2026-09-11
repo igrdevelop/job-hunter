@@ -32,6 +32,7 @@ here covered. Its own "week 0" items, unblocked and independent of every owner d
 | 0.2 | **Back up the real data** (`tracker.db`, `app.sqlite`, `users/` — today only the `/export` xlsx is snapshotted) | [06-OPS_PLAN M1](improvement-2026-09/06-OPS_PLAN.md) | `Connection.backup()` + restic off-host, restore drill | one day |
 | 0.3 | **Run the two July measurements** | [08-DATA_EVAL_PLAN M0](improvement-2026-09/08-DATA_EVAL_PLAN.md) | same questions as rows 4.1 / 4.3, now with pre-stated decision rules and sample-size caveats; ≈ $1 | half a day on the VPS |
 | 0.4 | **Concierge test on 5 external users** | [01-PRODUCT_PLAN M0.3](improvement-2026-09/01-PRODUCT_PLAN.md) | stop rule: < 3 of 5 send a generated CV → freeze pivot Stages 1–8, work on generation quality instead | two weeks, no code |
+| 0.5 | **Domain model documented (M1)** — target entities, `applications`/`profile_jobs`/API-table mapping, proposed Postgres DDL v1, module boundaries | [03-ARCHITECTURE_PLAN M1](improvement-2026-09/03-ARCHITECTURE_PLAN.md) → [DOMAIN_MODEL.md](DOMAIN_MODEL.md) | Shipped, docs-only. Next: owner answers to open questions 1–4, then M2 (`Settings` facade) | done |
 
 ## 1. Actionable now — small, unblocked
 
