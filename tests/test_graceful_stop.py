@@ -69,15 +69,24 @@ def test_sleep_or_stop_returns_early_once_stop_is_requested() -> None:
 
 
 def test_sleep_or_stop_sleeps_when_no_stop_is_requested() -> None:
+    """Without a stop request the call must actually sleep, not return at once.
+
+    The margin is deliberately wide. asyncio treats a timer as due when it
+    falls within one clock tick of "now" (`loop._clock_resolution`, 15.6 ms on
+    Windows), so a timeout can fire up to a tick EARLY. The first version slept
+    50 ms and required 40 ms, which that tick broke about once in 40 runs.
+    Sleeping 300 ms and requiring half of it still proves the point — an
+    early return would come back in microseconds — with no timing race left.
+    """
     from hunter.apply_worker import WorkerControl
 
     async def scenario() -> float:
         wc = WorkerControl()
         started = time.perf_counter()
-        await wc.sleep_or_stop(0.05)
+        await wc.sleep_or_stop(0.3)
         return time.perf_counter() - started
 
-    assert asyncio.run(scenario()) >= 0.04
+    assert asyncio.run(scenario()) >= 0.15
 
 
 def test_claim_map_round_trip() -> None:
