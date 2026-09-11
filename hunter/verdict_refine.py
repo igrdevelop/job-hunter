@@ -210,7 +210,7 @@ def _rewrite_round(
         "The independent ATS verdict — an assessor model that did NOT write "
         "this resume — scored the rendered PDF and flagged these gaps:\n\n"
         f"{feedback}\n\n{block}\n\n"
-        f"Job posting:\n{job_text[:6000]}\n\n"
+        f"Job posting:\n{gen_prompt.wrap_job_posting(job_text[:6000])}\n\n"
         f"Current resume_en JSON:\n{json.dumps(resume_en, ensure_ascii=False)}"
     )
     result = call_llm(

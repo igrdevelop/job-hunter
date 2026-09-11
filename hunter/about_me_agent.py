@@ -51,7 +51,11 @@ def generate_about_me(folder: Path, lang: str) -> str:
         logger.warning(f"[about_me_agent] job_posting.txt missing in {folder}")
         return ""
 
-    job_text = job_posting_path.read_text(encoding="utf-8", errors="replace")[:2000]
+    from hunter import gen_prompt
+
+    job_text = gen_prompt.wrap_job_posting(
+        job_posting_path.read_text(encoding="utf-8", errors="replace")[:2000]
+    )
 
     # Optional: extract already-parsed fields from content.json
     company_name = ""

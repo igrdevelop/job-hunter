@@ -189,7 +189,8 @@ def _generate_shadow(
     pl_optional = GEN_SKIP_PL_FOR_EN and not full_mode and posting_lang == "EN"
 
     user_message = (
-        f"Here is the job posting to analyze:\n\n{job_text}\n\nOriginal URL: (shadow run)"
+        "Here is the job posting to analyze:\n\n"
+        f"{gen_prompt.wrap_job_posting(job_text)}\n\nOriginal URL: (shadow run)"
     )
     user_message += build_ats_keyword_checklist(job_text)
     user_message += build_pl_skip_instruction(posting_lang, full_mode=full_mode)

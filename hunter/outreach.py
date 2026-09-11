@@ -161,6 +161,7 @@ def _draft_messages(content: dict, job_text: str, lang: str) -> tuple[str, str]:
         else "Set message_en to null."
     )
     try:
+        from hunter import gen_prompt
         from llm_client import call_llm
 
         raw = call_llm(
@@ -172,7 +173,7 @@ def _draft_messages(content: dict, job_text: str, lang: str) -> tuple[str, str]:
                 company=content.get("company_name") or "the company",
                 stack=content.get("stack") or "",
                 summary=summary,
-                job_excerpt=job_text[:1500],
+                job_excerpt=gen_prompt.wrap_job_posting(job_text[:1500]),
             ),
             provider=JUDGE_PROVIDER,
             model=JUDGE_MODEL,
