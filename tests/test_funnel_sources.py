@@ -68,6 +68,51 @@ def test_wilson_ci_bounds_stay_within_unit_interval():
     assert 0.0 <= lo <= hi <= 1.0
 
 
+def test_wilson_ci_survives_more_successes_than_trials():
+    """The sent-rate call site really passes sent > generated on live data.
+
+    `generated` counts rows whose ats_status holds a numeric score; `sent`
+    counts rows whose Sent column is not a non-sent marker. They are
+    independent columns, so a row added by hand through the Sheet
+    (tracker.insert_pulled_rows) is sent with no score. Before the clamp,
+    phat > 1 made `phat * (1 - phat)` negative and math.sqrt raised
+    ValueError: math domain error — the tool died on its first real run
+    against prod (2026-09-12).
+    """
+    lo, hi = fsrc.wilson_ci(5, 3)
+    assert 0.0 <= lo <= hi <= 1.0
+    assert hi == 1.0, "a clamped all-successes interval must reach the top of the range"
+
+
+def test_wilson_ci_survives_negative_successes():
+    lo, hi = fsrc.wilson_ci(-2, 10)
+    assert 0.0 <= lo <= hi <= 1.0
+
+
+def test_report_flags_a_source_with_more_sent_than_generated(monkeypatch):
+    """The clamp keeps the tool alive; the flag is what stops a reader from
+    reading the clamped interval as a real sent-rate."""
+    row = {
+        "tracked": 4,
+        "generated": 3,
+        "sent": 5,
+        "confirmed": 0,
+        "answered": 0,
+        "sent_rate_ci90": {"low": 0.52, "high": 1.0},
+        "sent_exceeds_generated": True,
+        "cost_per_sent": None,
+        "cost_priced_sent": 0,
+        "cost_unpriced_sent": 0,
+        "fail": 0,
+        "skip": 0,
+        "health_status": "OK",
+        "decision": "watch",
+        "filtered_urls_sample": [],
+    }
+    text = fsrc.format_report({"days": 90, "sources": {"linkedin": row}})
+    assert "sent 5 > generated 3" in text
+
+
 # ── aggregate_extra ──────────────────────────────────────────────────────────
 
 
