@@ -30,7 +30,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hunter.gsheets_client import OUTCOME_COL_INDEX, OUTCOME_COL_LETTER, get_tab_sheet_id
+from hunter.gsheets_client import (
+    COLUMNS,
+    OUTCOME_COL_INDEX,
+    OUTCOME_COL_LETTER,
+    get_tab_sheet_id,
+)
 from hunter.tracker import OUTCOME_LABELS
 
 log = logging.getLogger(__name__)
@@ -117,8 +122,16 @@ def write_outcome_cell_sync(
     tab: str = "Tracker",
     *,
     allow_blank: bool = False,
+    expect_id: str | None = None,
 ) -> bool:
     """Write O{sheet_row} = label. Returns True when a cell was written.
+
+    ``expect_id``: read K{sheet_row} first and write only if it still holds this
+    ID. The DB's cached sheets_row goes stale when rows above it are deleted in
+    the Sheet (until the next pull re-reads positions); a blind write would put
+    the label next to a DIFFERENT application, and the next pull would copy it
+    into that application's DB row. The resync skips this check because it
+    rewrites the whole A–K row at that position in the same pass.
 
     Raises on a Sheets error: the dirty-row resync relies on that to keep the
     row dirty. A blank label is skipped unless ``allow_blank`` — during a resync
@@ -131,6 +144,25 @@ def write_outcome_cell_sync(
         return False
     if not label and not allow_blank:
         return False
+    if expect_id is not None:
+        id_col = chr(ord("A") + COLUMNS.index("ID"))
+        got = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=sheet_id, range=f"'{tab}'!{id_col}{sheet_row}")
+            .execute()
+        )
+        cells = got.get("values") or [[""]]
+        found = str((cells[0] or [""])[0]).strip()
+        if found != expect_id:
+            log.warning(
+                "outcome_writer: row %d holds id %r, not %r — sheets_row is stale, "
+                "leaving O to the next resync",
+                sheet_row,
+                found,
+                expect_id,
+            )
+            return False
     ensure_outcome_column_sync(service, sheet_id, tab)
     service.spreadsheets().values().update(
         spreadsheetId=sheet_id,

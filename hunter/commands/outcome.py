@@ -145,9 +145,11 @@ async def cmd_outcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not updated:
         await message.reply_text("⚠️ No application of yours matches that id or URL.")
         return
-    await _mirror_to_sheet(key)
     shown = f"{_EMOJI.get(label, '')} {label}" if label else "cleared"
     await message.reply_text(f"✅ Outcome recorded: {shown}")
+    # After the reply: the label is saved, so a slow Sheets API must not hold up
+    # the confirmation.
+    await _mirror_to_sheet(key)
 
 
 async def outcome_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -173,16 +175,16 @@ async def outcome_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer("That application is no longer yours or was removed.", show_alert=True)
         return
     await query.answer(f"Recorded: {label}")
-    await _mirror_to_sheet(row_id)
     # Telegram hands back an InaccessibleMessage for a card older than ~48 h:
-    # it has no text to extend. The outcome is already saved, so just stop.
-    if not isinstance(query.message, Message):
-        return
-    try:
-        original = query.message.text_html or ""
-        await query.edit_message_text(
-            f"{original}\n\n{_EMOJI.get(label, '')} <b>{html.escape(label)}</b>",
-            parse_mode=ParseMode.HTML,
-        )
-    except Exception:  # noqa: BLE001 — the outcome is saved; a stale card is cosmetic
-        logger.debug("[outcome] could not edit the card for %s", row_id)
+    # it has no text to extend. The outcome is already saved, so skip the edit.
+    if isinstance(query.message, Message):
+        try:
+            original = query.message.text_html or ""
+            await query.edit_message_text(
+                f"{original}\n\n{_EMOJI.get(label, '')} <b>{html.escape(label)}</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:  # noqa: BLE001 — the outcome is saved; a stale card is cosmetic
+            logger.debug("[outcome] could not edit the card for %s", row_id)
+    # Last: a slow Sheets API must not hold up the toast or the card edit.
+    await _mirror_to_sheet(row_id)

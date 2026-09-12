@@ -257,7 +257,7 @@ async def mirror_outcome(url_or_id: str) -> int:
     with best_effort("gsheets.mirror_outcome"):
         try:
             cells = await asyncio.to_thread(get_outcome_cells, url_or_id)
-            for _row_id, sheet_row, label in cells:
+            for row_id, sheet_row, label in cells:
                 if await asyncio.to_thread(
                     write_outcome_cell_sync,
                     _get_service(),
@@ -265,6 +265,7 @@ async def mirror_outcome(url_or_id: str) -> int:
                     sheet_row,
                     label,
                     allow_blank=True,
+                    expect_id=row_id,
                 ):
                     written += 1
         except Exception as e:

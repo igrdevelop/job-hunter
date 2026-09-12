@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,10 +34,24 @@ def _fresh_column_state():
     outcome_writer._column_ready.clear()
 
 
-def _service(grid: list[list[str]] | None = None) -> MagicMock:
+def _service(grid: list[list[str]] | None = None, ids: dict[int, str] | None = None) -> MagicMock:
+    """MagicMock Sheets service. `grid` answers full-tab reads; `ids` answers the
+    single K<row> ID-cell read that mirror_outcome makes before writing O."""
     svc = MagicMock()
     values = svc.spreadsheets.return_value.values.return_value
-    values.get.return_value.execute.return_value = {"values": grid or []}
+
+    def _get(**kwargs):
+        call = MagicMock()
+        rng = kwargs.get("range", "")
+        match = re.fullmatch(r"'Tracker'!K(\d+)", rng)
+        if match:
+            row_id = (ids or {}).get(int(match.group(1)))
+            call.execute.return_value = {"values": [[row_id]]} if row_id else {}
+        else:
+            call.execute.return_value = {"values": grid or []}
+        return call
+
+    values.get.side_effect = _get
     values.update.return_value.execute.return_value = {}
     values.append.return_value.execute.return_value = {
         "updates": {"updatedRange": "'Tracker'!A9:K9"}
@@ -297,7 +312,7 @@ def test_outcome_round_trip_telegram_then_sheet(db):
 
     _insert(db, "dddd4444", sheets_row=6)
     assert tracker.set_outcome("dddd4444", "interview")
-    svc = _service()
+    svc = _service(ids={6: "dddd4444"})
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=svc),
@@ -321,7 +336,7 @@ def test_mirror_outcome_writes_blank_on_explicit_clear(db):
 
     _insert(db, "eeee5555", label="silence", sheets_row=8)
     assert tracker.set_outcome("eeee5555", "")
-    svc = _service()
+    svc = _service(ids={8: "eeee5555"})
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=svc),
@@ -337,7 +352,7 @@ def test_mirror_outcome_is_scoped_to_the_callers_rows(db, monkeypatch):
 
     _insert(db, "ffff6666", label="offer", sheets_row=9)
     monkeypatch.setenv("JOB_HUNTER_USER_ID", "someone-else")
-    svc = _service()
+    svc = _service(ids={9: "ffff6666"})
     with (
         patch("hunter.gsheets_sync._ready", return_value=True),
         patch("hunter.gsheets_sync._get_service", return_value=svc),
@@ -345,6 +360,26 @@ def test_mirror_outcome_is_scoped_to_the_callers_rows(db, monkeypatch):
     ):
         assert asyncio.run(gsheets_sync.mirror_outcome("ffff6666")) == 0
     assert _update_ranges(svc) == []
+
+
+def test_mirror_outcome_refuses_a_stale_sheets_row(db):
+    """Rows above were deleted in the Sheet: row 12 now belongs to another
+    application. Writing O12 would hand that application this label on the
+    next pull, so the write is skipped and the row stays dirty for resync."""
+    from hunter import gsheets_sync, tracker
+
+    _insert(db, "a0a07777", sheets_row=12)
+    assert tracker.set_outcome("a0a07777", "rejected")
+    svc = _service(ids={12: "b0b08888"})
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=svc),
+        patch("hunter.gsheets_sync._sheet_id", return_value="SHEET"),
+    ):
+        assert asyncio.run(gsheets_sync.mirror_outcome("a0a07777")) == 0
+
+    assert _update_ranges(svc) == []
+    assert _db_row(db, "a0a07777")["sheets_dirty"] == 1
 
 
 # ── column setup ─────────────────────────────────────────────────────────────
