@@ -259,6 +259,16 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # APPLY_CLAIM_TIMEOUT_MIN like reset_stale_claims()'s cross-host
         # sweep still does.
         ("claimed_by", "TEXT NOT NULL DEFAULT ''"),
+        # outcome_label / outcome_at (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md
+        # M1, owner decision 2026-09-12): what actually happened to a sent
+        # application — one of tracker.OUTCOME_LABELS, empty = not recorded.
+        # Added after a 90-day funnel run on prod showed 399 sent applications
+        # and ZERO recorded outcomes: nothing in the codebase ever wrote the
+        # free-text `answer` column, so "does the ATS verdict predict a reply"
+        # was structurally unanswerable. Written by tracker.set_outcome()
+        # (/outcome in Telegram) and by the Sheet column-O pull.
+        ("outcome_label", "TEXT NOT NULL DEFAULT ''"),
+        ("outcome_at", "TEXT"),
         # pending_meta is a JSON blob of the full Job the hunt loop found
         # (source, location, salary, raw dict incl. permalink/post_text) —
         # everything apply_worker needs to reconstruct a Job object without

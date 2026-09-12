@@ -42,21 +42,27 @@ def _build_report(days: int | None) -> str:
         f"  Sent:       <b>{o.sent}</b>  ({o.sent_rate}% of generated)",
         f"  Confirmed:  <b>{o.confirmed}</b>  ({o.confirm_rate}% of sent)",
         f"  Answered:   <b>{o.answered}</b>  ({o.answer_rate}% of sent)",
+        f"  Outcomes recorded: <b>{o.outcome_recorded}</b> of {o.sent} sent",
     ]
+    if o.sent and not o.outcome_recorded:
+        lines.append(
+            "  <i>No outcome has been recorded yet, so Answered is unmeasured rather "
+            "than zero. Use /outcome.</i>"
+        )
 
     top = rep.top_sources(_MAX_SOURCE_ROWS)
     active = [(name, c) for name, c in top if c.tracked]
     if active:
-        lines.append("\n<b>--- By source (tracked / gen / sent / conf / ans) ---</b>")
+        lines.append("\n<b>--- By source (tracked / gen / sent / conf / ans / out) ---</b>")
         for name, c in active:
             lines.append(
                 f"  {name}: {c.tracked} / {c.generated} / <b>{c.sent}</b> / "
-                f"{c.confirmed} / {c.answered}"
+                f"{c.confirmed} / {c.answered} / {c.outcome_recorded}"
             )
 
     lines.append(
         "\n<i>Generated = CV built · Sent = submitted · "
-        "Confirmed = ATS ack · Answered = human reply</i>"
+        "Confirmed = ATS ack · Answered = human reply · Out = any outcome recorded</i>"
     )
     return "\n".join(lines)
 

@@ -100,9 +100,31 @@ def _is_confirmed(confirmation: str) -> bool:
     return bool((confirmation or "").strip())
 
 
-def _is_answered(answer: str) -> bool:
-    """A human reply landed (rejection / interview / offer) — the real signal."""
+def _is_answered(answer: str, outcome_label: str = "") -> bool:
+    """A human reply landed (rejection / interview / offer) — the real signal.
+
+    Two sources, either is enough: the legacy free-text `answer` column (only
+    ever filled by hand in the Sheet — kept so historical rows still count) and
+    the structured `outcome_label` (tracker.OUTCOME_LABELS). `silence` is an
+    OBSERVED outcome but deliberately not a reply — counting it here would turn
+    "nobody wrote back" into a reply rate.
+    """
+    from hunter.tracker import OUTCOME_REPLY_LABELS
+
+    if (outcome_label or "").strip() in OUTCOME_REPLY_LABELS:
+        return True
     return bool((answer or "").strip())
+
+
+def _has_outcome(outcome_label: str) -> bool:
+    """Any outcome was recorded, `silence` included.
+
+    This is what separates "no replies" from "nobody recorded anything" — the
+    distinction a 90-day prod run could not make (399 sent, 0 outcomes).
+    """
+    from hunter.tracker import OUTCOME_LABELS
+
+    return (outcome_label or "").strip() in OUTCOME_LABELS
 
 
 # ── Report dataclasses ────────────────────────────────────────────────────────
@@ -115,13 +137,25 @@ class FunnelCounts:
     sent: int = 0
     confirmed: int = 0  # ATS / board automated acknowledgement
     answered: int = 0  # human reply (rejection / interview / offer)
+    # Rows with ANY recorded outcome, `silence` included. answered == 0 with
+    # outcome_recorded == 0 means "unmeasured", not "no replies".
+    outcome_recorded: int = 0
 
-    def add(self, *, generated: bool, sent: bool, confirmed: bool, answered: bool) -> None:
+    def add(
+        self,
+        *,
+        generated: bool,
+        sent: bool,
+        confirmed: bool,
+        answered: bool,
+        outcome_recorded: bool = False,
+    ) -> None:
         self.tracked += 1
         self.generated += int(generated)
         self.sent += int(sent)
         self.confirmed += int(confirmed)
         self.answered += int(answered)
+        self.outcome_recorded += int(outcome_recorded)
 
     @property
     def sent_rate(self) -> float:
@@ -168,8 +202,15 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
     cutoff = _cutoff(days)
 
     with get_db(DB_PATH) as conn:
+        # get_db() does not migrate — hunter.db.init_db() does, at bot startup.
+        # Probe instead of assuming, so /funnel and tools/funnel_sources.py
+        # keep working against a database that predates outcome_label (a
+        # stale dev fixture, or a tool run before the new image first starts).
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
+        outcome_col = "outcome_label" if "outcome_label" in cols else "'' AS outcome_label"
         rows = conn.execute(
-            "SELECT date, ats_status, url, sent, confirmation, answer FROM applications"
+            "SELECT date, ats_status, url, sent, confirmation, answer, "  # noqa: S608
+            f"{outcome_col} FROM applications"
         ).fetchall()
 
     for r in rows:
@@ -181,12 +222,24 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
         generated = _is_generated(r["ats_status"])
         sent = _is_sent(r["sent"])
         confirmed = _is_confirmed(r["confirmation"])
-        answered = _is_answered(r["answer"])
+        label = r["outcome_label"]
+        answered = _is_answered(r["answer"], label)
+        recorded = _has_outcome(label)
 
-        report.overall.add(generated=generated, sent=sent, confirmed=confirmed, answered=answered)
+        report.overall.add(
+            generated=generated,
+            sent=sent,
+            confirmed=confirmed,
+            answered=answered,
+            outcome_recorded=recorded,
+        )
         src = source_for_url(r["url"])
         report.by_source.setdefault(src, FunnelCounts()).add(
-            generated=generated, sent=sent, confirmed=confirmed, answered=answered
+            generated=generated,
+            sent=sent,
+            confirmed=confirmed,
+            answered=answered,
+            outcome_recorded=recorded,
         )
 
     return report

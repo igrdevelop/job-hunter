@@ -212,10 +212,13 @@ def test_decide_ballast():
 
 
 def test_decide_watch():
+    # A REAL "no replies" observation: outcomes were recorded (e.g. all
+    # `silence`), none of them a reply.
     d = fsrc.decide(
         tracked=10,
         sent=5,
         answered=0,
+        outcome_recorded=5,
         health_status="OK",
         health_source="x",
         zero_streak=0,
@@ -225,17 +228,53 @@ def test_decide_watch():
 
 
 def test_decide_watch_requires_min_window():
-    # sent>=5, answered==0, but window < 21 days -> not enough to call "watch"
+    # sent>=5, answered==0 with outcomes recorded, but window < 21 days -> not
+    # enough to call "watch"
     d = fsrc.decide(
         tracked=10,
         sent=5,
         answered=0,
+        outcome_recorded=5,
         health_status="OK",
         health_source="x",
         zero_streak=0,
         days=10,
     )
     assert d == "ok"
+
+
+def test_decide_unmeasured_when_no_outcome_was_ever_recorded():
+    """answered == 0 with NO outcome recorded is not "no replies" — it is no data.
+
+    The first prod run (2026-09-12) put 20 sources on "watch" while not a single
+    outcome had been written anywhere; every one of those verdicts was noise.
+    """
+    d = fsrc.decide(
+        tracked=447,
+        sent=211,
+        answered=0,
+        outcome_recorded=0,
+        health_status="OK",
+        health_source="linkedin",
+        zero_streak=0,
+        days=90,
+    )
+    assert d == "unmeasured"
+
+
+def test_decide_ballast_still_wins_over_unmeasured():
+    """No sent rows means ballast regardless of outcome data."""
+    d = fsrc.decide(
+        tracked=40,
+        sent=0,
+        answered=0,
+        outcome_recorded=0,
+        health_status="OK",
+        health_source="x",
+        zero_streak=0,
+        days=90,
+    )
+    assert d == "ballast"
 
 
 def test_decide_ok_when_nothing_flagged():

@@ -342,6 +342,7 @@ def build_application() -> Application:
     from hunter.commands.retry_reset import cmd_retry_reset
     from hunter.commands.fails import cmd_fails
     from hunter.commands.queue import cmd_queue
+    from hunter.commands.outcome import cmd_outcome, outcome_callback
     from hunter.commands.health import cmd_health
     from hunter.commands.llm import cmd_llm
     from hunter.commands.dual import cmd_dual
@@ -390,6 +391,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("retry_reset", require_owner(cmd_retry_reset)))
     app.add_handler(CommandHandler("fails", require_owner(cmd_fails)))
     app.add_handler(CommandHandler("queue", require_owner(cmd_queue)))
+    app.add_handler(CommandHandler("outcome", require_user(cmd_outcome)))
     app.add_handler(CommandHandler("health", require_owner(cmd_health)))
     app.add_handler(CommandHandler("llm", require_owner(cmd_llm)))
     app.add_handler(CommandHandler("dual", require_owner(cmd_dual)))
@@ -398,6 +400,13 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("scoutfound", require_owner(cmd_scoutfound)))
     app.add_handler(CommandHandler("link", cmd_link))
     app.add_handler(CommandHandler("unlink", cmd_unlink))
+
+    # Outcome buttons (/outcome) MUST be registered before button_callback:
+    # that handler has no pattern, so it catches every callback query and would
+    # read "outcome:<id>:<label>" as an Apply/Skip action on an unknown job,
+    # answering "Expired" instead of recording anything. Any linked user may
+    # press these — tracker.set_outcome scopes the write by user_id.
+    app.add_handler(CallbackQueryHandler(require_user(outcome_callback), pattern=r"^outcome:"))
 
     # Button callbacks stay owner-gated: Apply/Skip cards only come from the
     # owner-only hunt loop (B3.5 fan-out will revisit this).

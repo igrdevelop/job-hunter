@@ -165,6 +165,7 @@ def decide(
     tracked: int,
     sent: int,
     answered: int,
+    outcome_recorded: int = 0,
     health_status: str | None,
     health_source: str | None,
     zero_streak: int,
@@ -177,6 +178,13 @@ def decide(
         if broken_days is not None and broken_days >= _MIN_BROKEN_DAYS:
             return "broken"
         return "watch-broken"
+    # "No replies" and "nobody recorded anything" read identically as
+    # answered == 0. The first prod run (2026-09-12) put 20 sources on "watch"
+    # while not a single outcome had ever been written — every one of those
+    # verdicts was noise. With no outcome data for the source there is nothing
+    # to judge, so say that instead of implying a missing reply.
+    if sent >= _MIN_SENT_FOR_WATCH and outcome_recorded == 0:
+        return "unmeasured"
     if sent >= _MIN_SENT_FOR_WATCH and answered == 0 and (days or 0) >= _MIN_WINDOW_DAYS_FOR_WATCH:
         return "watch"
     return "ok"
@@ -223,6 +231,7 @@ def build_report(days: int | None, db_path: Path | None = None) -> dict[str, Any
             sent = counts.sent if counts else 0
             confirmed = counts.confirmed if counts else 0
             answered = counts.answered if counts else 0
+            outcome_recorded = counts.outcome_recorded if counts else 0
 
             ci_lo, ci_hi = wilson_ci(sent, generated)
             # decide() -> broken_since_days() -> source_health.recent_runs()
@@ -232,6 +241,7 @@ def build_report(days: int | None, db_path: Path | None = None) -> dict[str, Any
                 tracked=tracked,
                 sent=sent,
                 answered=answered,
+                outcome_recorded=outcome_recorded,
                 health_status=health.status if health else None,
                 health_source=name,
                 zero_streak=health.zero_streak if health else 0,
@@ -244,6 +254,7 @@ def build_report(days: int | None, db_path: Path | None = None) -> dict[str, Any
                 "sent": sent,
                 "confirmed": confirmed,
                 "answered": answered,
+                "outcome_recorded": outcome_recorded,
                 "sent_rate_ci90": {"low": ci_lo, "high": ci_hi},
                 # More sent than generated means hand-made applications for
                 # this source (a Sheet row with a Sent date and no score).
@@ -272,6 +283,8 @@ Decision rule (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md, M0.2):
     source's *_ENABLED toggle, but eyeball the printed filtered URLs first.
   - health status in {BROKEN?, ERROR} for >= 14 days -> "broken": fix the
     scraper or disable it.
+  - sent >= 5 and NO outcome recorded (the `out` column is 0) -> "unmeasured":
+    there is nothing to judge yet — record outcomes with /outcome first.
   - sent >= 5 and answered == 0 with a >= 21-day window -> "watch": n is too
     small to act on yet, flag it, don't disable it.
 """.strip()
@@ -285,7 +298,7 @@ def format_report(report: dict[str, Any]) -> str:
         "",
     ]
     header = (
-        f"{'Source':<22} {'trk':>4} {'gen':>4} {'sent':>4} {'conf':>4} {'ans':>4} "
+        f"{'Source':<22} {'trk':>4} {'gen':>4} {'sent':>4} {'conf':>4} {'ans':>4} {'out':>4} "
         f"{'sent%CI90':>16} {'$/sent':>8} {'fail':>4} {'skip':>4} {'health':<8} decision"
     )
     lines.append(header)
@@ -300,7 +313,8 @@ def format_report(report: dict[str, Any]) -> str:
         cost_text = f"{s['cost_per_sent']:.2f}" if s["cost_per_sent"] is not None else "—"
         lines.append(
             f"{name:<22} {s['tracked']:>4} {s['generated']:>4} {s['sent']:>4} "
-            f"{s['confirmed']:>4} {s['answered']:>4} {ci_text:>16} {cost_text:>8} "
+            f"{s['confirmed']:>4} {s['answered']:>4} {s.get('outcome_recorded', 0):>4} "
+            f"{ci_text:>16} {cost_text:>8} "
             f"{s['fail']:>4} {s['skip']:>4} {s['health_status']:<8} {s['decision']}"
         )
         if s.get("sent_exceeds_generated"):
