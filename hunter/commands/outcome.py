@@ -81,6 +81,22 @@ def _card_text(row: dict) -> str:
     return f"<b>{company}</b> — {title}\nSent: {sent} · <code>{html.escape(str(row['id']))}</code>"
 
 
+async def _mirror_to_sheet(key: str) -> None:
+    """Push the new label into Sheet column O now instead of at the next resync.
+
+    Best-effort and silent: the outcome is already saved, the row is dirty, and
+    the 5-minute resync writes the cell if this attempt fails.
+    """
+    from hunter.best_effort import best_effort
+
+    # mirror_outcome counts its own Sheets failures; this outer wrapper covers
+    # anything that escapes it (an import or setup error) so it still alerts.
+    with best_effort("outcome.sheet_mirror"):
+        from hunter import gsheets_sync
+
+        await gsheets_sync.mirror_outcome(key)
+
+
 def _usage() -> str:
     labels = " | ".join(_labels())
     return (
@@ -133,6 +149,9 @@ async def cmd_outcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     shown = f"{_EMOJI.get(label, '')} {label}" if label else "cleared"
     await message.reply_text(f"✅ Outcome recorded: {shown}")
+    # After the reply: the label is saved, so a slow Sheets API must not hold up
+    # the confirmation.
+    await _mirror_to_sheet(key)
 
 
 async def outcome_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -159,14 +178,15 @@ async def outcome_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.answer(f"Recorded: {label}")
     # Telegram hands back an InaccessibleMessage for a card older than ~48 h:
-    # it has no text to extend. The outcome is already saved, so just stop.
-    if not isinstance(query.message, Message):
-        return
-    try:
-        original = query.message.text_html or ""
-        await query.edit_message_text(
-            f"{original}\n\n{_EMOJI.get(label, '')} <b>{html.escape(label)}</b>",
-            parse_mode=ParseMode.HTML,
-        )
-    except Exception:  # noqa: BLE001 — the outcome is saved; a stale card is cosmetic
-        logger.debug("[outcome] could not edit the card for %s", row_id)
+    # it has no text to extend. The outcome is already saved, so skip the edit.
+    if isinstance(query.message, Message):
+        try:
+            original = query.message.text_html or ""
+            await query.edit_message_text(
+                f"{original}\n\n{_EMOJI.get(label, '')} <b>{html.escape(label)}</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:  # noqa: BLE001 — the outcome is saved; a stale card is cosmetic
+            logger.debug("[outcome] could not edit the card for %s", row_id)
+    # Last: a slow Sheets API must not hold up the toast or the card edit.
+    await _mirror_to_sheet(row_id)

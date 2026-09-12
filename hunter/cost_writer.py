@@ -9,8 +9,9 @@ range every time. Adding cost to COLUMNS would extend that range to A–M and
 DB. Clobbering L would silently destroy the user's stats tab.
 
 The fix: cost lives in **column M**, written by this module only. The main
-push touches A–K, ``sent_normalizer`` touches L, this module touches M —
-three non-overlapping writers, never racing for the same cell.
+push touches A–K, ``sent_normalizer`` touches L, this module touches M
+(``verdict_writer`` owns N and ``outcome_writer`` owns O) — non-overlapping
+writers, never racing for the same cell.
 
 Operations:
 - ``mirror_cost_cell(row_id)`` — async, called from gsheets_sync.mirror_new_row
