@@ -69,11 +69,13 @@ Consequences, each a question the owner asked or a ROADMAP row that is blocked:
   best-effort write; what passes and what is rejected is unchanged.
 - **No second outcome mechanism.** `outcome_label`/`/outcome` (#276) is the
   Y-variable; this plan only joins to it.
-- **No automatic tuning of filters, cooldowns or targets from the data** in
-  this plan. Each "search rule" in M4 is a flag, default off, with its own
-  stated measurement before it flips on (same posture as owner decision #4 of
-  2026-09-12: the script computes, the owner decides).
-
+- **Nothing in this plan changes what gets queued, generated or sent.**
+  Owner decision 2026-09-12: this plan is about collecting more information
+  and reporting on it, nothing else. No new filter reason, no new gate, no
+  warning line injected into the apply flow, no cooldown change. The hunt
+  loop gains one best-effort *write*; every read is a report (`/market`, the
+  digest, `tools/`). If the reports ever justify a search rule, that is a
+  separate plan with its own M0, written when the data exists.
 ---
 
 ## M0 — Measure
@@ -120,7 +122,7 @@ not already known" share turns it into the expected insert rate.
 | Metric | Threshold | If below |
 |---|---|---|
 | New (unique, not-yet-known) listings per full sweep, all sources | ≥ 30 | `postings_seen` adds little over `applications` + `generation_runs`; close M1 as not worth building, keep only M2 (`skip_reason`) |
-| Share of listings with a parseable salary (min or max + currency) | ≥ 25% | drop the salary column set and the salary-floor rule (M1.b, M4.c); keep everything else |
+| Share of listings with a parseable salary (min or max + currency) | ≥ 25% | drop the salary column set (M1.b) and the pay section of the digest; keep everything else |
 | Share of listings whose location classifies (remote/hybrid/onsite, not "unknown") | ≥ 60% | keep `location_raw` only; `remote_mode` becomes a best-effort column with a documented "unknown" majority and M4's remote-mode cuts are not built |
 | Expected inserts/day (M0.b × M0.a new-share) | ≤ 2 000 | if higher, TTL drops from 180 to 90 days and cloudscraper sources are excluded from the write (they are the noisiest and the ones 07-M6 excludes anyway) |
 
@@ -272,10 +274,11 @@ FAIL/EXPIRED rows and for rows older than #267. Backfill: a one-shot
 run long enough) and otherwise from the URL guess, marked `source_guessed=1`
 — or simply leave old rows blank; open question 3.
 
-## M4 — What the data is for: the digest and the first search rules
+## M4 — What the data is for: the digest and the company view
 
 Everything here is read-side, `$0`, and lands only after M1 has at least four
-weeks of rows (the digest compares weeks).
+weeks of rows (the digest compares weeks). None of it feeds back into the
+hunt, the queue or the apply pipeline.
 
 **M4.a — `/market [weeks]` + Monday 09:30 Telegram digest** (`hunter/market_report.py`,
 `hunter/commands/market.py`, `schedules/market_digest.py`). Sections, each
@@ -305,19 +308,11 @@ gate's `normalize_company` legal-token stripping plus a small agency-name
 list the owner already keeps in his head — open question 4). Read-only until
 its numbers say a rule is warranted.
 
-**M4.c — Search rules, each behind a flag, default OFF, each with its own
-gate:**
-
-| Rule | Flag | What it does | Turns on only after |
-|---|---|---|---|
-| Salary floor | `SALARY_FLOOR_PLN_B2B` (int, 0 = off) | listing-level filter reason `salary_floor` for a *parsed* B2B PLN max below the floor; unparsed salary never trips it | M0's salary-coverage rule passed AND four weeks of digests show the median so the owner picks a floor from data, not from a guess |
-| Ghost-job deprioritise | `GHOST_JOB_MIN_REPOSTS` (0 = off) | `seen_count ≥ N` over ≥ 45 days → still queued, but with a Telegram warning line like the SOFT doomed findings; never a SKIP on its own | M4.a section 6 has been eyeballed for four weeks and the owner confirms the list is really ghosts |
-| Company silence cooldown | `COMPANY_SILENCE_COOLDOWN_DAYS` (0 = off) | ≥ 3 `silence` outcomes for one `company_norm` in 180 days → `company_cooldown_active` extends to this value for that company | at least 20 companies with ≥ 3 recorded outcomes exist (M4.b shows it) |
-
-The plan deliberately stops at "warn" for ghost jobs and at "extend an
-existing cooldown" for companies: both reuse a rail that already exists
-(`assess_job_text`-style SOFT warnings, `tracker.company_cooldown_active`)
-rather than adding a gate.
+**No M4.c.** An earlier draft carried three "search rules" here (salary
+floor, ghost-job warning, company-silence cooldown). Removed 2026-09-12 by
+owner decision: this plan collects and reports, it does not act. The digest's
+sections 3, 5 and 6 are exactly the data such rules would need; whether to
+build any of them is a future plan.
 
 ---
 
@@ -327,7 +322,7 @@ rather than adding a gate.
 |---|---|
 | The hunt loop slows or fails on the new write (25 sources, hundreds of rows per sweep) | `best_effort("postings.record")` — a failure never reaches the loop; write runs in `to_thread` after the filter, one `executemany` per sweep; M0.b's volume rule sets the TTL |
 | Table grows without bound | nightly prune by `last_seen`; `POSTINGS_TTL_DAYS`; the index on `last_seen` makes the prune cheap |
-| A parser mis-classifies location or salary and a future rule acts on it | M4.c rules are default off and each fires only on a *parsed* value; "unknown" is a first-class value that never trips a rule; parsers are table-tested per source shape |
+| A parser mis-classifies location or salary | Nothing acts on the value — it only appears in reports, always next to `n`; "unknown" is a first-class value; parsers are table-tested per source shape |
 | Storing company names + titles for non-applied vacancies conflicts with 07-COMPLIANCE M6 | M6 governs a *published aggregate*; the owner's own bot storing public listing metadata for the owner is the same posture as today's `job_posting.txt`. When an aggregate tier is built, it reads a projection (`role_family × region × term`, `k ≥ 10`, no company) — the same `postings_seen` rows, minus the columns M6 forbids, from the allowlisted sources only. Documented in `docs/SOURCES_POLICY.md` when that day comes, not now |
 | `filter_verdict` goes stale after a `filters.yaml` edit | `filter_verdict_last` is re-stamped on every sighting; a listing not seen again keeps its last known verdict, which is the truth as of `last_seen` |
 | `skip_reason` values drift into free text | `SKIP_REASONS` tuple in `tracker.py` next to `OUTCOME_LABELS`, same "one definition" rule; `set`-style validation in the writer |
@@ -339,12 +334,11 @@ Zero LLM calls in every milestone. Storage: at the M0.b upper bound of ~2 000
 inserts/day and ~600 bytes/row, 180 days ≈ 200 MB worst case; the realistic
 figure (unique-new share × raw) is expected an order of magnitude lower —
 M0 gives the number. One extra `executemany` per hunt sweep; one daily
-`DELETE`. Owner time: none until M4 (the digest is read-only; the search rules
-ask for one decision each, from data).
+`DELETE`. Owner time: none — every output is a report.
 
 ## Open questions
 
-Owner decisions 2026-09-12 (questions 1–4 closed, 5 pending):
+Owner decisions 2026-09-12 (all five closed):
 
 1. TTL 180 days for `postings_seen` (90 if M0.b says volume is high) — **yes.**
 2. Include the cloudscraper sources (pracuj, theprotocol, builtin, jobleads)
@@ -358,12 +352,7 @@ Owner decisions 2026-09-12 (questions 1–4 closed, 5 pending):
    stripping already in `repost_gate.normalize_company` plus the agency
    boilerplate similarity the repost gate measures). No hand-kept agency
    list, no new YAML key.
-5. Salary floor (M4.c), once its data exists: a listing-level *filter* (a
-   `salary_floor` reason — the vacancy is never queued, never generated, only
-   counted in the digest's rejection split) versus a *warning* (the vacancy is
-   queued and generated as usual, with one extra Telegram line "salary below
-   your floor"). The plan proposes filter: a *parsed* B2B PLN maximum below
-   the owner's floor is a fact, not a judgment call, and generating for it
-   spends money on a vacancy the owner would not take. It is also the only
-   rule in this plan that discards vacancies, which is why it is asked
-   separately. **Pending.**
+5. Salary floor as filter vs warning — **moot.** Owner decision 2026-09-12:
+   the plan does not touch generation, queueing or filtering at all; M4.c
+   was removed. The digest still reports the pay distribution, so a floor
+   can be chosen from data later, in a plan of its own.
