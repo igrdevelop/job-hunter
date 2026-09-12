@@ -2014,7 +2014,8 @@ def apply_pulled_outcomes(updates: dict[str, str]) -> int:
     """Write outcome labels that came FROM the Sheet (column-O pull).
 
     Stamps `outcome_at` like set_outcome, but leaves `sheets_dirty` alone: the
-    Sheet already shows this value, so there is nothing to push back. Labels are
+    Sheet already shows this value, so there is nothing to push back. A row that
+    turned dirty since the merge read it is skipped. Labels are
     validated again here — a caller bug must not store garbage. Returns the
     number of rows updated.
     """
@@ -2029,8 +2030,12 @@ def apply_pulled_outcomes(updates: dict[str, str]) -> int:
                     "apply_pulled_outcomes: refusing invalid label %r for %s", label, row_id
                 )
                 continue
+            # AND sheets_dirty=0 re-checks the merge's dirty guard inside the
+            # write: an /outcome press committed between the pull's read and this
+            # UPDATE must not be overwritten by the older Sheet value.
             cur = conn.execute(
-                "UPDATE applications SET outcome_label=?, outcome_at=? WHERE id=? AND user_id=?",
+                "UPDATE applications SET outcome_label=?, outcome_at=? "
+                "WHERE id=? AND user_id=? AND sheets_dirty=0",
                 (label, stamped_at, row_id, _uid()),
             )
             updated += cur.rowcount

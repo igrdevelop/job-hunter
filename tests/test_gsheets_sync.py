@@ -560,7 +560,14 @@ def test_pull_full_snapshot_noop_when_not_ready():
         from hunter import gsheets_sync
 
         result = run(gsheets_sync.pull_full_snapshot())
-    assert result == {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
+    assert result == {
+        "pulled": 0,
+        "inserted": 0,
+        "updated": 0,
+        "outcomes": 0,
+        "reconciled": 0,
+        "errors": [],
+    }
 
 
 def test_pull_full_snapshot_read_all_error():

@@ -597,6 +597,26 @@ def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
     return marked
 
 
+def _pull_result(
+    *,
+    pulled: int = 0,
+    inserted: int = 0,
+    updated: int = 0,
+    outcomes: int = 0,
+    reconciled: int = 0,
+    errors: list[str] | None = None,
+) -> dict:
+    """pull_full_snapshot's result — the same keys on every path, early exits included."""
+    return {
+        "pulled": pulled,
+        "inserted": inserted,
+        "updated": updated,
+        "outcomes": outcomes,
+        "reconciled": reconciled,
+        "errors": errors or [],
+    }
+
+
 async def pull_full_snapshot() -> dict:
     """
     Pull all rows from Google Sheets and merge into DB.
@@ -614,7 +634,7 @@ async def pull_full_snapshot() -> dict:
     "reconciled": int, "errors": list[str]} — "updated" includes "outcomes".
     """
     if not _ready():
-        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
+        return _pull_result()
 
     from hunter.gsheets_client import read_all
 
@@ -624,7 +644,7 @@ async def pull_full_snapshot() -> dict:
         sheets_rows = await asyncio.to_thread(read_all, _get_service(), _sheet_id())
     except Exception as e:
         log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
-        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": [str(e)]}
+        return _pull_result(errors=[str(e)])
 
     # Self-heal dedup: insert Sheets rows missing from the DB (must run before the
     # conflict matrix so freshly inserted rows also get their Sent/To Learn applied).
@@ -642,7 +662,7 @@ async def pull_full_snapshot() -> dict:
         to_write = await asyncio.to_thread(_apply_pull_delta_db, sheets_rows)
     except Exception as e:
         log.error("gsheets pull_full_snapshot: _apply_pull_delta_db failed: %s", e)
-        return {"pulled": len(sheets_rows), "inserted": inserted, "updated": 0, "errors": [str(e)]}
+        return _pull_result(pulled=len(sheets_rows), inserted=inserted, errors=[str(e)])
 
     if to_write:
         try:
@@ -680,14 +700,14 @@ async def pull_full_snapshot() -> dict:
         len(to_write),
         reconciled,
     )
-    return {
-        "pulled": len(sheets_rows),
-        "inserted": inserted,
-        "updated": len(to_write) + outcomes,
-        "outcomes": outcomes,
-        "reconciled": reconciled,
-        "errors": errors,
-    }
+    return _pull_result(
+        pulled=len(sheets_rows),
+        inserted=inserted,
+        updated=len(to_write) + outcomes,
+        outcomes=outcomes,
+        reconciled=reconciled,
+        errors=errors,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -306,6 +306,52 @@ def test_pull_writes_sheet_outcome_into_empty_db_value(db):
     assert _db_row(db, "cccc3333")["outcome_label"] == "silence", "blank never clears"
 
 
+def _pull(svc: MagicMock) -> dict:
+    """pull_full_snapshot with only the Sheets boundary faked — every merge stage
+    (insert, A–K conflict matrix, outcome merge, reconcile) runs against the tmp DB."""
+    from hunter import gsheets_sync
+
+    with (
+        patch("hunter.gsheets_sync._ready", return_value=True),
+        patch("hunter.gsheets_sync._get_service", return_value=svc),
+        patch("hunter.gsheets_sync._sheet_id", return_value="SHEET"),
+    ):
+        return asyncio.run(gsheets_sync.pull_full_snapshot())
+
+
+def test_pull_full_snapshot_runs_the_outcome_stage(db):
+    _insert(db, "abab1212", sheets_row=2)
+    result = _pull(_service(_sheet_grid(("abab1212", "interview"))))
+
+    assert result["errors"] == []
+    assert result["outcomes"] == 1
+    assert result["updated"] == 1
+    assert _db_row(db, "abab1212")["outcome_label"] == "interview"
+
+
+def test_pull_full_snapshot_no_outcome_change(db):
+    _insert(db, "cdcd3434", label="offer", sheets_row=2)
+    result = _pull(_service(_sheet_grid(("cdcd3434", "offer"))))
+
+    assert result["errors"] == []
+    assert result["outcomes"] == 0
+    assert result["updated"] == 0
+    assert _db_row(db, "cdcd3434")["outcome_label"] == "offer"
+
+
+def test_apply_pulled_outcomes_skips_a_row_that_turned_dirty(db):
+    """An /outcome press committed between the pull's read and its write wins."""
+    from hunter import tracker
+
+    _insert(db, "efef5656", sheets_row=2)
+    state = tracker.get_outcome_pull_state()  # the merge reads: clean, no label
+    assert state["efef5656"] == ("", False)
+    assert tracker.set_outcome("efef5656", "offer")  # Telegram press lands now
+
+    assert tracker.apply_pulled_outcomes({"efef5656": "rejected"}) == 0
+    assert _db_row(db, "efef5656")["outcome_label"] == "offer"
+
+
 def test_outcome_round_trip_telegram_then_sheet(db):
     """/outcome → O written immediately; the owner's later Sheet edit comes back."""
     from hunter import gsheets_sync, tracker

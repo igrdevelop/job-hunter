@@ -2633,8 +2633,10 @@ command's reply (`shadow_uploaded` count, `shadow_errors` list).
 
 Replaces `to_send.xlsx`. tracker.xlsx rows are mirrored live to a Google Sheets spreadsheet.
 
-> **Sheet column L "Applied Date" (Sheet-only, not in tracker.db).** The bot syncs only
-> columns A–K (`gsheets_client.COLUMNS`) plus the round-tripped column O (`hunter.outcome_writer`). The `Sent` column (H) doubles as a free-text
+> **Sheet column L "Applied Date" (Sheet-only, not in tracker.db).** The main row push/pull
+> owns columns A–K (`gsheets_client.COLUMNS`); L, M, N and O each have a dedicated writer
+> (`sent_normalizer`, `cost_writer`, `verdict_writer`, `outcome_writer`), and only O is also
+> pulled back into tracker.db. The `Sent` column (H) doubles as a free-text
 > scratchpad (dates *and* notes like "выгасла"/"повторка"). `hunter.sent_normalizer`
 > parses a real application date out of `Sent` and writes it into the untouched column L,
 > so a Stats tab can `COUNT`/`QUERY` clean dates. Refreshed daily (00:20) and on demand

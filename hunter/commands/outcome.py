@@ -87,12 +87,14 @@ async def _mirror_to_sheet(key: str) -> None:
     Best-effort and silent: the outcome is already saved, the row is dirty, and
     the 5-minute resync writes the cell if this attempt fails.
     """
-    try:
+    from hunter.best_effort import best_effort
+
+    # mirror_outcome counts its own Sheets failures; this outer wrapper covers
+    # anything that escapes it (an import or setup error) so it still alerts.
+    with best_effort("outcome.sheet_mirror"):
         from hunter import gsheets_sync
 
         await gsheets_sync.mirror_outcome(key)
-    except Exception:  # noqa: BLE001 — never turn a recorded outcome into an error reply
-        logger.debug("[outcome] immediate Sheet mirror failed for %s", key, exc_info=True)
 
 
 def _usage() -> str:
