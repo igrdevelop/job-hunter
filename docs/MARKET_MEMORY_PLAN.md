@@ -344,17 +344,26 @@ ask for one decision each, from data).
 
 ## Open questions
 
-1. TTL 180 days for `postings_seen` (90 if M0.b says volume is high) — yes/no?
+Owner decisions 2026-09-12 (questions 1–4 closed, 5 pending):
+
+1. TTL 180 days for `postings_seen` (90 if M0.b says volume is high) — **yes.**
 2. Include the cloudscraper sources (pracuj, theprotocol, builtin, jobleads)
-   and LinkedIn in `postings_seen` for the owner's own use? (07-M6 excludes
-   them only from a *published* aggregate.) Yes/no?
-3. Backfill `source` on pre-existing rows from the URL guess (marked as
-   guessed), or leave old rows blank and let the column fill going forward?
-4. Is a hand-kept agency list (`candidate/agencies.yaml`, gitignored, or a key
-   in `filters.yaml`) acceptable as the agency-vs-direct signal for M4.b, or
-   should the plan stop at the legal-token heuristic already in
-   `repost_gate.normalize_company`?
-5. Should the salary floor, once its data exists, be a listing-level *filter*
-   (a `salary_floor` reason, vacancy never queued) or a *warning* only? The
-   plan proposes filter, because a parsed max below the owner's floor is not a
-   judgment call — but it is the one rule here that discards vacancies.
+   and LinkedIn in `postings_seen` for the owner's own use — **yes.** (07-M6
+   still excludes them from any *published* aggregate; that stays a
+   read-side projection, see Risks.)
+3. Backfill `source` on pre-existing rows — **no, leave old rows blank** and
+   let the column fill going forward; `funnel.py`'s URL guess remains the
+   fallback for blank values. No `tools/backfill_source.py`.
+4. Agency-vs-direct signal for M4.b — **heuristic only** (the legal-token
+   stripping already in `repost_gate.normalize_company` plus the agency
+   boilerplate similarity the repost gate measures). No hand-kept agency
+   list, no new YAML key.
+5. Salary floor (M4.c), once its data exists: a listing-level *filter* (a
+   `salary_floor` reason — the vacancy is never queued, never generated, only
+   counted in the digest's rejection split) versus a *warning* (the vacancy is
+   queued and generated as usual, with one extra Telegram line "salary below
+   your floor"). The plan proposes filter: a *parsed* B2B PLN maximum below
+   the owner's floor is a fact, not a judgment call, and generating for it
+   spends money on a vacancy the owner would not take. It is also the only
+   rule in this plan that discards vacancies, which is why it is asked
+   separately. **Pending.**
