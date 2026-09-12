@@ -5,9 +5,9 @@ Why a separate module
 Same reasoning as hunter.cost_writer (column M): the bot's main A–K push
 (hunter.gsheets_client.COLUMNS) writes a contiguous range every time, and
 column L is owned by ``sent_normalizer``. The independent PDF-verdict score
-therefore lives in **column N**, written by this module only. Four
+therefore lives in **column N**, written by this module only. Five
 non-overlapping writers: A–K main push, L sent_normalizer, M cost_writer,
-N verdict_writer — never racing for the same cell.
+N verdict_writer, O outcome_writer — never racing for the same cell.
 
 What the value is
 -----------------

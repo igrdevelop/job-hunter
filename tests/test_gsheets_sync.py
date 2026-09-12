@@ -593,6 +593,7 @@ def test_pull_full_snapshot_no_changes():
         patch("hunter.gsheets_sync.insert_pulled_rows", return_value=0),
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[]) as mock_delta,
         patch("hunter.gsheets_sync._reconcile_deleted_rows", return_value=0),
+        patch("hunter.gsheets_sync._apply_outcome_pull_db", return_value=0),
     ):
         from hunter import gsheets_sync
 
@@ -622,6 +623,7 @@ def test_pull_full_snapshot_writes_db_on_changes():
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[changed_row]),
         patch("hunter.gsheets_sync.apply_pull_updates", return_value=1),
         patch("hunter.gsheets_sync._reconcile_deleted_rows", return_value=0),
+        patch("hunter.gsheets_sync._apply_outcome_pull_db", return_value=0),
     ):
         from hunter import gsheets_sync
 

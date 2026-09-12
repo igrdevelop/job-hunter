@@ -1942,27 +1942,99 @@ def set_outcome(url_or_id: str, label: str) -> bool:
     label = (label or "").strip().lower()
     if label and label not in OUTCOME_LABELS:
         raise ValueError(f"unknown outcome label {label!r}; expected one of {OUTCOME_LABELS}")
+    stamped_at = datetime.now(timezone.utc).isoformat(timespec="seconds") if label else None
+    match = _own_row_match(url_or_id)
+    if match is None:
+        return False
+    where, params = match
+    with get_db(DB_PATH) as conn:
+        cur = conn.execute(
+            f"UPDATE applications SET outcome_label=?, outcome_at=?, sheets_dirty=1 WHERE {where}",  # noqa: S608 — `where` is one of two literals from _own_row_match
+            (label, stamped_at, *params),
+        )
+        return cur.rowcount > 0
+
+
+def _own_row_match(url_or_id: str) -> tuple[str, tuple[str, ...]] | None:
+    """WHERE clause + params selecting THIS user's row(s) by 8-hex id or URL.
+
+    The one definition of "which row does an /outcome key mean", shared by
+    set_outcome and get_outcome_cells so the Sheet mirror always addresses the
+    exact rows the label was written to. None when the key matches nothing.
+    """
     key = (url_or_id or "").strip()
     if not key:
-        return False
-    stamped_at = datetime.now(timezone.utc).isoformat(timespec="seconds") if label else None
+        return None
+    if _ROW_ID_RE.match(key):
+        return "id=? AND user_id=?", (key, _uid())
+    norm = normalize_url(key)
+    if not norm:
+        return None
+    return "url_norm=? AND user_id=?", (norm, _uid())
+
+
+def get_outcome_cells(url_or_id: str) -> list[tuple[str, int | None, str]]:
+    """(row_id, sheets_row, outcome_label) for THIS user's rows matching the key.
+
+    Feeds the immediate Sheet column-O write after /outcome
+    (gsheets_sync.mirror_outcome). `sheets_row` is None for a row that was
+    never mirrored — there is no cell to write yet.
+    """
+    match = _own_row_match(url_or_id)
+    if match is None:
+        return []
+    where, params = match
     with get_db(DB_PATH) as conn:
-        if _ROW_ID_RE.match(key):
+        rows = conn.execute(
+            f"SELECT id, sheets_row, outcome_label FROM applications WHERE {where}",  # noqa: S608 — `where` is one of two literals from _own_row_match
+            params,
+        ).fetchall()
+    return [(r["id"], r["sheets_row"], r["outcome_label"] or "") for r in rows]
+
+
+def get_outcome_pull_state() -> dict[str, tuple[str, bool]]:
+    """{row_id: (outcome_label, sheets_dirty)} for THIS user's rows.
+
+    The DB side of the Sheet column-O pull merge (gsheets_sync._merge_outcomes).
+    `sheets_dirty` says the DB holds a change the Sheet hasn't received yet — an
+    /outcome press whose immediate cell write failed — and must not be
+    overwritten by the stale cell. Same user scope as read_all_tracker_rows,
+    which the rest of the pull merge reads.
+    """
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, outcome_label, sheets_dirty FROM applications "
+            "WHERE id != '' AND user_id = ?",
+            (_uid(),),
+        ).fetchall()
+    return {r["id"]: (r["outcome_label"] or "", bool(r["sheets_dirty"])) for r in rows}
+
+
+def apply_pulled_outcomes(updates: dict[str, str]) -> int:
+    """Write outcome labels that came FROM the Sheet (column-O pull).
+
+    Stamps `outcome_at` like set_outcome, but leaves `sheets_dirty` alone: the
+    Sheet already shows this value, so there is nothing to push back. Labels are
+    validated again here — a caller bug must not store garbage. Returns the
+    number of rows updated.
+    """
+    if not updates:
+        return 0
+    stamped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    updated = 0
+    with get_db(DB_PATH) as conn:
+        for row_id, label in updates.items():
+            if label not in OUTCOME_LABELS:
+                log.warning(
+                    "apply_pulled_outcomes: refusing invalid label %r for %s", label, row_id
+                )
+                continue
             cur = conn.execute(
-                "UPDATE applications SET outcome_label=?, outcome_at=?, sheets_dirty=1 "
-                "WHERE id=? AND user_id=?",
-                (label, stamped_at, key, _uid()),
+                "UPDATE applications SET outcome_label=?, outcome_at=? WHERE id=? AND user_id=?",
+                (label, stamped_at, row_id, _uid()),
             )
-        else:
-            norm = normalize_url(key)
-            if not norm:
-                return False
-            cur = conn.execute(
-                "UPDATE applications SET outcome_label=?, outcome_at=?, sheets_dirty=1 "
-                "WHERE url_norm=? AND user_id=?",
-                (label, stamped_at, norm, _uid()),
-            )
-        return cur.rowcount > 0
+            updated += cur.rowcount
+    return updated
 
 
 def get_rows_awaiting_outcome(limit: int = 10, min_age_days: int = 0) -> list[dict]:
@@ -2308,7 +2380,7 @@ def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
             """
             SELECT id, date, company, title, stack, ats_status, url, folder,
                    sent, reapplication, to_learn, drive_url, confirmation, answer,
-                   sheets_row
+                   outcome_label, sheets_row
             FROM applications
             WHERE sheets_dirty=1
             """
@@ -2330,6 +2402,9 @@ def get_dirty_rows_for_sheets() -> list[tuple[str, dict, int | None]]:
             "Drive URL": r["drive_url"],
             "Confirmation": r["confirmation"],
             "Answer": r["answer"],
+            # Not in gsheets_client.COLUMNS — resync_dirty writes it to column O
+            # through hunter.outcome_writer, never through the A–K push.
+            "Outcome": r["outcome_label"] or "",
         }
         result.append((r["id"], row_dict, r["sheets_row"]))
     return result

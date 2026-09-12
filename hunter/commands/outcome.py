@@ -81,6 +81,20 @@ def _card_text(row: dict) -> str:
     return f"<b>{company}</b> — {title}\nSent: {sent} · <code>{html.escape(str(row['id']))}</code>"
 
 
+async def _mirror_to_sheet(key: str) -> None:
+    """Push the new label into Sheet column O now instead of at the next resync.
+
+    Best-effort and silent: the outcome is already saved, the row is dirty, and
+    the 5-minute resync writes the cell if this attempt fails.
+    """
+    try:
+        from hunter import gsheets_sync
+
+        await gsheets_sync.mirror_outcome(key)
+    except Exception:  # noqa: BLE001 — never turn a recorded outcome into an error reply
+        logger.debug("[outcome] immediate Sheet mirror failed for %s", key, exc_info=True)
+
+
 def _usage() -> str:
     labels = " | ".join(_labels())
     return (
@@ -131,6 +145,7 @@ async def cmd_outcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not updated:
         await message.reply_text("⚠️ No application of yours matches that id or URL.")
         return
+    await _mirror_to_sheet(key)
     shown = f"{_EMOJI.get(label, '')} {label}" if label else "cleared"
     await message.reply_text(f"✅ Outcome recorded: {shown}")
 
@@ -158,6 +173,7 @@ async def outcome_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer("That application is no longer yours or was removed.", show_alert=True)
         return
     await query.answer(f"Recorded: {label}")
+    await _mirror_to_sheet(row_id)
     # Telegram hands back an InaccessibleMessage for a card older than ~48 h:
     # it has no text to extend. The outcome is already saved, so just stop.
     if not isinstance(query.message, Message):

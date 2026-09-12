@@ -45,6 +45,15 @@ COLUMNS = [
 ]
 COL_COUNT = len(COLUMNS)  # 11
 
+# Column O "Outcome" — deliberately NOT part of COLUMNS. Every write path in this
+# module covers A–K only, so the main push can never blank a cell the owner edits
+# by hand. O has its own writer (hunter.outcome_writer); read_all() reads through
+# O so the pull can merge it (gsheets_sync._merge_outcomes). L/M/N (Applied Date,
+# Cost $, ATS Verdict) sit between K and O and are read but ignored.
+OUTCOME_COLUMN = "Outcome"
+OUTCOME_COL_LETTER = "O"
+OUTCOME_COL_INDEX = ord(OUTCOME_COL_LETTER) - ord("A")  # 14, 0-based
+
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -152,10 +161,15 @@ def read_all(service: Any, sheet_id: str, tab: str = "Tracker") -> list[tuple[in
 
     Returns list of (sheet_row_index, row_dict) where sheet_row_index is
     1-based (row 1 = header, row 2 = first data row).
+
+    Each row_dict carries the A–K COLUMNS plus ``OUTCOME_COLUMN`` (column O,
+    raw cell text, "" when absent) — the read range runs through O even though
+    every write stays inside A–K.
     """
+    read_range = f"'{tab}'!A:{OUTCOME_COL_LETTER}"
     try:
         result = (
-            service.spreadsheets().values().get(spreadsheetId=sheet_id, range=_range(tab)).execute()
+            service.spreadsheets().values().get(spreadsheetId=sheet_id, range=read_range).execute()
         )
     except HttpError as e:
         log.error("gsheets read_all failed: %s", e)
@@ -168,7 +182,10 @@ def read_all(service: Any, sheet_id: str, tab: str = "Tracker") -> list[tuple[in
     # Skip header row (index 0 in raw_rows = sheet row 1)
     data: list[tuple[int, dict]] = []
     for i, values in enumerate(raw_rows[1:], start=2):  # sheet rows start at 1
-        data.append((i, _list_to_row(values)))
+        row = _list_to_row(values)
+        outcome = values[OUTCOME_COL_INDEX] if len(values) > OUTCOME_COL_INDEX else ""
+        row[OUTCOME_COLUMN] = str(outcome or "")
+        data.append((i, row))
     return data
 
 
