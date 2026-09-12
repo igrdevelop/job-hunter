@@ -56,9 +56,23 @@ _BROKEN_STATUSES = ("BROKEN?", "ERROR")
 
 
 def wilson_ci(successes: int, total: int, z: float = 1.645) -> tuple[float, float]:
-    """Wilson score interval for a proportion, default z=1.645 (90% two-sided)."""
+    """Wilson score interval for a proportion, default z=1.645 (90% two-sided).
+
+    `successes` is clamped into [0, total] before the interval math. On this
+    repo's real data the sent-rate call site legitimately passes more
+    successes than trials: `generated` counts rows whose `ats_status` holds a
+    numeric score, `sent` counts rows whose Sent column is not a non-sent
+    marker, and those are independent columns — a row added by hand through
+    the Sheet (`tracker.insert_pulled_rows`) is sent without ever carrying a
+    score. Without the clamp `phat > 1` makes `phat * (1 - phat)` negative and
+    the square root below raises `ValueError: math domain error`, which is
+    exactly how this tool died on its first real run (2026-09-12, prod).
+    A ratio above 1 is not a proportion, so there is no meaningful interval
+    for it; the caller reports the raw counts and flags the row instead.
+    """
     if total <= 0:
         return (0.0, 0.0)
+    successes = min(max(successes, 0), total)
     phat = successes / total
     denom = 1 + z * z / total
     center = phat + z * z / (2 * total)
@@ -231,6 +245,11 @@ def build_report(days: int | None, db_path: Path | None = None) -> dict[str, Any
                 "confirmed": confirmed,
                 "answered": answered,
                 "sent_rate_ci90": {"low": ci_lo, "high": ci_hi},
+                # More sent than generated means hand-made applications for
+                # this source (a Sheet row with a Sent date and no score).
+                # The interval above is computed on the clamped value, so the
+                # flag is what keeps the reader from trusting it as a rate.
+                "sent_exceeds_generated": sent > generated,
                 "cost_per_sent": extra.cost_per_sent,
                 "cost_priced_sent": extra.cost_priced_sent,
                 "cost_unpriced_sent": extra.cost_unpriced_sent,
@@ -284,6 +303,11 @@ def format_report(report: dict[str, Any]) -> str:
             f"{s['confirmed']:>4} {s['answered']:>4} {ci_text:>16} {cost_text:>8} "
             f"{s['fail']:>4} {s['skip']:>4} {s['health_status']:<8} {s['decision']}"
         )
+        if s.get("sent_exceeds_generated"):
+            lines.append(
+                f"{'':<22}   (sent {s['sent']} > generated {s['generated']} — rows sent by "
+                f"hand, no score; the CI above is not a rate)"
+            )
         if s["cost_unpriced_sent"]:
             lines.append(f"{'':<22}   ({s['cost_unpriced_sent']} sent row(s) unpriced — CLI mode)")
 
