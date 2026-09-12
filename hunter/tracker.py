@@ -1908,6 +1908,102 @@ def set_cost(url: str, cost_usd: float) -> bool:
         return False
 
 
+# ── Outcome of a sent application ────────────────────────────────────────────
+#
+# docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1, owner decision 2026-09-12.
+# A 90-day funnel run on prod found 399 sent applications and ZERO recorded
+# outcomes: nothing ever wrote the free-text `answer` column, so no metric
+# downstream of "sent" was measurable. These labels are the ONE definition —
+# funnel.py, the /outcome command and the Sheet column-O pull all import them.
+#
+# `silence` is the owner's positive observation "no reply came" (typically after
+# a few weeks), which is different from "not recorded yet" (empty). It counts
+# as an observed outcome but NOT as a reply: counting it as a reply would turn
+# nobody writing back into a reply rate.
+OUTCOME_LABELS: tuple[str, ...] = ("interview", "rejected", "offer", "silence")
+OUTCOME_REPLY_LABELS: frozenset[str] = frozenset({"interview", "rejected", "offer"})
+
+_ROW_ID_RE = re.compile(r"^[0-9a-f]{8}$")
+
+
+def set_outcome(url_or_id: str, label: str) -> bool:
+    """Record what happened to one of THIS user's applications.
+
+    `url_or_id` is either the 8-hex tracker row id (what /outcome lists and the
+    Sheet shows) or the vacancy URL. `label` must be one of OUTCOME_LABELS, or
+    the empty string to clear a mistaken entry. Stamps `outcome_at` and marks the
+    row dirty so the Sheet mirror picks it up. Scoped by user_id: a URL two users
+    both applied to only ever updates the caller's own row.
+
+    Returns True when a row was updated. Raises ValueError for an unknown label
+    — the command layer turns that into a usage reply, and a silent no-op would
+    let a typo look like a recorded outcome.
+    """
+    label = (label or "").strip().lower()
+    if label and label not in OUTCOME_LABELS:
+        raise ValueError(f"unknown outcome label {label!r}; expected one of {OUTCOME_LABELS}")
+    key = (url_or_id or "").strip()
+    if not key:
+        return False
+    stamped_at = datetime.now(timezone.utc).isoformat(timespec="seconds") if label else None
+    with get_db(DB_PATH) as conn:
+        if _ROW_ID_RE.match(key):
+            cur = conn.execute(
+                "UPDATE applications SET outcome_label=?, outcome_at=?, sheets_dirty=1 "
+                "WHERE id=? AND user_id=?",
+                (label, stamped_at, key, _uid()),
+            )
+        else:
+            norm = normalize_url(key)
+            if not norm:
+                return False
+            cur = conn.execute(
+                "UPDATE applications SET outcome_label=?, outcome_at=?, sheets_dirty=1 "
+                "WHERE url_norm=? AND user_id=?",
+                (label, stamped_at, norm, _uid()),
+            )
+        return cur.rowcount > 0
+
+
+def get_rows_awaiting_outcome(limit: int = 10, min_age_days: int = 0) -> list[dict]:
+    """THIS user's sent applications with no recorded outcome, newest first.
+
+    "Sent" means `sent_parse.classify(sent) == "applied"` — a real date in the
+    Sent column — the same definition the funnel tools use, so a row this lists
+    is exactly a row the funnel counts as sent. `min_age_days` hides applications
+    too fresh for any outcome to be expected yet.
+    """
+    from hunter.sent_parse import classify, parse_sent_date
+
+    cutoff = date.today() - timedelta(days=max(0, int(min_age_days)))
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, date, company, title, url, sent FROM applications "
+            "WHERE user_id=? AND outcome_label='' ORDER BY rowid DESC",
+            (_uid(),),
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        if classify(r["sent"]) != "applied":
+            continue
+        sent_on = parse_sent_date(r["sent"])
+        if sent_on is not None and min_age_days and sent_on > cutoff:
+            continue
+        out.append(
+            {
+                "id": r["id"],
+                "date": r["date"],
+                "company": r["company"],
+                "title": r["title"],
+                "url": r["url"],
+                "sent": r["sent"],
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def set_to_learn(url: str, to_learn: str) -> bool:
     """Overwrite the "To Learn" column for the row matching `url`.
 

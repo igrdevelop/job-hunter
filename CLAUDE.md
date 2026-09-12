@@ -868,7 +868,13 @@ hunter/
                             tracked→generated→sent→confirmed→answered, overall + per source (source
                             inferred from URL via each source's matches_url + registered-domain
                             fallback). Confirmed = ATS ack (confirmation col, stamped by
-                            /check_responses); Answered = human reply (answer col). Feeds /funnel
+                            /check_responses); Answered = human reply — the legacy free-text
+                            answer col OR a reply `outcome_label` (interview/rejected/offer,
+                            NOT silence). `outcome_recorded` counts rows with ANY label and
+                            is what makes `answered == 0` interpretable: zero replies with
+                            outcomes recorded is data, zero with none recorded is not. The
+                            SELECT probes `PRAGMA table_info` first, because `get_db()` does
+                            not migrate and a pre-outcome DB must not crash /funnel. Feeds /funnel
   claim_judge.py            LLM-as-judge CV verification: judge_content() flags claims absent
                             from the candidate profile + posting (fabrication/exaggeration/
                             style); repair_content() drops the offending clause (deterministic
@@ -1080,6 +1086,17 @@ hunter/
     fails.py                /fails [N] — last N (default 10, max 30) entries from the
                             apply-failure audit log (hunter.apply_failures_log, M4 —
                             docs/HUNT_APPLY_SPLIT_PLAN.md); read-only
+    outcome.py              /outcome — record what happened to a sent application (docs/
+                            improvement-2026-09/08-DATA_EVAL_PLAN.md M1). No args: the 5
+                            newest sent rows with no outcome, one card each with four
+                            buttons; `/outcome <id|url> <label>` sets directly, `clear`
+                            removes a mistaken entry. `require_user`, not `require_owner` —
+                            a linked user labels their OWN rows and `tracker.set_outcome`
+                            scopes every write by user_id. Its `CallbackQueryHandler`
+                            (`pattern=r"^outcome:"`) MUST stay registered before the
+                            pattern-less `button_callback`, which catches every callback
+                            query and would answer an outcome press with "Expired"
+                            (pinned by a test)
     queue.py                /queue [limit] — M1 apply-queue introspection (docs/
                             HUNT_APPLY_SPLIT_PLAN.md): PENDING/IN_PROGRESS counts +
                             the oldest `limit` (default 10) PENDING jobs FIFO
@@ -1568,7 +1585,11 @@ tools/funnel_sources.py     Read-only M0 measurement (docs/improvement-2026-09/
                             (prints up to 10 filtered URLs to eyeball before
                             disabling the source); BROKEN?/ERROR for >=14
                             days (via `source_health.recent_runs`) -> "broken";
-                            sent>=5, answered==0, window>=21d -> "watch".
+                            sent>=5 and NO outcome recorded -> "unmeasured" (added
+                            2026-09-12: the first prod run put 20 sources on "watch" while
+                            not one outcome had ever been written — every one was noise);
+                            sent>=5, answered==0, window>=21d -> "watch". An `out` column
+                            shows how many rows per source carry any outcome.
                             `--json` for machine-readable output.
 tools/audit_tenant_scope.py Read-only M0 measurement (docs/improvement-2026-09/
                             05-SECURITY_PLAN.md M0): static AST scan of every
@@ -2586,6 +2607,7 @@ command's reply (`shadow_uploaded` count, `shadow_errors` list).
 | 11 | ID | Short UUID (8-char hex) — Google Sheets sync key |
 | 12 | Drive URL | Google Drive folder URL after upload (local-only, not synced to Sheets) |
 | 15 | Cost $ | Per-vacancy LLM USD spend (API mode). Written at row creation with the Step 6.5 figure, then **re-stamped post-hoc** (`tracker.set_cost`) after the verdict + refine loop so it covers the FULL run (verdict call, refine rewrite rounds incl. rollbacks, PL mirror). Blank for CLI mode (Pro subscription, no per-token visibility) and for pre-tracking rows. Mirrored to Sheet column **M** by `hunter.cost_writer` — separate writer (not part of the A–K push), parallel to `sent_normalizer` on column L. |
+| — | Outcome (`outcome_label` + `outcome_at` DB columns) | What actually happened to a SENT application: one of `tracker.OUTCOME_LABELS` = `interview` / `rejected` / `offer` / `silence`, empty = not recorded (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1, owner decision 2026-09-12). Added after a 90-day prod funnel run showed 399 sent applications and ZERO recorded outcomes — nothing ever wrote the free-text `answer` column, so no metric past "sent" was measurable. Written by `tracker.set_outcome(url_or_id, label)` (user-scoped, stamps `outcome_at`, sets `sheets_dirty=1`) via `/outcome`. `silence` is an OBSERVED outcome but not a reply: `funnel._is_answered` counts only `OUTCOME_REPLY_LABELS` (plus the legacy `answer` text), while `funnel._has_outcome` counts all four, so `answered == 0` can be told apart from "nobody recorded anything". **Not yet mirrored to the Sheet** — the Sheets layer is built on the fixed A–K `gsheets_client.COLUMNS` (push, pull row parser and conflict merge all assume it), so a column-O round trip is its own follow-up. |
 | — | ATS Verdict (`ats_verdict` DB column) | Independent PDF-verdict score (0–100): one `JUDGE_MODEL` (Haiku) call over the text extracted from the rendered EN CV PDF. Stamped post-hoc by `tracker.set_ats_verdict` (apply Step 7.7; the row already exists). NULL = no verdict. Mirrored to Sheet column **N** by `hunter.verdict_writer` when the bot-process `mirror_new_row` runs (the verdict is in the DB by then); `tools/sync_verdicts.py` backfills misses. Four non-overlapping Sheet writers: A–K main push, L sent_normalizer, M cost_writer, N verdict_writer. |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
