@@ -550,13 +550,31 @@ jobs:
             # failed pull reports success (2026-08-29 incident).
             set -eo pipefail
             cd ${{ secrets.VPS_WORK_DIR }}
+            curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/master/docker-compose.yml -o docker-compose.yml
             echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # -a (not bare prune): deploy images are TAGGED by commit SHA, so
-            # dangling-only pruning never reclaims them. until=168h keeps a
-            # week of rollback targets.
-            docker image prune -a -f --filter "until=168h"
+            export IMAGE_TAG=${{ github.sha }}
+            # Bounded retention (scripts/docker_prune.sh, fetched by the SHA
+            # being deployed -- raw.githubusercontent.com caches `master` URLs
+            # for ~5 min, 404s included): keep the live job-hunter image
+            # + 1 previous as a rollback target, remove the rest, then the
+            # generic `prune -a --filter until=168h` for everything else. A
+            # time window alone could not cap the disk — ten ~8.1 GB images
+            # younger than 2 days filled it on 2026-09-12 (see "Disk hygiene").
+            curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/${{ github.sha }}/scripts/docker_prune.sh -o docker_prune.sh
+            sh docker_prune.sh
+            # Free-space gate: the image is ~8.1 GB UNCOMPRESSED; 12000 MB is
+            # that plus headroom for the compressed layers during extraction.
+            AVAIL_MB=$(df -Pm / | awk 'NR==2 {print $4}')
+            if [ "$AVAIL_MB" -lt 12000 ]; then
+              echo "Only ${AVAIL_MB} MB free on / - need at least 12000 MB to pull and extract the ~8.1 GB image."
+              df -h /
+              docker system df
+              exit 1
+            fi
             docker compose pull
             docker compose up -d
+            # Settle to live + 1 previous now that the new image is live.
+            sh docker_prune.sh
             echo "Deploy complete"
 
       - name: Notify on failure
@@ -819,25 +837,48 @@ noise by comparison — `users/` 127 MB (100 application folders over 3.5
 months), `logs/` 52 MB and already bounded by rotation, `backups/` + `db/`
 14 MB. Images are the only thing worth automating.
 
-Install once, as the `deploy` user (`crontab -e`):
+**Why a bounded count and not a time window (2026-09-12).** The first fix
+was `docker image prune -a -f --filter until=168h`, in both the deploy and
+this cron. Two weeks later the disk was at 100% again with 17 images /
+73 GB, 63 GB reclaimable — **ten `ghcr.io/igrdevelop/job-hunter:<sha>`
+images of ~8.1 GB each, all younger than two days**. The image is 8.1 GB
+uncompressed (Playwright chromium + LibreOffice + Claude CLI), so a busy
+merge day adds tens of GB in hours, and an age filter of a week cannot
+reclaim any of it — both the deploy-time prune and this cron ran and freed
+nothing. What caps the disk is a bound on the NUMBER of images, whatever
+the merge rate: `scripts/docker_prune.sh` keeps the image behind the live
+`job-hunter` container plus one previous (`KEEP_PREVIOUS=1`, the rollback
+target), removes every other job-hunter image, and only then runs the
+generic `until=168h` prune for the sibling projects' leftovers. Steady
+state is therefore two job-hunter images (~16 GB), peaking at three during
+a deploy. The deploy workflow fetches the same script (pinned to the commit
+being deployed, next to `docker-compose.yml`) and runs it before the pull and again after
+`up -d`; the cron below runs the local copy that fetch leaves behind, so
+the two never drift.
+
+Install once, as the `deploy` user (`crontab -e`). The script lands in the
+work dir on the first deploy after this change; to install the cron before
+that, fetch it by hand once with the same `curl` the workflow uses:
 
 ```cron
-# Reclaim unused Docker images older than a week, daily at 04:17.
-# -a is required: deploy images are TAGGED by commit SHA, so a bare
-# `docker image prune -f` (dangling only) never removes any of them.
-# Images in use by a running container are always kept, and anything
-# removed is re-pullable from GHCR. `>` (not `>>`) keeps the log to the
-# last run so it cannot itself become a disk problem.
-# Absolute path on purpose: cron runs with a minimal PATH, and a bare
+# Bounded job-hunter image retention + generic week-old prune, daily at 04:17.
+# scripts/docker_prune.sh (fetched by the deploy next to docker-compose.yml):
+# keeps the live job-hunter image + 1 previous, removes the rest, then
+# `docker image prune -a -f --filter until=168h` for everything else on this
+# shared daemon. Images in use by any running container are always kept, and
+# anything removed is re-pullable from GHCR. `>` (not `>>`) keeps the log to
+# the last run so it cannot itself become a disk problem.
+# DOCKER=/usr/bin/docker on purpose: cron runs with a minimal PATH, and a bare
 # `docker` that resolves in your login shell is the classic way for a
 # scheduled job to fail silently at 04:17 forever.
-17 4 * * * /usr/bin/docker image prune -a -f --filter until=168h > /home/deploy/docker-prune.log 2>&1
+17 4 * * * DOCKER=/usr/bin/docker /bin/sh /home/deploy/job-hunter/docker_prune.sh > /home/deploy/docker-prune.log 2>&1
 ```
 
-Verify it took effect, and check what the last run reclaimed:
+Verify it took effect, and check what the last run reclaimed (the script
+ends with `docker system df`, so the log shows the post-prune state):
 
 ```bash
-crontab -l | grep prune
+crontab -l | grep docker_prune
 cat /home/deploy/docker-prune.log
 ```
 
@@ -910,16 +951,20 @@ docker compose restart job-hunter
 export IMAGE_TAG=<full-commit-sha>
 docker compose pull && docker compose up -d
 
-# Disk check — the deploy pulls a ~2 GB image and needs headroom to extract it.
-# A full disk is what broke the 2026-08-29 deploy (silently, before set -eo
-# pipefail was added to the workflow).
+# Disk check — the image is ~8.1 GB UNCOMPRESSED (measured 2026-09-12; the deploy
+# gate wants 12000 MB free before it pulls). A full disk broke the 2026-08-29
+# deploy (silently, before set -eo pipefail) and again on 2026-09-12 (ten
+# fresh ~8.1 GB images that an age-based prune could not touch).
 df -h /
 docker system df                       # RECLAIMABLE column is the one to watch
+docker images ghcr.io/igrdevelop/job-hunter   # SIZE column = what the gate must fit
 
-# Reclaim space. Deploy images are tagged by commit SHA, so a bare
-# `docker image prune -f` never removes them — -a is required. Images in use by
-# a running container are always kept; anything removed is re-pullable.
-docker image prune -a -f --filter "until=168h"
+# Reclaim space: live job-hunter image + 1 previous kept, everything else of
+# ours removed, then the generic week-old prune for the sibling projects.
+# Same file the deploy and the 04:17 cron run (see "Disk hygiene").
+sh docker_prune.sh
+# Rollback target gone too (e.g. after KEEP_PREVIOUS=0)? Any SHA is re-pullable:
+#   IMAGE_TAG=<full-commit-sha> docker compose pull
 
 # Shell into the container
 docker exec -it job-hunter bash

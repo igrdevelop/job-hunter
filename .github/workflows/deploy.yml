@@ -159,25 +159,48 @@ jobs:
             export IMAGE_TAG=${{ github.sha }}
 
             # Reclaim BEFORE pulling. Every deploy tags its image with a commit
-            # SHA, and the old `docker image prune -f` only removes DANGLING
-            # (untagged) images -- so it never removed a single deploy image.
-            # By 2026-08-29 that had accumulated 17 images / 63.9 GB reclaimable
-            # and filled the 75 GB disk to 100%, which is what broke the pull.
-            # `-a` also removes tagged images; `until=168h` keeps the last week
-            # so a recent rollback target stays local. Images in use by a
-            # running container are never touched, and anything removed here is
-            # re-pullable from GHCR. NOTE: this host also runs sibling projects
-            # (job-hunter-api, arifma, psybook) — their unused images older than
-            # a week are reclaimed by this too, which is intended.
-            docker image prune -a -f --filter "until=168h"
+            # SHA, and the original `docker image prune -f` only removed
+            # DANGLING (untagged) images -- so it never removed a single deploy
+            # image; by 2026-08-29 that was 17 images / 63.9 GB reclaimable and
+            # a 75 GB disk at 100%. The 2026-08-29 fix, `prune -a --filter
+            # until=168h`, capped the AGE of an image but not their NUMBER: on
+            # 2026-09-12 the disk was full again with TEN job-hunter images of
+            # ~8.1 GB each, all younger than two days, and the time window
+            # could not reclaim any of them. scripts/docker_prune.sh (fetched
+            # next to docker-compose.yml, so the deploy and the host cron in
+            # docs/DEPLOY.md run the same file) keeps the image
+            # behind the live container plus ONE previous job-hunter image as
+            # a rollback target and removes the rest, then runs the generic
+            # `prune -a --filter until=168h` for everything else on this shared
+            # daemon (job-hunter-api, arifma, psybook leave images here and
+            # never prune -- reclaiming their week-old leftovers is intended).
+            # Anything removed is re-pullable from GHCR by SHA. Runs again
+            # after `up -d` below so the steady state between deploys is
+            # exactly two job-hunter images (~16 GB), not three. Fetched by
+            # the SHA being deployed, not `master`: raw.githubusercontent.com
+            # caches for ~5 min (404s included), so a `master` URL can hand
+            # the first deploy after a merge a stale or missing copy, and it
+            # would otherwise run whatever master holds rather than the
+            # version in this commit.
+            curl -fsSL https://raw.githubusercontent.com/igrdevelop/job-hunter/${{ github.sha }}/scripts/docker_prune.sh -o docker_prune.sh
+            sh docker_prune.sh
 
             # A pull that runs out of disk mid-extraction is the exact failure
             # this block exists to prevent, so check before spending the
-            # download. The image is ~2 GB compressed and needs headroom to
-            # extract; 5 GB is a floor, not a target.
+            # download. The image is ~8.1 GB UNCOMPRESSED (Playwright chromium
+            # + LibreOffice + Claude CLI -- `docker images ghcr.io/igrdevelop/
+            # job-hunter` on the host, measured 2026-09-12), and the compressed
+            # layers sit on disk alongside it while they extract. The old floor
+            # of 5000 MB was written against a "~2 GB compressed" figure that
+            # was never the extracted size, so a deploy passed the check and
+            # then filled the disk mid-extraction -- which is also how the bot's
+            # startup token refresh wrote gsheets_token.json as a 0-byte file
+            # and killed the Sheets mirror until it was restored by hand.
+            # 12000 MB = the real image + ~50% headroom; re-measure and raise
+            # this whenever the Dockerfile grows.
             AVAIL_MB=$(df -Pm / | awk 'NR==2 {print $4}')
-            if [ "$AVAIL_MB" -lt 5000 ]; then
-              echo "Only ${AVAIL_MB} MB free on / - need at least 5000 MB to pull and extract the image."
+            if [ "$AVAIL_MB" -lt 12000 ]; then
+              echo "Only ${AVAIL_MB} MB free on / - need at least 12000 MB to pull and extract the ~8.1 GB image."
               df -h /
               docker system df
               exit 1
@@ -185,6 +208,10 @@ jobs:
 
             docker compose pull
             docker compose up -d
+
+            # Settle to live + 1 previous: the image that was live before this
+            # deploy is now the rollback target, the one before it goes.
+            sh docker_prune.sh
 
       - name: Notify on failure
         if: failure()
