@@ -218,6 +218,17 @@ def _row(url: str) -> dict:
     return rows[0] if rows else {}
 
 
+def _skip_reason(url: str) -> str:
+    """docs/MARKET_MEMORY_PLAN.md M2 — the column is not in lookup_url's dict."""
+    from hunter.db import get_db
+
+    with get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT skip_reason FROM applications WHERE url_norm=?", (tracker.normalize_url(url),)
+        ).fetchone()
+    return row["skip_reason"] if row else ""
+
+
 class TestPolishPostingShipsAPolishCv:
     """2026-08-22: 15 of 250 PL applications shipped an English CV."""
 
@@ -294,6 +305,7 @@ class TestPostGenerationAbortsUndoTheRow:
 
         assert result is None, "an aborted run must not return a folder to deliver"
         assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert _skip_reason(url) == "abort:react-only stack"
         assert not tracker.has_successful_entry(url), "the parent must not deliver this"
         folder = cli_env.applications / date.today().strftime("%Y-%m-%d") / "NordicFrontendLabs"
         assert not list(folder.glob("*.pdf")), "the rendered documents must be gone"
@@ -320,6 +332,7 @@ class TestPostGenerationAbortsUndoTheRow:
 
         assert result is None
         assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert _skip_reason(url).startswith("abort:company+title dedup (")
         assert tracker.has_successful_entry("https://example.com/jobs/the-first-one"), (
             "the ORIGINAL application must survive untouched"
         )
@@ -406,6 +419,7 @@ class TestPreLlmStackChecksSaveGenerationSpend:
             "the expensive claude -p call must never run for an obvious React-only posting"
         )
         assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert _skip_reason(url) == "react"
 
     def test_backend_only_text_skips_before_claude_runs(self, cli_env, golden_generation_response):
         url = "https://example.com/jobs/backend-pre-llm"
@@ -416,6 +430,7 @@ class TestPreLlmStackChecksSaveGenerationSpend:
         assert result is None
         assert cli_env.skill.claude_calls == 0
         assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert _skip_reason(url) == "other:backend_only"
 
     def test_force_bypasses_the_pre_llm_react_check(self, cli_env, golden_generation_response):
         url = "https://example.com/jobs/react-pre-llm-forced"
@@ -490,6 +505,7 @@ class TestBogusCompanyAbortsOnCli:
 
         assert result is None, "an aborted run must not return a folder to deliver"
         assert _row(url).get("ats", "").strip().upper() == "SKIP"
+        assert _skip_reason(url) == "abort:bogus company name 'Unknown'"
         assert not tracker.has_successful_entry(url), "the parent must not deliver this"
         folder = cli_env.applications / date.today().strftime("%Y-%m-%d") / "NordicFrontendLabs"
         assert not list(folder.glob("*.pdf")), "the rendered documents must be gone"

@@ -269,6 +269,16 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # (/outcome in Telegram) and by the Sheet column-O pull.
         ("outcome_label", "TEXT NOT NULL DEFAULT ''"),
         ("outcome_at", "TEXT"),
+        # skip_reason (docs/MARKET_MEMORY_PLAN.md M2): WHY a SKIP row was
+        # written — `<prefix>` or `<prefix>:<detail>` over the vocabulary in
+        # tracker.SKIP_REASON_PREFIXES (button / doomed:<rule> / prescreen /
+        # react / dedup_ct / abort:<reason> / other). Before this every
+        # reason produced an identical ats_status='SKIP' row, so the share of
+        # skips per gate was not measurable. Empty = a pre-M2 row, or a writer
+        # that never passed a reason. Reports only: no gate reads it, and it
+        # is mirrored nowhere (the Sheet contract stays A-K + the separate
+        # column writers).
+        ("skip_reason", "TEXT NOT NULL DEFAULT ''"),
         # pending_meta is a JSON blob of the full Job the hunt loop found
         # (source, location, salary, raw dict incl. permalink/post_text) —
         # everything apply_worker needs to reconstruct a Job object without

@@ -185,7 +185,8 @@ def run_doomed_gate(
                     salary=None,
                     url=url,
                     source="doomed_gate",
-                )
+                ),
+                reason=f"doomed:{finding.rule}",
             )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write doomed-gate SKIP to tracker: {e}")
@@ -329,6 +330,7 @@ def run_prescreen(
                 "job_title": title,
             },
             url,
+            reason="prescreen",
         )
     except Exception as e:  # noqa: BLE001 — a tracker failure must not crash the apply
         print(f"[prescreen] Warning: could not write the SKIP row: {e}")

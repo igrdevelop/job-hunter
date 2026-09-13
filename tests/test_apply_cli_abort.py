@@ -130,6 +130,8 @@ class TestAbortAfterGeneration:
 
         assert abort_after_generation(folder, URL, reason="react-only stack") is True
         assert _row()["ats_status"] == "SKIP"
+        # docs/MARKET_MEMORY_PLAN.md M2: the abort's own reason lands on the row.
+        assert _row()["skip_reason"] == "abort:react-only stack"
 
     def test_reports_false_when_there_is_no_row_to_convert(self, tracker_db, tmp_path):
         # The caller then falls back to its own terminal write

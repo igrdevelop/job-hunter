@@ -1067,8 +1067,12 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
     return True
 
 
-def add_skipped(job: Job) -> dict | None:
+def add_skipped(job: Job, *, reason: str = "") -> dict | None:
     """Append a SKIP row to tracker. Returns the row dict (with ID) or None if already known.
+
+    `reason` is stamped into `skip_reason` (normalize_skip_reason — see
+    SKIP_REASON_PREFIXES); it is NOT part of the returned Sheets-shaped dict,
+    because the column is deliberately mirrored nowhere.
 
     Sent is stamped '—' so the row never shows up in the owner's Sheets
     "Sent is empty" send-queue filter view — a skipped vacancy is a decision,
@@ -1081,7 +1085,8 @@ def add_skipped(job: Job) -> dict | None:
     (returns None — the row is already mirrored, resync pushes the change);
     see _convert_own_fail_row.
     """
-    if _convert_own_fail_row(job.url, sent="—"):
+    skip_reason = normalize_skip_reason(reason)
+    if _convert_own_fail_row(job.url, sent="—", skip_reason=skip_reason):
         return None
     if _is_known_terminal(job.url):
         return None
@@ -1095,10 +1100,10 @@ def add_skipped(job: Job) -> dict | None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent, skip_reason)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?)
             """,
-            (row_id, today, _uid(), job.company, job.title, norm, norm),
+            (row_id, today, _uid(), job.company, job.title, norm, norm, skip_reason),
         )
 
     return {
@@ -1119,8 +1124,12 @@ def add_skipped(job: Job) -> dict | None:
     }
 
 
-def add_react_skipped(content: dict, url: str) -> None:
-    """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered."""
+def add_react_skipped(content: dict, url: str, *, reason: str = "react") -> None:
+    """Write a SKIP row for a React-only job. Sent='—' marks it as stack-filtered.
+
+    `reason` defaults to `react` (SKIP_REASON_PREFIXES); a caller only passes
+    one to be more specific.
+    """
     company = (content.get("company_name") or "").strip()
     title = (content.get("job_title") or "").strip()
     if _is_known_terminal(url):
@@ -1134,8 +1143,9 @@ def add_react_skipped(content: dict, url: str) -> None:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, stack, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, ?, ?, 'SKIP', ?, ?, '—')
+            (id, date, user_id, company, title, stack, ats_status, url, url_norm, sent,
+             skip_reason)
+            VALUES (?, ?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?)
             """,
             (
                 _new_row_id(),
@@ -1146,12 +1156,16 @@ def add_react_skipped(content: dict, url: str) -> None:
                 content.get("stack", ""),
                 norm,
                 norm,
+                normalize_skip_reason(reason),
             ),
         )
 
 
-def _convert_own_fail_row(url: str, sent: str) -> bool:
+def _convert_own_fail_row(url: str, sent: str, *, skip_reason: str = "") -> bool:
     """Convert this user's FAIL row for `url` into a terminal SKIP row in place.
+
+    `skip_reason` (already normalised by the caller) is written in the same
+    UPDATE when non-empty; an empty value leaves the column untouched.
 
     Retry context: the vacancy died (or hit a gate) between the original FAIL
     and the retry. Updating the existing row keeps its id/sheets_row and marks
@@ -1164,11 +1178,13 @@ def _convert_own_fail_row(url: str, sent: str) -> bool:
     norm = normalize_url(url) if url else ""
     if not norm:
         return False
+    set_reason = ", skip_reason=?" if skip_reason else ""
+    params: list = [sent, *([skip_reason] if skip_reason else []), norm, _uid()]
     with get_db(DB_PATH) as conn:
         cur = conn.execute(
-            "UPDATE applications SET ats_status='SKIP', sent=?, sheets_dirty=1 "
+            f"UPDATE applications SET ats_status='SKIP', sent=?, sheets_dirty=1{set_reason} "  # noqa: S608
             "WHERE url_norm=? AND user_id=? AND ats_status='FAIL'",
-            (sent, norm, _uid()),
+            params,
         )
         return bool(cur.rowcount)
 
@@ -1179,8 +1195,12 @@ def convert_own_applied_row(
     folder: str = "",
     status: str = "SKIP",
     sent: str = "—",
+    skip_reason: str = "",
 ) -> bool:
     """Convert this user's APPLIED row into a terminal SKIP row, in place.
+
+    `skip_reason` (normalised via normalize_skip_reason) is written in the
+    same UPDATE when non-empty — docs/MARKET_MEMORY_PLAN.md M2.
 
     The CLI pipeline's abort stages (React-only stack, company+title dedup,
     judge block, language-gate block) all run after the CLI skill has already
@@ -1262,10 +1282,18 @@ def convert_own_applied_row(
                 ", ".join(r["folder"] or r["url"] or "?" for r in rows),
             )
             return False
-        conn.execute(
-            "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 WHERE rowid=?",
-            (status, sent, rows[0]["rowid"]),
-        )
+        reason = normalize_skip_reason(skip_reason)
+        if reason:
+            conn.execute(
+                "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1, skip_reason=? "
+                "WHERE rowid=?",
+                (status, sent, reason, rows[0]["rowid"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE applications SET ats_status=?, sent=?, sheets_dirty=1 WHERE rowid=?",
+                (status, sent, rows[0]["rowid"]),
+            )
     return True
 
 
@@ -1922,6 +1950,47 @@ def set_cost(url: str, cost_usd: float) -> bool:
 # nobody writing back into a reply rate.
 OUTCOME_LABELS: tuple[str, ...] = ("interview", "rejected", "offer", "silence")
 OUTCOME_REPLY_LABELS: frozenset[str] = frozenset({"interview", "rejected", "offer"})
+
+# skip_reason vocabulary (docs/MARKET_MEMORY_PLAN.md M2). A reason is
+# `<prefix>` or `<prefix>:<detail>` — `button` (Skip button), `doomed:<rule>`
+# (doomed-gate HARD finding), `prescreen` (stack pre-screen in skip mode),
+# `react` (React-only stack, pre- or post-LLM), `dedup_ct` (company+title
+# dedup gate), `abort:<reason>` (post-generation abort in the CLI pipeline),
+# `other[:<name>]` (anything else). The column is written by every SKIP
+# writer below and read by NO gate — reports only — so the ONE rule here is
+# that a write must never fail over a label: normalize_skip_reason() maps an
+# unknown prefix to `other:<original>` instead of raising.
+SKIP_REASON_PREFIXES: tuple[str, ...] = (
+    "button",
+    "doomed",
+    "prescreen",
+    "react",
+    "dedup_ct",
+    "abort",
+    "other",
+)
+SKIP_REASON_DETAIL_MAX = 80
+
+
+def normalize_skip_reason(reason: str) -> str:
+    """Canonicalise a skip reason to `<prefix>` / `<prefix>:<detail>`.
+
+    Empty in → empty out (an untagged writer). The prefix is lowercased and
+    must be one of SKIP_REASON_PREFIXES; the detail is whatever follows the
+    FIRST colon (further colons are kept inside it) and is truncated to
+    SKIP_REASON_DETAIL_MAX chars. An unknown prefix becomes `other:<original>`
+    (truncated the same way) rather than an error — see the note above.
+    """
+    raw = (reason or "").strip()
+    if not raw:
+        return ""
+    prefix, sep, detail = raw.partition(":")
+    prefix = prefix.strip().lower()
+    detail = detail.strip()[:SKIP_REASON_DETAIL_MAX] if sep else ""
+    if prefix not in SKIP_REASON_PREFIXES:
+        return f"other:{raw[:SKIP_REASON_DETAIL_MAX]}"
+    return f"{prefix}:{detail}" if detail else prefix
+
 
 _ROW_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
