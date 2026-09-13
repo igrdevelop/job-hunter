@@ -43,6 +43,7 @@ from hunter.schedules.daily_summary import scheduled_daily_summary
 from hunter.schedules.normalize_sent import scheduled_normalize_sent
 from hunter.schedules.apply_queue import scheduled_reset_stale_claims
 from hunter.schedules.profile_jobs import scheduled_profile_jobs_drain
+from hunter.schedules.postings_prune import scheduled_postings_prune
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ __all__ = [
     "scheduled_normalize_sent",
     "scheduled_reset_stale_claims",
     "scheduled_profile_jobs_drain",
+    "scheduled_postings_prune",
 ]
 
 
@@ -72,6 +74,14 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     """
     from hunter.sources import ALL_SOURCES
     from hunter.config import TIMEZONE
+
+    # PTB types Application.job_queue as Optional (the builder always creates
+    # one unless explicitly disabled). Narrow it once: the first registration
+    # below would raise AttributeError on None anyway, so this is the same
+    # failure made explicit — and it keeps every call site mypy-clean.
+    job_queue = app.job_queue
+    if job_queue is None:
+        raise RuntimeError("Application was built without a JobQueue — nothing to schedule on")
 
     # ── Staggered per-source scheduled hunts ─────────────────────────────────
     # Quiet hours are enforced here rather than by picking base times: one
@@ -100,7 +110,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             total = fire_minute(base_minute, idx, SCHEDULE_SOURCE_OFFSET_MIN, blackout)
             fire_hour, fire_min = total // 60, total % 60
 
-            app.job_queue.run_daily(
+            job_queue.run_daily(
                 callback=scheduled_hunt,
                 time=dt_time(fire_hour, fire_min, tzinfo=tz),
                 name=f"hunt_{source.name}_{base_time}",
@@ -123,7 +133,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
         except (ValueError, AttributeError):
             logger.warning("[Schedule] Invalid RETRY_FAILED_TIMES entry %r — skipped", retry_time)
             continue
-        app.job_queue.run_daily(
+        job_queue.run_daily(
             callback=scheduled_retry_failed,
             time=dt_time(rh, rm, tzinfo=tz),
             name=f"retry_failed_{rh:02d}{rm:02d}",
@@ -132,7 +142,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
 
     # ── Twice-daily pending report ────────────────────────────────────────────
     for report_hour in (9, 21):
-        app.job_queue.run_daily(
+        job_queue.run_daily(
             callback=scheduled_pending_report,
             time=dt_time(report_hour, 0, tzinfo=tz),
             name=f"pending_report_{report_hour:02d}00",
@@ -145,7 +155,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     except (ValueError, AttributeError):
         ech, ecm = 0, 0
         logger.warning("[Schedule] Invalid EXPIRED_CHECK_TIME=%r — using 00:00", EXPIRED_CHECK_TIME)
-    app.job_queue.run_daily(
+    job_queue.run_daily(
         callback=scheduled_check_expired,
         time=dt_time(ech, ecm, tzinfo=tz),
         name="check_expired_daily",
@@ -164,7 +174,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
                 "[Schedule] Invalid TRACKER_BACKUP_TIME=%r — using 06:05",
                 TRACKER_BACKUP_TIME,
             )
-        app.job_queue.run_daily(
+        job_queue.run_daily(
             callback=scheduled_tracker_backup,
             time=dt_time(bh, bm, tzinfo=tz),
             name="tracker_backup_daily",
@@ -172,7 +182,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
         logger.info("[Schedule] tracker_backup at %02d:%02d %s", bh, bm, TIMEZONE)
 
     # ── Daily log upload to Drive at 06:10 ───────────────────────────────────
-    app.job_queue.run_daily(
+    job_queue.run_daily(
         callback=scheduled_gdrive_upload_logs,
         time=dt_time(6, 10, tzinfo=tz),
         name="gdrive_upload_logs_daily",
@@ -180,7 +190,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     logger.info("[Schedule] gdrive_upload_logs at 06:10 %s", TIMEZONE)
 
     # ── Sheets resync every 5 min ─────────────────────────────────────────────
-    app.job_queue.run_repeating(
+    job_queue.run_repeating(
         callback=scheduled_gsheets_resync,
         interval=300,
         first=60,
@@ -189,7 +199,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     logger.info("[Schedule] gsheets_resync every 5 min")
 
     # ── Drive upload backfill (safety net behind the instant post-apply upload) ──
-    app.job_queue.run_repeating(
+    job_queue.run_repeating(
         callback=scheduled_gdrive_upload_missing,
         interval=max(60, GDRIVE_UPLOAD_MISSING_INTERVAL_MIN * 60),
         first=300,
@@ -206,7 +216,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
             "[Schedule] Invalid EMAIL_RESPONSE_CHECK_TIME=%r — using 09:00",
             EMAIL_RESPONSE_CHECK_TIME,
         )
-    app.job_queue.run_daily(
+    job_queue.run_daily(
         callback=scheduled_check_email_responses,
         time=dt_time(erch, ercm, tzinfo=tz),
         name="check_email_responses",
@@ -214,7 +224,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     logger.info("[Schedule] check_email_responses at %02d:%02d %s", erch, ercm, TIMEZONE)
 
     # ── Daily applications summary at 00:01 ──────────────────────────────────
-    app.job_queue.run_daily(
+    job_queue.run_daily(
         callback=scheduled_daily_summary,
         time=dt_time(0, 1, tzinfo=tz),
         name="daily_summary",
@@ -224,7 +234,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     # ── Sheets pull every GSHEETS_REFRESH_INTERVAL_MIN ───────────────────────
     if GSHEETS_ENABLED:
         pull_interval_sec = max(60, GSHEETS_REFRESH_INTERVAL_MIN * 60)
-        app.job_queue.run_repeating(
+        job_queue.run_repeating(
             callback=scheduled_gsheets_pull,
             interval=pull_interval_sec,
             first=120,
@@ -234,16 +244,26 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
 
     # ── Daily Sent → clean date (column L) refresh at 00:20 ──────────────────
     if GSHEETS_ENABLED:
-        app.job_queue.run_daily(
+        job_queue.run_daily(
             callback=scheduled_normalize_sent,
             time=dt_time(0, 20, tzinfo=tz),
             name="normalize_sent_daily",
         )
         logger.info("[Schedule] normalize_sent at 00:20 %s", TIMEZONE)
 
+    # ── Nightly postings_seen TTL prune at 00:40 (docs/MARKET_MEMORY_PLAN.md M1) ──
+    # Registered unconditionally: the callback itself no-ops when
+    # POSTINGS_SEEN_ENABLED is off, same shape as reset_stale_claims' own guard.
+    job_queue.run_daily(
+        callback=scheduled_postings_prune,
+        time=dt_time(0, 40, tzinfo=tz),
+        name="postings_prune",
+    )
+    logger.info("[Schedule] postings_prune at 00:40 %s", TIMEZONE)
+
     # ── Stale apply-claim sweep every 15 min (M1, docs/HUNT_APPLY_SPLIT_PLAN.md) ──
     if APPLY_QUEUE_ENABLED:
-        app.job_queue.run_repeating(
+        job_queue.run_repeating(
             callback=scheduled_reset_stale_claims,
             interval=900,
             first=900,
@@ -253,7 +273,7 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
 
     # ── Resume profile store: render/parse queue drain every ~20s (docs/
     # RESUME_PROFILE_STORE_PLAN.md step 4b) ──────────────────────────────────
-    app.job_queue.run_repeating(
+    job_queue.run_repeating(
         callback=scheduled_profile_jobs_drain,
         interval=20,
         first=20,
