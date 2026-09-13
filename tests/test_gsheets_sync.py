@@ -560,7 +560,14 @@ def test_pull_full_snapshot_noop_when_not_ready():
         from hunter import gsheets_sync
 
         result = run(gsheets_sync.pull_full_snapshot())
-    assert result == {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
+    assert result == {
+        "pulled": 0,
+        "inserted": 0,
+        "updated": 0,
+        "outcomes": 0,
+        "reconciled": 0,
+        "errors": [],
+    }
 
 
 def test_pull_full_snapshot_read_all_error():
@@ -593,6 +600,7 @@ def test_pull_full_snapshot_no_changes():
         patch("hunter.gsheets_sync.insert_pulled_rows", return_value=0),
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[]) as mock_delta,
         patch("hunter.gsheets_sync._reconcile_deleted_rows", return_value=0),
+        patch("hunter.gsheets_sync._apply_outcome_pull_db", return_value=0),
     ):
         from hunter import gsheets_sync
 
@@ -622,6 +630,7 @@ def test_pull_full_snapshot_writes_db_on_changes():
         patch("hunter.gsheets_sync._apply_pull_delta_db", return_value=[changed_row]),
         patch("hunter.gsheets_sync.apply_pull_updates", return_value=1),
         patch("hunter.gsheets_sync._reconcile_deleted_rows", return_value=0),
+        patch("hunter.gsheets_sync._apply_outcome_pull_db", return_value=0),
     ):
         from hunter import gsheets_sync
 

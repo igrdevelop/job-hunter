@@ -232,6 +232,49 @@ async def mirror_expired_batch(row_ids: set[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Mirror — outcome cell (column O) straight after /outcome
+# ---------------------------------------------------------------------------
+
+
+async def mirror_outcome(url_or_id: str) -> int:
+    """Write the just-recorded outcome into column O. Returns cells written.
+
+    Called by /outcome after tracker.set_outcome, which already marked the row
+    dirty. The row is deliberately NOT marked clean here — it may be dirty for
+    an A–K change too, and resync_dirty rewrites O idempotently anyway. Unlike
+    the resync, a blank label IS written: this is the explicit
+    `/outcome <id> clear`. Best-effort: a failure leaves the dirty row for the
+    5-minute resync, and the pull's dirty guard keeps the stale cell from
+    overwriting the new DB value in the meantime.
+    """
+    if not _ready() or not url_or_id:
+        return 0
+
+    from hunter.outcome_writer import write_outcome_cell_sync
+    from hunter.tracker import get_outcome_cells
+
+    written = 0
+    with best_effort("gsheets.mirror_outcome"):
+        try:
+            cells = await asyncio.to_thread(get_outcome_cells, url_or_id)
+            for row_id, sheet_row, label in cells:
+                if await asyncio.to_thread(
+                    write_outcome_cell_sync,
+                    _get_service(),
+                    _sheet_id(),
+                    sheet_row,
+                    label,
+                    allow_blank=True,
+                    expect_id=row_id,
+                ):
+                    written += 1
+        except Exception as e:
+            log.warning("gsheets mirror_outcome failed for %s: %s", url_or_id, e)
+            raise
+    return written
+
+
+# ---------------------------------------------------------------------------
 # Resync dirty rows
 # ---------------------------------------------------------------------------
 
@@ -242,6 +285,7 @@ async def resync_dirty() -> int:
         return 0
 
     from hunter.gsheets_client import append_rows, read_all, update_row
+    from hunter.outcome_writer import write_outcome_cell_sync
 
     dirty = await asyncio.to_thread(get_dirty_rows_for_sheets)
     if not dirty:
@@ -275,12 +319,14 @@ async def resync_dirty() -> int:
     for row_id, row, sheet_row in dirty:
         with best_effort("gsheets.resync_dirty"):
             try:
+                target_row = sheet_row
                 if sheet_row is None:
                     already_row = existing_ids.get(row_id)
                     if already_row is not None:
                         # Already in the Sheet from a prior append whose
                         # response we lost — record where, don't duplicate it.
                         set_sheets_row(row_id, already_row)
+                        target_row = already_row
                         log.info(
                             "gsheets resync_dirty: %s already at row %d — skipping re-append",
                             row_id,
@@ -290,9 +336,17 @@ async def resync_dirty() -> int:
                         indices = await asyncio.to_thread(append_rows, svc, sheet_id, [row])
                         if indices:
                             set_sheets_row(row_id, indices[0])
+                            target_row = indices[0]
                 else:
                     # Row exists in Sheets — overwrite it
                     await asyncio.to_thread(update_row, svc, sheet_id, sheet_row, row)
+                # Column O lives outside the A–K range the calls above write, so
+                # a changed outcome needs its own cell write. It raises on
+                # failure, which keeps the row dirty: the pull must not treat a
+                # Sheet that never received the label as the newer value.
+                await asyncio.to_thread(
+                    write_outcome_cell_sync, svc, sheet_id, target_row, row.get("Outcome", "")
+                )
                 mark_sheets_clean(row_id)
                 synced += 1
                 log.debug("gsheets resync_dirty: synced %s", row_id)
@@ -431,6 +485,65 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
     return to_write
 
 
+def _merge_outcomes(
+    sheets_rows: list[tuple[int, dict]],
+    db_state: dict[str, tuple[str, bool]],
+) -> dict[str, str]:
+    """Pure: decide which column-O cells win over the DB. Returns {row_id: label}.
+
+    db_state is tracker.get_outcome_pull_state(): {row_id: (label, sheets_dirty)}.
+
+    Conflict matrix (Outcome — same side as To Learn: the owner edits in the Sheet):
+      blank cell                        → ignore (never clears a DB value; clearing
+                                          is `/outcome <id> clear` only — an O write
+                                          that failed must not read as a deletion)
+      not one of OUTCOME_LABELS         → log + ignore (never raises, never clears)
+      same as DB                        → nothing
+      DB row dirty                      → keep DB (an /outcome change the Sheet has
+                                          not received yet; resync pushes it)
+      anything else                     → trust Sheets
+    """
+    from hunter.gsheets_client import OUTCOME_COLUMN
+    from hunter.outcome_writer import parse_outcome_cell
+
+    updates: dict[str, str] = {}
+    for sheet_idx, sheet_row in sheets_rows:
+        row_id = (sheet_row.get("ID") or "").strip()
+        if not row_id or row_id not in db_state:
+            continue
+        raw = sheet_row.get(OUTCOME_COLUMN, "")
+        label = parse_outcome_cell(raw)
+        if label is None:
+            log.warning(
+                "gsheets pull: ignoring unknown Outcome %r in row %d (id=%s)",
+                raw,
+                sheet_idx,
+                row_id,
+            )
+            continue
+        if not label:
+            continue
+        db_label, dirty = db_state[row_id]
+        if label == db_label or dirty:
+            continue
+        updates[row_id] = label
+    return updates
+
+
+def _apply_outcome_pull_db(sheets_rows: list[tuple[int, dict]]) -> int:
+    """Synchronous: merge column O into the DB. Returns rows updated.
+
+    Intended to be called via asyncio.to_thread after the A–K merge, so rows the
+    insert step just created (sheets_dirty=0) take their Sheet outcome too.
+    """
+    from hunter.tracker import apply_pulled_outcomes, get_outcome_pull_state
+
+    updates = _merge_outcomes(sheets_rows, get_outcome_pull_state())
+    if not updates:
+        return 0
+    return apply_pulled_outcomes(updates)
+
+
 # ---------------------------------------------------------------------------
 # Pull — Sheets → DB
 # ---------------------------------------------------------------------------
@@ -484,6 +597,26 @@ def _reconcile_deleted_rows(sheets_rows: list[tuple[int, dict]]) -> int:
     return marked
 
 
+def _pull_result(
+    *,
+    pulled: int = 0,
+    inserted: int = 0,
+    updated: int = 0,
+    outcomes: int = 0,
+    reconciled: int = 0,
+    errors: list[str] | None = None,
+) -> dict:
+    """pull_full_snapshot's result — the same keys on every path, early exits included."""
+    return {
+        "pulled": pulled,
+        "inserted": inserted,
+        "updated": updated,
+        "outcomes": outcomes,
+        "reconciled": reconciled,
+        "errors": errors or [],
+    }
+
+
 async def pull_full_snapshot() -> dict:
     """
     Pull all rows from Google Sheets and merge into DB.
@@ -491,14 +624,17 @@ async def pull_full_snapshot() -> dict:
     Conflict matrix (applied in _apply_pull_delta_db):
       - Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
       - To Learn, Re-application: always trust Sheets (user edits there).
+      - Outcome (column O, _merge_outcomes): a valid Sheet label wins unless the
+        DB row is dirty; blank or garbage cells never clear the DB.
 
     Also persists sheets_row in DB for all matched rows, and inserts Sheets rows
     that are absent from the DB (dedup self-heal after a fresh/empty tracker.db).
 
-    Returns: {"pulled": int, "inserted": int, "updated": int, "errors": list[str]}
+    Returns: {"pulled": int, "inserted": int, "updated": int, "outcomes": int,
+    "reconciled": int, "errors": list[str]} — "updated" includes "outcomes".
     """
     if not _ready():
-        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": []}
+        return _pull_result()
 
     from hunter.gsheets_client import read_all
 
@@ -508,7 +644,7 @@ async def pull_full_snapshot() -> dict:
         sheets_rows = await asyncio.to_thread(read_all, _get_service(), _sheet_id())
     except Exception as e:
         log.error("gsheets pull_full_snapshot: read_all failed: %s", e)
-        return {"pulled": 0, "inserted": 0, "updated": 0, "errors": [str(e)]}
+        return _pull_result(errors=[str(e)])
 
     # Self-heal dedup: insert Sheets rows missing from the DB (must run before the
     # conflict matrix so freshly inserted rows also get their Sent/To Learn applied).
@@ -526,7 +662,7 @@ async def pull_full_snapshot() -> dict:
         to_write = await asyncio.to_thread(_apply_pull_delta_db, sheets_rows)
     except Exception as e:
         log.error("gsheets pull_full_snapshot: _apply_pull_delta_db failed: %s", e)
-        return {"pulled": len(sheets_rows), "inserted": inserted, "updated": 0, "errors": [str(e)]}
+        return _pull_result(pulled=len(sheets_rows), inserted=inserted, errors=[str(e)])
 
     if to_write:
         try:
@@ -535,6 +671,17 @@ async def pull_full_snapshot() -> dict:
         except Exception as e:
             log.error("gsheets pull_full_snapshot: apply_pull_updates failed: %s", e)
             errors.append(str(e))
+
+    # Column O (Outcome) has its own merge — it lives outside COLUMNS and has a
+    # different conflict rule (see _merge_outcomes).
+    outcomes = 0
+    try:
+        outcomes = await asyncio.to_thread(_apply_outcome_pull_db, sheets_rows)
+        if outcomes:
+            log.info("gsheets pull_full_snapshot: took %d outcome(s) from Sheets", outcomes)
+    except Exception as e:
+        log.error("gsheets pull_full_snapshot: _apply_outcome_pull_db failed: %s", e)
+        errors.append(str(e))
 
     # Reconcile deletions: rows removed from the Sheet but still lingering in the DB
     # with a blank Sent (guarded against partial reads). Runs last so inserts above
@@ -553,13 +700,14 @@ async def pull_full_snapshot() -> dict:
         len(to_write),
         reconciled,
     )
-    return {
-        "pulled": len(sheets_rows),
-        "inserted": inserted,
-        "updated": len(to_write),
-        "reconciled": reconciled,
-        "errors": errors,
-    }
+    return _pull_result(
+        pulled=len(sheets_rows),
+        inserted=inserted,
+        updated=len(to_write) + outcomes,
+        outcomes=outcomes,
+        reconciled=reconciled,
+        errors=errors,
+    )
 
 
 # ---------------------------------------------------------------------------
