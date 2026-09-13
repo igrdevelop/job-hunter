@@ -6,13 +6,17 @@ actually converts:
 
     tracked → docs generated → sent → responded
 
-both overall and per source. The source isn't stored on the row (the tracker
-predates this), so it's inferred from the URL via each source's own
-`matches_url`, with a registered-domain fallback.
+both overall and per source. Since docs/MARKET_MEMORY_PLAN.md M3 the source
+is STORED on the row (`applications.source`, stamped by every tracker INSERT
+from `Job.source` / the `postings_seen` row); the old inference from the URL
+via each source's own `matches_url` (registered-domain fallback) is kept only
+as the fallback for blank values — pre-M3 rows, which stay blank by owner
+decision (no backfill), and writers that had no source in hand.
 
 Public API
 ----------
     compute_funnel(days=None) -> FunnelReport
+    source_for_row(stored, url) -> str
     source_for_url(url) -> str
 """
 
@@ -81,6 +85,18 @@ def source_for_url(url: str) -> str:
         except Exception:
             continue
     return _registered_domain(url)
+
+
+def source_for_row(stored: str | None, url: str) -> str:
+    """Attribute a tracker ROW to a source: the stored `source` column when
+    the writer stamped one (M3), else the URL guess.
+
+    The guess is wrong for exactly the class ROADMAP 4.3 needs to judge — a
+    Greenhouse/Lever/Workable link surfaced by justjoin/gmail/a Telegram
+    channel is guessed as `ats_aggregator` — so a stored value always wins.
+    """
+    name = (stored or "").strip()
+    return name if name else source_for_url(url)
 
 
 # ── Row classification ────────────────────────────────────────────────────────
@@ -208,9 +224,11 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
         # stale dev fixture, or a tool run before the new image first starts).
         cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
         outcome_col = "outcome_label" if "outcome_label" in cols else "'' AS outcome_label"
+        # Same probe for `source` (M3): a blank reads as "guess from the URL".
+        source_col = "source" if "source" in cols else "'' AS source"
         rows = conn.execute(
             "SELECT date, ats_status, url, sent, confirmation, answer, "  # noqa: S608
-            f"{outcome_col} FROM applications"
+            f"{outcome_col}, {source_col} FROM applications"
         ).fetchall()
 
     for r in rows:
@@ -233,7 +251,7 @@ def compute_funnel(days: int | None = None) -> FunnelReport:
             answered=answered,
             outcome_recorded=recorded,
         )
-        src = source_for_url(r["url"])
+        src = source_for_row(r["source"], r["url"])
         report.by_source.setdefault(src, FunnelCounts()).add(
             generated=generated,
             sent=sent,

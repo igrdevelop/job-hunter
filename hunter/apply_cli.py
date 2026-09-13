@@ -455,7 +455,8 @@ def main_cli(
                         salary=None,
                         url=url,
                         source="backend_only_gate",
-                    )
+                    ),
+                    reason="other:backend_only",
                 )
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")

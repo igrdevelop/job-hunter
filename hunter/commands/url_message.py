@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from functools import partial
 from typing import Optional
 
 from telegram import Update
@@ -46,7 +47,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _handle_skip(query, job: Job, job_id: str) -> None:
-    row = await asyncio.to_thread(add_skipped, job)
+    row = await asyncio.to_thread(partial(add_skipped, job, reason="button"))
     _pending_jobs.pop(job_id, None)
     if row:
         try:

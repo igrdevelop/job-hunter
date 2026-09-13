@@ -26,15 +26,15 @@ def _load_module():
 fsrc = _load_module()
 
 
-def _insert(db, *, url=None, ats="", sent="", answer="", cost=None, d=None):
+def _insert(db, *, url=None, ats="", sent="", answer="", cost=None, d=None, source=""):
     d = d if d is not None else date.today().isoformat()
     if url is None:
         url = f"https://x.com/{uuid.uuid4().hex[:8]}"
     with get_db(db) as conn:
         conn.execute(
             "INSERT INTO applications (id, date, company, title, ats_status, url, "
-            "url_norm, sent, answer, cost_usd) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (uuid.uuid4().hex[:8], d, "Co", "Dev", ats, url, url, sent, answer, cost),
+            "url_norm, sent, answer, cost_usd, source) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (uuid.uuid4().hex[:8], d, "Co", "Dev", ats, url, url, sent, answer, cost, source),
         )
 
 
@@ -337,6 +337,43 @@ def test_build_report_sent_and_cost(tracker_db):
     s = report["sources"]["justjoin"]
     assert s["sent"] == 2
     assert s["cost_per_sent"] == pytest.approx(0.5)
+
+
+def test_build_report_buckets_fail_skip_by_the_stored_source(tracker_db):
+    """M3: aggregate_extra (FAIL/SKIP/cost) and compute_funnel (tracked/sent)
+    must bucket a row the SAME way — by the stored column, URL guess only for
+    blanks — or the table's columns would describe different row sets."""
+    gh = "https://boards.greenhouse.io/acme/jobs/"
+    _insert(tracker_db, url=gh + "1", ats="90%", sent="2026-06-01", cost=0.4, source="justjoin")
+    _insert(tracker_db, url=gh + "2", ats="SKIP", source="justjoin")
+    _insert(tracker_db, url=gh + "3", ats="FAIL", source="")  # pre-M3 row → guess
+
+    report = fsrc.build_report(days=None, db_path=tracker_db)
+    jj = report["sources"]["justjoin"]
+    assert jj["tracked"] == 2
+    assert jj["sent"] == 1
+    assert jj["skip"] == 1
+    assert jj["fail"] == 0
+    assert jj["cost_per_sent"] == pytest.approx(0.4)
+    ats = report["sources"]["ats_aggregator"]
+    assert ats["tracked"] == 1
+    assert ats["fail"] == 1
+
+
+def test_fetch_rows_tolerates_a_db_without_the_source_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE applications (date TEXT, url TEXT, ats_status TEXT, sent TEXT, cost_usd REAL)"
+    )
+    conn.execute("INSERT INTO applications VALUES ('2026-09-01', 'https://x/1', 'FAIL', '', NULL)")
+    rows = fsrc.fetch_rows(conn)
+    conn.close()
+    assert rows[0]["source"] == ""
+    assert rows[0]["ats_status"] == "FAIL"
 
 
 def test_build_report_format_smoke(tracker_db):

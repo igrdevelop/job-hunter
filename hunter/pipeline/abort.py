@@ -92,11 +92,13 @@ def abort_after_generation(
     with best_effort("apply.abort_undo"):
         from hunter.tracker import convert_own_applied_row
 
+        skip_reason = f"abort:{reason}"
         converted = convert_own_applied_row(
             row_url if row_url and row_url != PASTE_NO_URL_PLACEHOLDER else "",
             folder=row_folder,
+            skip_reason=skip_reason,
         )
-        if not converted and not _write_abort_skip_row(row_url or url, meta):
+        if not converted and not _write_abort_skip_row(row_url or url, meta, reason=skip_reason):
             raise RuntimeError(
                 f"post-generation abort settled nothing for {row_url or url!r} "
                 f"(folder={row_folder!r}) - the applied row may still be delivered"
@@ -111,8 +113,11 @@ def abort_after_generation(
     return converted
 
 
-def _write_abort_skip_row(url: str, content: dict) -> bool:
+def _write_abort_skip_row(url: str, content: dict, *, reason: str = "abort") -> bool:
     """Last resort when no applied row could be converted: write the SKIP row.
+
+    `reason` is the skip_reason to stamp (`abort:<why>` from
+    abort_after_generation; docs/MARKET_MEMORY_PLAN.md M2).
 
     True when a row was actually written. add_skipped returns None when an
     existing terminal row already covers this URL or its company+title -- and
@@ -133,7 +138,8 @@ def _write_abort_skip_row(url: str, content: dict) -> bool:
             salary=None,
             url=url,
             source="post_generation_abort",
-        )
+        ),
+        reason=reason,
     )
     return bool(written)
 

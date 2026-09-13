@@ -373,7 +373,8 @@ def _run_main_api(
                     salary=None,
                     url=url,
                     source="backend_only_gate",
-                )
+                ),
+                reason="other:backend_only",
             )
         except Exception as e:
             print(f"[apply_agent] Warning: could not write backend-only SKIP to tracker: {e}")
@@ -731,7 +732,8 @@ def _run_main_api(
                         salary=None,
                         url=url,
                         source="dedup_ct_gate",
-                    )
+                    ),
+                    reason="dedup_ct",
                 )
             except Exception as e:
                 print(f"[apply_agent] Warning: could not write dedup SKIP to tracker: {e}")

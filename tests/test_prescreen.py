@@ -240,6 +240,15 @@ class TestPipelineStage:
         rows = tracker.lookup_url(self.URL)
         assert rows and rows[0]["ats"].strip().upper() == "SKIP"
         assert any("Skipped" in n for n in notes)
+        # docs/MARKET_MEMORY_PLAN.md M2: the row says which gate skipped it.
+        from hunter.db import get_db
+
+        with get_db(tracker.DB_PATH) as conn:
+            reason = conn.execute(
+                "SELECT skip_reason FROM applications WHERE url_norm=?",
+                (tracker.normalize_url(self.URL),),
+            ).fetchone()["skip_reason"]
+        assert reason == "prescreen"
 
     def test_a_manual_request_is_never_skipped(self, tracker_db, monkeypatch):
         notes, _ = self._wire(monkeypatch, mode="skip")

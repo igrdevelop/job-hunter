@@ -72,6 +72,8 @@ class TestRunDoomedGateHardSkip:
         assert job_arg.url == "https://example.com/2"
         assert job_arg.company == "Acme"
         assert job_arg.title == "Senior Angular Dev"
+        # docs/MARKET_MEMORY_PLAN.md M2: the SKIP row names the rule that fired.
+        assert mock_add_skipped.call_args.kwargs["reason"] == "doomed:foreign_onsite_hybrid"
         mock_notify.assert_called_once()
         assert "Skipped before generation" in mock_notify.call_args[0][0]
         assert "foreign_onsite_hybrid" in mock_notify.call_args[0][0]

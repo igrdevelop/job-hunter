@@ -71,13 +71,18 @@ requires for `hunter/tracker.py`'s column-index constants.
 | `drive_url` | bot | ReadModel/SheetsMirror bucket | Owner-only legacy Google Drive integration (§3.4), not part of target `Document`/storage |
 | `confirmation` | bot | `Outcome.confirmed_at` | |
 | `answer` | bot | `Outcome.response` | |
+| `outcome_label` | bot (08-DATA_EVAL M1, `/outcome`) | `Outcome` lifecycle state (`no_reply \| rejection \| interview \| offer` in §1) | Today's labels are `tracker.OUTCOME_LABELS` = `interview`/`rejected`/`offer`/`silence`, written by `tracker.set_outcome()` (user-scoped); `silence` is an OBSERVED outcome but not a reply — `funnel._is_answered` counts only `OUTCOME_REPLY_LABELS`, `funnel._has_outcome` all four, which is what tells "zero replies" apart from "nothing recorded". Empty = not recorded (pre-M1 rows, or never labelled) |
+| `outcome_at` | bot (08-DATA_EVAL M1) | `Outcome.updated_at` | Stamped by `set_outcome()` alongside the label; NULL until a label is recorded |
 | `sheets_row` | bot | ReadModel/SheetsMirror bucket | |
 | `sheets_dirty` | bot | ReadModel/SheetsMirror bucket | |
 | `fail_count` | bot | `Tailoring.retry_count` | |
 | `cost_usd` | bot | `Tailoring.cost_usd` | Re-stamped post-hoc after verdict/refine |
 | `ats_verdict` | bot | `QualityReport.verdict_score` | Independent judge score, never the self-score |
 | `claimed_at` | bot (M1 apply-queue) | `Job.claimed_at` | Pre-`Job`-entity primitive living on the wrong table today |
+| `claimed_by` | bot (06-OPS M3 graceful stop) | `Job.claimed_by` (not yet in §1's `Job` field list — add it there when the entity is built) | `hostname:pid` of the worker holding an `IN_PROGRESS` claim (`hunter.apply_worker.claimed_by_tag()`), stamped in the same atomic UPDATE as `claimed_at`; read once at startup by `tracker.release_claims_by_host()` so a restarted container frees its own claims immediately instead of waiting out `APPLY_CLAIM_TIMEOUT_MIN`. Empty when never claimed or since released |
 | `pending_meta` | bot (M1 apply-queue) | `Job.payload` | Full serialized `Job` dataclass, JSON |
+| `skip_reason` | bot (MARKET_MEMORY M2) | `Tailoring.skip_reason` | `<prefix>[:<detail>]` over `tracker.SKIP_REASON_PREFIXES` — why a `SKIP` `Tailoring.status` was reached; empty on pre-M2 rows; never mirrored to the Sheet |
+| `source` | bot (MARKET_MEMORY M3) | `Vacancy.source` | Which hunt source surfaced the vacancy, written at INSERT (`Job.source` when it is a registered source name, else the `postings_seen` row for the same `url_norm`); empty on pre-M3 rows (no backfill, owner decision 2026-09-12) — `hunter/funnel.py` falls back to its URL guess for blanks; never mirrored to the Sheet |
 | `app_status` | **API** (`tracker-migrations.ts`, absent from `hunter/db.py`) | `Outcome.response` (parallel input) | Manual status set from the website dropdown; bot never reads/writes it — a bot-only column scan would miss this one |
 
 **The `ats_status` overload:** (1) a real score (`"85%"`) → `QualityReport.verdict_score` /

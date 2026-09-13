@@ -100,10 +100,12 @@ class SourceExtra:
 
 
 def aggregate_extra(rows: list[dict], days: int | None = None) -> dict[str, SourceExtra]:
-    """rows: dicts with date/url/ats_status/sent/cost_usd. Applies the SAME
-    date-window filter as hunter.funnel.compute_funnel so this and the
-    reused funnel counts describe the identical row set."""
-    from hunter.funnel import _cutoff, _is_sent, source_for_url
+    """rows: dicts with date/url/ats_status/sent/cost_usd (+ optional `source`).
+    Applies the SAME date-window filter AND the same source attribution
+    (stored `source` column first, URL guess for blanks — M3) as
+    hunter.funnel.compute_funnel, so this and the reused funnel counts
+    describe the identical row set bucketed the identical way."""
+    from hunter.funnel import _cutoff, _is_sent, source_for_row
 
     cutoff = _cutoff(days)
     out: dict[str, SourceExtra] = {}
@@ -112,7 +114,7 @@ def aggregate_extra(rows: list[dict], days: int | None = None) -> dict[str, Sour
         if cutoff is not None and (not re.match(r"^\d{4}-\d{2}-\d{2}", d) or d < cutoff):
             continue
 
-        src = source_for_url(r.get("url") or "")
+        src = source_for_row(r.get("source"), r.get("url") or "")
         extra = out.setdefault(src, SourceExtra())
         status = (r.get("ats_status") or "").strip().upper()
         if status == "FAIL":
@@ -133,7 +135,13 @@ def aggregate_extra(rows: list[dict], days: int | None = None) -> dict[str, Sour
 
 
 def fetch_rows(conn) -> list[dict]:
-    cur = conn.execute("SELECT date, url, ats_status, sent, cost_usd FROM applications")
+    # get_db() does not migrate — probe for the M3 `source` column the same
+    # way hunter.funnel.compute_funnel does, so a pre-M3 snapshot still loads.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
+    source_col = "source" if "source" in cols else "'' AS source"
+    cur = conn.execute(
+        f"SELECT date, url, ats_status, sent, cost_usd, {source_col} FROM applications"  # noqa: S608
+    )
     return [dict(r) for r in cur.fetchall()]
 
 

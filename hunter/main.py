@@ -28,11 +28,14 @@ from hunter.config import (
     MAX_JOBS_PER_RUN,
     APPLY_AGENT_TIMEOUT_SEC,
     GMAIL_MAX_RESULTS,
+    POSTINGS_SEEN_ENABLED,
 )
+from hunter.best_effort import best_effort
 from hunter.filters import apply_filters_with_stats, classify_job
 from hunter.gmail_report import build_gmail_report, JobOutcome
 from hunter import llm_outage
 from hunter.models import Job
+from hunter.postings_seen import record_listings
 from hunter.services.apply_service import run_apply_agent_subprocess
 from hunter.sources import ALL_SOURCES
 from hunter.tracker import (
@@ -243,6 +246,27 @@ async def _run_hunt_impl(
     for j in all_jobs:
         if j.source.startswith("gmail_") and id(j) not in filtered_ids:
             gmail_outcomes.append(JobOutcome.from_job(j, "filtered", classify_job(j, flt=flt)))
+
+    # ── Step 2.5: Market memory — record every listing this sweep SAW ────────
+    # docs/MARKET_MEMORY_PLAN.md M1. After the filter so the verdict is known,
+    # BEFORE dedup so a URL the tracker already knows still counts as seen —
+    # that is what makes postings_seen.seen_count a re-post counter. Listing
+    # metadata only, never posting text; reports-only, nothing here feeds back
+    # into the hunt. best_effort: a broken table must never cost a hunt slot,
+    # but repeated failures still alert instead of degrading silently.
+    if POSTINGS_SEEN_ENABLED and all_jobs:
+        with best_effort("postings.record"):
+            seen_items = [
+                (j, "passed" if id(j) in filtered_ids else (classify_job(j, flt=flt) or "passed"))
+                for j in all_jobs
+            ]
+            seen_stats = await asyncio.to_thread(record_listings, seen_items, flt=flt)
+            logger.info(
+                "[Hunt] postings_seen: %d new, %d re-seen, %d without url",
+                seen_stats.inserted,
+                seen_stats.updated,
+                seen_stats.skipped_no_url,
+            )
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
     # sent-company filter is intentionally disabled: a company may have multiple

@@ -64,6 +64,11 @@ reviews:
         drift. Terminal-status writers must check `_is_known_terminal()`
         URL-ONLY and clear their own PENDING/IN_PROGRESS placeholder before
         inserting; watch claim/release/convert semantics regressions.
+        `skip_reason` and `source` are reports-only columns: every SKIP
+        writer stamps a reason through `normalize_skip_reason` (unknown
+        prefix maps to `other:`, never raises) and no gate or Sheet writer
+        reads either — flag a write that can fail over a label, or a new
+        Sheet column for them.
     - path: ".claude/commands/apply.md"
       instructions: >-
         This file is the LIVE prompt of the CLI apply pipeline (run via

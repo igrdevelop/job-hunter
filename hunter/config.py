@@ -239,6 +239,39 @@ SOURCE_HEALTH_ALERT_STREAK: int = int(os.getenv("SOURCE_HEALTH_ALERT_STREAK", "3
 # Rows retained per source (ring buffer; older runs pruned).
 SOURCE_HEALTH_KEEP: int = int(os.getenv("SOURCE_HEALTH_KEEP", "50"))
 
+# ── Market memory: postings_seen (docs/MARKET_MEMORY_PLAN.md M1) ─────────────
+# One row per vacancy the hunt ever SAW (listing metadata only — never the
+# posting text), written after the filter step and before dedup so a re-post
+# of a known URL still bumps seen_count. Reports-only: nothing reads this
+# table back into the hunt or the apply pipeline. `false` skips the write and
+# leaves the table in place (rollback is the flag, not a migration).
+POSTINGS_SEEN_ENABLED: bool = os.getenv("POSTINGS_SEEN_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
+
+def _env_int(name: str, default: int) -> int:
+    """int(os.getenv(name)) with a logged fallback — a typo in .env must not
+    prevent the bot from starting (same posture as SCHEDULE_BLACKOUT)."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "%s=%r is not an integer — using the default %d", name, raw, default
+        )
+        return default
+
+
+# Nightly prune deletes postings_seen rows whose last_seen is older than this.
+POSTINGS_TTL_DAYS: int = _env_int("POSTINGS_TTL_DAYS", 180)
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
