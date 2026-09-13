@@ -580,7 +580,15 @@ hunter/
                             `PENDING` row per new job (`tracker.add_pending`) and
                             returns — `_hunt_lock` is held for seconds, not however
                             long a CLI-fallback apply batch takes. `apply_worker.py`
-                            is the other half
+                            is the other half. **Step 2.5 — market memory** (docs/
+                            MARKET_MEMORY_PLAN.md M1, 2026-09-13): between the filter and
+                            dedup, every job of the sweep — passed AND rejected — is
+                            upserted into `postings_seen` (`hunter/postings_seen.py`) with
+                            its verdict, inside `best_effort("postings.record")` via
+                            `asyncio.to_thread`. After the filter so the verdict is known,
+                            BEFORE dedup so a URL the tracker already knows still bumps
+                            `seen_count`. Gated by `POSTINGS_SEEN_ENABLED`; nothing reads
+                            the table back into the hunt or the apply pipeline
   apply_worker.py           M1 apply-queue worker (docs/HUNT_APPLY_SPLIT_PLAN.md):
                             `apply_worker_loop(context, worker_id=0)` — a long-running
                             background task (started from `telegram_bot._post_init`
@@ -794,6 +802,31 @@ hunter/
                             a full CLI generation attempt on every ~60min stale-claim reset,
                             never resolving). `add_manual_jobleads_pending` already did its
                             own URL-only check and was unaffected.
+                            `skip_reason` + `source` columns (docs/MARKET_MEMORY_PLAN.md
+                            M2/M3, 2026-09-13): every SKIP writer stamps WHY —
+                            `SKIP_REASON_PREFIXES` = button / doomed:<rule> / prescreen /
+                            react / dedup_ct / abort:<reason> / other, canonicalised by
+                            `normalize_skip_reason` (`<prefix>[:<detail>]`, detail capped at
+                            80 chars, an UNKNOWN prefix becomes `other:<original>` rather
+                            than an error) — and every INSERT writer stamps WHICH board
+                            surfaced the vacancy (`_source_for_write`: a real registered
+                            name from `_real_source_names()` — the toggle-INDEPENDENT
+                            `_fetch_roster()` + `ALL_SOURCES` + Gmail — or a
+                            `gmail_<aggregator>` alert source wins; the apply pipeline's
+                            synthetic markers `doomed_gate`/`backend_only_gate`/
+                            `dedup_ct_gate`/`post_generation_abort` describe the writer,
+                            not the board, and fall through to the `postings_seen` row for
+                            the same url_norm; anything else is ''). Both are reports-only:
+                            no gate reads them, neither is mirrored to the Sheet, '' means a
+                            pre-M2/M3 row (no backfill, owner decision 2026-09-12). The ONE
+                            rule: a tracker write must never fail over either label. The
+                            `postings_seen` lookup goes through THIS module's `DB_PATH`,
+                            not `postings_seen.get_row` — the `tracker_db` test fixture
+                            repoints only `tracker.DB_PATH`, so the other path would open
+                            (and lazily CREATE the table in) the real ./tracker.db from
+                            every SKIP/FAIL write in the suite. The in-place conversions
+                            (`_convert_own_fail_row`, `convert_own_applied_row`) take
+                            `skip_reason=` and keep the `source` the row was written with.
   tracker_cache.py          In-memory tracker cache (asyncio.Lock, O(1) dedup + stats)
   tracker_backup.py         Timestamped daily LOCAL snapshots (docs/improvement-2026-09/
                             06-OPS_PLAN.md M1). Three independent families, each pruned to
@@ -865,9 +898,14 @@ hunter/
                             ≤300-char LinkedIn message (one JUDGE_MODEL call, posting language,
                             +EN for PL). Best-effort; bot never sends anything itself
   funnel.py                 Application funnel analytics over tracker.db: compute_funnel(days?) →
-                            tracked→generated→sent→confirmed→answered, overall + per source (source
-                            inferred from URL via each source's matches_url + registered-domain
-                            fallback). Confirmed = ATS ack (confirmation col, stamped by
+                            tracked→generated→sent→confirmed→answered, overall + per source.
+                            Source = the STORED `applications.source` column since
+                            docs/MARKET_MEMORY_PLAN.md M3 (`source_for_row(stored, url)`);
+                            the old inference from the URL via each source's matches_url +
+                            registered-domain fallback (`source_for_url`) is kept only as the
+                            fallback for blank rows — pre-M3 rows (no backfill) and writers
+                            with no source in hand. The column is probed the same way as
+                            `outcome_label` below. Confirmed = ATS ack (confirmation col, stamped by
                             /check_responses); Answered = human reply — the legacy free-text
                             answer col OR a reply `outcome_label` (interview/rejected/offer,
                             NOT silence). `outcome_recorded` counts rows with ANY label and
@@ -910,6 +948,63 @@ hunter/
                             redirect-following, revalidating every `Location` with this same
                             function — closes the "redirect off an already-public host onto
                             a private one" bypass.
+  location_parse.py         Deterministic location classifier ($0 — docs/MARKET_MEMORY_PLAN.md
+                            M1.b, 2026-09-13): `classify_location(raw, flt=) -> LocationParse(
+                            raw, remote_mode, city, is_home_city)`. Mode by token presence,
+                            precedence hybrid > onsite > remote > unknown — a bare city is
+                            never guessed as onsite. Vocabulary is REUSED, never defined
+                            here: mode words from `sources.text_utils.REMOTE_ANY`, cities
+                            from `filters._anti_hybrid_cities(flt)` + the candidate's
+                            home-city aliases (`filter_profile._home_city_aliases`) — no
+                            city literal in the module, so the handoff-readiness gate stays
+                            clean. Case- and diacritics-insensitive, word boundaries.
+                            Caveat: the PL city set lists declensions next to nominatives
+                            with NO declension → nominative mapping, and none is invented
+                            here — `city` is the matched vocabulary entry (a locative input
+                            yields the locative entry); a future mapping belongs in
+                            filters.py next to the set. Reports-only; nothing acts on it
+  postings_seen.py          Market memory (docs/MARKET_MEMORY_PLAN.md M1, 2026-09-13): one
+                            row per `url_norm` the hunt ever SAW — source, first/last_seen,
+                            seen_count, title/company/company_norm, location_raw +
+                            remote_mode/city (location_parse), salary_raw + min/max/
+                            currency/period/contract + monthly_min/max (salary_parse —
+                            `salary_period`/`salary_monthly_*` are deliberate additions over
+                            the plan's DDL sketch so the parser's period normalisation is
+                            kept, not thrown away), lang, `skills_listing` (JSON list from
+                            the boards that carry one in `job.raw`), `filter_verdict` at
+                            first sighting + `filter_verdict_last`, and a `text_hash` over
+                            title+company+location+salary — NEVER posting text. Own
+                            lazy-ensure DDL (same self-contained pattern as source_health /
+                            drive_ledger, NOT part of `init_db()`), no `user_id` by design
+                            (a listing is the employer's public advertisement, and
+                            `hunter/erasure.py` discovers tables by that column, so it
+                            correctly skips this one). `record_listings(items, flt=)` is one
+                            upsert per sweep: a new url_norm inserts every column, a known
+                            one bumps `last_seen`/`seen_count`/`filter_verdict_last` ONLY —
+                            first-seen attributes are never overwritten. `prune(ttl_days)`,
+                            `count_rows()`, `get_row(url_norm)`. Deliberately RAISES on a
+                            broken DB instead of swallowing: the hunt-loop caller wraps it
+                            in `best_effort("postings.record")`, which needs the exception
+                            to count consecutive failures and alert. Reports-only: nothing
+                            in the hunt or the apply pipeline reads it back (owner
+                            decision); `tracker._source_for_write` reads it for the M3
+                            `source` column, `tools/market_memory_m0.py` never writes it
+  salary_parse.py           Deterministic salary-string parser ($0, stdlib only, no I/O,
+                            never raises — docs/MARKET_MEMORY_PLAN.md M1.b, 2026-09-13):
+                            `parse_salary(raw) -> SalaryParse(min, max, currency, period,
+                            period_assumed, contract, monthly_min, monthly_max)` over every
+                            shape the sources emit (space/comma thousands, `k`, en-dash/
+                            `do`/`up to`/`?` open bounds, zł/PLN/EUR/USD/GBP, hour/day/year/
+                            month tokens, B2B/UoP). ONE documented heuristic: with an amount
+                            + currency but no period token, the period is inferred from
+                            magnitude (< 1 000 hour, [1 000, 200 000) month, >= 200 000
+                            year) and flagged `period_assumed=True` — the Polish JSON boards
+                            emit unit-less monthly figures, so without it the monthly
+                            normalisation would be None for the bulk of the corpus; a
+                            unit-less yearly "$100k-150k" lands in the monthly band,
+                            accepted. A `week` token BLOCKS the heuristic rather than
+                            mislabelling a weekly rate. `monthly_*` = hour x 160, day x 20,
+                            year / 12, in the string's own currency (no FX). Reports-only
   source_health.py          Per-source yield tracking in SQLite (source_runs table): record_run()
                             after each source.search() in the hunt loop, health_report() for /health,
                             newly_broken() alerts once when a previously-working source goes dry for
@@ -927,10 +1022,13 @@ hunter/
                             upload_missing_folders — the 2026-07-13 stale-token incident this
                             closes), gsheets_sync (mirror_new_row/resync_dirty), delivery.py
                             (both targeted stages), outreach.py, dual_apply.py (shadow),
-                            cost_writer.py, verdict_writer.py, and apply_shared.ensure_pl_resume
+                            cost_writer.py, verdict_writer.py, apply_shared.ensure_pl_resume
                             ("apply.pl_mirror" — a silently dead PL mirror recreates exactly the
                             bug it closes, Polish employers receiving an EN CV, which went
-                            unnoticed for a month the first time). Existing try/except are NOT
+                            unnoticed for a month the first time), and the market-memory
+                            writes ("postings.record" in hunter/main.py Step 2.5,
+                            "postings.prune" in schedules/postings_prune.py — both
+                            reports-only, both must never cost a hunt slot). Existing try/except are NOT
                             removed — the wrapper goes around them; a block that already
                             returns None/False on error re-raises from its except clause so the
                             failure still reaches best_effort() for counting
@@ -1157,6 +1255,13 @@ hunter/
     email_responses.py      scheduled_check_email_responses
     daily_summary.py        scheduled_daily_summary
     normalize_sent.py       scheduled_normalize_sent (daily 00:20, refreshes Sheets column L)
+    postings_prune.py       scheduled_postings_prune (daily 00:40) — docs/
+                            MARKET_MEMORY_PLAN.md M1: `postings_seen.prune(POSTINGS_TTL_DAYS)`
+                            inside `best_effort("postings.prune")`. Registered
+                            unconditionally; the callback itself no-ops when
+                            `POSTINGS_SEEN_ENABLED` is off (a disabled writer's table is
+                            left as-is — rollback is the flag, not a migration), same
+                            shape as reset_stale_claims' own guard
     apply_queue.py          scheduled_reset_stale_claims (every 15 min, no-op unless
                             `APPLY_QUEUE_ENABLED`) — M1 crashed-worker recovery:
                             `tracker.reset_stale_claims(APPLY_CLAIM_TIMEOUT_MIN)` moves
@@ -1217,7 +1322,11 @@ hunter/
                             `best_effort("profile.jobs")` so repeated DRAIN
                             failures alert — a single bad upload/profile does
                             not, since `_process_job` catches that itself
-    __init__.py             register(app, tz) — wires all callbacks into the Application
+    __init__.py             register(app, tz) — wires all callbacks into the Application.
+                            Narrows `app.job_queue` (PTB types it Optional) ONCE at the top —
+                            `RuntimeError` on None, the same failure the first registration
+                            used to raise as AttributeError — instead of at every call site
+                            (mypy 14 → 0 on this file, 2026-09-13)
   services/
     apply_service.py        Subprocess wrapper for apply_agent + generate_docs cmd builder.
                              ApplyOutcome includes "cli_timeout" (docs/HUNT_APPLY_SPLIT_PLAN.md
@@ -1322,14 +1431,18 @@ docs/ORACLE_FREE_TIER_PLAN.md Measure-first plan for moving bot+api from the Het
                             the prod `source_runs` median (any fail closes the plan); M0b =
                             arm64 test build; M0c = invoice + peak RAM. Not a migration until
                             M0a passes.
-docs/MARKET_MEMORY_PLAN.md  Keep what the hunt SEES, not only what it applies to (draft,
-                            2026-09-12): M0 read-only probe of listing attribute coverage
-                            + volume, then `postings_seen` (one row per url_norm ever
-                            fetched — source, first/last_seen, seen_count, parsed salary/
-                            location, filter verdict; metadata only, $0), `skip_reason` on
-                            SKIP rows, `source` written not guessed, `/market` digest.
-                            Reports only — nothing feeds back into the hunt or the
-                            apply pipeline (owner decision). The X side of #276's `outcome_label`.
+docs/MARKET_MEMORY_PLAN.md  Keep what the hunt SEES, not only what it applies to. M0 tool +
+                            M1–M3 SHIPPED 2026-09-13 (branch claude/nifty-sagan-g1iagx):
+                            `tools/market_memory_m0.py` (read-only probe — live prod numbers
+                            still PENDING, the dev sandbox had no network), `postings_seen`
+                            (one row per url_norm ever fetched — source, first/last_seen,
+                            seen_count, parsed salary/location, filter verdict; metadata
+                            only, $0; hunt Step 2.5 + nightly prune), `skip_reason` on SKIP
+                            rows, `source` written not guessed. M4 `/market` digest is NEXT,
+                            deliberately not started until the table holds ~4 weeks of rows
+                            and M0 has run on prod. Reports only — nothing feeds back into
+                            the hunt or the apply pipeline (owner decision). The X side of
+                            #276's `outcome_label`.
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
                             best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
@@ -1731,7 +1844,34 @@ tools/market_m0.py          Market-aggregate M0 stability probe (docs/improvemen
                             union (hand-rolled, no scipy), and held-out coverage. Prints
                             the plan's decision rule (Jaccard >= 0.7 and Spearman >= 0.6
                             for the main cell -> aggregate stable) and bias caveat
-                            verbatim. Read-only, $0, `--json` for per-cell results
+                            verbatim. Read-only, $0, `--json` for per-cell results. That
+                            caveat — an applied-only corpus, a biased ~10% sample by
+                            construction — is exactly what `postings_seen` (docs/
+                            MARKET_MEMORY_PLAN.md, `tools/market_memory_m0.py` below)
+                            removes: the same term-share idea over every listing seen
+tools/market_memory_m0.py   Read-only M0 probe for docs/MARKET_MEMORY_PLAN.md (M0.a,
+                            2026-09-13): runs every enabled source's `search()` once,
+                            sequentially, exactly like the hunt loop's Step 1 (own
+                            try/except per source) and reports per source + in total: raw /
+                            unique url_norm / already known to tracker.db (`get_known_urls`)
+                            / NEW; salary presence and `salary_parse` coverage + currency/
+                            contract split; `location_parse` classification split (remote/
+                            hybrid/onsite vs unknown, city share); the filter-verdict
+                            distribution against the hunt's own profile
+                            (`filter_profile.load_profile()`); and WHICH skills keys each
+                            source's `job.raw` really carries. Prints the plan's four
+                            decision rules with the numbers filled in (PASS/FAIL/UNMEASURED
+                            — rule 4, inserts/day, needs the M0.b `source_runs` SQL on prod
+                            and is printed verbatim instead). NO DB writes, NO LLM, NO
+                            Telegram. The plan's sketched `--offline` over `Applications/**/
+                            content.json` was replaced by `--dump`/`--from-dump`: that
+                            corpus carries no `salary` and no listing `location`, so it
+                            cannot feed these metrics; a live run on the deploy host is
+                            dumped to JSON (title/company/location/salary/url/non-empty raw
+                            KEYS + the live verdict — never the raw payload) and re-analysed
+                            offline with the same `summarise`. `--sources a,b` narrows,
+                            `--json` for machine output. NOT yet run against prod (the dev
+                            sandbox had no outbound network) — no live numbers exist yet
 tools/list_env_vars.py      Collects every environment-variable NAME the codebase actually
                             reads (`hunter/` + the four root entry scripts), by regex over
                             `os.getenv(...)` / `os.environ.get(...)` / `os.environ[...]`,
@@ -2049,6 +2189,8 @@ Applications/               Generated documents (gitignored)
 | `SOURCE_HEALTH_ENABLED` | `true` | Record per-source yield per hunt + alert on breakage |
 | `SOURCE_HEALTH_ALERT_STREAK` | `3` | Consecutive 0/error runs (for a previously-working source) before alerting |
 | `SOURCE_HEALTH_KEEP` | `50` | Per-source run rows retained (ring buffer) |
+| `POSTINGS_SEEN_ENABLED` | `true` | Market memory (docs/MARKET_MEMORY_PLAN.md M1): hunt Step 2.5 upserts every listing the sweep saw into `postings_seen` (listing metadata only — never posting text). `false` skips the write and the nightly prune while leaving the table in place — rollback is the flag, not a migration. Reports-only: nothing reads the table back into the hunt or the apply pipeline. |
+| `POSTINGS_TTL_DAYS` | `180` | Nightly prune (00:40, `hunter/schedules/postings_prune.py`) deletes `postings_seen` rows whose `last_seen` is older than this. Read via `config._env_int` — a non-integer value logs a warning and falls back to the default (same posture as `SCHEDULE_BLACKOUT`: a typo in `.env` must never stop the bot). The plan's M0 volume rule may lower it to 90 once prod numbers exist. |
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
 | `GSHEETS_REFRESH_INTERVAL_MIN` | `30` | Sheets → Excel pull interval |
@@ -2099,6 +2241,15 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
 ### Hunt cycle (`hunter/main.py`)
 1. Each source calls `source.search()` -> `list[Job]`
 3. `filters.apply_filters_with_stats()` — keywords, level, location, patterns, React-only, German language
+3a. **Market memory** (Step 2.5 in the code, `hunter/postings_seen.record_listings`,
+   docs/MARKET_MEMORY_PLAN.md M1): every job of the sweep — passed AND rejected —
+   is upserted into `postings_seen` with its verdict (`passed` or the
+   `classify_job` reason), inside `best_effort("postings.record")` via
+   `asyncio.to_thread`. After the filter so the verdict is known, BEFORE dedup
+   so a URL the tracker already knows still bumps `seen_count` (that is what
+   makes it a re-post counter). Listing metadata only, never posting text;
+   `POSTINGS_SEEN_ENABLED` gates it; nothing reads the table back into the hunt
+   or the apply pipeline. Manual pastes and `/force` never pass through here.
 4. Dedup: URL (`normalize_url`) + company+title key (`dedup_key`)
 5. New jobs -> Telegram cards with Apply/Skip buttons
 6. If `AUTO_APPLY=true` -> auto-apply pipeline; after each successful apply,
@@ -2617,6 +2768,8 @@ command's reply (`shadow_uploaded` count, `shadow_errors` list).
 | 15 | Cost $ | Per-vacancy LLM USD spend (API mode). Written at row creation with the Step 6.5 figure, then **re-stamped post-hoc** (`tracker.set_cost`) after the verdict + refine loop so it covers the FULL run (verdict call, refine rewrite rounds incl. rollbacks, PL mirror). Blank for CLI mode (Pro subscription, no per-token visibility) and for pre-tracking rows. Mirrored to Sheet column **M** by `hunter.cost_writer` — separate writer (not part of the A–K push), parallel to `sent_normalizer` on column L. |
 | — | Outcome (`outcome_label` + `outcome_at` DB columns) | What actually happened to a SENT application: one of `tracker.OUTCOME_LABELS` = `interview` / `rejected` / `offer` / `silence`, empty = not recorded (docs/improvement-2026-09/08-DATA_EVAL_PLAN.md M1, owner decision 2026-09-12). Added after a 90-day prod funnel run showed 399 sent applications and ZERO recorded outcomes — nothing ever wrote the free-text `answer` column, so no metric past "sent" was measurable. Written by `tracker.set_outcome(url_or_id, label)` (user-scoped, stamps `outcome_at`, sets `sheets_dirty=1`) via `/outcome`. `silence` is an OBSERVED outcome but not a reply: `funnel._is_answered` counts only `OUTCOME_REPLY_LABELS` (plus the legacy `answer` text), while `funnel._has_outcome` counts all four, so `answered == 0` can be told apart from "nobody recorded anything". **Not yet mirrored to the Sheet** — the Sheets layer is built on the fixed A–K `gsheets_client.COLUMNS` (push, pull row parser and conflict merge all assume it), so a column-O round trip is its own follow-up. |
 | — | ATS Verdict (`ats_verdict` DB column) | Independent PDF-verdict score (0–100): one `JUDGE_MODEL` (Haiku) call over the text extracted from the rendered EN CV PDF. Stamped post-hoc by `tracker.set_ats_verdict` (apply Step 7.7; the row already exists). NULL = no verdict. Mirrored to Sheet column **N** by `hunter.verdict_writer` when the bot-process `mirror_new_row` runs (the verdict is in the DB by then); `tools/sync_verdicts.py` backfills misses. Four non-overlapping Sheet writers: A–K main push, L sent_normalizer, M cost_writer, N verdict_writer. |
+| — | Skip reason (`skip_reason` DB column) | WHY a SKIP row was written (docs/MARKET_MEMORY_PLAN.md M2, 2026-09-13): `<prefix>[:<detail>]` over `tracker.SKIP_REASON_PREFIXES` — `button` (Skip button), `doomed:<rule>` (doomed-gate HARD finding), `prescreen`, `react`, `dedup_ct` (the API pipeline's Step 4.55 company+title gate), `abort:<reason>` (every CLI-pipeline post-generation abort incl. its company+title dedup, which lands as `abort:company+title dedup (...)` — the uniform abort rule), `other[:<name>]` (e.g. `other:backend_only`). Canonicalised by `normalize_skip_reason`; an unknown prefix becomes `other:<original>` — a write never fails over a label. '' = pre-M2 row or an untagged writer. Stamped by `add_skipped`/`add_react_skipped` and both in-place conversions; full call-site → value table in `tests/test_skip_reason.py`. **Not mirrored to the Sheet**: the Sheets layer is the fixed A–K contract plus three single-column writers, and the owner reads reasons through reports/`tools/`, not the Sheet — a fifth writer for a reports-only column is more round-trip surface than it is worth. No gate reads it. |
+| — | Source (`source` DB column) | WHICH hunt source surfaced the vacancy (docs/MARKET_MEMORY_PLAN.md M3, 2026-09-13), written at INSERT by every tracker writer via `tracker._source_for_write` — a real registered source name / `gmail_<aggregator>` from `Job.source` wins; the apply pipeline's synthetic `*_gate` markers fall through to the `postings_seen` row for the same url_norm; else ''. '' = pre-M3 row (no backfill, owner decision 2026-09-12) or no source in hand — `hunter/funnel.py::source_for_row` falls back to the URL guess for blanks. **Not mirrored to the Sheet**, same reasoning as `skip_reason`; consumed by `/funnel` and `tools/funnel_sources.py` only. |
 
 **Column index constants** in `hunter/tracker.py` — update both code and this doc if schema changes.
 
@@ -3087,8 +3240,8 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-09-13 | fable+sonnet | **Market memory M0–M3 shipped (docs/MARKET_MEMORY_PLAN.md; seven commits on `claude/nifty-sagan-g1iagx`, PR pending).** The plan from the day before found that the bot keeps almost nothing about a vacancy as a market object — every one of the 25 sources parses `salary`/`location`/`source` into the `Job` and the hunt throws them away, the ~90% of listings the filters reject leave no trace, and every SKIP row looked identical whichever gate wrote it. **M1.b parsers** (`hunter/salary_parse.py`, `hunter/location_parse.py`): deterministic, $0, never raise. The salary parser's ONE heuristic — a unit-less amount + currency is monthly when in [1 000, 200 000), because the Polish JSON boards emit exactly that shape — is flagged by `period_assumed`; the location classifier reuses the filters' own city vocabulary plus the candidate's home-city aliases (no city literal, the handoff gate stays clean) and deliberately does NOT map Polish declensions to nominatives, because the filter set carries no such mapping and inventing one here would make the two disagree. **M1 table** (`hunter/postings_seen.py`): one row per `url_norm` ever seen, listing metadata only (`text_hash` over title+company+location+salary, never posting text), no `user_id` by design (`hunter/erasure.py` discovers tables by that column and correctly skips this one); `salary_period` + `salary_monthly_min/max` are additions over the plan's DDL sketch so the parser's normalisation is kept, not thrown away. Wired as hunt **Step 2.5** — after the filter so the verdict is known, BEFORE dedup so a URL the tracker already knows still bumps `seen_count` — inside `best_effort("postings.record")`; the module RAISES on a broken DB on purpose so the wrapper has something to count. `POSTINGS_SEEN_ENABLED`/`POSTINGS_TTL_DAYS` in config + `.env.example`, nightly `scheduled_postings_prune` at 00:40, and `schedules.register()` now narrows `app.job_queue` once at the top instead of at every call site (mypy 14 → 0 on that file, same behaviour on None). **M2** `applications.skip_reason`: one vocabulary (`SKIP_REASON_PREFIXES` + `normalize_skip_reason` — `<prefix>[:<detail>]`, unknown prefix → `other:<original>`, a write never fails over a label), stamped by every SKIP writer: Skip button `button`, doomed gate `doomed:<rule>`, prescreen `prescreen`, React `react`, the API pipeline's Step 4.55 company+title gate `dedup_ct`, backend-only `other:backend_only`, and every CLI-pipeline post-generation abort as `abort:<reason>` — so the CLI dedup lands as `abort:company+title dedup (...)`, the uniform abort rule, not `dedup_ct`; threaded through both in-place conversions. **M3** `applications.source`: stamped at INSERT by every writer (`_source_for_write` — a real registered name or a `gmail_<aggregator>` alert source wins, the apply pipeline's synthetic `*_gate` markers fall through to the `postings_seen` row for the same url_norm, else ''), no backfill (owner decision 2026-09-12); `funnel.py` + `tools/funnel_sources.py` bucket by the stored column and keep the URL guess only for blanks — a Greenhouse link surfaced by JustJoin now counts for JustJoin instead of collapsing into the ATS bucket. **M0 tool** `tools/market_memory_m0.py`: read-only sweep probe that prints the plan's decision rules with the numbers filled in; `--dump/--from-dump` replaced the sketched `--offline` (`content.json` carries no salary and no listing location, so that corpus cannot feed the metrics). The dev sandbox had no outbound network, so there are NO live M0 numbers yet — the ≥ 30 new/sweep and ≥ 25% parseable-salary rules are still unevaluated and running the probe on prod is the next step. **Two things worth knowing.** (a) `_source_for_write`'s `postings_seen` lookup goes through `tracker.DB_PATH`, not `postings_seen.get_row`: the `tracker_db` fixture repoints only `tracker.DB_PATH`, so the other module's path would have opened — and lazily CREATED the table in — the real `./tracker.db` from every SKIP/FAIL write across the whole suite. (b) The local mypy ratchet reports `llm_client.py 3 → 4` on a file none of the seven commits touched (`llm_client.py:439`, `last_err = e` in the generic `except Exception` after an earlier branch bound the variable to `LLMRateLimitError`) — a type-inference difference between the sandbox's tool versions and CI's, which installs from the lock; the baseline was deliberately NOT `--update`d, CI is the arbiter. **M4 (`/market` digest) is deliberately not started**: it compares weeks, so it waits for ~4 weeks of `postings_seen` rows and for M0 to have run on prod. Nothing in any milestone feeds back into the hunt, the queue or the apply pipeline. |
 | 2026-09-12 | fable | **`docs/MARKET_MEMORY_PLAN.md` (docs-only) — keep what the hunt sees, not only what it applies to.** Owner question: what can be done with months of collected search data, and which fields/aspects to add. Audit against the code first: of everything the 25 sources return, only `source_runs` counts survive; filter/dedup rejects (~90% of listings) leave no trace; `Job.salary`/`location`/`source` are dropped even for applied vacancies (`pending_meta` carries the full Job but `_clear_own_placeholder` deletes it when the terminal row lands); every SKIP row is indistinguishable by reason; `funnel.py` re-derives source from the URL and collapses every ATS-hosted link. The plan is the X side of #276's `outcome_label` (the Y side, merged the same day): M0 = `tools/market_memory_m0.py`, a read-only live probe of every source (new-unique share, salary/location parse coverage, filter-verdict distribution) plus one `source_runs` query for volume, with decision rules that CLOSE the plan below 30 new listings/sweep and drop the salary track below 25% coverage; M1 = `postings_seen` table (one row per `url_norm` ever seen: source, first/last_seen, seen_count, parsed salary/location, `filter_verdict`, skills from sources that give them; metadata only, never posting text; no `user_id` by design; `best_effort("postings.record")` after the filter step, nightly TTL prune); M2 = `skip_reason` column (the one attribute derivable only at the call site) — NO salary/location duplicates on `applications`, a `url_norm` join replaces them; M3 = `source` written not guessed; M4 = `/market` + Monday digest (market vs 4-week mean, remote split, PLN B2B pay median, rising terms ∩ `to_learn`, my funnel × listing attributes via #276 outcomes, ghost-job list) — reports only: an earlier draft's three default-OFF "search rules" were removed the same day by owner decision ("we are only talking about collecting more info; generation must not be touched"). Supersedes 08-DATA_EVAL M3.1's `postings_seen` sketch; 07-COMPLIANCE M6 applies to a published aggregate as a read-side projection, not to the owner's own table. Zero LLM calls in every milestone. Indexed as ROADMAP 1.5. No code. |
 | 2026-09-12 | opus | **Two CLI post-processing re-renders were still rewriting the vacancy's tracker row.** `.claude/commands/apply.md` runs `generate_docs.py` WITHOUT `--no-tracker`, so the applied row already exists when `main_cli`'s post-processing starts, and every re-render there changes only the DOCUMENTS. The verdict-refine loop carried that rule since it was written, and #261's foreign-contact regen picked it up; the language enforce-gate regen and the NBSP self-heal regen never did — both pass `force=skip_dedup`, so in `/force` mode they DELETE+INSERTed the row (new Sheets sync ID, false Re-application flag) for a change that touched no tracker field. Outside `/force` the write was already a silent no-op (`_is_known_terminal`), which is why this sat unnoticed: the damage needs `/force`, and `/force` is the rarer path. Verified before changing either site that nothing downstream depends on the rewrite — every later tracker touch (`set_to_learn`, `set_ats_verdict`, `lookup_url` for metrics, `abort_after_generation`'s `convert_own_applied_row`) finds the row by URL or by the identity stored on `content.json`, never by a row generate_docs just re-inserted. The one scenario that could have made the write load-bearing — a `/force` apply where the skill's own non-force `add_applied` is refused by the existing terminal row — is already handled earlier: `/force` runs `_force_cleanup` → `delete_all_by_url` before the apply, so the skill writes a fresh row and the regen's delete was redundant (and fired only on the minority of runs where a fix or heal actually triggered, so it was never a net anyway). `--force` is now inert at both sites: `generate_docs.py` reads `force_mode` nowhere but the tracker write `--no-tracker` skips. Left the flag in place rather than "unifying" it, matching #261's site. `tests/test_apply_cli_regen_no_tracker.py` pins both (mutation-verified one at a time) plus a sweep requiring EVERY `build_generate_docs_cmd` call in `apply_cli` to carry `no_tracker=True` — the initial render belongs to the CLI skill, so any call site in that module is by definition a re-render. |
 | 2026-09-10 | opus | **`/rabbit` and the `/pr` poll still assumed a review that never starts by itself.** Follow-up to the same-day entry below, which fixed `/pr` Step 7 and the two CLAUDE.md rows but left two places behind. Re-verified before touching anything: `gh repo view igrdevelop/job-hunter --json stargazerCount` returns 0, and PR #251 carries only the bot's "This repository does not receive automatic reviews because it has fewer than 10 stars" checkbox comment. (a) `.claude/commands/rabbit.md` Step 1 now checks that rabbit reviewed the CURRENT HEAD before triaging anything (newest `coderabbitai[bot]` review's `commit_id` vs `headRefOid`) — the REST comments endpoint returns an empty list both for a clean review and for a PR nothing ever looked at, so `/rabbit <N>` run against an untriggered PR reported "no findings" with full confidence, which is the worst possible failure mode for a review-triage skill. No review, or one stamped on an older commit — the normal state right after Step 3 pushes fixes, since nothing re-reviews a fix push either — posts `@coderabbitai review`, waits, and re-runs Step 1; a "Trigger review" checkbox comment is the bot declining to start, not a review. (b) `docs/AGENT_LOG.md`'s 2026-09-01 entry ("auto-reviews every PR") marked superseded in place rather than rewritten — the log is the record of what was believed when, and agents grep it to learn how the integration works. (c) `/pr` Step 7.1's one-line poll replaced with a digit-matching loop: the natural `until [ "$(gh ... --jq '...\|length')" != "0" ]` exits on the FIRST transient `gh` failure, because the empty string IS `!= "0"` — that fired live while writing this and made a poll report a review that did not exist. Documented there too that the bot's login is `coderabbitai` via `gh pr view` (GraphQL) but `coderabbitai[bot]` via `gh api` (REST), so the two filters are not interchangeable. The sibling repos carried the same "PRs get an automatic CodeRabbit review" line in their CLAUDE.md and are fixed in their own PRs (job-hunter-api, job-hunter-site); both do have `pr.md` + `rabbit.md`, contrary to the entry below which said they had no `/pr` — neither has a trigger step yet. CodeRabbit's own review of this PR contributed two of the shipped changes: the head-match refinement above (a plain review COUNT would have said "reviewed, proceed" on every second `/rabbit` run) and an escaped `\|` inside this entry's inline code, which GFM was splitting into extra table columns. Docs/skill text only; no runtime change. |
 | 2026-09-10 | fable+sonnet | **Twelve PRs off the `docs/improvement-2026-09/` series, batch-executed (#256-#268, all merged except #261).** The series (#255) ended with four week-0 items that need no owner decision; those plus the unblocked milestones behind them went out as one PR each, written by parallel Sonnet agents in isolated worktrees and reviewed here. **Security:** #262 closes the series' critical finding — `hunter/apply_cli.py` ran `claude -p --dangerously-skip-permissions` with scraped job text inside the agent's prompt, as root (`Dockerfile`'s `IS_SANDBOX=1` existed only to permit that), in a container mounting `.env`, `db/`, `users/` and `.claude-cli`; it now passes an explicit `--allowedTools`/`--disallowedTools WebFetch,WebSearch` policy, stages the posting to a file referenced by path instead of inlining it (`_write_staging_posting`/`_posting_file_prompt_block`), runs as a non-root `hunter` uid 1000, and `.dockerignore` stops a local build baking tokens/`users/`/`db/` into the image (`APPLY_CLI_LEGACY_PERMS=true` is the one-release escape hatch; **the deploy host needs `chown -R 1000:1000 db users logs .claude-cli` once**). #263 adds `hunter/url_policy.py` (scheme + resolved-address check, manual redirect walking) at the untrusted-URL entry points and a per-chat `/link` attempt limiter that refuses without ever querying `telegram_link_codes`. **Ops:** #256 backs up `tracker.db` (and optionally the API's `app.sqlite` via `APP_SQLITE_PATH`) with `sqlite3.Connection.backup()` + `PRAGMA integrity_check`, since the daily job had been snapshotting `tracker.xlsx`, which prod only writes on `/export` — plus `scripts/offhost_backup.sh` (restic) and `scripts/restore_drill.sh`. #266 makes shutdown graceful: `WorkerControl` + a PTB `post_shutdown` hook wake a sleeping worker, cancel one stuck in a subprocess and release its claim, and a new `applications.claimed_by` (`hostname:pid`) lets `release_claims_by_host()` free at startup what a restarted container claimed, instead of stranding the row for up to 75 min. **Compliance:** #259 adds `hunter/erasure.py` + a `profile_jobs` `erase` kind + `tools/erase_user.py` — one transaction over every table with a `user_id` column (discovered via `PRAGMA table_info`), then the `users/{uid}/` tree; refuses the owner and any non-single-segment uid. **Measurement:** #267 adds `hunter/metrics.py` (`generation_runs` + `pipeline_events`, every call inside `best_effort("metrics")`) wired into both pipelines with no behavior change, plus `tools/backfill_runs.py`; #264 adds the four read-only M0 scripts (`verdict_vs_outcome`, `funnel_sources`, `audit_tenant_scope`, `pii_inventory`), each printing its pre-stated decision rule with the numbers; #260 adds `eval_golden`, `dual_pairs_stats` and `market_m0`. **Engineering:** #265 turns the informational mypy job into a blocking regression ratchet (`scripts/mypy_ratchet.py` + `mypy_baseline.json`) and marks the subprocess-heavy tests `slow` (`pytest -m "not slow"`, ~52 s); #258 documents all 69 undocumented env vars in `.env.example` behind a new `test_handoff_readiness` check; #257 writes `docs/DOMAIN_MODEL.md` (every `applications` column mapped to a target entity, proposed Postgres DDL). **Two things worth knowing for next time.** (a) The ratchet caught a real regression on its first day: #259 and #263 merged just before it and left four new type errors, so master failed its own gate — #268 fixed three properly (sockaddr `str | int`, a `None`-seeded `resp`, a mixed-arity `params` tuple) and baselined only the fourth, an instance of the pre-existing `Message | None` pattern. The baseline itself had to be re-derived as the MAX of CI and a dev machine: the two resolve beautifulsoup4/requests stubs differently, worth 4 errors across 5 files, and a locally-generated baseline fails on CI. (b) Seven of the agents died mid-run on a model rate limit; their work survived in the worktrees and was finished here — which surfaced that the graceful-stop branch had no tests at all (18 written + mutation-verified) and that the metrics branch's tests assumed `normalize_url` strips the scheme, which it does not. #261 (wrapping the posting in `<job_posting>` tags in every prompt + a deterministic foreign-contact QA drop) is deliberately still OPEN: it edits live generation prompts, so it wants the #260 eval harness run against it first. |
-| 2026-09-10 | opus | **CodeRabbit stopped auto-reviewing this repo (< 10 stars) — `/pr` now triggers it by hand.** On PR #251 (2026-09-08) and #252 the bot posted only its "Trigger review" checkbox with the note that repositories under 10 GitHub stars do not receive automatic reviews; #248–#250 (2026-09-01..03) had still been reviewed automatically (3/8/1 reviews), so this is a CodeRabbit-side policy change, not a config regression — `auto_review.enabled: true` in `.coderabbit.yaml` is now inert here, and `/pr` Step 7's 10-minute poll was waiting for a review that could not arrive. Fix: `.claude/commands/pr.md` Step 7 gains step 0 — `gh pr comment <N> --body "@coderabbitai review"` right after `gh pr create` — plus a note that a lone checkbox comment means the trigger was skipped, never "no findings"; the CLAUDE.md entries for `pr.md` and `.coderabbit.yaml` say the same. The site/api repos have `rabbit.md` but no `/pr` step, so their PRs need the comment posted by hand until they grow one. Same day, owner decision after #252 sat fixed-but-blocked for an hour: `request_changes_workflow: false` in `.coderabbit.yaml` — a "changes requested" review can only be lifted by the bot, and the free tier rate-limits it after one review, so the fixed PR waited on a bot that could not re-check it. Findings keep their teeth through master's required conversation resolution (every thread still gets triaged and resolved by `/rabbit`, via GraphQL when the bot is silent); the merge just no longer hinges on the bot's quota. Docs/skill/config text only; no runtime change. |

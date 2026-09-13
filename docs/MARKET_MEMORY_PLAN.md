@@ -1,6 +1,6 @@
 # MARKET_MEMORY Plan — keep what the hunt sees, not only what it applies to
 
-**Status:** draft
+**Status:** in progress — M0 tool + M1–M3 shipped 2026-09-13 (branch claude/nifty-sagan-g1iagx); live M0 run on prod pending; M4 not started
 **Date:** 2026-09-12
 **Motivation:** owner question 2026-09-12 ("what can we do with the information
 we have collected over months of searching and keep collecting, and maybe add
@@ -100,10 +100,18 @@ and in total:
   the plan can say what share of the market the owner's filters reject and for
   what.
 
-`--json` for the numbers; `--offline` skips the network and reruns the parsers
-over `Applications/**/content.json`'s `job_title`/`company_name` + the
-`pending_meta` JSON of any PENDING rows present — a smaller, biased sample,
-only for developing the parsers without hitting 25 sites.
+`--json` for the numbers. *Shipped 2026-09-13 with one change:* the sketched
+`--offline` mode over `Applications/**/content.json` was dropped — that corpus
+carries no `salary` and no listing `location`, so it cannot feed any of the
+metrics above. `--dump <file>` / `--from-dump <file>` replace it: a live run on
+the deploy host dumps what the probe needs (title / company / location / salary
+/ url / the non-empty `raw` KEY names / the live filter verdict — never the raw
+payload) and the same `summarise` re-analyses it offline, so the parsers can be
+developed against real listings without hitting 25 sites again. The live
+verdict is stored per job because a dump cannot reproduce `react_no_angular`
+for jobs whose React signal lives only in `raw` skills. The probe has NOT yet
+run against prod (the dev sandbox had no outbound network) — no live numbers
+exist yet.
 
 **M0.b — volume from what already exists (prod DB, one query).**
 
@@ -154,10 +162,13 @@ CREATE TABLE IF NOT EXISTS postings_seen (
     remote_mode     TEXT NOT NULL DEFAULT '', -- remote|hybrid|onsite|unknown
     city            TEXT NOT NULL DEFAULT '',
     salary_raw      TEXT NOT NULL DEFAULT '',
-    salary_min      REAL,                   -- monthly, in salary_currency
-    salary_max      REAL,
-    salary_currency TEXT NOT NULL DEFAULT '',
-    salary_contract TEXT NOT NULL DEFAULT '', -- b2b|uop|other|''
+    salary_min          REAL,
+    salary_max          REAL,
+    salary_currency     TEXT    NOT NULL DEFAULT '',
+    salary_period       TEXT    NOT NULL DEFAULT '',
+    salary_contract     TEXT    NOT NULL DEFAULT '',
+    salary_monthly_min  REAL,
+    salary_monthly_max  REAL,
     lang            TEXT NOT NULL DEFAULT '', -- PL|EN from title (lang_guard)
     skills_listing  TEXT NOT NULL DEFAULT '', -- JSON list when the source gives one (JustJoin requiredSkills, NoFluff requirements, theprotocol, SmartJobs); else ''
     filter_verdict  TEXT NOT NULL DEFAULT '', -- 'passed' | one of FILTER_REASONS, as of first_seen
@@ -167,6 +178,15 @@ CREATE TABLE IF NOT EXISTS postings_seen (
 CREATE INDEX IF NOT EXISTS idx_postings_seen_last ON postings_seen(last_seen);
 CREATE INDEX IF NOT EXISTS idx_postings_seen_company ON postings_seen(company_norm);
 ```
+
+*Shipped 2026-09-13 as above* (`hunter/postings_seen.py::_DDL`). Three columns
+were added over the original sketch: `salary_period` (`hour|day|month|year|''`,
+as the parser read or inferred it — see `period_assumed` in
+`hunter/salary_parse.py`) and `salary_monthly_min`/`salary_monthly_max` (hour
+× 160, day × 20, year / 12, month as-is, in the string's own currency). The
+sketch said `salary_min`/`salary_max` were "monthly"; the parser reports the
+string's OWN figures there and the monthly pair separately, both kept
+unconverted, so a report can show what the listing actually said.
 
 `record_listings(jobs, verdicts)` is an upsert: a new `url_norm` inserts; a
 known one bumps `last_seen`, `seen_count` and `filter_verdict_last` only —
@@ -251,6 +271,16 @@ default `''`, so no existing caller changes behaviour until it passes one. The
 column is mirrored nowhere (not a Sheet column — the owner reads reasons via
 the digest / `tools/`), which keeps the four-writer Sheet contract untouched.
 
+**Shipped 2026-09-13.** Two values differ from the table above, on purpose:
+the CLI pipeline's company+title dedup runs AFTER generation and goes through
+`abort_after_generation`, so it lands as `abort:company+title dedup (...)` —
+the uniform abort rule — not `dedup_ct` (which the API pipeline's Step 4.55
+gate writes); and the backend-only gate (both pipelines) writes
+`other:backend_only`. The vocabulary lives in `tracker.SKIP_REASON_PREFIXES` +
+`normalize_skip_reason` (`<prefix>[:<detail>]`, detail capped at 80 chars,
+unknown prefix → `other:<original>` — a write never fails over a label). Full
+call-site → value table: `tests/test_skip_reason.py`.
+
 **Tests.** One assertion per writer above that the reason lands, plus
 `tests/test_apply_cli_abort.py`/`tests_doomed_gate_wiring.py` extended rather
 than duplicated.
@@ -273,6 +303,17 @@ FAIL/EXPIRED rows and for rows older than #267. Backfill: a one-shot
 `tools/backfill_source.py` that fills blanks from `postings_seen` (when M1 has
 run long enough) and otherwise from the URL guess, marked `source_guessed=1`
 — or simply leave old rows blank; open question 3.
+
+**Shipped 2026-09-13.** `tracker._source_for_write(url, job_source)`: a
+`Job.source` that is a registered source name wins, and so does any
+`gmail_<aggregator>` value — Gmail alert jobs never carry the bare registry
+name (`hunter/gmail_parsers.py`), so the prefix is treated as a real source,
+not a marker; the apply pipeline's synthetic markers (`doomed_gate`,
+`backend_only_gate`, `dedup_ct_gate`, `post_generation_abort`) fall through to
+the `postings_seen` row for the same `url_norm`; anything else is `''` and the
+write still succeeds. Open question 3 was decided before the code (see below):
+no backfill and no `tools/backfill_source.py` — old rows stay blank and
+`funnel.source_for_row` keeps the URL guess for them.
 
 ## M4 — What the data is for: the digest and the company view
 
