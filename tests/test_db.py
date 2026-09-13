@@ -73,6 +73,7 @@ def test_init_db_has_all_columns(db_path: Path) -> None:
         "outcome_label",
         "outcome_at",
         "skip_reason",
+        "source",
         "pending_meta",
     }
     with get_db(db_path) as conn:

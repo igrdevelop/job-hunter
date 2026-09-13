@@ -79,6 +79,7 @@ requires for `hunter/tracker.py`'s column-index constants.
 | `claimed_at` | bot (M1 apply-queue) | `Job.claimed_at` | Pre-`Job`-entity primitive living on the wrong table today |
 | `pending_meta` | bot (M1 apply-queue) | `Job.payload` | Full serialized `Job` dataclass, JSON |
 | `skip_reason` | bot (MARKET_MEMORY M2) | `Tailoring.skip_reason` | `<prefix>[:<detail>]` over `tracker.SKIP_REASON_PREFIXES` — why a `SKIP` `Tailoring.status` was reached; empty on pre-M2 rows; never mirrored to the Sheet |
+| `source` | bot (MARKET_MEMORY M3) | `Vacancy.source` | Which hunt source surfaced the vacancy, written at INSERT (`Job.source` when it is a registered source name, else the `postings_seen` row for the same `url_norm`); empty on pre-M3 rows (no backfill, owner decision 2026-09-12) — `hunter/funnel.py` falls back to its URL guess for blanks; never mirrored to the Sheet |
 | `app_status` | **API** (`tracker-migrations.ts`, absent from `hunter/db.py`) | `Outcome.response` (parallel input) | Manual status set from the website dropdown; bot never reads/writes it — a bot-only column scan would miss this one |
 
 **The `ats_status` overload:** (1) a real score (`"85%"`) → `QualityReport.verdict_score` /

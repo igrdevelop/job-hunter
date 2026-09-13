@@ -877,6 +877,92 @@ def latest_manual_pending() -> dict[str, str] | None:
 # ── Write operations ──────────────────────────────────────────────────────────
 
 
+# ── source column (docs/MARKET_MEMORY_PLAN.md M3) ────────────────────────────
+#
+# Which hunt source surfaced a vacancy, written at INSERT time instead of
+# guessed from the URL by hunter/funnel.py afterwards — the guess collapses
+# every Greenhouse/Lever/Workable/Ashby/Recruitee link into the ATS bucket no
+# matter which board actually surfaced it. Reports-only: nothing gates on it
+# and it is mirrored nowhere. '' = pre-M3 row or no source in hand; the
+# funnel keeps the URL guess as the fallback for blanks (no backfill, owner
+# decision 2026-09-12). UPDATE-style conversions (_convert_own_fail_row,
+# convert_own_applied_row) leave the value the row was written with.
+
+_SOURCE_NAMES: frozenset[str] | None = None
+
+
+def _real_source_names() -> frozenset[str]:
+    """Names of every registered hunt source, cached after the first call.
+
+    Read from ``hunter.sources._fetch_roster()`` — the toggle-INDEPENDENT
+    roster — rather than ``ALL_SOURCES`` alone: a source disabled by its
+    ``*_ENABLED`` flag after a row was queued still surfaced that row, and
+    the name must not be rejected just because the toggle flipped. Gmail is
+    the one source with no URL domain of its own and therefore absent from
+    that roster (and ``GMAIL_ENABLED`` defaults to false, so from
+    ``ALL_SOURCES`` too); its ``name`` is a class attribute, read without
+    instantiating. Imported lazily (hunter.sources -> hunter.tracker would
+    be a cycle at module level) and best-effort: an import failure yields
+    whatever was collected before it, so a name falls through to the
+    postings_seen lookup instead of crashing a tracker write.
+    """
+    global _SOURCE_NAMES
+    if _SOURCE_NAMES is None:
+        names: set[str] = set()
+        try:
+            from hunter.sources import ALL_SOURCES, _fetch_roster
+
+            names.update(s.name for s in [*_fetch_roster(), *ALL_SOURCES] if getattr(s, "name", ""))
+        except Exception as e:  # pragma: no cover - import-time environment failure
+            log.warning("tracker._real_source_names: source roster unavailable: %s", e)
+        try:
+            from hunter.sources.gmail import GmailSource
+
+            names.add(GmailSource.name)
+        except Exception as e:  # pragma: no cover - google libs absent
+            log.warning("tracker._real_source_names: gmail source unavailable: %s", e)
+        _SOURCE_NAMES = frozenset(names)
+    return _SOURCE_NAMES
+
+
+def _source_for_write(url: str, job_source: str = "") -> str:
+    """Resolve the ``source`` value a tracker INSERT should stamp.
+
+    ``job_source`` wins when it is a REAL registered source name. The apply
+    pipeline builds synthetic Jobs with markers like ``doomed_gate`` /
+    ``backend_only_gate`` / ``dedup_ct_gate`` / ``post_generation_abort`` in
+    that field (hunter/pipeline/gates.py and friends) — those describe the
+    writer, not the board, and fall through to the ``postings_seen`` row for
+    the same ``url_norm`` (hunter/postings_seen.py, M1), which knows which
+    source really surfaced the listing. Anything else resolves to ''.
+
+    The lookup reads ``postings_seen`` through THIS module's ``DB_PATH`` (in
+    prod both tables share tracker.db) rather than ``postings_seen.get_row``:
+    the ``tracker_db`` test fixture repoints only ``tracker.DB_PATH``, so
+    going through the other module's path would open — and lazily CREATE the
+    table in — the real ./tracker.db from every SKIP/FAIL write in the suite.
+    A missing table (fresh DB, M1 never ran) or any other failure returns
+    '' — a tracker write must never fail over a reports-only column.
+    """
+    name = (job_source or "").strip()
+    # Gmail alert jobs carry ``gmail_<aggregator>`` (hunter/gmail_parsers.py),
+    # never the bare registry name — the hunt loop's own gmail checks key on
+    # that prefix too (hunter/main.py), so it is a real source, not a marker.
+    if name and (name in _real_source_names() or name.startswith("gmail_")):
+        return name
+    if not url:
+        return ""
+    try:
+        with get_db(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT source FROM postings_seen WHERE url_norm = ?",
+                (normalize_url(url),),
+            ).fetchone()
+    except Exception:
+        return ""
+    return (row["source"] or "").strip() if row else ""
+
+
 def add_manual_jobleads_pending(
     *,
     url: str,
@@ -899,14 +985,16 @@ def add_manual_jobleads_pending(
     norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
     folder_str = str(folder_abs).replace("\\", "/")
+    source = _source_for_write(url)
 
     with get_db(DB_PATH) as conn:
         _clear_own_placeholder(conn, url)
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, folder, to_learn)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, folder, to_learn,
+             source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
@@ -919,6 +1007,7 @@ def add_manual_jobleads_pending(
                 norm,
                 folder_str,
                 "Paste job text into job_posting.txt in Folder, then re-run apply (same URL).",
+                source,
             ),
         )
 
@@ -980,6 +1069,9 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
     # total; the full breakdown stays on content.json next to the docs.
     cost_payload = content.get("cost") if isinstance(content.get("cost"), dict) else None
     cost_usd = cost_payload.get("total_usd") if cost_payload else None
+    # M3: no Job here — the postings_seen row for this url is the only
+    # source of truth for which board surfaced it ('' when M1 never saw it).
+    source = _source_for_write(apply_url)
 
     with get_db(DB_PATH) as conn:
         # Atomic dedup: check + insert inside ONE transaction so concurrent
@@ -1045,8 +1137,8 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
             """
             INSERT INTO applications
             (id, date, user_id, company, title, stack, ats_status, url, url_norm,
-             folder, sent, reapplication, to_learn, cost_usd)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+             folder, sent, reapplication, to_learn, cost_usd, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
             """,
             (
                 _new_row_id(),
@@ -1062,6 +1154,7 @@ def add_applied(content: dict, force: bool = False, reapplication: bool = False)
                 "+" if (is_reapply or reapplication) else "",
                 to_learn,
                 cost_usd,
+                source,
             ),
         )
     return True
@@ -1094,16 +1187,18 @@ def add_skipped(job: Job, *, reason: str = "") -> dict | None:
     row_id = _new_row_id()
     norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
+    source = _source_for_write(job.url, job.source)
 
     with get_db(DB_PATH) as conn:
         _clear_own_placeholder(conn, job.url)
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, sent, skip_reason)
-            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent, skip_reason,
+             source)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?, ?)
             """,
-            (row_id, today, _uid(), job.company, job.title, norm, norm, skip_reason),
+            (row_id, today, _uid(), job.company, job.title, norm, norm, skip_reason, source),
         )
 
     return {
@@ -1137,6 +1232,7 @@ def add_react_skipped(content: dict, url: str, *, reason: str = "react") -> None
 
     norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
+    source = _source_for_write(url)
 
     with get_db(DB_PATH) as conn:
         _clear_own_placeholder(conn, url)
@@ -1144,8 +1240,8 @@ def add_react_skipped(content: dict, url: str, *, reason: str = "react") -> None
             """
             INSERT INTO applications
             (id, date, user_id, company, title, stack, ats_status, url, url_norm, sent,
-             skip_reason)
-            VALUES (?, ?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?)
+             skip_reason, source)
+            VALUES (?, ?, ?, ?, ?, ?, 'SKIP', ?, ?, '—', ?, ?)
             """,
             (
                 _new_row_id(),
@@ -1157,6 +1253,7 @@ def add_react_skipped(content: dict, url: str, *, reason: str = "react") -> None
                 norm,
                 norm,
                 normalize_skip_reason(reason),
+                source,
             ),
         )
 
@@ -1315,16 +1412,17 @@ def add_expired(url: str, company: str = "", title: str = "") -> None:
 
     norm = normalize_url(url) if url else ""
     today = date.today().strftime("%Y-%m-%d")
+    source = _source_for_write(url)
 
     with get_db(DB_PATH) as conn:
         _clear_own_placeholder(conn, url)
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, 'EXPIRED')
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent, source)
+            VALUES (?, ?, ?, ?, ?, 'SKIP', ?, ?, 'EXPIRED', ?)
             """,
-            (_new_row_id(), today, _uid(), company, title, norm, norm),
+            (_new_row_id(), today, _uid(), company, title, norm, norm, source),
         )
 
 
@@ -1346,16 +1444,17 @@ def add_failed(job: Job) -> None:
 
     norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
+    source = _source_for_write(job.url, job.source)
 
     with get_db(DB_PATH) as conn:
         _clear_own_placeholder(conn, job.url)
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, sent)
-            VALUES (?, ?, ?, ?, ?, 'FAIL', ?, ?, '—')
+            (id, date, user_id, company, title, ats_status, url, url_norm, sent, source)
+            VALUES (?, ?, ?, ?, ?, 'FAIL', ?, ?, '—', ?)
             """,
-            (_new_row_id(), today, _uid(), job.company, job.title, norm, norm),
+            (_new_row_id(), today, _uid(), job.company, job.title, norm, norm, source),
         )
 
 
@@ -1406,13 +1505,14 @@ def add_pending(job: Job) -> str:
     row_id = _new_row_id()
     norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
+    source = _source_for_write(job.url, job.source)
 
     with get_db(DB_PATH) as conn:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, pending_meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, pending_meta, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
@@ -1424,6 +1524,7 @@ def add_pending(job: Job) -> str:
                 job.url,
                 norm,
                 _serialize_pending_meta(job),
+                source,
             ),
         )
     return row_id

@@ -19,7 +19,7 @@ def funnel_db(tracker_db, monkeypatch):
     return tracker_db
 
 
-def _insert(db, *, url=None, ats="", sent="", answer="", confirmation="", d=None):
+def _insert(db, *, url=None, ats="", sent="", answer="", confirmation="", d=None, source=""):
     d = d if d is not None else date.today().isoformat()
     # Each call that doesn't specify a URL gets its own unique URL so multiple
     # inserts don't collide on the (user_id, url_norm) unique constraint.
@@ -28,8 +28,20 @@ def _insert(db, *, url=None, ats="", sent="", answer="", confirmation="", d=None
     with get_db(db) as conn:
         conn.execute(
             "INSERT INTO applications (id, date, company, title, ats_status, url, "
-            "url_norm, sent, confirmation, answer) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (uuid.uuid4().hex[:8], d, "Co", "Dev", ats, url, url, sent, confirmation, answer),
+            "url_norm, sent, confirmation, answer, source) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                uuid.uuid4().hex[:8],
+                d,
+                "Co",
+                "Dev",
+                ats,
+                url,
+                url,
+                sent,
+                confirmation,
+                answer,
+                source,
+            ),
         )
 
 
@@ -118,6 +130,60 @@ def test_by_source_grouping(funnel_db):
     assert rep.by_source["justjoin"].generated == 2
     assert rep.by_source["justjoin"].sent == 1
     assert rep.by_source["nofluffjobs"].sent == 1
+
+
+def test_by_source_prefers_the_stored_column_over_the_url_guess(funnel_db):
+    """M3: a Greenhouse link surfaced by justjoin must count under justjoin.
+
+    The URL guess routes it to ats_aggregator — exactly the collapse the
+    stored column exists to undo."""
+    gh = "https://boards.greenhouse.io/acme/jobs/123"
+    assert funnel.source_for_url(gh) == "ats_aggregator"
+    _insert(funnel_db, url=gh, ats="90%", sent="2026-06-10", source="justjoin")
+
+    rep = funnel.compute_funnel()
+    assert rep.by_source["justjoin"].sent == 1
+    assert "ats_aggregator" not in rep.by_source
+
+
+def test_by_source_falls_back_to_the_url_guess_for_a_blank_source(funnel_db):
+    """A pre-M3 row (source='') keeps the old attribution byte-for-byte."""
+    _insert(funnel_db, url="https://nofluffjobs.com/job/x", ats="70%", source="")
+    _insert(funnel_db, url="https://nofluffjobs.com/job/y", ats="70%", source="   ")
+
+    rep = funnel.compute_funnel()
+    assert rep.by_source["nofluffjobs"].tracked == 2
+
+
+def test_source_for_row():
+    assert funnel.source_for_row("gmail", "https://justjoin.it/o/a") == "gmail"
+    assert funnel.source_for_row("", "https://justjoin.it/o/a") == "justjoin"
+    assert funnel.source_for_row(None, "https://justjoin.it/o/a") == "justjoin"
+    assert funnel.source_for_row("", "") == "—"
+
+
+def test_compute_funnel_tolerates_a_db_without_the_source_column(tmp_path, monkeypatch):
+    """get_db() does not migrate; a pre-M3 database must not crash /funnel."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE applications (id TEXT, date TEXT, ats_status TEXT, url TEXT, "
+        "sent TEXT, confirmation TEXT, answer TEXT, outcome_label TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO applications VALUES ('a1b2c3d4', ?, '80%', 'https://justjoin.it/o/1', "
+        "'2026-09-01', '', '', '')",
+        (date.today().isoformat(),),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(funnel, "DB_PATH", path)
+
+    rep = funnel.compute_funnel()
+    assert rep.overall.sent == 1
+    assert rep.by_source["justjoin"].sent == 1
 
 
 def test_top_sources_sorted_by_sent(funnel_db):

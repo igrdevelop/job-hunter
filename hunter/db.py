@@ -279,6 +279,17 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # is mirrored nowhere (the Sheet contract stays A-K + the separate
         # column writers).
         ("skip_reason", "TEXT NOT NULL DEFAULT ''"),
+        # source (docs/MARKET_MEMORY_PLAN.md M3): WHICH hunt source surfaced
+        # the vacancy, written by every tracker INSERT that has a Job or a
+        # url in hand (tracker._source_for_write — Job.source when it is a
+        # real registered source name, else the postings_seen row for the
+        # same url_norm). Before this hunter/funnel.py GUESSED the source
+        # from the URL, which collapses every Greenhouse/Lever/Workable link
+        # — whichever board surfaced it — into the ATS bucket, exactly the
+        # source class ROADMAP 4.3 needs to judge. '' = a pre-M3 row, or a
+        # writer with no source in hand; the funnel keeps the URL guess as
+        # the fallback for blanks. No backfill (owner decision 2026-09-12).
+        ("source", "TEXT NOT NULL DEFAULT ''"),
         # pending_meta is a JSON blob of the full Job the hunt loop found
         # (source, location, salary, raw dict incl. permalink/post_text) —
         # everything apply_worker needs to reconstruct a Job object without
