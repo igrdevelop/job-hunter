@@ -26,6 +26,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
@@ -1828,6 +1829,7 @@ def apply_pull_updates(rows: list[dict]) -> int:
             orig_reapp = row_dict.get("_orig_reapplication")
             orig_to_learn = row_dict.get("_orig_to_learn")
 
+            params: tuple[Any, ...]
             if orig_sent is None and orig_reapp is None and orig_to_learn is None:
                 # No merge-time originals supplied — legacy/other-caller path.
                 sql = (
