@@ -1799,7 +1799,19 @@ def apply_pull_updates(rows: list[dict]) -> int:
     AND sheets_dirty=0 re-checks that guard inside the UPDATE itself: a web-UI
     edit (mark_sheets_dirty) committed between the merge's read and this write
     must not be clobbered by the older Sheet value — same race guard as
-    apply_pulled_outcomes.
+    apply_pulled_outcomes. That alone isn't enough, though: resync_dirty() runs
+    as its own scheduled job on the same event loop and can push a web-UI edit
+    to Sheets AND clear sheets_dirty back to 0 — in its own separate transaction
+    — all before this UPDATE runs (both functions await Sheets-API network calls
+    via asyncio.to_thread, which yields the loop for long enough). sheets_dirty=0
+    would then match again and this stale queued row would clobber the value
+    resync_dirty just correctly synced. Closed with compare-and-set: when the
+    caller supplies the row's `_orig_sent`/`_orig_reapplication`/`_orig_to_learn`
+    (the values the merge actually read — gsheets_sync._apply_pull_delta_db sets
+    these), the UPDATE also requires the live columns to still equal them, so a
+    row any other write touched in between — dirty flag aside — is rejected too.
+    A row missing those keys falls back to the plain sheets_dirty=0 check only,
+    so any other caller not yet passing merge-time originals keeps working.
     """
     if not rows:
         return 0
@@ -1809,16 +1821,43 @@ def apply_pull_updates(rows: list[dict]) -> int:
             row_id = row_dict.get("ID", "").strip()
             if not row_id:
                 continue
-            cur = conn.execute(
-                "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
-                "WHERE id=? AND sheets_dirty=0",
-                (
-                    row_dict.get("Sent", ""),
-                    row_dict.get("Re-application", ""),
-                    row_dict.get("To Learn", ""),
+            new_sent = row_dict.get("Sent", "")
+            new_reapp = row_dict.get("Re-application", "")
+            new_to_learn = row_dict.get("To Learn", "")
+            orig_sent = row_dict.get("_orig_sent")
+            orig_reapp = row_dict.get("_orig_reapplication")
+            orig_to_learn = row_dict.get("_orig_to_learn")
+
+            if orig_sent is None and orig_reapp is None and orig_to_learn is None:
+                # No merge-time originals supplied — legacy/other-caller path.
+                sql = (
+                    "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
+                    "WHERE id=? AND sheets_dirty=0"
+                )
+                params = (new_sent, new_reapp, new_to_learn, row_id)
+            else:
+                # Compare-and-set: reject the write if any of the three columns
+                # changed since the merge read them, not just if sheets_dirty
+                # flipped back to 0 in between. COALESCE(...,'') treats NULL and
+                # '' as equal — the columns are NOT NULL DEFAULT '' today, but the
+                # comparison stays correct even if that ever changes.
+                sql = (
+                    "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
+                    "WHERE id=? AND sheets_dirty=0 "
+                    "AND COALESCE(sent,'')=COALESCE(?,'') "
+                    "AND COALESCE(reapplication,'')=COALESCE(?,'') "
+                    "AND COALESCE(to_learn,'')=COALESCE(?,'')"
+                )
+                params = (
+                    new_sent,
+                    new_reapp,
+                    new_to_learn,
                     row_id,
-                ),
-            )
+                    orig_sent,
+                    orig_reapp,
+                    orig_to_learn,
+                )
+            cur = conn.execute(sql, params)
             updated += cur.rowcount
     return updated
 

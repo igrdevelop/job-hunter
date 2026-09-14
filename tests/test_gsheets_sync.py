@@ -1116,3 +1116,57 @@ def test_clean_row_real_db_round_trip(tracker_db):
         ).fetchone()
     assert row["sent"] == "2026-06-11"
     assert row["to_learn"] == "RxJS"
+
+
+def test_stale_pull_update_rejected_after_dirty_resync_race(tracker_db):
+    """CodeRabbit #4009890964: pull_full_snapshot() reads a row in
+    _apply_pull_delta_db, then awaits several more asyncio.to_thread hops
+    (apply_pull_updates itself, plus the outcome merge and orphan reconcile
+    that run after it) before this write lands. resync_dirty() is its own
+    scheduled job on the same event loop, awaiting Sheets-API network calls
+    the same way — plenty of room for it to run entirely inside that gap. If a
+    web-UI edit sets sheets_dirty=1 there and resync_dirty() then pushes it and
+    clears sheets_dirty back to 0 — both in their own separate transactions —
+    the plain `sheets_dirty=0` guard matches again and the pull's stale queued
+    Sheet value would clobber the edit resync_dirty just correctly synced. The
+    `_orig_*` compare-and-set must reject the write instead, end to end against
+    the real tracker.db and the real merge function."""
+    from hunter import tracker
+    from hunter.gsheets_sync import _apply_pull_delta_db, apply_pull_updates
+
+    content = {
+        "company_name": "RaceCo",
+        "job_title": "Backend Dev",
+        "stack": "Python",
+        "ats_score": "75",
+        "apply_url": "https://example.com/race/1",
+        "output_folder": "/tmp/RaceCo",
+        "to_learn": "",
+    }
+    assert tracker.add_applied(content)
+    row_id = tracker.lookup_url("https://example.com/race/1")[0]["id"]
+    tracker.set_sheets_row(row_id, 7)
+
+    # Merge read: the Sheet has a newer Sent value than the DB's still-blank one.
+    sheet_row = {"ID": row_id, "Sent": "2026-06-12", "To Learn": "", "Re-application": ""}
+    to_write = _apply_pull_delta_db([(7, sheet_row)])
+    assert len(to_write) == 1
+    assert to_write[0]["_orig_sent"] == ""
+
+    # Race, entirely AFTER the merge read above: a web-UI edit sets a real Sent
+    # value and marks the row dirty, then resync_dirty() pushes it to Sheets and
+    # clears the flag — modeled here as the two separate transactions they are.
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        conn.execute("UPDATE applications SET sent='WEB-UI-VALUE' WHERE id=?", (row_id,))
+    tracker.mark_sheets_dirty(row_id)
+    tracker.mark_sheets_clean(row_id)  # resync_dirty()'s post-push clear
+
+    written = apply_pull_updates(to_write)
+    assert written == 0, "stale queued Sheet value must not overwrite the resynced edit"
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT sent, sheets_dirty FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    assert row["sent"] == "WEB-UI-VALUE", "the resynced web-UI edit must survive the stale pull"
+    assert row["sheets_dirty"] == 0

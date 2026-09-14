@@ -509,6 +509,17 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
                 changed = True
 
         if changed:
+            # Carry the values this merge actually read, under keys apply_pull_updates
+            # recognizes as its compare-and-set originals (see its docstring): a row
+            # can turn dirty AFTER this read (still caught by the plain sheets_dirty=0
+            # check) but resync_dirty() can then push that newer edit and clear
+            # sheets_dirty back to 0 in a separate transaction, all before
+            # apply_pull_updates() runs — sheets_dirty=0 alone would then match again
+            # and this stale `updated` would clobber the value resync just synced.
+            # Requiring the live columns to still equal what was read here closes that.
+            updated["_orig_sent"] = db_row.get("Sent", "")
+            updated["_orig_reapplication"] = db_row.get("Re-application", "")
+            updated["_orig_to_learn"] = db_row.get("To Learn", "")
             to_write.append(updated)
 
     return to_write

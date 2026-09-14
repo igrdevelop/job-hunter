@@ -2889,7 +2889,24 @@ dedup reflect the new state without a bot restart.
   DB edit resynced), the dirty DB value still wins — same "dirty beats
   everything" precedence as the Outcome merge below, and `apply_pull_updates`'s
   `UPDATE ... AND sheets_dirty=0` re-checks the guard at write time to close
-  the merge-read-to-write race. **Known gap, shared with Outcome's dirty
+  the merge-read-to-write race. That flag-only recheck isn't sufficient by
+  itself, though (CodeRabbit review on #281, fixed same day): `resync_dirty()`
+  runs as its own scheduled job on the same event loop and can push a web-UI
+  edit to Sheets and clear `sheets_dirty` back to 0 — in its own separate
+  transaction — entirely inside the gap between the merge's read and
+  `apply_pull_updates`' write (both hop through `asyncio.to_thread` for
+  Sheets-API network calls, which yields the loop for long enough). At that
+  point `sheets_dirty=0` matches again and the pull's stale queued value would
+  clobber the edit resync just correctly synced. Closed with compare-and-set:
+  `_apply_pull_delta_db` now carries the `Sent`/`Re-application`/`To Learn`
+  values it actually read under `_orig_sent`/`_orig_reapplication`/
+  `_orig_to_learn` on each `to_write` row, and `apply_pull_updates` requires
+  the live columns to still equal those originals (`COALESCE(...,'')` for
+  NULL/'' safety) in addition to `sheets_dirty=0` — a row any other write
+  touched in between, dirty flag aside, is rejected too. Rows without those
+  keys (any future caller not yet passing merge-time originals) fall back to
+  the plain `sheets_dirty=0` check, so `apply_pull_updates`'s API stays
+  backward compatible. **Known gap, shared with Outcome's dirty
   guard below:** `sheets_dirty` is one flag per row, not per column — a row
   dirty ONLY because of an `/outcome` press (or a SKIP/FAIL write) also skips
   a genuine, unrelated Sheets-side edit to To Learn/Re-application until the
