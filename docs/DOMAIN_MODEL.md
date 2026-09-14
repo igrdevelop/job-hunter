@@ -65,13 +65,13 @@ requires for `hunter/tracker.py`'s column-index constants.
 | `url` | bot | `Vacancy.url` | |
 | `url_norm` | bot | `Vacancy.url_norm` | Becomes the unique `(account_id, vacancy_id)` constraint on `Tailoring` |
 | `folder` | bot | `Document.storage_key` (root) | |
-| `sent` | bot | **overloaded**: `Outcome.sent_at` + `Vacancy`/`Tailoring` state | Free-text in practice: a real date, `EXPIRED` (Vacancy state leaking in), or `—` (SKIP/FAIL's "deliberately not sent", i.e. `Tailoring.status` leaking in) |
+| `sent` | bot, **also API** (derived) | **overloaded**: `Outcome.sent_at` + `Vacancy`/`Tailoring` state | Free-text in practice: a real date, `EXPIRED` (Vacancy state leaking in), or `—` (SKIP/FAIL's "deliberately not sent", i.e. `Tailoring.status` leaking in). The API's `app_status` PATCH derivation (`TrackerService.updateApplication`) also writes this column: today's ISO date for an "applied" status, or the bot's own `—` marker for `Skipped`/`Filter miss` — but only when `sent` is still blank/a dash marker, never overwriting a real date or free text |
 | `reapplication` | bot | `Tailoring.is_reapplication` | `+` flag from the re-post gate |
 | `to_learn` | bot | `QualityReport.skills_gap` | |
 | `drive_url` | bot | ReadModel/SheetsMirror bucket | Owner-only legacy Google Drive integration (§3.4), not part of target `Document`/storage |
 | `confirmation` | bot | `Outcome.confirmed_at` | |
 | `answer` | bot | `Outcome.response` | |
-| `outcome_label` | bot (08-DATA_EVAL M1, `/outcome`) | `Outcome` lifecycle state (`no_reply \| rejection \| interview \| offer` in §1) | Today's labels are `tracker.OUTCOME_LABELS` = `interview`/`rejected`/`offer`/`silence`, written by `tracker.set_outcome()` (user-scoped); `silence` is an OBSERVED outcome but not a reply — `funnel._is_answered` counts only `OUTCOME_REPLY_LABELS`, `funnel._has_outcome` all four, which is what tells "zero replies" apart from "nothing recorded". Empty = not recorded (pre-M1 rows, or never labelled) |
+| `outcome_label` | bot (08-DATA_EVAL M1, `/outcome`), **also API** (derived) | `Outcome` lifecycle state (`no_reply \| rejection \| interview \| offer` in §1) | Today's labels are `tracker.OUTCOME_LABELS` = `interview`/`rejected`/`offer`/`silence`, written by `tracker.set_outcome()` (user-scoped); `silence` is an OBSERVED outcome but not a reply — `funnel._is_answered` counts only `OUTCOME_REPLY_LABELS`, `funnel._has_outcome` all four, which is what tells "zero replies" apart from "nothing recorded". Empty = not recorded (pre-M1 rows, or never labelled). The same `app_status` PATCH derivation also sets this label (+ `outcome_at`) for the four statuses with a matching bot outcome (`Interview`/`Rejected`/`Offer`/`Silence`), but only when it actually differs from what's already stored, and never to clear it |
 | `outcome_at` | bot (08-DATA_EVAL M1) | `Outcome.updated_at` | Stamped by `set_outcome()` alongside the label; NULL until a label is recorded |
 | `sheets_row` | bot | ReadModel/SheetsMirror bucket | |
 | `sheets_dirty` | bot | ReadModel/SheetsMirror bucket | |
@@ -84,12 +84,32 @@ requires for `hunter/tracker.py`'s column-index constants.
 | `skip_reason` | bot (MARKET_MEMORY M2) | `Tailoring.skip_reason` | `<prefix>[:<detail>]` over `tracker.SKIP_REASON_PREFIXES` — why a `SKIP` `Tailoring.status` was reached; empty on pre-M2 rows; never mirrored to the Sheet |
 | `source` | bot (MARKET_MEMORY M3) | `Vacancy.source` | Which hunt source surfaced the vacancy, written at INSERT (`Job.source` when it is a registered source name, else the `postings_seen` row for the same `url_norm`); empty on pre-M3 rows (no backfill, owner decision 2026-09-12) — `hunter/funnel.py` falls back to its URL guess for blanks; never mirrored to the Sheet |
 | `app_status` | **API** (`tracker-migrations.ts`, absent from `hunter/db.py`) | `Outcome.response` (parallel input) | Manual status set from the website dropdown; bot never reads/writes it — a bot-only column scan would miss this one |
+| `owner_reason` | **API** (`tracker-migrations.ts`, absent from `hunter/db.py`) | `Outcome.response` (parallel input, structured) | Code from a fixed list, set only when `app_status` is `Skipped`/`Filter miss` (see below); bot never reads/writes it, never mirrored to the Sheet |
+| `owner_reason_note` | **API** (`tracker-migrations.ts`, absent from `hunter/db.py`) | `Outcome.response` (parallel input, free text) | Optional comment, ≤ 500 chars, alongside `owner_reason`; same ownership/mirroring rules |
 
 **The `ats_status` overload:** (1) a real score (`"85%"`) → `QualityReport.verdict_score` /
 `Tailoring.status='applied'`; (2) `SKIP`/`FAIL`/`MANUAL`/`EXPIRED` → `Tailoring.status`
 (terminal); (3) `PENDING`/`IN_PROGRESS` → `Job.status` — an apply-queue Job's state stored on the
 Tailoring row for lack of a `Job` entity. Splitting `Job` out (M4) is what finally lets this
 column mean only "how did the application conclude".
+
+**`owner_reason` / `owner_reason_note` — Skipped vs Filter miss:** both hang off `app_status`,
+and the two values that unlock them mean opposite things. `app_status = Skipped` is the owner's
+own decision not to apply — the filters were right to let the vacancy through. `app_status =
+Filter miss` is the opposite: the bot should have dropped this vacancy and didn't. `owner_reason`
+is a code from a fixed list (mirrored in site `models.ts` as `OWNER_REASONS`, with labels):
+`stack`, `fullstack_backend`, `level`, `title`, `location`, `language`, `work_authorization`,
+`contract`, `relocation`, `company`, `russia`, `duplicate`, `expired`, `other` are valid for
+either status; `salary` and `not_interesting` are valid only for `Skipped` (a Filter miss can't
+be about salary or plain disinterest — the bot has no salary gate and no notion of "interesting").
+The API PATCH rejects a reason that doesn't match the resulting status (400), and clears both
+columns whenever `app_status` moves away from `Skipped`/`Filter miss` — a corrected mistake must
+not leave a stale reason in the analysis data. `Filter miss` + `owner_reason` is the first
+structured "should have been filtered" label in this codebase: the 2026-08-08 Sent-notes audit
+(`docs/AGENT_LOG.md:78`) only ever classified 250 free-text notes by hand after the fact. Useful
+ground truth for a future filter-tuning pass, but per `docs/MARKET_MEMORY_PLAN.md`'s non-goal
+("No change to `filters.py` logic or to any gate"), acting on it needs its own plan — this column
+only records the label.
 
 ### 2.1b `profile_jobs` (mirrored from the API's `tracker-migrations.ts`; API writes, bot drains
 via `hunter/profile_jobs.py`)
