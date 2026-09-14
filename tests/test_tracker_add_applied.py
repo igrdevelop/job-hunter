@@ -155,6 +155,54 @@ def test_apply_pull_updates_updates_fields(tracker_db) -> None:
     assert row["to_learn"] == "RxJS"
 
 
+def test_apply_pull_updates_skips_row_that_turned_dirty_after_merge_read(tracker_db) -> None:
+    """AND sheets_dirty=0 race guard: a row marked dirty after the pull's merge
+
+    read (e.g. a concurrent web-UI edit) must not be clobbered by the stale
+    Sheets value the merge already decided to write.
+    """
+    content = {
+        "company_name": "RaceCo",
+        "job_title": "Backend Dev",
+        "stack": "Python",
+        "ats_score": "60",
+        "apply_url": "https://example.com/race/1",
+        "output_folder": "/tmp/RaceCo",
+        "to_learn": "",
+    }
+    assert add_applied(content)
+
+    rows = lookup_url("https://example.com/race/1")
+    row_id = rows[0]["id"]
+
+    # Simulate a web-UI write landing between _apply_pull_delta_db's merge read
+    # and apply_pull_updates' write.
+    tracker.mark_sheets_dirty(row_id)
+
+    count = apply_pull_updates(
+        [
+            {
+                "ID": row_id,
+                "Sent": "2026-05-14",
+                "Re-application": "",
+                "To Learn": "",
+            }
+        ]
+    )
+    assert count == 0
+
+    from hunter.db import get_db
+
+    with get_db(tracker_db) as conn:
+        row = conn.execute(
+            "SELECT sent, sheets_dirty FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    # Sent stays whatever add_applied wrote (blank) — the pull's Sheets value
+    # never landed — and sheets_dirty is untouched (still 1).
+    assert row["sent"] != "2026-05-14"
+    assert row["sheets_dirty"] == 1
+
+
 def test_apply_pull_updates_noop_for_unknown_id(tracker_db) -> None:
     content = {
         "company_name": "Ghost",

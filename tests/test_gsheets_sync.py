@@ -846,13 +846,14 @@ def _db_row(row_id: str = "abc12345", **overrides) -> dict:
 class TestApplyPullDeltaDB:
     """Conflict matrix for _apply_pull_delta_db (moved from TrackerCache in Phase 5.5)."""
 
-    def _run(self, db_rows, sheets_rows):
-        """Call _apply_pull_delta_db with mocked DB and set_sheets_row."""
+    def _run(self, db_rows, sheets_rows, dirty_ids: set[str] | None = None):
+        """Call _apply_pull_delta_db with mocked DB, set_sheets_row and dirty state."""
         from hunter.gsheets_sync import _apply_pull_delta_db
 
         with (
             patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=db_rows),
             patch("hunter.gsheets_sync.set_sheets_row"),
+            patch("hunter.gsheets_sync.get_pull_dirty_ids", return_value=dirty_ids or set()),
         ):
             return _apply_pull_delta_db(sheets_rows)
 
@@ -933,6 +934,22 @@ class TestApplyPullDeltaDB:
         with (
             patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=[row]),
             patch("hunter.gsheets_sync.set_sheets_row") as mock_set,
+            patch("hunter.gsheets_sync.get_pull_dirty_ids", return_value=set()),
+        ):
+            _apply_pull_delta_db([(7, dict(row))])
+        mock_set.assert_called_once_with("abc12345", 7)
+
+    def test_set_sheets_row_called_even_for_dirty_row(self):
+        """sheets_row index is persisted regardless of the dirty guard — it just
+        records where the row lives in the Sheet, unrelated to which side wins
+        for Sent/To Learn/Re-application."""
+        row = _db_row()
+        from hunter.gsheets_sync import _apply_pull_delta_db
+
+        with (
+            patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=[row]),
+            patch("hunter.gsheets_sync.set_sheets_row") as mock_set,
+            patch("hunter.gsheets_sync.get_pull_dirty_ids", return_value={"abc12345"}),
         ):
             _apply_pull_delta_db([(7, dict(row))])
         mock_set.assert_called_once_with("abc12345", 7)
@@ -943,3 +960,159 @@ class TestApplyPullDeltaDB:
         sheet_row = {**row, "ID": "unknownid"}
         to_write = self._run([row], [(2, sheet_row)])
         assert to_write == []
+
+
+# ── _apply_pull_delta_db — sheets_dirty guard (web-UI edit wins the pull) ─────
+
+
+class TestApplyPullDeltaDBDirtyGuard:
+    """A dirty DB row (an unpushed web-UI/bot edit) keeps its Sent / To Learn /
+
+    Re-application values during the pull — the Sheet cell is stale until
+    resync_dirty() pushes the edit out. Mirrors _merge_outcomes' dirty
+    precedence for column O.
+    """
+
+    def _run(self, db_rows, sheets_rows, dirty_ids: set[str]):
+        from hunter.gsheets_sync import _apply_pull_delta_db
+
+        with (
+            patch("hunter.gsheets_sync.read_all_tracker_rows", return_value=db_rows),
+            patch("hunter.gsheets_sync.set_sheets_row"),
+            patch("hunter.gsheets_sync.get_pull_dirty_ids", return_value=dirty_ids),
+        ):
+            return _apply_pull_delta_db(sheets_rows)
+
+    def test_dirty_row_keeps_db_sent_against_differing_sheet(self):
+        """DB Sent set by the web UI, Sheet still blank (not resynced yet),
+        row is dirty → keep the DB date, don't blank it."""
+        row = _db_row(Sent="2026-06-01")
+        sheet_row = {**row, "Sent": ""}
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids={row["ID"]})
+        assert to_write == []
+
+    def test_dirty_row_keeps_db_to_learn_against_differing_sheet(self):
+        row = _db_row(**{"To Learn": "RxJS"})
+        sheet_row = {**row, "To Learn": "NgRx"}
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids={row["ID"]})
+        assert to_write == []
+
+    def test_dirty_row_keeps_db_re_application_against_differing_sheet(self):
+        row = _db_row(**{"Re-application": "+"})
+        sheet_row = {**row, "Re-application": ""}
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids={row["ID"]})
+        assert to_write == []
+
+    def test_dirty_row_wins_even_when_both_sides_changed(self):
+        """Owner edited the Sheet cell AND the web UI edited the DB before the
+        Sheet edit was ever read back. The dirty DB edit still wins — same
+        "dirty beats everything" precedence as the Outcome merge — and the
+        owner's Sheet edit is lost. Documented tradeoff, not a bug: the next
+        resync_dirty() push overwrites the Sheet with the DB's (newer) value."""
+        row = _db_row(Sent="2026-06-05")  # web UI set this after the DB read
+        sheet_row = {**row, "Sent": "2026-06-01"}  # owner's independent Sheet edit
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids={row["ID"]})
+        assert to_write == []
+
+    def test_clean_row_still_takes_sheet_values(self):
+        """A row NOT in dirty_ids is unaffected by the guard — Sheets still wins
+        on a real difference, same as before this change."""
+        row = _db_row(Sent="")
+        sheet_row = {**row, "Sent": "2026-06-01"}
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids=set())
+        assert len(to_write) == 1
+        assert to_write[0]["Sent"] == "2026-06-01"
+
+    def test_bot_marker_rule_still_applies_to_a_clean_row(self):
+        """The EXPIRED-beats-blank-Sheets marker rule is unaffected for a clean
+        row — it only interacts with the NEW dirty guard by being skipped
+        entirely when the row is dirty (covered by the other tests above)."""
+        row = _db_row(Sent="EXPIRED")
+        sheet_row = {**row, "Sent": ""}
+        to_write = self._run([row], [(2, sheet_row)], dirty_ids=set())
+        assert to_write == []
+
+
+# ── sheets_dirty guard — real DB round trip (no mocked DB layer) ─────────────
+#
+# The unit tests above mock get_pull_dirty_ids/read_all_tracker_rows/
+# apply_pull_updates in isolation. These exercise the real tracker.db wiring:
+# get_pull_dirty_ids() reading the real sheets_dirty column, and
+# apply_pull_updates()'s AND sheets_dirty=0 guard, together with
+# _apply_pull_delta_db's merge — the same two-step pipeline pull_full_snapshot
+# drives in production.
+
+
+def test_dirty_guard_real_db_round_trip(tracker_db):
+    """A web-UI edit (mark_sheets_dirty) survives a pull that would otherwise
+    blank it, end to end against the real tracker.db — this is the exact
+    scenario from the bug report: the web UI sets Sent and marks the row
+    dirty, then the periodic pull runs before resync_dirty() has pushed it."""
+    from hunter import tracker
+    from hunter.gsheets_sync import _apply_pull_delta_db
+
+    content = {
+        "company_name": "WebUiCo",
+        "job_title": "Frontend Dev",
+        "stack": "Angular",
+        "ats_score": "80",
+        "apply_url": "https://example.com/webui/1",
+        "output_folder": "/tmp/WebUiCo",
+        "to_learn": "",
+    }
+    assert tracker.add_applied(content)
+    row_id = tracker.lookup_url("https://example.com/webui/1")[0]["id"]
+
+    # Simulate the web UI's My Status write: sets Sent and marks the row dirty
+    # (sheets_row must already be set — otherwise it can't be a Sheets row yet).
+    tracker.set_sheets_row(row_id, 5)
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        conn.execute("UPDATE applications SET sent='2026-06-10' WHERE id=?", (row_id,))
+    tracker.mark_sheets_dirty(row_id)
+
+    # The pull runs before resync_dirty() — the Sheet cell is still blank.
+    sheet_row = {"ID": row_id, "Sent": "", "To Learn": "", "Re-application": ""}
+    to_write = _apply_pull_delta_db([(5, sheet_row)])
+
+    assert to_write == [], "dirty row must not be queued for a Sheets-sourced write"
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT sent, sheets_dirty FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    assert row["sent"] == "2026-06-10", "the web UI's edit must survive the pull"
+    assert row["sheets_dirty"] == 1, "still awaiting resync_dirty()'s push"
+
+
+def test_clean_row_real_db_round_trip(tracker_db):
+    """A row that is NOT dirty still takes the Sheet's value, end to end
+    against the real tracker.db — the fix must not regress the ordinary case."""
+    from hunter import tracker
+    from hunter.gsheets_sync import _apply_pull_delta_db, apply_pull_updates
+
+    content = {
+        "company_name": "CleanCo",
+        "job_title": "Backend Dev",
+        "stack": "Python",
+        "ats_score": "70",
+        "apply_url": "https://example.com/clean/1",
+        "output_folder": "/tmp/CleanCo",
+        "to_learn": "",
+    }
+    assert tracker.add_applied(content)
+    row_id = tracker.lookup_url("https://example.com/clean/1")[0]["id"]
+    tracker.set_sheets_row(row_id, 6)
+
+    sheet_row = {"ID": row_id, "Sent": "2026-06-11", "To Learn": "RxJS", "Re-application": ""}
+    to_write = _apply_pull_delta_db([(6, sheet_row)])
+    assert len(to_write) == 1
+
+    written = apply_pull_updates(to_write)
+    assert written == 1
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT sent, to_learn FROM applications WHERE id=?", (row_id,)
+        ).fetchone()
+    assert row["sent"] == "2026-06-11"
+    assert row["to_learn"] == "RxJS"

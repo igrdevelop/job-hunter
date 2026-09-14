@@ -1791,8 +1791,15 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
 def apply_pull_updates(rows: list[dict]) -> int:
     """Write Sheets-sourced field changes back to tracker (pull sync).
 
-    rows: list of row dicts (with 'ID') where Sheets had a newer value.
-    Updates Sent, Re-application, To Learn columns. Returns count updated.
+    rows: list of row dicts (with 'ID') where Sheets had a newer value, already
+    filtered by the conflict matrix (gsheets_sync._apply_pull_delta_db) to
+    exclude rows that were sheets_dirty at merge time. Updates Sent,
+    Re-application, To Learn columns. Returns count updated.
+
+    AND sheets_dirty=0 re-checks that guard inside the UPDATE itself: a web-UI
+    edit (mark_sheets_dirty) committed between the merge's read and this write
+    must not be clobbered by the older Sheet value — same race guard as
+    apply_pulled_outcomes.
     """
     if not rows:
         return 0
@@ -1803,7 +1810,8 @@ def apply_pull_updates(rows: list[dict]) -> int:
             if not row_id:
                 continue
             cur = conn.execute(
-                "UPDATE applications SET sent=?, reapplication=?, to_learn=? WHERE id=?",
+                "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
+                "WHERE id=? AND sheets_dirty=0",
                 (
                     row_dict.get("Sent", ""),
                     row_dict.get("Re-application", ""),
@@ -2590,3 +2598,21 @@ def get_dirty_sheets_count() -> int:
     with get_db(DB_PATH) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1").fetchone()
     return row["n"] if row else 0
+
+
+def get_pull_dirty_ids() -> set[str]:
+    """Row ids (this user) whose sheets_dirty=1.
+
+    The DB side of the Sheets pull's A–K conflict matrix (gsheets_sync.
+    _apply_pull_delta_db). `sheets_dirty` means the DB holds a Sent / To Learn /
+    Re-application edit (e.g. from the web UI) that resync_dirty() has not yet
+    pushed to the Sheet — a differing Sheet cell for such a row is stale, not a
+    real Sheets-side edit, and must not overwrite it. Same scope as
+    get_outcome_pull_state / read_all_tracker_rows.
+    """
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id FROM applications WHERE sheets_dirty=1 AND user_id=?",
+            (_uid(),),
+        ).fetchall()
+    return {r["id"] for r in rows}
