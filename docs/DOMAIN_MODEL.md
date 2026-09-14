@@ -105,7 +105,8 @@ be about salary or plain disinterest — the bot has no salary gate and no notio
 The API PATCH rejects a reason that doesn't match the resulting status (400), clears both
 columns whenever the resulting `app_status` is not `Skipped`/`Filter miss` — a corrected mistake
 must not leave a stale reason in the analysis data — and drops a stored reason that is no longer
-valid after a Skipped ↔ Filter miss switch. Clearing `app_status` (`''`) on a row that was
+valid after a Skipped ↔ Filter miss switch (only `owner_reason` is reset to `''` there;
+`owner_reason_note` is kept, since the comment usually still applies). Clearing `app_status` (`''`) on a row that was
 Skipped/Filter miss also resets `sent` from `—` back to blank (the row returns to the Unsent
 queue), except on rows whose `ats_status` is `SKIP`/`FAIL`, where the `—` was stamped by the bot
 at insert and must stay. Dates and `outcome_label` are never cleared by the API. `Filter miss` + `owner_reason` is the first
