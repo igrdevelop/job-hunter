@@ -37,6 +37,7 @@ from hunter.tracker import (
     mark_sheets_clean,
     get_dirty_rows_for_sheets,
     get_dirty_sheets_count,
+    get_pull_dirty_ids,
     lookup_url,
     read_all_tracker_rows,
     apply_pull_updates,
@@ -437,11 +438,27 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
     Intended to be called via asyncio.to_thread.
 
     Conflict matrix:
-      Sent:              bot marker (EXPIRED / '—' skip-fail dash) in DB
+      sheets_dirty=1 in DB              → keep DB (a web-UI / bot edit resync_dirty()
+                                          hasn't pushed to the Sheet yet — the Sheet
+                                          cell is stale, not a real Sheets-side edit;
+                                          same precedence as the Outcome merge in
+                                          _merge_outcomes. If the Sheet ALSO changed
+                                          in the meantime, the dirty DB edit still
+                                          wins — resolved the same way as Outcome's
+                                          "both sides changed" case)
+      else, Sent:        bot marker (EXPIRED / '—' skip-fail dash) in DB
                          + empty (Sheets)                → keep DB (Sheets will be fixed by resync)
                          anything else differs           → trust Sheets
-      To Learn:          always trust Sheets
-      Re-application:    always trust Sheets
+      else, To Learn:          always trust Sheets
+      else, Re-application:    always trust Sheets
+
+    Known gap, shared with _merge_outcomes' identical dirty guard: sheets_dirty
+    is one flag per ROW, not per column — a row dirty only because of an
+    /outcome press (or a SKIP/FAIL write) also skips a genuine, unrelated
+    Sheets-side edit to To Learn/Re-application until the next pull after
+    resync clears the flag. A per-column dirty flag would close it; not judged
+    worth a migration at this volume (see CLAUDE.md's Sent/Outcome conflict
+    matrix sections for the fuller writeup).
     """
     from hunter.tracker import REACT_SKIP_SENT_MARKERS
 
@@ -453,6 +470,7 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
 
     tracker_rows = {r["ID"]: r for r in read_all_tracker_rows() if r.get("ID")}
     sheets_by_id = {r.get("ID", ""): (idx, r) for idx, r in sheets_rows if r.get("ID")}
+    dirty_ids = get_pull_dirty_ids()
 
     to_write: list[dict] = []
     for row_id, db_row in tracker_rows.items():
@@ -460,8 +478,19 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
             continue
 
         sheet_idx, sheet_row = sheets_by_id[row_id]
-        # Persist Sheets row index to DB
+        # Persist Sheets row index to DB — unconditional, independent of dirty
+        # state (it just records where this row lives in the Sheet).
         set_sheets_row(row_id, sheet_idx)
+
+        if row_id in dirty_ids:
+            # DB holds a Sent / To Learn / Re-application edit that hasn't been
+            # pushed to the Sheet yet (e.g. the web UI's My Status write). A
+            # differing Sheet cell here — usually still blank — is stale, not a
+            # real conflicting edit; overwriting the DB now would silently lose
+            # the edit and resync_dirty() would then push the stale value back
+            # out. Skip the whole row; the next pull cycle picks up the Sheet's
+            # value once resync has cleared sheets_dirty.
+            continue
 
         changed = False
         updated = dict(db_row)
@@ -480,6 +509,17 @@ def _apply_pull_delta_db(sheets_rows: list[tuple[int, dict]]) -> list[dict]:
                 changed = True
 
         if changed:
+            # Carry the values this merge actually read, under keys apply_pull_updates
+            # recognizes as its compare-and-set originals (see its docstring): a row
+            # can turn dirty AFTER this read (still caught by the plain sheets_dirty=0
+            # check) but resync_dirty() can then push that newer edit and clear
+            # sheets_dirty back to 0 in a separate transaction, all before
+            # apply_pull_updates() runs — sheets_dirty=0 alone would then match again
+            # and this stale `updated` would clobber the value resync just synced.
+            # Requiring the live columns to still equal what was read here closes that.
+            updated["_orig_sent"] = db_row.get("Sent", "")
+            updated["_orig_reapplication"] = db_row.get("Re-application", "")
+            updated["_orig_to_learn"] = db_row.get("To Learn", "")
             to_write.append(updated)
 
     return to_write
@@ -622,8 +662,11 @@ async def pull_full_snapshot() -> dict:
     Pull all rows from Google Sheets and merge into DB.
 
     Conflict matrix (applied in _apply_pull_delta_db):
-      - Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
-      - To Learn, Re-application: always trust Sheets (user edits there).
+      - sheets_dirty=1: DB wins outright for Sent/To Learn/Re-application — a
+        web-UI/bot edit resync_dirty() hasn't pushed yet; overwriting it with the
+        still-stale Sheet cell would silently lose the edit.
+      - else, Sent: EXPIRED beats empty Sheets; Sheets date beats EXPIRED; else trust Sheets.
+      - else, To Learn, Re-application: always trust Sheets (user edits there).
       - Outcome (column O, _merge_outcomes): a valid Sheet label wins unless the
         DB row is dirty; blank or garbage cells never clear the DB.
 

@@ -26,6 +26,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from hunter.config import TRACKER_DB_PATH, TRACKER_PATH
@@ -1791,8 +1792,27 @@ def apply_sent_updates(updates: dict[str, str]) -> int:
 def apply_pull_updates(rows: list[dict]) -> int:
     """Write Sheets-sourced field changes back to tracker (pull sync).
 
-    rows: list of row dicts (with 'ID') where Sheets had a newer value.
-    Updates Sent, Re-application, To Learn columns. Returns count updated.
+    rows: list of row dicts (with 'ID') where Sheets had a newer value, already
+    filtered by the conflict matrix (gsheets_sync._apply_pull_delta_db) to
+    exclude rows that were sheets_dirty at merge time. Updates Sent,
+    Re-application, To Learn columns. Returns count updated.
+
+    AND sheets_dirty=0 re-checks that guard inside the UPDATE itself: a web-UI
+    edit (mark_sheets_dirty) committed between the merge's read and this write
+    must not be clobbered by the older Sheet value — same race guard as
+    apply_pulled_outcomes. That alone isn't enough, though: resync_dirty() runs
+    as its own scheduled job on the same event loop and can push a web-UI edit
+    to Sheets AND clear sheets_dirty back to 0 — in its own separate transaction
+    — all before this UPDATE runs (both functions await Sheets-API network calls
+    via asyncio.to_thread, which yields the loop for long enough). sheets_dirty=0
+    would then match again and this stale queued row would clobber the value
+    resync_dirty just correctly synced. Closed with compare-and-set: when the
+    caller supplies the row's `_orig_sent`/`_orig_reapplication`/`_orig_to_learn`
+    (the values the merge actually read — gsheets_sync._apply_pull_delta_db sets
+    these), the UPDATE also requires the live columns to still equal them, so a
+    row any other write touched in between — dirty flag aside — is rejected too.
+    A row missing those keys falls back to the plain sheets_dirty=0 check only,
+    so any other caller not yet passing merge-time originals keeps working.
     """
     if not rows:
         return 0
@@ -1802,15 +1822,44 @@ def apply_pull_updates(rows: list[dict]) -> int:
             row_id = row_dict.get("ID", "").strip()
             if not row_id:
                 continue
-            cur = conn.execute(
-                "UPDATE applications SET sent=?, reapplication=?, to_learn=? WHERE id=?",
-                (
-                    row_dict.get("Sent", ""),
-                    row_dict.get("Re-application", ""),
-                    row_dict.get("To Learn", ""),
+            new_sent = row_dict.get("Sent", "")
+            new_reapp = row_dict.get("Re-application", "")
+            new_to_learn = row_dict.get("To Learn", "")
+            orig_sent = row_dict.get("_orig_sent")
+            orig_reapp = row_dict.get("_orig_reapplication")
+            orig_to_learn = row_dict.get("_orig_to_learn")
+
+            params: tuple[Any, ...]
+            if orig_sent is None and orig_reapp is None and orig_to_learn is None:
+                # No merge-time originals supplied — legacy/other-caller path.
+                sql = (
+                    "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
+                    "WHERE id=? AND sheets_dirty=0"
+                )
+                params = (new_sent, new_reapp, new_to_learn, row_id)
+            else:
+                # Compare-and-set: reject the write if any of the three columns
+                # changed since the merge read them, not just if sheets_dirty
+                # flipped back to 0 in between. COALESCE(...,'') treats NULL and
+                # '' as equal — the columns are NOT NULL DEFAULT '' today, but the
+                # comparison stays correct even if that ever changes.
+                sql = (
+                    "UPDATE applications SET sent=?, reapplication=?, to_learn=? "
+                    "WHERE id=? AND sheets_dirty=0 "
+                    "AND COALESCE(sent,'')=COALESCE(?,'') "
+                    "AND COALESCE(reapplication,'')=COALESCE(?,'') "
+                    "AND COALESCE(to_learn,'')=COALESCE(?,'')"
+                )
+                params = (
+                    new_sent,
+                    new_reapp,
+                    new_to_learn,
                     row_id,
-                ),
-            )
+                    orig_sent,
+                    orig_reapp,
+                    orig_to_learn,
+                )
+            cur = conn.execute(sql, params)
             updated += cur.rowcount
     return updated
 
@@ -2590,3 +2639,21 @@ def get_dirty_sheets_count() -> int:
     with get_db(DB_PATH) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM applications WHERE sheets_dirty=1").fetchone()
     return row["n"] if row else 0
+
+
+def get_pull_dirty_ids() -> set[str]:
+    """Row ids (this user) whose sheets_dirty=1.
+
+    The DB side of the Sheets pull's A–K conflict matrix (gsheets_sync.
+    _apply_pull_delta_db). `sheets_dirty` means the DB holds a Sent / To Learn /
+    Re-application edit (e.g. from the web UI) that resync_dirty() has not yet
+    pushed to the Sheet — a differing Sheet cell for such a row is stale, not a
+    real Sheets-side edit, and must not overwrite it. Same scope as
+    get_outcome_pull_state / read_all_tracker_rows.
+    """
+    with get_db(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id FROM applications WHERE sheets_dirty=1 AND user_id=?",
+            (_uid(),),
+        ).fetchall()
+    return {r["id"] for r in rows}
