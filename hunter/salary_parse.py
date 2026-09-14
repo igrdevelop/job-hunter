@@ -120,6 +120,16 @@ _CURRENCY_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("USD", re.compile(rf"\$|{_NOT_LETTER_BEFORE}usd{_NOT_LETTER_AFTER}", re.IGNORECASE)),
     ("GBP", re.compile(rf"£|{_NOT_LETTER_BEFORE}gbp{_NOT_LETTER_AFTER}", re.IGNORECASE)),
     ("CHF", re.compile(rf"{_NOT_LETTER_BEFORE}chf{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    # ISO codes the remote/global boards actually emit (M0 probe on prod,
+    # 2026-09-14: every 4dayweek "…CAD/yr" range was unparsed). Plain
+    # word-bounded codes only — "$" is already USD above, and a "C$"/"A$"
+    # prefix is rare enough in the corpus not to be worth its own rule.
+    ("CAD", re.compile(rf"{_NOT_LETTER_BEFORE}cad{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    ("AUD", re.compile(rf"{_NOT_LETTER_BEFORE}aud{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    ("SEK", re.compile(rf"{_NOT_LETTER_BEFORE}sek{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    ("NOK", re.compile(rf"{_NOT_LETTER_BEFORE}nok{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    ("DKK", re.compile(rf"{_NOT_LETTER_BEFORE}dkk{_NOT_LETTER_AFTER}", re.IGNORECASE)),
+    ("CZK", re.compile(rf"{_NOT_LETTER_BEFORE}(?:czk|kč){_NOT_LETTER_AFTER}", re.IGNORECASE)),
 )
 
 # Period tokens, scanned by position — the earliest wins. "week" is an

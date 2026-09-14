@@ -1448,8 +1448,11 @@ docs/ORACLE_FREE_TIER_PLAN.md Measure-first plan for moving bot+api from the Het
                             M0a passes.
 docs/MARKET_MEMORY_PLAN.md  Keep what the hunt SEES, not only what it applies to. M0 tool +
                             M1–M3 SHIPPED 2026-09-13 (branch claude/nifty-sagan-g1iagx):
-                            `tools/market_memory_m0.py` (read-only probe — live prod numbers
-                            still PENDING, the dev sandbox had no network), `postings_seen`
+                            `tools/market_memory_m0.py` (read-only probe — run on prod
+                            2026-09-14: 1 858 raw / 1 706 new per sweep, salary 39%,
+                            location 77% — rules 1–3 PASS; the volume rule is decided
+                            on `postings_seen`'s own growth after ~2 weeks, see the
+                            plan's revised M0.b), `postings_seen`
                             (one row per url_norm ever fetched — source, first/last_seen,
                             seen_count, parsed salary/location, filter verdict; metadata
                             only, $0; hunt Step 2.5 + nightly prune), `skip_reason` on SKIP
@@ -1913,8 +1916,12 @@ tools/market_memory_m0.py   Read-only M0 probe for docs/MARKET_MEMORY_PLAN.md (M
                             dumped to JSON (title/company/location/salary/url/non-empty raw
                             KEYS + the live verdict — never the raw payload) and re-analysed
                             offline with the same `summarise`. `--sources a,b` narrows,
-                            `--json` for machine output. NOT yet run against prod (the dev
-                            sandbox had no outbound network) — no live numbers exist yet
+                            `--json` for machine output. Run on prod 2026-09-14 (numbers
+                            in the plan's "M0.a result"); it surfaced the missing
+                            CAD/AUD/SEK/NOK/DKK/CZK currencies in `salary_parse`, fixed
+                            the same day. One caveat when reading its "new" column:
+                            the known set is `tracker.db`, so new/raw is the first-day
+                            insert share, not the steady state
 tools/list_env_vars.py      Collects every environment-variable NAME the codebase actually
                             reads (`hunter/` + the four root entry scripts), by regex over
                             `os.getenv(...)` / `os.environ.get(...)` / `os.environ[...]`,

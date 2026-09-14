@@ -1,6 +1,6 @@
 # MARKET_MEMORY Plan — keep what the hunt sees, not only what it applies to
 
-**Status:** in progress — M0 tool + M1–M3 shipped 2026-09-13 (branch claude/nifty-sagan-g1iagx); live M0 run on prod pending; M4 not started
+**Status:** in progress — M0 tool + M1–M3 shipped 2026-09-13 (PR #279); M0.a run on prod 2026-09-14 (three rules PASS, volume rule pending ~2 weeks of `postings_seen` rows); M4 not started
 **Date:** 2026-09-12
 **Motivation:** owner question 2026-09-12 ("what can we do with the information
 we have collected over months of searching and keep collecting, and maybe add
@@ -109,9 +109,27 @@ the deploy host dumps what the probe needs (title / company / location / salary
 payload) and the same `summarise` re-analyses it offline, so the parsers can be
 developed against real listings without hitting 25 sites again. The live
 verdict is stored per job because a dump cannot reproduce `react_no_angular`
-for jobs whose React signal lives only in `raw` skills. The probe has NOT yet
-run against prod (the dev sandbox had no outbound network) — no live numbers
-exist yet.
+for jobs whose React signal lives only in `raw` skills.
+
+**M0.a result (prod, one sweep, 2026-09-14 14:48 UTC):** 1 858 raw listings
+across 24 live sources (justremote and the scout relay returned 0), 1 814
+unique, 1 706 not yet known to `tracker.db` (known set = 1 461 url_norms —
+the tracker only ever held applied/skipped rows, so "new" here means
+"never queued", not "never seen"). Salary parseable 38.8% of raw (517 USD,
+123 PLN, 46 EUR, 33 GBP; contract known for only 80 of 640 parsed — the
+global boards don't label B2B/UoP). Location mode classified 76.8%
+(746 remote / 431 hybrid / 250 onsite / 431 unknown); the unknowns are bare
+Polish city strings ("Kraków", "Warsaw, Mazowieckie, Poland") with no mode
+token, which is the classifier's documented "never guess onsite" rule — the
+city itself is still captured (342 rows). Filter verdicts: 67% title_kw,
+10% location, 9% passed, 8% react_no_angular. One source dominates volume:
+4dayweek returned 1 033 listings (56% of the sweep) for 16 passes — M4 must
+report per-source shares, not a raw pooled count, or 4dayweek's US/Canada
+market IS the digest. Two parser gaps surfaced and were fixed the same day:
+every 4dayweek "…CAD/yr" range was unparsed (CAD/AUD/SEK/NOK/DKK/CZK added
+to `salary_parse`); "Wynagrodzenie niejawne"/"Dla zalogowanych" are
+correctly unparsed (not a salary). Verdict against the rules below: rule 1
+PASS (1 706 ≥ 30), rule 2 PASS (38.8% ≥ 25%), rule 3 PASS (76.8% ≥ 60%).
 
 **M0.b — volume from what already exists (prod DB, one query).**
 
@@ -124,6 +142,24 @@ FROM source_runs WHERE ts >= date('now','-14 days') GROUP BY day ORDER BY day;
 Run on the deploy host: `docker compose exec job-hunter sqlite3 /app/db/tracker.db "<query>"`.
 This gives the upper bound of rows/day before URL dedup; M0.a's "unique and
 not already known" share turns it into the expected insert rate.
+
+**M0.b, revised after the M0.a run:** the probe's new/raw of 0.918 is
+measured against `tracker.db`, which only knows queued vacancies, so
+`raw/day × 0.918` (≈ 4 sweeps × 1 858 × 0.918 ≈ 6 800) is the FIRST-day
+insert count, not the steady state — from the second sweep on, `postings_seen`
+itself is the known set and a listing that is still on the board only bumps
+`seen_count`. The honest volume measurement is therefore the table's own
+growth after it has run for two weeks:
+
+```sql
+SELECT substr(first_seen,1,10) AS day, COUNT(*) AS inserted
+FROM postings_seen GROUP BY day ORDER BY day;
+```
+
+Rule 4 is decided on that (steady-state days ≤ 2 000 → TTL stays 180),
+not on `source_runs`. Even the worst case — 2 000/day × 180 days = 360 k
+rows of listing metadata — is a few hundred MB of SQLite, so nothing
+needs to change before the measurement exists.
 
 **Decision rules (stated before running):**
 
