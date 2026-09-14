@@ -102,9 +102,13 @@ is a code from a fixed list (mirrored in site `models.ts` as `OWNER_REASONS`, wi
 `contract`, `relocation`, `company`, `russia`, `duplicate`, `expired`, `other` are valid for
 either status; `salary` and `not_interesting` are valid only for `Skipped` (a Filter miss can't
 be about salary or plain disinterest — the bot has no salary gate and no notion of "interesting").
-The API PATCH rejects a reason that doesn't match the resulting status (400), and clears both
-columns whenever `app_status` moves away from `Skipped`/`Filter miss` — a corrected mistake must
-not leave a stale reason in the analysis data. `Filter miss` + `owner_reason` is the first
+The API PATCH rejects a reason that doesn't match the resulting status (400), clears both
+columns whenever the resulting `app_status` is not `Skipped`/`Filter miss` — a corrected mistake
+must not leave a stale reason in the analysis data — and drops a stored reason that is no longer
+valid after a Skipped ↔ Filter miss switch. Clearing `app_status` (`''`) on a row that was
+Skipped/Filter miss also resets `sent` from `—` back to blank (the row returns to the Unsent
+queue), except on rows whose `ats_status` is `SKIP`/`FAIL`, where the `—` was stamped by the bot
+at insert and must stay. Dates and `outcome_label` are never cleared by the API. `Filter miss` + `owner_reason` is the first
 structured "should have been filtered" label in this codebase: the 2026-08-08 Sent-notes audit
 (`docs/AGENT_LOG.md:78`) only ever classified 250 free-text notes by hand after the fact. Useful
 ground truth for a future filter-tuning pass, but per `docs/MARKET_MEMORY_PLAN.md`'s non-goal
