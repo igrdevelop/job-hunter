@@ -401,6 +401,21 @@ def save_docx(doc, path_docx):
     print(f"  [OK] DOCX: {path_docx}")
 
 
+def save_cover_letter_text(text, path_txt):
+    """Write the cover letter as plain UTF-8 text next to the rendered document.
+
+    PDF has no notion of a paragraph: every viewer copies one newline per
+    RENDERED line, so a cover letter pasted out of the PDF into an application
+    form arrives hard-wrapped and ragged. This file keeps the real paragraphs
+    for copy-paste. It never reaches Telegram — both pipelines build their
+    attachment list from *.docx/*.pdf globs only — and rides the Drive folder
+    upload, exactly like About_Me_*.txt already does. Short mode's cleanup
+    removes *.docx only, so the .txt survives the PDF-only flow.
+    """
+    Path(path_txt).write_text(text.strip() + "\n", encoding="utf-8")
+    print(f"  [OK] TXT:  {path_txt}")
+
+
 def convert_all_to_pdf(output_folder):
     """Convert all DOCX files in the folder to PDF in a single LibreOffice call."""
     import subprocess
@@ -507,6 +522,9 @@ def main():
         set_margins(doc)
         build_cover_letter(doc, content["cover_letter_en"])
         save_docx(doc, Path(output_folder) / "Cover_Letter_EN.docx")
+        save_cover_letter_text(
+            content["cover_letter_en"], Path(output_folder) / "Cover_Letter_EN.txt"
+        )
 
     # --- Cover Letter PL ---
     if content.get("cover_letter_pl"):
@@ -514,6 +532,9 @@ def main():
         set_margins(doc)
         build_cover_letter(doc, content["cover_letter_pl"])
         save_docx(doc, Path(output_folder) / "Cover_Letter_PL.docx")
+        save_cover_letter_text(
+            content["cover_letter_pl"], Path(output_folder) / "Cover_Letter_PL.txt"
+        )
 
     # --- About Me ---
     _about_me_pl = os.getenv("GENERATE_ABOUT_ME_PL", "true").lower() in ("true", "1", "yes")

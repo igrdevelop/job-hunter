@@ -2604,6 +2604,19 @@ auth/MTProto; see "Telegram Channels Source" below). Also: `TELEGRAM_CHANNELS_FI
 - **Short** (default): PDF only, EN CV — **plus the PL CV when the posting is Polish**
   (`content["primary_lang"] == "PL"`), so a Polish employer receives the clean Polish CV
 - **Full** (`--full`): DOCX + PDF, EN + PL CV, About_Me .txt (10 files)
+- **Both modes** additionally write `Cover_Letter_EN.txt` / `Cover_Letter_PL.txt`
+  (`generate_docs.save_cover_letter_text`, added 2026-09-19) next to the rendered
+  documents. A PDF stores positioned lines, not paragraphs, so every viewer copies
+  ONE NEWLINE PER RENDERED LINE — a cover letter pasted out of the PDF into an
+  application form arrives hard-wrapped and ragged, and short mode deletes the DOCX,
+  so the folder had no paragraph-preserving copy source at all. The .txt never
+  reaches Telegram (both pipelines build `created_files` from `*.docx`/`*.pdf` globs
+  only, which is what already keeps `About_Me_*.txt` out) and rides the Drive folder
+  upload; short mode's cleanup sweeps `*.docx` only, so it survives. LibreOffice's
+  tagged-PDF export is NOT the lever here — it is already on by default (verified:
+  `/StructTreeRoot` + `/MarkInfo` present in the current output) and changes nothing
+  about clipboard behaviour. `repost_gate._COPY_PATTERNS` carries the file into a
+  reused package too.
 - **Force** (`--force`): skip dedup, bypass React-only skip
 - **Manual** (`--manual`): the owner asked for THIS vacancy by hand. It degrades
   the STACK gates to warnings — Step 1.5c (React) and Step 1.5d (backend-only),
