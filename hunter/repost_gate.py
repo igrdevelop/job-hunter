@@ -227,7 +227,16 @@ def find_repost(job_text: str, company: str, *, window_days: int) -> RepostMatch
 
 # ── Reuse execution ───────────────────────────────────────────────────────────
 
-_COPY_PATTERNS = ("*.pdf", "*.docx", "outreach.md", "judge_report.json")
+# Cover_Letter_*.txt rides along so a reused package keeps the plain-text
+# copy source (see generate_docs.save_cover_letter_text); `docs` below still
+# filters to .pdf/.docx, so it never becomes a Telegram attachment.
+_COPY_PATTERNS = (
+    "*.pdf",
+    "*.docx",
+    "Cover_Letter_*.txt",
+    "outreach.md",
+    "judge_report.json",
+)
 
 
 def execute_reuse(
