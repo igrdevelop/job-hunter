@@ -114,6 +114,20 @@ class TestRunCanary:
         assert result.reason == "exit code 1"
         assert "529" in result.detail
 
+    @pytest.mark.parametrize("reply", ["OK", "ok\n", "OK.", "`OK`", "  Ok!  "])
+    def test_bare_ok_in_any_case_or_punctuation_passes(
+        self, monkeypatch, restricted_perms, reply
+    ) -> None:
+        monkeypatch.setattr(cli_canary.subprocess, "run", _FakeRun((0, reply, "")))
+        assert run_canary().ok
+
+    @pytest.mark.parametrize("reply", ["OK, but I cannot continue", "BOOK", "Not OK", "OK OK", ""])
+    def test_anything_beyond_a_bare_ok_fails(self, monkeypatch, restricted_perms, reply) -> None:
+        monkeypatch.setattr(cli_canary.subprocess, "run", _FakeRun((0, reply, "")))
+        result = run_canary()
+        assert not result.ok
+        assert result.reason == "unexpected reply"
+
     def test_unexpected_reply(self, monkeypatch, restricted_perms) -> None:
         monkeypatch.setattr(cli_canary.subprocess, "run", _FakeRun((0, "I can't help", "")))
         result = run_canary()

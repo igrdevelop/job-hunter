@@ -42,6 +42,13 @@ _ARGV_REJECTED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The whole reply must be the word OK. Case and surrounding punctuation are
+# ignored ("ok", "OK.", "`OK`"): the canary checks that the CLI invocation
+# works, not the model's obedience, and a false alarm on every restart would
+# teach the owner to ignore the real one. A qualified reply ("OK, but I
+# cannot continue") or one that merely contains the letters ("BOOK") fails.
+_OK_REPLY_RE = re.compile(r"[\W_]*ok[\W_]*", re.IGNORECASE)
+
 # Keeps a reference so the background task isn't garbage-collected mid-run.
 _task: asyncio.Task | None = None
 
@@ -95,7 +102,7 @@ def run_canary(timeout: int = CANARY_TIMEOUT_SEC) -> CanaryResult:
         )
     if proc.returncode != 0:
         return CanaryResult(False, f"exit code {proc.returncode}", _head(err or out))
-    if "OK" not in out.upper():
+    if not _OK_REPLY_RE.fullmatch(out.strip()):
         return CanaryResult(False, "unexpected reply", _head(out or err))
     return CanaryResult(True, "ok")
 
