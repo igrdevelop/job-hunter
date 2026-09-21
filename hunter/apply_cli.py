@@ -129,14 +129,20 @@ def _build_cli_command(apply_input: str) -> list[str]:
     """
     if APPLY_CLI_LEGACY_PERMS:
         return ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
+    # The prompt MUST come before the tool flags: --allowedTools and
+    # --disallowedTools are variadic in the claude CLI, so a positional placed
+    # after them is consumed as more tool rules. With the prompt last, every
+    # whitespace-separated word of it became a "deny rule", claude got no
+    # prompt at all and exited 1 ("Permission deny rule "/apply" matches no
+    # known tool") — every CLI-mode apply failed.
     return [
         "claude",
         "-p",
+        f"/apply {apply_input}",
         "--allowedTools",
         _CLI_ALLOWED_TOOLS,
         "--disallowedTools",
         _CLI_DISALLOWED_TOOLS,
-        f"/apply {apply_input}",
     ]
 
 

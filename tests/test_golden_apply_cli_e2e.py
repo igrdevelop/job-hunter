@@ -96,7 +96,8 @@ class FakeClaudeSkill:
         # real claude invocation into the doc-generation stand-in instead.
         if cmd and str(cmd[0]) == "claude":
             self.last_cmd = list(cmd)
-            prompt = str(cmd[-1])
+            # The prompt sits right after `-p` (before the variadic tool flags).
+            prompt = str(cmd[2])
             match = re.search(r"Job posting file: (.+)", prompt)
             if match:
                 posting_path = Path(match.group(1).strip())

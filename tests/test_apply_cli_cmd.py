@@ -49,12 +49,24 @@ class TestBuildCliCommandDefault:
         assert "WebFetch" not in allowed
         assert "WebSearch" not in allowed
 
-    def test_prompt_text_is_the_final_argv_element(self, monkeypatch) -> None:
+    def test_prompt_precedes_the_variadic_tool_flags(self, monkeypatch) -> None:
+        # --allowedTools / --disallowedTools are variadic in the claude CLI:
+        # a positional after them is swallowed as more tool rules. The prompt
+        # used to be the final argv element, which made claude read every word
+        # of it as a deny rule and exit 1 with no prompt (prod, 2026-09-21).
         monkeypatch.setattr("hunter.apply_cli.APPLY_CLI_LEGACY_PERMS", False)
         cmd = _build_cli_command("URL: https://example.com/job\n\nJob posting file: /tmp/x.txt")
         assert cmd[0] == "claude"
         assert cmd[1] == "-p"
-        assert cmd[-1] == "/apply URL: https://example.com/job\n\nJob posting file: /tmp/x.txt"
+        assert cmd[2] == "/apply URL: https://example.com/job\n\nJob posting file: /tmp/x.txt"
+        first_flag = min(cmd.index("--allowedTools"), cmd.index("--disallowedTools"))
+        # Nothing but the two flag values may follow the variadic flags.
+        assert cmd[first_flag:] == [
+            "--allowedTools",
+            _CLI_ALLOWED_TOOLS,
+            "--disallowedTools",
+            _CLI_DISALLOWED_TOOLS,
+        ]
 
     def test_module_constants_are_consistent_with_the_built_command(self, monkeypatch) -> None:
         # Guards against the flags and the module-level policy strings drifting
