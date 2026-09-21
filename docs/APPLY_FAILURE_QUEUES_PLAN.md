@@ -1,6 +1,8 @@
 # Apply Failure Queues Plan
 
-**Status:** draft. M0 tool shipped, not yet run on prod.
+**Status:** in progress. M0 run on prod 2026-09-21 → verdict "M1 + M4 only";
+M2/M3 closed. M1 shipped. M4 open. See "M0 result" below; it corrects the
+Problem section's picture of this particular incident.
 **Date:** 2026-09-21
 **Motivation:** From 2026-09-10 to 2026-09-21, every apply that went through
 the full CLI pipeline (`hunter/apply_cli.py::main_cli`) died before doing any
@@ -87,8 +89,8 @@ and given up (`fail_count >= MAX_FAIL_RETRIES`), or later applied/skipped.
 That last number is the damage count for 2026-09-10.
 
 ```bash
-docker compose exec job-hunter python tools/fail_signatures.py --db tracker.db
-docker compose exec job-hunter python tools/fail_signatures.py --db tracker.db --json > /tmp/sigs.json
+docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db
+docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db --json > /tmp/sigs.json
 ```
 
 **Decision rules (fixed before the run):**
@@ -112,7 +114,56 @@ docker compose exec job-hunter python tools/fail_signatures.py --db tracker.db -
    `logs/` volume was reset), say so and fall back to `logs/apply_stdout/`
    transcripts (7-day retention). Do not decide from a window that small.
 
-## M1 — Post-deploy CLI canary
+## M0 result (prod, 2026-09-21)
+
+`docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db`:
+**14 records over 42.3 days, 4 signatures, 0 uninformative.**
+
+| Signature | Vacancies | 6 h peak | Now |
+|---|---|---|---|
+| `[apply_agent] FETCH ERROR: Page at <url> returned too little text` | 4 (3× `jobs.ashbyhq.com`) | 1 | 3 given up, 1 absent |
+| `Traceback (most recent call last):` | 2 | 1 | 1 skipped, 1 applied |
+| `(empty error text)` (rate_limited, exit 45) | 1 | 1 | skipped |
+| `[solidjobs] HTTP fetch failed (500 …)` | 1 | 1 | retryable |
+
+Rules: (1) no recurring non-incident signature; (2) nothing crosses 3 in 6 h;
+(3) n/a; (4) window 42 days, measurable. **Verdict: ship M1 + M4, close M2/M3.**
+
+**The incident is not in the log at all, and that corrects the Problem
+section.** Prod runs with `LLM_API_KEY` set, so the paid API is the primary
+path; `main_cli` only runs as the fallback after an API account outage
+(`apply_agent.py:98-132`). When that fallback failed, `apply_agent` exited 46,
+`llm_outage`: no FAIL row, no `fail_count` bump, the claim released back to
+`PENDING`, and by design no line in `apply_failures.jsonl`. So for THIS
+incident:
+
+- **No vacancy was lost or given up.** Affected jobs were delayed until the
+  API recovered, not burned. Problem items 2–3 describe what the pipeline
+  does to a systemic failure that lands in `fail`. This one didn't.
+- **The real damage was a dead safety net.** For 11 days an API outage meant
+  no generation at all, and the broken fallback looked exactly like the
+  outage itself. It surfaced only when the API went down again on 2026-09-21.
+- **Blind spot:** "the fallback failed too" is folded into `llm_outage` and
+  is invisible to the failure log, which is why no log-based design (M2/M3)
+  could have caught it. That is the argument for M1 (probe the path directly)
+  and for M4's new first item below.
+
+Side finding, out of scope: `jobs.ashbyhq.com` detail pages return a
+near-empty shell to a plain HTTP fetch (JavaScript-rendered), so every Ashby
+posting fails at Step 1 and ends up given up. That is a source-level fetch
+bug, 3 vacancies in 5 weeks. The fix is the Ashby public posting API, the
+same move already made for Lever. Tracked separately.
+
+## M1 — Post-deploy CLI canary (SHIPPED 2026-09-21)
+
+As built: `hunter/cli_canary.py`, started from `_post_init` as a plain
+asyncio task. It is gated by `CLI_CANARY_ENABLED` (default true) and by
+`llm_client.cli_credentials_present()`. A transient failure (non-zero exit,
+timeout, unexpected reply) is retried once after 60 s. A deterministic one
+(argv rejected, binary missing) alerts at once. A pass is logged only.
+Nothing is blocked, since M3 is closed. The design sketch below is kept for
+the record.
+
 
 **What:** Once at bot start (`telegram_bot._post_init`), when
 `llm_client.cli_credentials_present()` is true, run one `claude -p` probe
@@ -140,7 +191,11 @@ prompt last again, and the canary argv test must fail).
 (a broken invocation) within a minute of the deploy that introduces it,
 regardless of what M0 says.
 
-## M2 — Classify every failure; record the signature
+## M2 — Classify every failure; record the signature (CLOSED by M0, 2026-09-21)
+
+> Closed: no recurring systemic signature in 42 days of prod log (M0 rule 1).
+> Kept for the record. The head-vs-tail inconsistency in the `error` field
+> (Problem #5) is still real; fix it if the log is ever used for decisions.
 
 **What:** new `hunter/failure_class.py::classify(outcome, exit_code, error,
 url)` returns `"system" | "vacancy"`:
@@ -167,7 +222,9 @@ across a simulated restart.
 **Rollback:** `FAILURE_CLASSIFY_ENABLED=false` makes `classify()` always
 return `vacancy`, which is today's behaviour byte-for-byte.
 
-## M3 — `BLOCKED` queue and a real stop
+## M3 — `BLOCKED` queue and a real stop (CLOSED by M0, 2026-09-21)
+
+> Closed together with M2, which it depends on.
 
 Built on M2. Same shape as the `llm_outage` pause, which already works.
 
@@ -202,6 +259,13 @@ untouched throughout.
 parked). Any `BLOCKED` rows left over are released by `/queue resume`.
 
 ## M4 — Success rate in the daily summary + rate alert
+
+- **New, from the M0 blind spot:** count "API outage AND the CLI fallback
+  failed too" separately from a plain outage. Today `apply_agent.py` turns
+  both into exit 46, so a broken fallback reads as one more API outage. A
+  distinct marker (log line + a counter the daily summary shows) is enough;
+  it must not change the `llm_outage` semantics (no FAIL row, no
+  `fail_count` bump).
 
 - `scheduled_daily_summary` gets one line:
   `applies 24h: 12 ok / 3 fail (API 10/1, CLI 2/2) · top: <signature> ×2`.
