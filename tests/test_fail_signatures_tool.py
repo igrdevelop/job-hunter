@@ -204,6 +204,12 @@ class TestMain:
         assert imp["distinct_vacancies"] == 5
         assert imp["sig_id"] in payload["summary"]["rule1_recurring"]
 
+    def test_missing_db_file_warns(self, tmp_path: Path, capsys) -> None:
+        base = tmp_path / "apply_failures.jsonl"
+        _write(base, [_rec(T0, "https://a.example/1", IMPORT)])
+        assert fs.main(["--log", str(base), "--db", str(tmp_path / "nope.db")]) == 0
+        assert "does not exist" in capsys.readouterr().err
+
     def test_text_output_with_no_log(self, tmp_path: Path, capsys) -> None:
         assert fs.main(["--log", str(tmp_path / "missing.jsonl")]) == 0
         out = capsys.readouterr().out

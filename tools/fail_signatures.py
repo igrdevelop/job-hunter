@@ -19,9 +19,9 @@ Then prints the plan's four decision rules with the numbers filled in.
 Read-only, zero LLM calls, zero network, zero writes.
 
 Usage:
-    docker compose exec -T job-hunter python tools/fail_signatures.py --db tracker.db
-    docker compose exec -T job-hunter python tools/fail_signatures.py --db tracker.db --days 30
-    docker compose exec -T job-hunter python tools/fail_signatures.py --db tracker.db --json
+    docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db
+    docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db --days 30
+    docker exec job-hunter python tools/fail_signatures.py --db /app/db/tracker.db --json
 """
 
 from __future__ import annotations
@@ -404,7 +404,12 @@ def main(argv: list[str] | None = None) -> int:
     groups = group_records(records)
 
     states: dict[str, str] = {}
-    if args.db:
+    if args.db and not args.db.is_file():
+        # Without this the report silently omitted every "tracker now:" line —
+        # easy to mistake for "no affected rows" (prod keeps the db at
+        # /app/db/tracker.db, not ./tracker.db).
+        print(f"WARNING: --db {args.db} does not exist; tracker fates omitted", file=sys.stderr)
+    elif args.db:
         all_urls: set[str] = set()
         for g in groups:
             all_urls |= g.distinct_urls

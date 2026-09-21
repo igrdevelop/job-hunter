@@ -220,6 +220,14 @@ async def _post_init(app: Application) -> None:
         register_worker_task(0, task)
         logger.info("[apply_worker] background task started (APPLY_QUEUE_ENABLED=true)")
 
+    # Post-start CLI canary (docs/APPLY_FAILURE_QUEUES_PLAN.md M1): one
+    # trivial `claude -p` through the apply pipeline's own argv builder, in the
+    # background, alerting only on failure. No-op without a CLI login or when
+    # CLI_CANARY_ENABLED=false.
+    from hunter import cli_canary
+
+    cli_canary.start(app)
+
     # Bootstrap / validate Google Sheets on startup.
     try:
         from hunter import gsheets_sync

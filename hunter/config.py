@@ -210,6 +210,17 @@ APPLY_CLI_LEGACY_PERMS: bool = os.getenv("APPLY_CLI_LEGACY_PERMS", "false").lowe
     "yes",
 )
 
+# Post-start CLI canary (docs/APPLY_FAILURE_QUEUES_PLAN.md M1): once per bot
+# start, when a CLI login exists, run one trivial `claude -p` through the SAME
+# argv builder the apply pipeline uses and alert in Telegram if it fails. The
+# CLI path is only exercised when the paid API is down, so a broken invocation
+# otherwise stays invisible until the worst possible moment (2026-09-10..21).
+CLI_CANARY_ENABLED: bool = os.getenv("CLI_CANARY_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+
 # Hunt / apply split (docs/HUNT_APPLY_SPLIT_PLAN.md M1): feature-gated so the
 # old same-loop behavior is the default. When true, the hunt loop writes new
 # jobs to a PENDING queue in tracker.db (ats_status='PENDING') instead of

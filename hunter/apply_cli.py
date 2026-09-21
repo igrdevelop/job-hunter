@@ -119,16 +119,21 @@ def _posting_file_prompt_block(posting_file: Path) -> str:
     )
 
 
-def _build_cli_command(apply_input: str) -> list[str]:
-    """Construct the `claude -p` argv for one apply run.
+def _cli_argv(prompt: str) -> list[str]:
+    """The `claude -p` argv for an arbitrary prompt, under the apply tool policy.
 
     Default: an explicit tool allowlist (see the module constants above)
     instead of `--dangerously-skip-permissions`. `APPLY_CLI_LEGACY_PERMS=true`
     is a one-release escape hatch back to the old unrestricted flag, in case
     the allowlist is missing a tool the skill legitimately needs.
+
+    Shared by `_build_cli_command` (the real apply run) and
+    `hunter.cli_canary` (the post-deploy probe), so the probe exercises the
+    exact flags and flag ORDER a real apply uses — that order is what broke
+    in the 2026-09-10 incident (docs/APPLY_FAILURE_QUEUES_PLAN.md M1).
     """
     if APPLY_CLI_LEGACY_PERMS:
-        return ["claude", "-p", "--dangerously-skip-permissions", f"/apply {apply_input}"]
+        return ["claude", "-p", "--dangerously-skip-permissions", prompt]
     # The prompt MUST come before the tool flags: --allowedTools and
     # --disallowedTools are variadic in the claude CLI, so a positional placed
     # after them is consumed as more tool rules. With the prompt last, every
@@ -138,12 +143,17 @@ def _build_cli_command(apply_input: str) -> list[str]:
     return [
         "claude",
         "-p",
-        f"/apply {apply_input}",
+        prompt,
         "--allowedTools",
         _CLI_ALLOWED_TOOLS,
         "--disallowedTools",
         _CLI_DISALLOWED_TOOLS,
     ]
+
+
+def _build_cli_command(apply_input: str) -> list[str]:
+    """Construct the `claude -p` argv for one apply run."""
+    return _cli_argv(f"/apply {apply_input}")
 
 
 # ── Folder detection helpers ──────────────────────────────────────────────────
