@@ -65,6 +65,22 @@ def _isolated_hunt_runs_db(tmp_path, monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_metrics_db(tmp_path, monkeypatch) -> None:
+    """Point hunter.metrics at a per-test temp DB by default.
+
+    `hunter.services.apply_service` stamps orphan `generation_runs` rows after
+    every faked subprocess exit (docs/PIPELINE_VIZ_PLAN.md M1), so every test
+    that drives run_apply_agent_subprocess / run_apply_agent_for_url would
+    otherwise lazily CREATE the metrics tables in the real repo ./tracker.db —
+    the same class of leak the `tracker_db` docstring in CLAUDE.md warns about
+    for `postings_seen`. A test that needs metrics in a specific DB (the golden
+    E2E tests, test_metrics.py, test_backfill_runs.py) overrides this with its
+    own later monkeypatch, which wins.
+    """
+    monkeypatch.setattr("hunter.metrics.DB_PATH", tmp_path / "metrics_autouse.db")
+
+
+@pytest.fixture(autouse=True)
 def _owner_candidate_data(monkeypatch) -> None:
     """Patch candidate-derived constants to the owner's Wroclaw-based values.
 

@@ -316,7 +316,6 @@ def test_golden_happy_path_en(
     conn = sqlite3.connect(str(golden_env.tracker_db))
     conn.row_factory = sqlite3.Row
     runs = conn.execute("SELECT * FROM generation_runs WHERE url_norm != ''").fetchall()
-    conn.close()
     assert len(runs) == 1, "expected exactly one generation_runs row for this URL"
     run = runs[0]
     assert run["pipeline"] == "api"
@@ -327,6 +326,32 @@ def test_golden_happy_path_en(
     assert run["verdict_final"] == 96
     assert run["judge_violations"] == 0
     assert run["posting_lang"] == "EN"
+
+    # ── pipeline_events: the ordered stage sequence, `start` before each `ok`
+    # (docs/PIPELINE_VIZ_PLAN.md M1). The verdict (96) is already at target,
+    # so no refine events belong here — a `refine` row would mean the loop
+    # ran on a happy path that must not spend on it.
+    events = conn.execute(
+        "SELECT stage, event FROM pipeline_events WHERE run_id = ? ORDER BY id",
+        (run["run_id"],),
+    ).fetchall()
+    conn.close()
+    assert [(e["stage"], e["event"]) for e in events] == [
+        ("fetch", "start"),
+        ("fetch", "ok"),
+        ("generate", "start"),
+        ("generate", "ok"),
+        ("ats_loop", "start"),
+        ("ats_loop", "ok"),
+        ("judge", "start"),
+        ("judge", "ok"),
+        ("lang_gate", "start"),
+        ("lang_gate", "ok"),
+        ("render", "start"),
+        ("render", "ok"),
+        ("verdict", "start"),
+        ("verdict", "ok"),
+    ]
 
 
 def test_golden_happy_path_paste_mode(
