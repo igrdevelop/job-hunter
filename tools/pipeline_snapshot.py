@@ -9,14 +9,25 @@ already good enough to draw the page from, or does M1 instrumentation
 (`start` events, per-refine-round events, a `hunt_runs` table, a
 `queued_at` column, orphan-run stamping) have to land first?
 
+Since 2026-09-22 the tool also READS that M1 data where it exists (PRs
+#288–#291): the `hunt_runs` funnel is the primary hunt line, PENDING rows
+carry their queue wait from `queued_at`, and the in-progress card reads the
+`start` event and the latest refine-round event instead of inferring. Every
+pre-M1 branch is kept — a backup copy from before the instrumentation still
+snapshots, it just says less.
+
 Sections:
-  hunt      source_runs yield in the window, postings_seen verdicts (passed /
-            rejected + top reasons), rows that entered the tracker, and the
-            next hunt slot computed from the same grid the scheduler uses
-  apply     PENDING / IN_PROGRESS rows, the open generation_runs row behind
-            each IN_PROGRESS one with its last pipeline_events stage (the
-            "where is it right now" card), $0 cut-offs by outcome, FAIL rows
-            and the apply_failures.jsonl records in the window
+  hunt      hunt_runs funnel (found → filtered → dup → new → queued, the
+            loop's own counters), source_runs yield in the window,
+            postings_seen verdicts (passed / rejected + top reasons), rows
+            that entered the tracker, and the next hunt slot computed from
+            the same grid the scheduler uses
+  apply     PENDING / IN_PROGRESS rows (queue wait from `queued_at`), the
+            open generation_runs row behind each IN_PROGRESS one with its
+            last pipeline_events stage, the minutes since that stage's
+            `start` event and the latest refine round (the "where is it
+            right now" card), $0 cut-offs by outcome, FAIL rows and the
+            apply_failures.jsonl records in the window
   result    ready-to-send (applied, sent=''), sent in the window, recorded
             outcomes, LLM spend
   events    the last N pipeline_events joined to company/title
@@ -84,6 +95,37 @@ try:
     from hunter.tracker import MAX_FAIL_RETRIES
 except Exception:  # noqa: BLE001
     MAX_FAIL_RETRIES = 3
+
+# The hunt_runs count columns, in DDL order — a pure constant, imported so the
+# tool sums exactly the set `hunter.hunt_runs.sum_window` does. The module's
+# writer/reader functions are NOT used: they open the bot's own DB path with a
+# writable connection, and this tool owns one read-only connection.
+try:
+    from hunter.hunt_runs import COUNT_COLUMNS as HUNT_RUN_COUNT_COLUMNS
+except ImportError:  # a bare DB copy on a machine without the package — a real
+    # error INSIDE hunter.hunt_runs must surface, so only the missing-module
+    # case falls back to the pinned list
+    HUNT_RUN_COUNT_COLUMNS = (
+        "found",
+        "filtered_out",
+        "dup_url",
+        "dup_ct",
+        "dup_cooldown",
+        "new",
+        "capped",
+        "queued",
+        "applied_inline",
+        "duration_ms",
+    )
+
+# `generation_runs.outcome` prefix a parent/sweeper stamp carries (never the
+# pipeline itself) — hunter.metrics.ORPHAN_PREFIX; a literal so the tool runs
+# against a bare DB copy with no package import.
+ORPHAN_PREFIX = "orphan:"
+
+# pipeline_events.event values the refine loop writes once per round (the
+# `start` event opens the loop and carries no round).
+REFINE_ROUND_EVENTS = ("accepted", "rejected", "discarded")
 
 try:
     from hunter.sent_parse import classify as _classify_sent
@@ -241,6 +283,24 @@ class Window:
 def hunt_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str, Any]:
     out: dict[str, Any] = {"window": win.label}
 
+    # hunt_runs (M1) — the loop's own funnel, one row per hunt. The PRIMARY
+    # funnel line: these are the numbers `_run_hunt_impl` held when it
+    # decided, so found → filtered → dup → new → queued adds up by
+    # construction. source_runs / postings_seen below stay as the secondary,
+    # per-source and per-listing views (and as the pre-M1 comparison).
+    # A table that exists but predates a column (a DB written by an older
+    # bot, a hand-created fixture) must report UNMEASURED with the reason —
+    # never raise out of a read-only snapshot.
+    out["hunt_runs"], out["hunt_runs_unmeasured"] = None, None
+    if _table_exists(conn, "hunt_runs"):
+        missing = sorted(set(HUNT_RUN_REQUIRED_COLUMNS) - _columns(conn, "hunt_runs"))
+        if missing:
+            out["hunt_runs_unmeasured"] = f"hunt_runs table lacks columns: {', '.join(missing)}"
+        else:
+            out["hunt_runs"] = _hunt_runs_window(conn, win)
+    else:
+        out["hunt_runs_unmeasured"] = "hunt_runs table missing"
+
     if _table_exists(conn, "source_runs"):
         rows = conn.execute(
             "SELECT source, ts, yield, ok, error FROM source_runs WHERE ts >= ? ORDER BY id",
@@ -305,6 +365,59 @@ def hunt_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str, 
 
     out["next_slot"] = _next_hunt_slot(win.now)
     return out
+
+
+# Every column _hunt_runs_window reads; checked against PRAGMA table_info
+# before the query so a partial schema degrades to UNMEASURED.
+HUNT_RUN_REQUIRED_COLUMNS = ("ts", "trigger", "sources", "filter_reasons", *HUNT_RUN_COUNT_COLUMNS)
+
+
+def _hunt_runs_window(conn: sqlite3.Connection, win: Window) -> dict[str, Any]:
+    """Totals over the hunt_runs rows in the window — the same arithmetic as
+    `hunter.hunt_runs.sum_window`, run over this tool's own read-only
+    connection. An empty window is all zeros with `last=None`."""
+    count_cols = ", ".join(f'"{c}"' for c in HUNT_RUN_COUNT_COLUMNS)
+    rows = conn.execute(
+        f'SELECT ts, "trigger", sources, filter_reasons, {count_cols} '  # noqa: S608 — constant column list
+        "FROM hunt_runs WHERE ts >= ? ORDER BY id",
+        (win.start_iso,),
+    ).fetchall()
+    totals: dict[str, Any] = {"hunts": len(rows), **dict.fromkeys(HUNT_RUN_COUNT_COLUMNS, 0)}
+    reasons: Counter[str] = Counter()
+    by_trigger: Counter[str] = Counter()
+    for r in rows:
+        for c in HUNT_RUN_COUNT_COLUMNS:
+            totals[c] += int(r[c] or 0)
+        by_trigger[r["trigger"] or "?"] += 1
+        try:
+            parsed = json.loads(r["filter_reasons"] or "{}")
+        except (TypeError, ValueError):
+            parsed = {}
+        if isinstance(parsed, dict):
+            for k, v in parsed.items():
+                try:
+                    reasons[str(k)] += max(0, int(v or 0))
+                except (TypeError, ValueError):
+                    continue
+    last = rows[-1] if rows else None
+    if last is not None:
+        try:
+            last_sources = json.loads(last["sources"] or "[]")
+        except (TypeError, ValueError):
+            last_sources = []
+        totals["last"] = {
+            "ts": last["ts"],
+            "at": _local_hhmm(last["ts"]),
+            "trigger": last["trigger"],
+            "sources": last_sources if isinstance(last_sources, list) else [],
+            "found": int(last["found"] or 0),
+            "new": int(last["new"] or 0),
+        }
+    else:
+        totals["last"] = None
+    totals["by_trigger"] = dict(by_trigger)
+    totals["top_filter_reasons"] = reasons.most_common(8)
+    return totals
 
 
 def _bucket_status(ats: str | None) -> str:
@@ -389,21 +502,35 @@ def apply_tier(
     }
     has_metrics = _table_exists(conn, "generation_runs") and _table_exists(conn, "pipeline_events")
 
-    # PENDING — the queue. No insertion timestamp exists (plan M1: queued_at);
-    # `date` is the best age signal today.
+    # PENDING — the queue, in the order claim_pending drains it (rowid).
+    # `queued_at` (M1) is the placeholder's UTC insertion time; NULL on a row
+    # written before the column existed. `oldest_wait_min` follows the same
+    # rule as tracker.oldest_pending_wait_min: it is the wait of the HEAD row
+    # (queue order), and a NULL there reports None rather than skipping ahead
+    # to a younger stamped row. (That function is not called here — it opens
+    # the bot's DB path with its own user scope; this tool owns one ro
+    # connection and an explicit --user.)
     source_col = "source" if "source" in cols else "''"
     claimed_by_col = "claimed_by" if "claimed_by" in cols else "''"
+    queued_at_col = "queued_at" if "queued_at" in cols else "NULL"
     pend = conn.execute(
-        f"SELECT company, title, date, rowid, {source_col} AS source "  # noqa: S608 — literal column names
+        f"SELECT company, title, date, rowid, {source_col} AS source, "  # noqa: S608 — literal column names
+        f"{queued_at_col} AS queued_at "
         "FROM applications WHERE user_id = ? AND ats_status = 'PENDING' ORDER BY rowid",
         (user_id,),
     ).fetchall()
     out["pending"] = {
         "count": len(pend),
         "oldest_date": pend[0]["date"] if pend else None,
-        "oldest_wait_min": None,  # needs queued_at (M1)
+        "oldest_wait_min": _minutes_ago(pend[0]["queued_at"], win.now) if pend else None,
         "head": [
-            {"company": r["company"], "title": r["title"], "source": r["source"]} for r in pend[:5]
+            {
+                "company": r["company"],
+                "title": r["title"],
+                "source": r["source"],
+                "wait_min": _minutes_ago(r["queued_at"], win.now),
+            }
+            for r in pend[:5]
         ],
     }
 
@@ -505,6 +632,7 @@ def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dic
         (run["run_id"],),
     ).fetchall()
     last = events[-1] if events else None
+    current = _infer_stage(events)
     return {
         "run_id": run["run_id"],
         "pipeline": run["pipeline"],
@@ -516,7 +644,9 @@ def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dic
             if last
             else None
         ),
-        "current_stage": _infer_stage(events),
+        "current_stage": current,
+        "stage_started_min_ago": _stage_started_min_ago(events, current["stage"], now),
+        "refine_progress": _refine_progress(events),
         "verdict_first": run["verdict_first"],
         "verdict_final": run["verdict_final"],
         "refine_rounds": run["refine_rounds"],
@@ -524,15 +654,52 @@ def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dic
     }
 
 
+def _stage_started_min_ago(events: list[sqlite3.Row], stage: str, now: datetime) -> int | None:
+    """Minutes since the `start` event of the CURRENT stage (M1), or None when
+    the run has no `start` row for it — a pre-M1 run, or a stage that was
+    inferred rather than observed."""
+    for e in reversed(events):
+        if e["event"] == "start":
+            return _minutes_ago(e["ts"], now) if e["stage"] == stage else None
+    return None
+
+
+def _refine_progress(events: list[sqlite3.Row]) -> dict[str, Any] | None:
+    """The latest refine ROUND (M1: one event per round from
+    `verdict_refine.refine_loop`, payload `{round, kind, score, best,
+    reason}`), or None before the first round / on a pre-M1 run."""
+    for e in reversed(events):
+        if e["stage"] != "refine" or e["event"] not in REFINE_ROUND_EVENTS:
+            continue
+        try:
+            payload = json.loads(e["payload"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "round": payload.get("round"),
+            "kind": payload.get("kind"),
+            "score": payload.get("score"),
+            "best": payload.get("best"),
+            "outcome": e["event"],
+            "at": _local_hhmm(e["ts"]),
+        }
+    return None
+
+
 def _infer_stage(events: list[sqlite3.Row]) -> dict[str, Any]:
-    """Best guess at the stage a run is in RIGHT NOW from end-of-stage events
-    only. Returns the guess and how it was made — the page needs to say
-    "probably" until M1 adds `start` events."""
+    """The stage a run is in RIGHT NOW. Observed from a `start` event or a
+    refine-round event when the run has them (M1); otherwise the pre-M1
+    guess — "the stage after the last `ok`" — with a basis that says so, so
+    the page can still say "probably" for a run that predates the events."""
     if not events:
         return {"stage": "fetch", "basis": "no events yet"}
     last = events[-1]
     if last["event"] == "start":
         return {"stage": last["stage"], "basis": "start event"}
+    if last["stage"] == "refine" and last["event"] in REFINE_ROUND_EVENTS:
+        return {"stage": "refine", "basis": f"refine round {last['event']}"}
     if last["event"] in ("error", "blocked"):
         return {"stage": last["stage"], "basis": f"last event was {last['event']}"}
     try:
@@ -779,6 +946,24 @@ def coverage(
             "verdict": "UNMEASURED",
             "why": "no source_runs/postings_seen rows in window",
         }
+    # Rule 3b — the M1 answer to rule 3: hunt_runs holds the loop's own
+    # funnel, so the derived gap above stops mattering once rows exist. Kept
+    # as a separate key so the pre-M1 comparison still prints next to it.
+    hr = hunt.get("hunt_runs")
+    if hr is None:
+        rules["3b_hunt_runs_present"] = {
+            "verdict": "UNMEASURED",
+            "why": hunt.get("hunt_runs_unmeasured") or "hunt_runs table missing",
+        }
+    else:
+        rules["3b_hunt_runs_present"] = {
+            "hunts_in_window": hr["hunts"],
+            "found": hr["found"],
+            "new": hr["new"],
+            "queued": hr["queued"],
+            "verdict": "PASS" if hr["hunts"] > 0 else "UNMEASURED",
+            **({} if hr["hunts"] > 0 else {"why": "table present, no hunt rows in window"}),
+        }
 
     # Rule 4 — ready stack == /unsent minus its non-applied entries.
     ready = int(
@@ -831,9 +1016,23 @@ def coverage(
             )
             or 0
         )
+        # Informational (M1): runs in the window whose outcome was stamped by
+        # the parent/sweeper (`orphan:<outcome>` / `orphan:stale`) rather than
+        # written by the pipeline itself. Not part of the verdict — a stamped
+        # run is a CLOSED run, which is what the rule wants.
+        orphan_stamped = int(
+            _scalar(
+                conn,
+                "SELECT COUNT(*) FROM generation_runs WHERE started_at >= ? "
+                "AND pipeline != 'backfill' AND outcome LIKE ?",
+                (win.start_iso, ORPHAN_PREFIX + "%"),
+            )
+            or 0
+        )
         rules["5_leaked_open_runs"] = {
             "open_runs": open_total,
             "older_than_timeout": leaked,
+            "orphan_stamped": orphan_stamped,
             "timeout_sec": APPLY_AGENT_CLI_TIMEOUT_SEC,
             "verdict": "PASS" if leaked == 0 else "FAIL",
             "consequence_if_fail": "M1 stamps orphan runs from apply_worker._resolve_outcome",
@@ -910,6 +1109,27 @@ def print_report(snap: dict[str, Any]) -> None:
 
     h = snap["hunt"]
     print("HUNT")
+    hr = h["hunt_runs"]
+    if hr is None:
+        print(
+            f"  hunts              —   ({h.get('hunt_runs_unmeasured') or 'no hunt_runs table'} — funnel below is derived)"
+        )
+    elif not hr["hunts"]:
+        print("  hunts              0   (hunt_runs present, no hunt in window)")
+    else:
+        last = hr["last"]
+        print(
+            f"  hunts              {hr['hunts']:>6}   {_fmt_pairs(list(hr['by_trigger'].items()))}; "
+            f"last {last['at']} ({last['trigger']}, {', '.join(last['sources'][:3]) or '?'}"
+            f"{', …' if len(last['sources']) > 3 else ''}: found {last['found']}, new {last['new']})"
+        )
+        print(
+            f"  funnel             found {hr['found']} → filtered {hr['filtered_out']} → "
+            f"dup {hr['dup_url']} url / {hr['dup_ct']} company+title / {hr['dup_cooldown']} cooldown → "
+            f"new {hr['new']} → capped {hr['capped']} → queued {hr['queued']}"
+            + (f" / inline {hr['applied_inline']}" if hr["applied_inline"] else "")
+        )
+        print(f"    top reasons      {_fmt_pairs(hr['top_filter_reasons'])}")
     sr = h["source_runs"]
     if sr:
         print(
@@ -948,11 +1168,13 @@ def print_report(snap: dict[str, Any]) -> None:
         )
     )
     p = a["pending"]
+    wait = f"{p['oldest_wait_min']} min" if p["oldest_wait_min"] is not None else "—"
     print(
-        f"  pending            {p['count']:>6}   oldest date {p['oldest_date'] or '—'}, wait — (no queued_at yet)"
+        f"  pending            {p['count']:>6}   oldest date {p['oldest_date'] or '—'}, oldest waits {wait}"
     )
     for r in p["head"]:
-        print(f"      · {r['company']} — {r['title']}  [{r['source'] or '?'}]")
+        w = f"  waiting {r['wait_min']} min" if r["wait_min"] is not None else ""
+        print(f"      · {r['company']} — {r['title']}  [{r['source'] or '?'}]{w}")
     ip = a["in_progress"]
     print(f"  in progress        {ip['count']:>6}")
     for c in ip["cards"]:
@@ -975,9 +1197,20 @@ def print_report(snap: dict[str, Any]) -> None:
                 if run["verdict_first"] is not None
                 else "no verdict yet"
             )
-            print(
-                f"        now: {cs['stage']} ({cs['basis']}); {v}; refine {run['refine_rounds'] or 0} rounds"
+            since = (
+                f", for {run['stage_started_min_ago']} min"
+                if run["stage_started_min_ago"] is not None
+                else ""
             )
+            print(
+                f"        now: {cs['stage']} ({cs['basis']}{since}); {v}; refine {run['refine_rounds'] or 0} rounds"
+            )
+            rp = run["refine_progress"]
+            if rp:
+                print(
+                    f"        refine: round {rp['round']} {rp['kind'] or '?'} {rp['outcome']} @ {rp['at']}, "
+                    f"score {rp['score']}, best {rp['best']}"
+                )
         else:
             print("        no open generation_runs row for this url (metrics gap or pre-M1 DB)")
     rn = a["runs"]
@@ -1040,6 +1273,7 @@ def print_report(snap: dict[str, Any]) -> None:
         "1_run_coverage",
         "2_stage_resolution",
         "3_hunt_funnel",
+        "3b_hunt_runs_present",
         "4_ready_stack",
         "5_leaked_open_runs",
     ):
