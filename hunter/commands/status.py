@@ -67,12 +67,15 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         from hunter.config import APPLY_QUEUE_ENABLED
 
         if APPLY_QUEUE_ENABLED:
-            from hunter.tracker import count_in_progress, count_pending
+            from hunter.tracker import count_in_progress, count_pending, oldest_pending_wait_min
 
             qp = await asyncio.to_thread(count_pending)
             qi = await asyncio.to_thread(count_in_progress)
+            wait_min = await asyncio.to_thread(oldest_pending_wait_min) if qp else None
+            wait = f"  oldest waits <b>{wait_min} min</b>" if wait_min is not None else ""
             lines.append(
-                f"📥 Apply queue: PENDING <b>{qp}</b>  IN_PROGRESS <b>{qi}</b> (<code>/queue</code>)"
+                f"📥 Apply queue: PENDING <b>{qp}</b>  IN_PROGRESS <b>{qi}</b>{wait} "
+                f"(<code>/queue</code>)"
             )
     except Exception:
         pass

@@ -82,6 +82,34 @@ def test_cmd_queue_shows_in_progress_count(tracker_db, monkeypatch):
     assert "IN_PROGRESS: <b>1</b>" in text
 
 
+def test_cmd_queue_header_shows_oldest_wait(tracker_db, monkeypatch):
+    from hunter import tracker
+
+    monkeypatch.setattr("hunter.config.APPLY_QUEUE_ENABLED", True)
+    tracker.add_pending(_job(1))
+    monkeypatch.setattr(tracker, "oldest_pending_wait_min", lambda now=None: 38)
+
+    text = _run_cmd([])
+    header = text.split("\n", 1)[0]
+    assert "oldest waits <b>38 min</b>" in header
+
+
+def test_cmd_queue_header_omits_wait_when_unknown(tracker_db, monkeypatch):
+    """A legacy PENDING row without queued_at (or an empty queue) must not
+    render a bogus wait."""
+    from hunter import tracker
+
+    monkeypatch.setattr("hunter.config.APPLY_QUEUE_ENABLED", True)
+    job = _job(1)
+    tracker.add_pending(job)
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        conn.execute("UPDATE applications SET queued_at=NULL")
+
+    text = _run_cmd([])
+    assert "oldest waits" not in text
+    assert "PENDING: <b>1</b>" in text
+
+
 def test_cmd_queue_registered_in_dispatcher():
     from hunter import telegram_bot
 

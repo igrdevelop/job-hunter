@@ -844,6 +844,27 @@ hunter/
                             IN_PROGRESS — a queued-but-not-yet-applied job isn't a real
                             application yet and must stay invisible to every downstream
                             consumer until the worker resolves it.
+                            `queued_at` (docs/PIPELINE_VIZ_PLAN.md M1, 2026-09-22): the
+                            UTC insertion time of the placeholder, stamped by
+                            `add_pending` in the same `%Y-%m-%dT%H:%M:%SZ` format
+                            `claim_pending` uses for `claimed_at` (both via
+                            `_utc_now_iso`), so "the oldest queued job has waited N
+                            minutes" is finally computable — `date` is a local calendar
+                            day and `claimed_at` only exists from IN_PROGRESS on.
+                            `release_claim`/`reset_stale_claims`/`release_claims_by_host`
+                            KEEP it (a bounce back to PENDING continues the same wait);
+                            `_clear_own_placeholder` still deletes the row before the
+                            terminal INSERT, so the value does NOT carry over onto the
+                            final applied/SKIP/FAIL row — carrying it would mean
+                            threading a new column through all six terminal writers'
+                            INSERTs, deferred until a report actually needs per-vacancy
+                            queue wait. NULL for every pre-column row (no backfill).
+                            DB-only: NOT a tracker.xlsx/Sheet column (the Sheets layer
+                            is the fixed A–K contract plus the four single-column
+                            writers). Read side: `oldest_pending_wait_min()` (user-
+                            scoped like `iter_unsent_rows`, walks queue order, None
+                            when the head of the queue has no timestamp) feeds
+                            `/queue` + `/status`; `list_pending()` dicts carry it.
                             `convert_own_applied_row(url)` is the opposite direction
                             (2026-08-24): it turns THIS user's applied row back into a
                             terminal SKIP in place, for the CLI pipeline's
@@ -1259,7 +1280,10 @@ hunter/
     schedule.py             /schedule
     unsent.py               /unsent
     status.py               /status — shows PENDING/IN_PROGRESS apply-queue counts too
-                            when `APPLY_QUEUE_ENABLED` (docs/HUNT_APPLY_SPLIT_PLAN.md M1)
+                            when `APPLY_QUEUE_ENABLED` (docs/HUNT_APPLY_SPLIT_PLAN.md M1),
+                            plus "oldest waits N min" on that same line when the head of
+                            the queue carries a `queued_at` (`tracker.
+                            oldest_pending_wait_min`, docs/PIPELINE_VIZ_PLAN.md M1)
     sync_sent.py            /sync_sent
     hunt.py                 /hunt + parse_hunt_source_args
     force.py                /force + _force_cleanup + _force_run
@@ -1296,6 +1320,10 @@ hunter/
                             HUNT_APPLY_SPLIT_PLAN.md): PENDING/IN_PROGRESS counts +
                             the oldest `limit` (default 10) PENDING jobs FIFO
                             (`tracker.count_pending`/`count_in_progress`/`list_pending`);
+                            the header line adds "oldest waits N min" when the head of
+                            the queue carries a `queued_at` (`tracker.
+                            oldest_pending_wait_min`, docs/PIPELINE_VIZ_PLAN.md M1 —
+                            omitted, not shown as 0, for a legacy row without one);
                             reports "queue disabled" when `APPLY_QUEUE_ENABLED` is false.
                             Read-only
     health.py               /health — per-source scraper yield report (source_health)
@@ -1540,6 +1568,23 @@ docs/MARKET_MEMORY_PLAN.md  Keep what the hunt SEES, not only what it applies to
                             and M0 has run on prod. Reports only — nothing feeds back into
                             the hunt or the apply pipeline (owner decision). The X side of
                             #276's `outcome_label`.
+docs/PIPELINE_VIZ_PLAN.md   A read-only pipeline page on the site (found → filtered →
+                            queued → in progress (ONE card with a stage strip — there is
+                            one apply worker, so "vacancies on verdict" would read 0/1
+                            forever) → cut at $0 → ready → sent → outcomes), replacing the
+                            six-command Telegram tour (`/status` `/queue` `/health`
+                            `/schedule` `/unsent` `/fails`). Written 2026-09-22 after the
+                            owner asked, again, whether the bot has independent
+                            per-stage queues (it has two: hunt and apply; everything
+                            inside an apply is one sequential subprocess). n8n / per-stage
+                            queues were considered and rejected — see its Non-goals. M0 =
+                            `tools/pipeline_snapshot.py` (shipped, NOT yet run on prod)
+                            with five decision rules that decide which M1 instrumentation
+                            is needed (`start` + per-refine-round events, a `hunt_runs`
+                            table, `queued_at`, orphan-run stamping). M2 = a snapshot JSON
+                            contract + `GET /pipeline/snapshot` in job-hunter-api (it reads
+                            tracker.db directly); M3 = the `/pipeline` page in
+                            job-hunter-site. Nothing changes how the pipeline executes.
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
                             best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
@@ -1822,6 +1867,42 @@ tools/fail_signatures.py    Read-only M0 measurement (docs/APPLY_FAILURE_QUEUES_
                             `matches no known tool` signature is excluded from rule 1 (the
                             question is whether systemic failures RECUR). `--days`, `--json`.
                             $0, no LLM, no writes
+tools/pipeline_snapshot.py  Read-only M0 measurement (docs/PIPELINE_VIZ_PLAN.md): ONE
+                            snapshot of the whole vacancy pipeline from the tables the
+                            bot already writes — the three tiers of the planned site
+                            page (hunt: `source_runs` raw yield, `postings_seen`
+                            passed/rejected + top reasons, rows that entered the
+                            tracker, next hunt slot via `schedules.grid.fire_minute` —
+                            the scheduler's own arithmetic, so the two can never
+                            disagree; apply: PENDING/IN_PROGRESS with the open
+                            `generation_runs` row + last `pipeline_events` stage behind
+                            each IN_PROGRESS card, `_infer_stage()` guessing the CURRENT
+                            stage as "the one after the last `ok`" because no `start`
+                            event exists yet, $0 cut-offs by outcome, SKIP/EXPIRED rows
+                            by `skip_reason` prefix, FAIL rows retryable/gave-up, the
+                            `apply_failures.jsonl` records, the `llm_outage_until` KV;
+                            result: ready (applied + `sent=''`), sent (`sent_parse`),
+                            outcomes by `outcome_at`, `cost_usd`), an events footer
+                            (newest first by `ts`, company joined via url_norm), and the
+                            plan's five COVERAGE rules: run coverage (produced rows ↔
+                            `generation_runs`, ≥ 90%), stage resolution (median share of
+                            run wall time inside the longest event gap, ≤ 50%), hunt
+                            funnel consistency (raw yield vs unique postings_seen,
+                            ≤ 30% gap), ready-stack == `iter_unsent_rows`'s SQL minus
+                            non-applied, and leaked open runs older than
+                            `APPLY_AGENT_CLI_TIMEOUT_SEC` (must be 0), each printed
+                            PASS/FAIL/UNMEASURED with the consequence. Window = Warsaw
+                            calendar days (`--days`, 1 = today) so it matches the
+                            schedule grid; `applications` queries are scoped by
+                            `--user` (default `config.current_user_id()`), the hunt
+                            tables are global by design. DB opened `mode=ro`; a missing
+                            table (pre-M1 checkout, fresh dev DB — the dev
+                            `tracker.db` has NO `applications` table at all, only the
+                            lazily-created ones) reports UNMEASURED, never 0. `--json`
+                            is the shape the M2 API contract will be cut from.
+                            `tests/test_pipeline_snapshot_tool.py` builds a real-schema
+                            fixture DB (`init_db` + the three lazy DDLs) and pins every
+                            count, every rule verdict and the read-only contract
 tools/audit_tenant_scope.py Read-only M0 measurement (docs/improvement-2026-09/
                             05-SECURITY_PLAN.md M0): static AST scan of every
                             `.py` under `hunter/` (pre-filtered by a plain
