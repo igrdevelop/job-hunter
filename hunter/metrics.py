@@ -30,12 +30,37 @@ Public API
     timed_stage(run_id, name)                context manager: records
                                               "ok"/"error" + duration_ms,
                                               re-raises the block's exception
+    finish_open_runs_for_url(url_norm, outcome, exit_code=None,
+                             *, older_than_sec=0) -> int
+                                              PARENT-side stamp for a run the
+                                              subprocess never finished
+    reset_stale_open_runs(timeout_sec) -> int  sweeper: any open run older
+                                              than the widest legitimate run
+                                              becomes `orphan:stale`
 
 Every public function wraps its own DB access in
 ``with hunter.best_effort.best_effort("metrics"):`` — a metrics write must
 NEVER be the reason an apply fails, and `start_run` always hands back a
 run_id (even when the INSERT itself silently failed) so every call site can
 call `stage()`/`finish_run()` unconditionally, with no None-check needed.
+
+Orphan runs (docs/PIPELINE_VIZ_PLAN.md M1, 2026-09-22)
+-------------------------------------------------------
+`start_run` runs INSIDE the apply subprocess and `finish_run` only on the
+paths the pipeline itself reaches, so a subprocess killed by the parent's
+timeout (`apply_service` — `asyncio.wait_for` + `proc.kill()`), an unhandled
+exception, or a `sys.exit` on a path without `finish_run` left the row with
+`finished_at IS NULL` forever — the M0 snapshot found 5 such rows on prod,
+days old, that a "where is each vacancy" page would show as in progress
+indefinitely. Two layers close it, both best-effort and neither changes what
+the apply does: the parent process stamps `orphan:<outcome>` on the url's
+open run right after the subprocess exits (`finish_open_runs_for_url`, called
+from `hunter.services.apply_service` — the one call site every apply path
+shares), and a 15-min sweep stamps `orphan:stale` on any open run older than
+`APPLY_AGENT_CLI_TIMEOUT_SEC` (`reset_stale_open_runs`, for a parent that
+died too, or a paste-mode run that has no url_norm to match on). The
+`orphan:` prefix is what tells a reader the pipeline did NOT write this
+outcome itself.
 """
 
 from __future__ import annotations
@@ -45,7 +70,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Generator
 
 from hunter.best_effort import best_effort
@@ -249,6 +274,108 @@ def finish_run(
     update_run(run_id, **fields)
 
 
+# ── Write: orphan runs (parent-side stamp + sweeper) ─────────────────────────
+
+# Stamped on a run the pipeline itself never finished. The prefix is the
+# contract: a reader can always tell a parent/sweeper-written outcome from one
+# `finish_run` wrote from inside the subprocess.
+ORPHAN_PREFIX = "orphan:"
+STALE_OUTCOME = ORPHAN_PREFIX + "stale"
+
+
+def _finish_open_runs(
+    conn: sqlite3.Connection,
+    where: str,
+    params: tuple[Any, ...],
+    outcome: str,
+    exit_code: int | None,
+) -> int:
+    """UPDATE every OPEN, non-backfill generation_runs row matching `where`.
+
+    Open = `finished_at IS NULL`. Backfill rows (`tools/backfill_runs.py`,
+    `pipeline='backfill'`, `started_at=NULL`) are derived from the pre-metrics
+    corpus and were never "in progress" — they must stay untouched by every
+    orphan writer, not just by timing readers.
+    """
+    _ensure_tables(conn)
+    # `where` is one of this module's own literal fragments (url / age
+    # predicate) — only placeholders, every value stays parameterised.
+    sql = (
+        "UPDATE generation_runs SET finished_at = ?, outcome = ?, exit_code = ? "  # noqa: S608
+        f"WHERE finished_at IS NULL AND pipeline != 'backfill' AND {where}"
+    )
+    cur = conn.execute(sql, (_now_iso(), outcome, exit_code, *params))
+    return int(cur.rowcount or 0)
+
+
+def finish_open_runs_for_url(
+    url_norm: str,
+    outcome: str,
+    exit_code: int | None = None,
+    *,
+    older_than_sec: int = 0,
+) -> int:
+    """Stamp `finished_at` + `outcome` (+ `exit_code`) on every OPEN run of
+    `url_norm` and return how many rows were stamped.
+
+    The parent-side half of the orphan-run fix (module docstring): called by
+    `hunter.services.apply_service` right after the apply subprocess exits,
+    with the outcome the parent already resolved, prefixed `orphan:`. A run
+    the pipeline finished normally has `finished_at` set and is untouched —
+    the common case, where this returns 0. Backfill rows are never touched.
+
+    `older_than_sec` > 0 restricts the stamp to runs whose `started_at` is at
+    least that old (a run started in the last few seconds for the same url
+    belongs to someone else — today no path spawns two subprocesses for one
+    url, `hunter.bot.state._active_apply_urls` guards that, so the default 0
+    stamps every open row). An empty `url_norm` is a no-op: a paste-mode run
+    carries no url and is left to `reset_stale_open_runs`. Best-effort —
+    returns 0 on any DB failure.
+    """
+    if not url_norm:
+        return 0
+    where = "url_norm = ?"
+    params: tuple[Any, ...] = (url_norm,)
+    if older_than_sec > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=older_than_sec)).isoformat(
+            timespec="seconds"
+        )
+        where += " AND started_at IS NOT NULL AND started_at <= ?"
+        params += (cutoff,)
+    stamped = 0
+    with best_effort("metrics"), get_db(DB_PATH) as conn:
+        stamped = _finish_open_runs(conn, where, params, outcome, exit_code)
+    return stamped
+
+
+def reset_stale_open_runs(timeout_sec: int) -> int:
+    """Stamp `orphan:stale` on every OPEN run whose `started_at` is older than
+    `timeout_sec` seconds; returns the count.
+
+    The sweeper half of the orphan-run fix (module docstring): the parent-side
+    stamp cannot cover a parent that died with its subprocess, or a paste-mode
+    run with no url_norm. Called every 15 min from
+    `hunter.schedules.apply_queue.scheduled_reset_stale_claims` with
+    `APPLY_AGENT_CLI_TIMEOUT_SEC` — the widest wall clock a legitimate run can
+    have — so a run still genuinely in progress is never stamped. Rows with a
+    NULL `started_at` (backfill) have no age and are left alone. Best-effort —
+    returns 0 on any DB failure.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_sec)).isoformat(
+        timespec="seconds"
+    )
+    stamped = 0
+    with best_effort("metrics"), get_db(DB_PATH) as conn:
+        stamped = _finish_open_runs(
+            conn,
+            "started_at IS NOT NULL AND started_at < ?",
+            (cutoff,),
+            STALE_OUTCOME,
+            None,
+        )
+    return stamped
+
+
 # ── Write: events ─────────────────────────────────────────────────────────
 
 
@@ -311,8 +438,6 @@ def count_runs_since(days: int = 7) -> int:
     Best-effort: returns 0 on any failure (missing table, DB error) rather
     than raising — this feeds an informational /status line, never a gate.
     """
-    from datetime import timedelta
-
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     try:
         with get_db(DB_PATH) as conn:

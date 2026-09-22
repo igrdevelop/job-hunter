@@ -261,15 +261,21 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
     )
     logger.info("[Schedule] postings_prune at 00:40 %s", TIMEZONE)
 
-    # ── Stale apply-claim sweep every 15 min (M1, docs/HUNT_APPLY_SPLIT_PLAN.md) ──
-    if APPLY_QUEUE_ENABLED:
-        job_queue.run_repeating(
-            callback=scheduled_reset_stale_claims,
-            interval=900,
-            first=900,
-            name="reset_stale_claims",
-        )
-        logger.info("[Schedule] reset_stale_claims every 15 min")
+    # ── Stale apply-claim + orphan-run sweep every 15 min (M1, docs/
+    # HUNT_APPLY_SPLIT_PLAN.md; docs/PIPELINE_VIZ_PLAN.md M1) ──────────────────
+    # Registered unconditionally since 2026-09-22: the callback's claim sweep
+    # checks APPLY_QUEUE_ENABLED itself, while its orphan generation_runs
+    # sweep must run either way — the inline hunt path leaks open runs too.
+    job_queue.run_repeating(
+        callback=scheduled_reset_stale_claims,
+        interval=900,
+        first=900,
+        name="reset_stale_claims",
+    )
+    logger.info(
+        "[Schedule] reset_stale_claims every 15 min (claim sweep %s, orphan-run sweep on)",
+        "on" if APPLY_QUEUE_ENABLED else "off",
+    )
 
     # ── Resume profile store: render/parse queue drain every ~20s (docs/
     # RESUME_PROFILE_STORE_PLAN.md step 4b) ──────────────────────────────────

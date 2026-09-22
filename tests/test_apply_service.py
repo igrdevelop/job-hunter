@@ -500,6 +500,182 @@ def test_run_apply_agent_for_url_reports_no_output_when_both_streams_empty(monke
     assert detail == "(no output)"
 
 
+# ── orphan generation_runs: the parent stamps the run the subprocess left open ─
+# docs/PIPELINE_VIZ_PLAN.md M1 (2026-09-22). metrics.start_run runs INSIDE the
+# apply subprocess; when that process is killed by our timeout or dies on an
+# unhandled exception it never reaches finish_run, and the row stayed open
+# forever. Both runners share this one post-exit call site.
+
+
+def _open_run_for(url: str) -> str:
+    from hunter import metrics
+    from hunter.tracker import normalize_url
+
+    # What apply_api/apply_cli's own start_run writes for this url.
+    return metrics.start_run(pipeline="api", url_norm=normalize_url(url))
+
+
+def _run_row(run_id: str) -> dict:
+    import sqlite3
+
+    from hunter import metrics
+
+    conn = sqlite3.connect(str(metrics.DB_PATH))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM generation_runs WHERE run_id = ?", (run_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def test_subprocess_runner_stamps_the_open_run_as_orphan_on_fail(monkeypatch) -> None:
+    url = "https://example.com/jobs/orphan-1?utm_source=x"
+    run_id = _open_run_for(url)
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return _FakeProc(returncode=1, stderr=b"Traceback: boom")
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            _job(url),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result == "fail"  # the outcome the caller sees is unchanged
+
+    row = _run_row(run_id)
+    assert row["outcome"] == "orphan:fail"
+    assert row["exit_code"] == 1
+    assert row["finished_at"]
+
+
+def test_subprocess_runner_stamps_orphan_cli_timeout_after_a_kill(monkeypatch) -> None:
+    url = "https://example.com/jobs/orphan-2"
+    run_id = _open_run_for(url)
+
+    class _SlowProc(_FakeProc):
+        def __init__(self) -> None:
+            super().__init__(returncode=0)
+            self._calls = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            self._calls += 1
+            if self._calls == 1:
+                await asyncio.sleep(0.05)
+            return b"", b""
+
+    proc = _SlowProc()
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return proc
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    # A widened timeout (!= caller's) is what makes the runner report cli_timeout.
+    monkeypatch.setattr("hunter.services.apply_service._effective_timeout", lambda t: t * 2)
+
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            _job(url),
+            timeout_sec=0.01,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result == "cli_timeout"
+    assert proc.killed is True
+    assert _run_row(run_id)["outcome"] == "orphan:cli_timeout"
+
+
+def test_subprocess_runner_leaves_a_normally_finished_run_alone(monkeypatch) -> None:
+    """The common case: the pipeline wrote finish_run itself before exiting."""
+    from hunter import metrics
+
+    url = "https://example.com/jobs/orphan-3"
+    run_id = _open_run_for(url)
+    metrics.finish_run(run_id, outcome="ok", exit_code=0, cost_usd=0.5)
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    asyncio.run(
+        run_apply_agent_subprocess(
+            _job(url),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    row = _run_row(run_id)
+    assert row["outcome"] == "ok"
+    assert row["cost_usd"] == 0.5
+
+
+def test_url_runner_stamps_the_open_run_as_orphan(monkeypatch) -> None:
+    """run_apply_agent_for_url (manual paste / Apply button) shares the stamp."""
+    from hunter.services.apply_service import run_apply_agent_for_url
+
+    url = "https://example.com/jobs/orphan-4"
+    run_id = _open_run_for(url)
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return _FakeProc(returncode=46)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    outcome, _detail = asyncio.run(
+        run_apply_agent_for_url(
+            url=url,
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert outcome == "llm_outage"
+    row = _run_row(run_id)
+    assert row["outcome"] == "orphan:llm_outage"
+    assert row["exit_code"] == 46
+
+
+def test_orphan_stamp_failure_never_changes_the_outcome(monkeypatch) -> None:
+    """Best-effort: a broken metrics layer must not turn an ok run into anything else."""
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("metrics on fire")
+
+    monkeypatch.setattr("hunter.metrics.finish_open_runs_for_url", _boom)
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        return _FakeProc(returncode=0)
+
+    monkeypatch.setattr(
+        "hunter.services.apply_service.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    result = asyncio.run(
+        run_apply_agent_subprocess(
+            _job("https://example.com/jobs/orphan-5"),
+            timeout_sec=1,
+            apply_agent_path=Path("apply_agent.py"),
+            python_executable="python",
+        )
+    )
+    assert result == "ok"
+
+
 # ── _effective_timeout: CLI runs get a wider wall clock ───────────────────────
 # A CLI-served vacancy spawns ~10-20 sequential `claude -p` calls (M4b) — far
 # past the 15-minute API budget. Killing a slow-but-working subscription apply

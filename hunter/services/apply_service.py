@@ -50,6 +50,38 @@ def _effective_timeout(timeout_sec: int) -> int:
     return timeout_sec
 
 
+def _settle_orphan_run(url: str, outcome: str, exit_code: int | None = None) -> None:
+    """Stamp `orphan:<outcome>` on the url's open `generation_runs` row, if any.
+
+    docs/PIPELINE_VIZ_PLAN.md M1 "orphan runs": `metrics.start_run` runs inside
+    the apply subprocess and `metrics.finish_run` only on the paths the
+    pipeline itself reaches, so a subprocess killed by our timeout, an
+    unhandled exception, or a `sys.exit` on a path without `finish_run` left
+    the row open forever (5 such rows on prod, 2026-09-22). This is the ONE
+    call site every apply path shares — the queue worker, the inline hunt
+    batch/retry loop and the manual paste/Apply-button runner all end up in
+    `run_apply_agent_subprocess` / `run_apply_agent_for_url` — so the stamp
+    lives here, right after the subprocess has returned, with the outcome the
+    parent already resolved. A run that finished normally has `finished_at`
+    set and is untouched (the common case). Best-effort throughout: the
+    metrics write is inside `best_effort("metrics")`, and nothing here can
+    change the outcome the caller receives.
+    """
+    if not url:
+        # Paste-mode run (no URL): its generation_runs row has url_norm=''
+        # and nothing to match on — metrics.reset_stale_open_runs covers it.
+        return
+    try:
+        from hunter import metrics
+        from hunter.tracker import normalize_url
+
+        metrics.finish_open_runs_for_url(
+            normalize_url(url), f"{metrics.ORPHAN_PREFIX}{outcome}", exit_code
+        )
+    except Exception as e:  # noqa: BLE001 — telemetry must never break the apply run
+        logger.debug("[apply_service] orphan-run stamp failed for %s: %s", url, e)
+
+
 def build_generate_docs_cmd(
     generate_docs_script: Path,
     content_json_path: Path,
@@ -161,7 +193,10 @@ async def run_apply_agent_subprocess(
         stdout: bytes | None = None
         stderr: bytes | None = None
 
-        def _save_stdout(save_outcome: ApplyOutcome, exit_code: int | None = None) -> None:
+        def _after_exit(save_outcome: ApplyOutcome, exit_code: int | None = None) -> None:
+            """Post-exit telemetry, on every path the subprocess actually ran:
+            the stdout transcript + the orphan-run stamp (see _settle_orphan_run).
+            Neither can change the outcome being returned."""
             try:
                 from hunter.apply_stdout_log import save_apply_stdout
 
@@ -177,6 +212,7 @@ async def run_apply_agent_subprocess(
                 )
             except Exception as e:  # noqa: BLE001 — logging must never break the apply run
                 logger.debug("[auto-apply] stdout transcript save failed: %s", e)
+            _settle_orphan_run(job.url, save_outcome, exit_code)
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -200,7 +236,7 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
-            _save_stdout(outcome)
+            _after_exit(outcome)
             return outcome
         except asyncio.CancelledError:
             # Worker/task cancel must not leave apply_agent.py running while
@@ -215,7 +251,7 @@ async def run_apply_agent_subprocess(
 
         if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
             logger.info(f"[auto-apply] MANUAL pending (JobLeads) {job.company} — {job.title}")
-            _save_stdout("manual", proc.returncode)
+            _after_exit("manual", proc.returncode)
             return "manual"
 
         if proc.returncode == _APPLY_RATE_LIMITED_EXIT_CODE:
@@ -229,12 +265,12 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
-            _save_stdout("rate_limited", proc.returncode)
+            _after_exit("rate_limited", proc.returncode)
             return "rate_limited"
 
         if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
             logger.error(f"[auto-apply] LLM OUTAGE (billing/auth) {job.company} — {job.title}")
-            _save_stdout("llm_outage", proc.returncode)
+            _after_exit("llm_outage", proc.returncode)
             return "llm_outage"
 
         if proc.returncode != 0:
@@ -254,7 +290,7 @@ async def run_apply_agent_subprocess(
                 duration_sec=time.monotonic() - started,
                 cli_mode=cli_mode,
             )
-            _save_stdout("fail", proc.returncode)
+            _after_exit("fail", proc.returncode)
             return "fail"
 
         if stdout:
@@ -262,7 +298,7 @@ async def run_apply_agent_subprocess(
                 f"[auto-apply] stdout for {job.url}: {stdout.decode(errors='replace')[-300:]}"
             )
         logger.info(f"[auto-apply] OK {job.company} — {job.title}")
-        _save_stdout("ok", proc.returncode)
+        _after_exit("ok", proc.returncode)
         return "ok"
     finally:
         if paste_path:
@@ -344,7 +380,9 @@ async def run_apply_agent_for_url(
     stdout: bytes | None = None
     stderr: bytes | None = None
 
-    def _save_stdout(save_outcome: str, exit_code: int | None = None) -> None:
+    def _after_exit(save_outcome: str, exit_code: int | None = None) -> None:
+        """Post-exit telemetry (stdout transcript + orphan-run stamp) — same
+        contract as run_apply_agent_subprocess's own _after_exit."""
         try:
             from hunter.apply_stdout_log import save_apply_stdout
 
@@ -359,6 +397,7 @@ async def run_apply_agent_for_url(
             )
         except Exception as e:  # noqa: BLE001 — logging must never break the apply run
             logger.debug("[apply_agent] stdout transcript save failed: %s", e)
+        _settle_orphan_run(url, save_outcome, exit_code)
 
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -378,7 +417,7 @@ async def run_apply_agent_for_url(
             duration_sec=time.monotonic() - started,
             cli_mode=cli_mode,
         )
-        _save_stdout(outcome)
+        _after_exit(outcome)
         return outcome, detail
     except asyncio.CancelledError:
         proc.kill()
@@ -390,12 +429,12 @@ async def run_apply_agent_for_url(
 
     if proc.returncode == _APPLY_MANUAL_EXIT_CODE:
         logger.info(f"[apply_agent] MANUAL pending (JobLeads) {label}")
-        _save_stdout("manual", proc.returncode)
+        _after_exit("manual", proc.returncode)
         return "manual", ""
 
     if proc.returncode == _APPLY_LLM_OUTAGE_EXIT_CODE:
         logger.error(f"[apply_agent] LLM OUTAGE (billing/auth) for {label}")
-        _save_stdout("llm_outage", proc.returncode)
+        _after_exit("llm_outage", proc.returncode)
         return "llm_outage", "LLM account outage (billing/auth) — no docs generated"
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
@@ -417,11 +456,11 @@ async def run_apply_agent_for_url(
             duration_sec=time.monotonic() - started,
             cli_mode=cli_mode,
         )
-        _save_stdout("fail", proc.returncode)
+        _after_exit("fail", proc.returncode)
         return "fail", snippet
 
     if stdout:
         logger.debug(f"[apply_agent] stdout for {label}: {stdout.decode(errors='replace')[-300:]}")
     logger.info(f"[apply_agent] OK {label}")
-    _save_stdout("ok", proc.returncode)
+    _after_exit("ok", proc.returncode)
     return "ok", ""
