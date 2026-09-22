@@ -755,18 +755,38 @@ hunter/
                             counters, cost, terminal `outcome`, `exit_code`) — and
                             `pipeline_events` — an append log of stage transitions per
                             run (`fetch`/`generate`/`ats_loop`/`judge`/`lang_gate`/
-                            `render`/`verdict`, event `ok`/`error`/`blocked`, optional
-                            `duration_ms` + JSON payload). API: `start_run(**fields) ->
-                            run_id` (always returns an id, the INSERT is best-effort),
-                            `stage()`, `update_run()` (whitelisted columns —
-                            `ALLOWED_RUN_FIELDS`, a typo raises), `finish_run()`,
-                            `timed_stage()`. Every write sits inside
+                            `render`/`verdict`/`refine`, event `start`/`ok`/`error`/
+                            `blocked` — plus `accepted`/`rejected`/`discarded` for
+                            `refine` — optional `duration_ms` + JSON payload). API:
+                            `start_run(**fields) -> run_id` (always returns an id, the
+                            INSERT is best-effort), `stage()`, `update_run()`
+                            (whitelisted columns — `ALLOWED_RUN_FIELDS`, a typo raises),
+                            `finish_run()`, `timed_stage()`. Every write sits inside
                             `best_effort("metrics")`: a metrics failure must never be why
-                            an apply fails. Wired into `apply_api` (41 call sites) and
-                            `apply_cli` (29) with no behavior change; `tools/
-                            backfill_runs.py` derives rows for the pre-metrics corpus
-                            (`pipeline='backfill'`, `started_at=NULL` — every reader
-                            must exclude those from timing). **Orphan runs (closed
+                            an apply fails. Wired into `apply_api` and `apply_cli` with
+                            no behavior change; `tools/backfill_runs.py` derives rows
+                            for the pre-metrics corpus (`pipeline='backfill'`,
+                            `started_at=NULL` — every reader must exclude those from
+                            timing). **Since 2026-09-22 (PIPELINE_VIZ M1, first
+                            item):** every stage that records an end event ALSO
+                            records `start` at its top, in BOTH pipelines (the CLI
+                            `generate` = the `claude -p` subprocess; the CLI `fetch`
+                            gained its own `start`/`ok`/`error` trio at the same
+                            time — it had no event at all before, and its `error` is
+                            telemetry only since a failed pre-fetch is non-fatal
+                            there), and `verdict_refine.refine_loop(run_id=...)` writes
+                            one `refine` row per attempted round — event = the round's
+                            `verdict_history` outcome, payload `{round, kind, score,
+                            best, reason}` — after a single `refine`/`start` carrying
+                            `{target, max_rounds, verdict_first}`; `run_id=None` (the
+                            default, what `dual_apply`'s shadow passes) keeps the loop
+                            byte-for-byte silent. The golden E2E tests pin the exact
+                            ordered `(stage, event)` sequence for the happy path of
+                            each pipeline (tests/test_golden_apply_e2e.py, tests/
+                            test_golden_apply_cli_e2e.py — mutation-verified: dropping
+                            any one `start` fails at that index) and tests/
+                            test_metrics_refine_events.py pins the refine rows.
+                            **Orphan runs (closed
                             2026-09-22, PIPELINE_VIZ M1):** `start_run` runs INSIDE the
                             apply subprocess and `finish_run` only on the paths the
                             pipeline itself reaches, so a subprocess killed by the
@@ -806,11 +826,10 @@ hunter/
                             match. Backfill rows are excluded from both writers, not just
                             from timing readers. The 5 prod rows predate this and are
                             older than the sweep cutoff, so the first tick after deploy
-                            stamps them `orphan:stale`. REMAINING GAPS the snapshot tool
-                            measures: events are written only at the END of a stage (no
-                            `start`) and the refine loop writes no per-round event. No
-                            prune yet. Read side today: `count_runs_since()` for a
-                            `/status` line, and `tools/pipeline_snapshot.py`
+                            stamps them `orphan:stale`.
+                            REMAINING GAP from the M0 list: no prune yet. Read side
+                            today: `count_runs_since()` for a `/status` line, and
+                            `tools/pipeline_snapshot.py` (PIPELINE_VIZ M0, PR #287)
   prescreen.py              Stack pre-screen (docs/STACK_PRESCREEN_PLAN.md M3/M4):
                             ONE JUDGE_MODEL call reading which framework a posting
                             is actually for, at Step 1.5h — after every free
@@ -864,6 +883,27 @@ hunter/
                             IN_PROGRESS — a queued-but-not-yet-applied job isn't a real
                             application yet and must stay invisible to every downstream
                             consumer until the worker resolves it.
+                            `queued_at` (docs/PIPELINE_VIZ_PLAN.md M1, 2026-09-22): the
+                            UTC insertion time of the placeholder, stamped by
+                            `add_pending` in the same `%Y-%m-%dT%H:%M:%SZ` format
+                            `claim_pending` uses for `claimed_at` (both via
+                            `_utc_now_iso`), so "the oldest queued job has waited N
+                            minutes" is finally computable — `date` is a local calendar
+                            day and `claimed_at` only exists from IN_PROGRESS on.
+                            `release_claim`/`reset_stale_claims`/`release_claims_by_host`
+                            KEEP it (a bounce back to PENDING continues the same wait);
+                            `_clear_own_placeholder` still deletes the row before the
+                            terminal INSERT, so the value does NOT carry over onto the
+                            final applied/SKIP/FAIL row — carrying it would mean
+                            threading a new column through all six terminal writers'
+                            INSERTs, deferred until a report actually needs per-vacancy
+                            queue wait. NULL for every pre-column row (no backfill).
+                            DB-only: NOT a tracker.xlsx/Sheet column (the Sheets layer
+                            is the fixed A–K contract plus the four single-column
+                            writers). Read side: `oldest_pending_wait_min()` (user-
+                            scoped like `iter_unsent_rows`, walks queue order, None
+                            when the head of the queue has no timestamp) feeds
+                            `/queue` + `/status`; `list_pending()` dicts carry it.
                             `convert_own_applied_row(url)` is the opposite direction
                             (2026-08-24): it turns THIS user's applied row back into a
                             terminal SKIP in place, for the CLI pipeline's
@@ -1279,7 +1319,10 @@ hunter/
     schedule.py             /schedule
     unsent.py               /unsent
     status.py               /status — shows PENDING/IN_PROGRESS apply-queue counts too
-                            when `APPLY_QUEUE_ENABLED` (docs/HUNT_APPLY_SPLIT_PLAN.md M1)
+                            when `APPLY_QUEUE_ENABLED` (docs/HUNT_APPLY_SPLIT_PLAN.md M1),
+                            plus "oldest waits N min" on that same line when the head of
+                            the queue carries a `queued_at` (`tracker.
+                            oldest_pending_wait_min`, docs/PIPELINE_VIZ_PLAN.md M1)
     sync_sent.py            /sync_sent
     hunt.py                 /hunt + parse_hunt_source_args
     force.py                /force + _force_cleanup + _force_run
@@ -1316,6 +1359,10 @@ hunter/
                             HUNT_APPLY_SPLIT_PLAN.md): PENDING/IN_PROGRESS counts +
                             the oldest `limit` (default 10) PENDING jobs FIFO
                             (`tracker.count_pending`/`count_in_progress`/`list_pending`);
+                            the header line adds "oldest waits N min" when the head of
+                            the queue carries a `queued_at` (`tracker.
+                            oldest_pending_wait_min`, docs/PIPELINE_VIZ_PLAN.md M1 —
+                            omitted, not shown as 0, for a legacy row without one);
                             reports "queue disabled" when `APPLY_QUEUE_ENABLED` is false.
                             Read-only
     health.py               /health — per-source scraper yield report (source_health)
@@ -1573,6 +1620,23 @@ docs/MARKET_MEMORY_PLAN.md  Keep what the hunt SEES, not only what it applies to
                             and M0 has run on prod. Reports only — nothing feeds back into
                             the hunt or the apply pipeline (owner decision). The X side of
                             #276's `outcome_label`.
+docs/PIPELINE_VIZ_PLAN.md   A read-only pipeline page on the site (found → filtered →
+                            queued → in progress (ONE card with a stage strip — there is
+                            one apply worker, so "vacancies on verdict" would read 0/1
+                            forever) → cut at $0 → ready → sent → outcomes), replacing the
+                            six-command Telegram tour (`/status` `/queue` `/health`
+                            `/schedule` `/unsent` `/fails`). Written 2026-09-22 after the
+                            owner asked, again, whether the bot has independent
+                            per-stage queues (it has two: hunt and apply; everything
+                            inside an apply is one sequential subprocess). n8n / per-stage
+                            queues were considered and rejected — see its Non-goals. M0 =
+                            `tools/pipeline_snapshot.py` (shipped, NOT yet run on prod)
+                            with five decision rules that decide which M1 instrumentation
+                            is needed (`start` + per-refine-round events, a `hunt_runs`
+                            table, `queued_at`, orphan-run stamping). M2 = a snapshot JSON
+                            contract + `GET /pipeline/snapshot` in job-hunter-api (it reads
+                            tracker.db directly); M3 = the `/pipeline` page in
+                            job-hunter-site. Nothing changes how the pipeline executes.
 docs/QUALITY_ROADMAP.md     Quality roadmap (2026-07-15): master doc with priorities/sequencing;
                             per-workstream details in docs/quality/01..09-*.md (deps lockfile,
                             best-effort alerts, golden E2E, pipeline unification, mypy/Sonar,
@@ -1855,6 +1919,42 @@ tools/fail_signatures.py    Read-only M0 measurement (docs/APPLY_FAILURE_QUEUES_
                             `matches no known tool` signature is excluded from rule 1 (the
                             question is whether systemic failures RECUR). `--days`, `--json`.
                             $0, no LLM, no writes
+tools/pipeline_snapshot.py  Read-only M0 measurement (docs/PIPELINE_VIZ_PLAN.md): ONE
+                            snapshot of the whole vacancy pipeline from the tables the
+                            bot already writes — the three tiers of the planned site
+                            page (hunt: `source_runs` raw yield, `postings_seen`
+                            passed/rejected + top reasons, rows that entered the
+                            tracker, next hunt slot via `schedules.grid.fire_minute` —
+                            the scheduler's own arithmetic, so the two can never
+                            disagree; apply: PENDING/IN_PROGRESS with the open
+                            `generation_runs` row + last `pipeline_events` stage behind
+                            each IN_PROGRESS card, `_infer_stage()` guessing the CURRENT
+                            stage as "the one after the last `ok`" because no `start`
+                            event exists yet, $0 cut-offs by outcome, SKIP/EXPIRED rows
+                            by `skip_reason` prefix, FAIL rows retryable/gave-up, the
+                            `apply_failures.jsonl` records, the `llm_outage_until` KV;
+                            result: ready (applied + `sent=''`), sent (`sent_parse`),
+                            outcomes by `outcome_at`, `cost_usd`), an events footer
+                            (newest first by `ts`, company joined via url_norm), and the
+                            plan's five COVERAGE rules: run coverage (produced rows ↔
+                            `generation_runs`, ≥ 90%), stage resolution (median share of
+                            run wall time inside the longest event gap, ≤ 50%), hunt
+                            funnel consistency (raw yield vs unique postings_seen,
+                            ≤ 30% gap), ready-stack == `iter_unsent_rows`'s SQL minus
+                            non-applied, and leaked open runs older than
+                            `APPLY_AGENT_CLI_TIMEOUT_SEC` (must be 0), each printed
+                            PASS/FAIL/UNMEASURED with the consequence. Window = Warsaw
+                            calendar days (`--days`, 1 = today) so it matches the
+                            schedule grid; `applications` queries are scoped by
+                            `--user` (default `config.current_user_id()`), the hunt
+                            tables are global by design. DB opened `mode=ro`; a missing
+                            table (pre-M1 checkout, fresh dev DB — the dev
+                            `tracker.db` has NO `applications` table at all, only the
+                            lazily-created ones) reports UNMEASURED, never 0. `--json`
+                            is the shape the M2 API contract will be cut from.
+                            `tests/test_pipeline_snapshot_tool.py` builds a real-schema
+                            fixture DB (`init_db` + the three lazy DDLs) and pins every
+                            count, every rule verdict and the read-only contract
 tools/audit_tenant_scope.py Read-only M0 measurement (docs/improvement-2026-09/
                             05-SECURITY_PLAN.md M0): static AST scan of every
                             `.py` under `hunter/` (pre-filtered by a plain
@@ -3483,7 +3583,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 | Date | Agent | Work |
 |------|-------|------|
 | 2026-09-22 | fable | **Orphan `generation_runs` rows closed — docs/PIPELINE_VIZ_PLAN.md M1 "orphan runs" (branch `fix/metrics-orphan-runs`, cut from origin/master; the `hunter/metrics.py` CLAUDE.md entry is copied from #287's branch, so a merge conflict there is expected).** The M0 snapshot on prod found 5 `generation_runs` rows with `finished_at IS NULL` days old (all `pipeline='api'`, 2026-09-10..15, `outcome NULL`; one had reached `render`, the rest stopped after `fetch`/`generate`) — `metrics.start_run` runs inside the apply subprocess and `finish_run` only on the paths the pipeline itself reaches, so a subprocess killed by the parent's timeout (`apply_service`'s `asyncio.wait_for` + `proc.kill()`), an unhandled exception, or a `sys.exit` on a path without `finish_run` left the row open forever, and the planned page would show it as "in progress" indefinitely. **Two layers, both best-effort, zero change to apply behaviour or outcomes.** (1) Parent-side stamp: `metrics.finish_open_runs_for_url(url_norm, outcome, exit_code=None, *, older_than_sec=0) -> int` stamps `finished_at`/`outcome`/`exit_code` on every open, non-backfill run of that url_norm. The three apply paths — `apply_worker._resolve_outcome`, `main._run_apply_agent` (batch + retry), `bot.apply_runner._run_apply_agent` — all converge on `run_apply_agent_subprocess`/`run_apply_agent_for_url`, so the ONE call site is `apply_service._settle_orphan_run`, folded into the per-run `_save_stdout` closure (renamed `_after_exit` so its name stays honest) that already ran on all 11 post-exit paths; the outcome is prefixed `orphan:` (`ORPHAN_PREFIX`) so a reader can tell a parent-written outcome from one the pipeline wrote. A normally finished run is untouched (returns 0, the common case); an empty url_norm (paste mode) is a deliberate no-op — an empty key must never stamp every url-less row. (2) Sweeper: `metrics.reset_stale_open_runs(timeout_sec)` stamps `orphan:stale` (`STALE_OUTCOME`) on any open run older than the cutoff; called from `scheduled_reset_stale_claims` with `APPLY_AGENT_CLI_TIMEOUT_SEC` (widest legitimate run — a 2 h CLI run is never stamped), which now runs REGARDLESS of `APPLY_QUEUE_ENABLED` (the flag only guards the claim sweep inside the callback; registration in `schedules/__init__.py` became unconditional, same shape as postings_prune) — the inline hunt path leaks the same way, and this is what catches a parent that died too. Backfill rows (`started_at NULL`) are excluded from both writers. The 5 prod rows are older than the cutoff, so the first tick after deploy stamps them `orphan:stale`. **Tests (+19, 3770 fast-suite pass):** metrics unit tests (only that url's open rows, finished run untouched, backfill ignored, empty url_norm no-op, exit_code stamped, `older_than_sec`, cutoff respected, DB failure → 0), the shared call site with the faked subprocess (`orphan:fail` + exit 1, `orphan:cli_timeout` after a kill, `orphan:llm_outage` via the url runner, finished run left alone, a broken metrics layer never changes the outcome), and the tick (sweep runs with the queue off, 2 h vs 4 h cutoff, sweep failure doesn't break the tick, registration with the flag off). **Mutation-verified by hand, 9 mutations, all caught on the intended assertion:** drop the backfill exclusion, drop `finished_at IS NULL`, drop the empty-url_norm guard, sweeper ignores the cutoff, remove the stamp from either runner, drop the `orphan:` prefix, put the sweep back under the queue flag, gate registration by the flag again. Also: a new autouse `_isolated_metrics_db` fixture in `tests/conftest.py` — every existing apply_service test drives a faked subprocess, and the stamp would otherwise lazily CREATE the metrics tables in the real repo `./tracker.db` (the same leak class the `postings_seen` note in the tracker.py entry describes); explicit per-test `hunter.metrics.DB_PATH` patches (golden E2E, test_metrics, test_backfill_runs) still win. Gates: ruff check/format clean, mypy ratchet no regression. Not pushed, no PR (per work order). |
+| 2026-09-22 | fable | **Pipeline visualization M1, first item — `start` events + per-refine-round events (docs/PIPELINE_VIZ_PLAN.md; branch feat/metrics-start-refine-events).** The M0 gap list said the best a reader of `pipeline_events` could do was "last `ok` was `render`, so probably on verdict or refine for the last 25 minutes": events were written only at the END of a stage and the refine loop — the longest part of a run — wrote nothing per round. Now (a) every stage that already records `ok`/`error`/`blocked` also records `start` at its top, in BOTH `apply_api` (fetch/generate/ats_loop/judge/lang_gate/render/verdict) and `apply_cli` (fetch/generate/judge/lang_gate/verdict — the `claude -p` subprocess IS its generate stage; ats_loop/render live inside the skill). The CLI `fetch` had NO event at all before and gained the full `start`/`ok`/`error` trio (its `error` is telemetry only — a failed pre-fetch there is non-fatal by design, the skill gets the bare URL). (b) `verdict_refine.refine_loop` takes an optional `run_id` (default `None` → every `metrics.stage` call is already a no-op, so `dual_apply`'s shadow and every test caller are byte-for-byte unchanged) and emits one `refine` row per attempted round from the SAME helper that appends to `verdict_history` (`_record`), so the telemetry can never drift from the persisted audit trail: event = the round's outcome — `accepted`/`rejected`, and ALSO `discarded` (the plan sketch listed only the first two; a round the language gate blocks or a rewrite that drops roles is still a round the page should show, with `score=None`) — payload `{round, kind, score, best, reason}`, after one `refine`/`start` with `{target, max_rounds, verdict_first}`. Zero change to the loop's logic, rollback or return values. Both golden E2E happy paths now assert the exact ordered `(stage, event)` list (14 rows API, 10 rows CLI — no `refine` rows there, the golden verdict is 96 ≥ target); `tests/test_metrics_refine_events.py` pins the refine rows with the same fakes `test_verdict_refine.py` uses. Mutation-verified by hand: dropping the API `judge` start, the CLI `lang_gate` start, or the `_record` emit each fails its test at the expected index. Lesson worth writing down: restoring a mutation with `git checkout <file>` on a branch whose edits are still uncommitted reverts the WHOLE file to HEAD — the pipeline edits had to be re-applied from a saved patch script; restore from a copy, or commit first. Also added the `hunter/metrics.py` Repository Layout entry (copied from PR #287's version and amended — that PR is not merged yet, so the CLAUDE.md merge conflict is expected and trivial). Still open from the M0 gap list: orphan runs (`finished_at IS NULL` after a worker kill) and a prune. |
+| 2026-09-22 | fable | **`queued_at` on PENDING rows — docs/PIPELINE_VIZ_PLAN.md M1 "PENDING insertion time" (branch `feat/tracker-queued-at`).** The plan's problem #4: `add_pending` stamped only `date` (a local calendar day) and `claimed_at` exists only from IN_PROGRESS on, so "the oldest queued job has waited N minutes" was not computable at all. New nullable `applications.queued_at` (hunter/db.py `_ensure_columns`, WHY-comment next to `claimed_at`; NULL for every pre-column row, no backfill), stamped by `add_pending` in the exact `%Y-%m-%dT%H:%M:%SZ` UTC format `claim_pending` uses for `claimed_at` — both now go through one `_utc_now_iso()`/`_QUEUE_TS_FMT` so the two columns subtract cleanly. `release_claim`/`reset_stale_claims`/`release_claims_by_host` deliberately leave it alone (an IN_PROGRESS -> PENDING bounce continues the same wait). **Not carried onto the terminal row:** `_clear_own_placeholder` deletes the placeholder and each of the six terminal writers then runs its own INSERT with its own column list, so a pass-through means a new column on every one of those INSERTs plus a return value from the delete — more than the "one-line pass-through" the work order allowed; left out, and the column stays DB-only (not a Sheet column — the Sheets layer is the fixed A–K contract + four single-column writers). Read side: `tracker.oldest_pending_wait_min(now=None) -> int | None` — user-scoped like `iter_unsent_rows` (`count_pending`/`list_pending` are not, by design), walks QUEUE order (`rowid`, what `claim_pending` drains) rather than `MIN(queued_at)`, so a legacy NULL row at the head reports None instead of silently skipping ahead to a younger stamped row; malformed timestamp -> None, clock skew -> 0, never raises. `list_pending()` dicts carry `queued_at`. `/queue`'s header and `/status`'s apply-queue line append "oldest waits N min" when available and omit it (not "0") otherwise. Tests (17 new): stamp format, both resets preserve it, oldest/ignores IN_PROGRESS/NULL-head/never-negative/user-scoped, the `_ensure_columns` migration on a DB that had the column dropped (`ALTER TABLE DROP COLUMN` — same SQLite >= 3.35 floor `claim_pending`'s `UPDATE…RETURNING` already requires), and both command lines. `release_claim` preservation mutation-verified by hand (clearing `queued_at` in the UPDATE fails exactly that test). Not pushed, no PR. |
+| 2026-09-22 | fable | **Pipeline visualization — plan + M0 snapshot tool (docs/PIPELINE_VIZ_PLAN.md; branch feat/pipeline-viz-plan-m0, PR #287).** The owner asked, for the third time, whether the bot has independent per-stage processing queues and wanted a site page showing found → filtered → queued → generation 1 → generation 2 → verdict → done. Audit first: there are exactly TWO queues (hunt under `_hunt_lock`; the apply `PENDING` queue drained by ONE `apply_worker_loop`), and inside an apply every stage runs sequentially in one subprocess — a "vacancies on verdict" stack would read 0/1 forever. Per-stage queues and an n8n orchestrator were both rejected in the plan's Non-goals (no throughput gain at ~6 applies/day, the one-process-one-exit-code shape is what every outage/timeout/abort rule relies on, and n8n would add a second runtime + state store to a VPS that filled its disk two weeks ago); the page is built read-only on top of the existing tables instead. Mockup agreed (three tiers, ONE in-progress card with a stage strip, events footer, outage banner). **M0 shipped:** `tools/pipeline_snapshot.py` (read-only `mode=ro`, $0, Warsaw calendar-day window, user-scoped `applications`) builds every stack from `source_runs` / `postings_seen` / `applications` / `generation_runs` / `pipeline_events` / the `config` KV, computes the next hunt slot through `schedules.grid.fire_minute` itself, and prints five decision rules: run coverage ≥ 90%, stage resolution (median share of wall time inside the longest event gap ≤ 50%), hunt funnel gap ≤ 30% (raw yield vs unique postings_seen), ready == `iter_unsent_rows`'s SQL, leaked open runs = 0. Synthetic-fixture run: rules 1/2/3/5 FAIL as designed for the fixture, which is the point — each FAIL names the M1 instrumentation it implies (`start` + per-refine-round events, a `hunt_runs` table from `hunter/main.py`'s own counters, `queued_at` on PENDING rows, orphan-run stamping in `apply_worker._resolve_outcome`). Two things found on the way: `hunter/metrics.py` (shipped in #267) had NO CLAUDE.md entry — added now; and the dev checkout's `tracker.db` has no `applications` table at all (only the lazily-created ones), so the tool's "not a tracker.db" guard fired on its first local run. Tests: `tests/test_pipeline_snapshot_tool.py` (10, real-schema fixture DB, read-only contract pinned). NOT yet run on prod — that is the next step, and the numbers decide the M1 scope. |
 | 2026-09-21 | opus | **Apply failure queues — M0 result on prod + M1 CLI canary (docs/APPLY_FAILURE_QUEUES_PLAN.md; branch feat/cli-canary).** M0 (`tools/fail_signatures.py` on prod): 14 failures / 42 days, 4 signatures, no recurring systemic one, 6 h peak never above 1 → per the pre-stated rules M2 (classifier) and M3 (`BLOCKED` queue) are CLOSED; M1 + M4 only. The finding that reshaped the plan: **the 2026-09-10..21 CLI-argv incident left no line in the failure log at all.** Prod runs on the paid API; `main_cli` is only reached as the fallback after an API account outage (`apply_agent.py:98-132`), and a failed fallback exits 46 = `llm_outage`: no FAIL row, no `fail_count` bump, claim released to PENDING, excluded from `apply_failures.jsonl` by design. So no vacancy was lost; what died for 11 days was the safety net (an API outage meant no generation at all), and it read as just another outage. **M1 shipped:** `hunter/cli_canary.py` runs one trivial `claude -p` per bot start through `apply_cli._cli_argv` (split out of `_build_cli_command`, which is now a thin wrapper), so the probe carries the real flags in the real order; alerts once on failure, retries a transient failure once after 60 s, never retries the CLI rejecting its own argv; `CLI_CANARY_ENABLED` (default true), `best_effort("apply.cli_canary")`. Mutation-verified: putting the prompt back after the tool flags fails `test_uses_the_apply_pipelines_own_argv_builder` on `cmd[2]`. M4 gained an item from the M0 blind spot: count "API down AND CLI fallback failed" separately from a plain outage. Also: `fail_signatures.py --db` now warns on a missing file (prod db is `/app/db/tracker.db`, not `./tracker.db`; a wrong path used to silently drop every tracker-fate line). Side finding, not done: Ashby detail pages are JS-rendered, 3 vacancies given up at Step 1; fix is the Ashby posting API, same as Lever. |
-| 2026-09-21 | opus | **Apply failure queues — plan + M0 tool (docs/APPLY_FAILURE_QUEUES_PLAN.md; branch docs/apply-failure-queues-plan).** Triggered by the 2026-09-10..21 CLI-argv incident (fixed in #284): PR #262 left the `/apply` prompt after the variadic `--allowedTools`/`--disallowedTools`, so `claude` read every word of it as a deny rule and exited 1, and every `main_cli` apply died for 11 days. The fix is small; the point of the plan is that 11 days of a 100% systemic failure looked like ordinary per-vacancy FAILs. Same `❌ Failed` line, the 3-fail breaker only naps 5 min, and each retry bumped `fail_count` until `MAX_FAIL_RETRIES`=3 dropped the vacancy for good. Plan: M0 measure → M1 post-deploy CLI canary through the SAME argv builder (ships regardless) → M2 deterministic system/vacancy classifier (pattern list + same signature on ≥3 distinct vacancies in 6 h) → M3 `BLOCKED` queue with a real stop, no `fail_count` bump, one alert, resume on a passing canary or `/queue resume` (shape copied from `llm_outage`) → M4 success rate in the daily summary + a ≥50%-fail rate alert. **M0 shipped here:** `hunter/failure_signature.py` (shared normaliser, reused by M2 so calibration == classifier) + `tools/fail_signatures.py` (groups `apply_failures.jsonl` by signature, distinct vacancies, 6 h peak, domain spread, `--db` fate join read-only; prints the four decision rules, excluding the known incident from rule 1). Two things the tests caught: (a) choosing the LAST error line split one defect into a signature per vacancy because the logged text is truncated mid-line, so the most frequent line wins now; (b) `\berror\b` never matched CamelCase `ModuleNotFoundError`. Also found: the `error` field is the HEAD of the output on the worker path and the TAIL on the manual path (M2 fixes it). NOT yet run on prod: the next step is `python tools/fail_signatures.py --db tracker.db` on the deploy host. |
-| 2026-09-14 | sonnet | **`docs/DOMAIN_MODEL.md` (docs-only) — `owner_reason`/`owner_reason_note` added to the `applications` ownership table**, for the cross-repo "Applications table v2" decline-reason feature (site/api, same day). Two new api-owned, non-mirrored columns documented next to `app_status`; spelled out `Skipped` (owner's own decision, filters were right) vs. `Filter miss` (bot should have caught it) and the 16 reason codes, 2 of them `Skipped`-only. Noted this is the first structured "should have been filtered" label (vs. the 2026-08-08 hand-classified Sent-notes audit) and cross-referenced `docs/MARKET_MEMORY_PLAN.md`'s "no filter changes" non-goal. Also updated `sent`/`outcome_label` to note the API now derives both from `app_status` on PATCH (verified against the api repo's `feat/applications-status-note` worktree). No code, no push. Full entry: `docs/AGENT_LOG.md`. |
-| 2026-09-14 | sonnet | **Sheets pull silently overwrote fresh web-UI Sent/To Learn/Re-application edits — a data-loss bug caught by code review, not a live incident report** (branch `fix/sheets-pull-respects-dirty-rows`; fresh worktree from `origin/master`, not the stale dirty main checkout). Root cause: `gsheets_sync._apply_pull_delta_db`'s Sheets→DB conflict matrix for Sent/To Learn/Re-application compared DB vs. Sheet and trusted Sheets on any difference, and `tracker.apply_pull_updates`'s `UPDATE` had no dirty guard either — neither ever consulted `sheets_dirty`, unlike the Outcome (column O) merge's existing `_merge_outcomes`/`get_outcome_pull_state`/`apply_pulled_outcomes` precedent, which already does. Since job-hunter-api writes `sent`/`to_learn`/`reapplication` from the web UI and sets `sheets_dirty=1` (pushed out by `resync_dirty()` on its own ~5-min cycle), a pull that runs first (every ~30 min, at bot startup, or on `/sync_sent`) read the still-stale — usually blank — Sheet cell as authoritative, silently reverted the fresh DB edit, and then `resync_dirty()` pushed that same blank back out to the Sheet, permanently erasing the edit with no error anywhere. This gets materially worse once igrdevelop/job-hunter-api#34 ships (every My Status pick derives a `sent` date, not just an explicit Sheets edit) — this PR is meant to land BEFORE that one. **Fix, mirroring the Outcome design exactly:** new `tracker.get_pull_dirty_ids()` (row ids with `sheets_dirty=1`, scoped like `get_outcome_pull_state`); `_apply_pull_delta_db` skips the whole Sent/To Learn/Re-application comparison for a dirty row (keeps DB, `set_sheets_row` still runs — sheet position tracking is independent of the dirty guard); `apply_pull_updates`'s `UPDATE` gained `AND sheets_dirty=0` to re-check the guard at write time, closing the merge-read-to-write race the same way `apply_pulled_outcomes` already does. Both-sides-changed (owner edited the Sheet cell AND the web UI edited the DB) resolves the same way Outcome already does: dirty DB wins outright, documented in both the code and a dedicated test — a known, accepted tradeoff, not new behavior. Every other pull path (`insert_pulled_rows`, `set_sheets_row`, `mark_orphans_expired`/orphan reconcile, the bot-marker EXPIRED/'—' rule) is untouched and re-verified by the existing test suite. New tests (12): unit-level `_apply_pull_delta_db` dirty-guard cases (Sent/To Learn/Re-application each individually, both-sides-changed, clean row still takes Sheets, bot-marker rule unaffected when clean, `set_sheets_row` still called for a dirty row), two real-`tracker.db` round-trip tests (dirty survives, clean still updates) bypassing every mock, and the `apply_pull_updates` in-UPDATE race-guard test (a row turning dirty between merge-read and write is skipped, count 0, value untouched). 3708 tests pass (was 3696); `ruff check .` and `ruff format --check .` (after one `ruff format` pass on the two touched test files) both clean. **`code-review` skill run at medium effort (2 findings, both addressed, not a fix to the merge logic):** (1) `sheets_dirty` is one flag per row, not per column, so a row dirty only for an unrelated reason (e.g. an `/outcome` press, or a SKIP/FAIL write) now also defers a genuine Sheets-side To Learn/Re-application edit until the flag clears — judged a known, accepted tradeoff rather than a fix-blocking regression, because it symmetrically extends a gap this codebase already accepted for the Outcome/column-O merge on 2026-09-12 ("a per-column dirty flag would close it and was not worth a migration at this volume"); documented explicitly in both `_apply_pull_delta_db`'s docstring and CLAUDE.md's conflict-matrix section instead of building per-column dirty tracking. (2) CLAUDE.md's "Conflict matrix (Sent column)" section still described the pre-fix unconditional "To Learn/Re-application always trust Sheets" behavior — rewritten to lead with the new dirty-guard rule (mirroring the adjacent Outcome section's own "known gap" callout) before this entry was written. **Could not run per `.claude/commands/pr.md`, said explicitly rather than implied:** no `project-invariants-review` agent type is available in this environment (only claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup), so that pre-flight step did not run. No PR comments were posted (owner's own explicit instruction for this task) — no `@coderabbitai review` trigger, no CodeRabbit triage. PR references igrdevelop/job-hunter-site#49 (the web-UI My Status work that motivated this) and igrdevelop/job-hunter#280 (a related open PR in this repo, per the work order). |

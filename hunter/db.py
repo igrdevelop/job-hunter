@@ -297,6 +297,18 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         # once by the worker after claim_pending(); NULL outside PENDING/
         # IN_PROGRESS rows.
         ("pending_meta", "TEXT"),
+        # queued_at (docs/PIPELINE_VIZ_PLAN.md M1): the UTC timestamp
+        # add_pending() INSERTed the PENDING placeholder — the moment the
+        # hunt handed the vacancy to the apply queue. `date` is a local
+        # calendar day and claimed_at only exists from IN_PROGRESS on, so
+        # before this "the oldest queued job has waited N minutes" was not
+        # computable at all. Kept through release_claim/reset_stale_claims
+        # (an IN_PROGRESS -> PENDING bounce is the same wait, not a new one);
+        # NULL for every row written before the column existed and for every
+        # row that never went through the queue. DB-only, never mirrored to
+        # the Sheet. Read by tracker.oldest_pending_wait_min() (/queue,
+        # /status).
+        ("queued_at", "TEXT"),
         # B1 (docs/MULTI_USER_UPDATE.md): every row is scoped to one user.
         # Existing rows are backfilled with DEFAULT_USER_ID below.
         ("user_id", "TEXT NOT NULL DEFAULT ''"),

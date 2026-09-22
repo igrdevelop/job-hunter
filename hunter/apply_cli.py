@@ -358,9 +358,15 @@ def main_cli(
     # text (docs/improvement-2026-09/05-SECURITY_PLAN.md M1).
     job_text: str | None = None
 
+    # The fetch stage's own event pair (docs/PIPELINE_VIZ_PLAN.md M1) — the
+    # API pipeline had `fetch` ok/error since #267, the CLI branch had none.
+    # A failed pre-fetch is NOT fatal here (the skill gets the bare URL), so
+    # the "error" event is telemetry only and the run continues.
+    metrics.stage(run_id, "fetch", "start")
     if paste_text:
         job_text = paste_text
         print(f"[apply_agent] Using pasted text ({len(paste_text)} chars) — skipping fetch")
+        metrics.stage(run_id, "fetch", "ok", payload={"chars": len(job_text)})
     else:
         try:
             from hunter.sources import fetch_job_text
@@ -368,8 +374,10 @@ def main_cli(
             job_text = fetch_job_text(url, use_session=True)
             if job_text and len(job_text) > 100:
                 print(f"[apply_agent] Pre-fetched {len(job_text)} chars via JSON API")
+            metrics.stage(run_id, "fetch", "ok", payload={"chars": len(job_text or "")})
         except Exception as e:
             print(f"[apply_agent] Pre-fetch failed ({e}), passing raw URL to Claude")
+            metrics.stage(run_id, "fetch", "error", payload={"error": str(e)[:200]})
 
     # Check for expired offer before spinning up Claude CLI
     if job_text:
@@ -586,6 +594,8 @@ def main_cli(
 
     cmd = _build_cli_command(apply_input)
     print("[apply_agent] Running claude CLI...\n")
+    # The `claude -p` subprocess IS this pipeline's generate stage.
+    metrics.stage(run_id, "generate", "start")
 
     result = None
     new_folder_timeout = None
@@ -805,6 +815,7 @@ def main_cli(
                     from hunter.config import JUDGE_ENABLED, JUDGE_MODE
 
                     if JUDGE_ENABLED:
+                        metrics.stage(run_id, "judge", "start")
                         try:
                             from hunter.claim_judge import run_judge_stage
 
@@ -858,6 +869,7 @@ def main_cli(
                             print(f"[apply_agent] Warning: claim judge failed (continuing): {_je}")
 
                     _posting_lang = detect_posting_language(job_text or "")
+                    metrics.stage(run_id, "lang_gate", "start")
                     _cli_content, _blocked, _report = enforce_language_separation(_cli_content)
                     for _line in _report:
                         print(f"[apply_agent] lang-gate: {_line}")
@@ -1163,6 +1175,7 @@ def main_cli(
         # Informational only; failures log + continue.
         verdict = None
         if job_text:
+            metrics.stage(run_id, "verdict", "start")
             try:
                 from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
 
@@ -1240,6 +1253,7 @@ def main_cli(
                                     regenerate_docs=_regen_for_refine,
                                     target=ATS_VERDICT_TARGET,
                                     max_rounds=ATS_VERDICT_MAX_REFINES,
+                                    run_id=run_id,
                                 )
                                 content_json_path.write_text(
                                     json.dumps(_refine_content, ensure_ascii=False, indent=2),

@@ -283,7 +283,6 @@ class TestEnglishPostingIsUnaffected:
         conn = sqlite3.connect(str(cli_env.tracker_db))
         conn.row_factory = sqlite3.Row
         runs = conn.execute("SELECT * FROM generation_runs WHERE url_norm != ''").fetchall()
-        conn.close()
         assert len(runs) == 1, "expected exactly one generation_runs row for this URL"
         run = runs[0]
         assert run["pipeline"] == "cli"
@@ -293,6 +292,29 @@ class TestEnglishPostingIsUnaffected:
         assert run["verdict_first"] == 96
         assert run["verdict_final"] == 96
         assert run["posting_lang"] == "EN"
+
+        # ── pipeline_events: the ordered stage sequence, `start` before each
+        # `ok` (docs/PIPELINE_VIZ_PLAN.md M1). No ats_loop/render here — the
+        # CLI skill owns both inside the `claude -p` subprocess, which IS this
+        # pipeline's generate stage. The verdict (96) is at target, so no
+        # refine events belong on the happy path.
+        events = conn.execute(
+            "SELECT stage, event FROM pipeline_events WHERE run_id = ? ORDER BY id",
+            (run["run_id"],),
+        ).fetchall()
+        conn.close()
+        assert [(e["stage"], e["event"]) for e in events] == [
+            ("fetch", "start"),
+            ("fetch", "ok"),
+            ("generate", "start"),
+            ("generate", "ok"),
+            ("judge", "start"),
+            ("judge", "ok"),
+            ("lang_gate", "start"),
+            ("lang_gate", "ok"),
+            ("verdict", "start"),
+            ("verdict", "ok"),
+        ]
 
 
 class TestPostGenerationAbortsUndoTheRow:
