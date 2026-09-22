@@ -1,13 +1,17 @@
-"""Tests for tools/pipeline_snapshot.py (docs/PIPELINE_VIZ_PLAN.md M0).
+"""Tests for tools/pipeline_snapshot.py (docs/PIPELINE_VIZ_PLAN.md M0 + M1 readers).
 
 Builds a small tracker.db in tmp_path with the real schema (hunter.db.init_db
-+ the lazy-ensure DDL of source_runs / postings_seen / metrics), populates
-every stack the page shows, and checks the snapshot's counts and the five
-decision rules. Also pins the read-only contract: the file must not change.
++ the lazy-ensure DDL of source_runs / postings_seen / metrics / hunt_runs),
+populates every stack the page shows, and checks the snapshot's counts and
+the decision rules. The fixture mixes pre-M1 and M1 shapes on purpose: the
+finished runs carry end-of-stage events only (pre-M1), the in-progress run
+carries `start` + refine-round events (M1), PENDING rows carry `queued_at`.
+Also pins the read-only contract: the file must not change.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import tools.pipeline_snapshot as ps
-from hunter import metrics, postings_seen, source_health
+from hunter import hunt_runs, metrics, postings_seen, source_health
 from hunter.db import init_db
 
 UID = "u1"
@@ -36,7 +40,41 @@ def fixture_db(tmp_path: Path) -> Path:
         postings_seen._ensure_table(c)
         source_health._ensure_table(c)
         metrics._ensure_tables(c)
+        hunt_runs._ensure_table(c)
         c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+
+        # hunt_runs (M1): two hunts in the window + one three days old that
+        # the window must cut. Totals: found 230, filtered 190, dup 33/2/1,
+        # new 4, capped 1, queued 3.
+        for ts, trig, srcs, found, filt, reasons, du, dc, dcool, new, cap, q in (
+            (now - timedelta(minutes=50), "scheduled", ["justjoin"], 120, 100,
+             {"location": 60, "level": 40}, 15, 2, 1, 2, 0, 2),
+            (now - timedelta(minutes=10), "manual", ["pracuj", "justjoin"], 110, 90,
+             {"location": 50, "keyword": 40}, 18, 0, 0, 2, 1, 1),
+            (now - timedelta(days=3), "scheduled", ["justjoin"], 999, 999,
+             {"location": 999}, 0, 0, 0, 0, 0, 0),
+        ):  # fmt: skip
+            c.execute(
+                'INSERT INTO hunt_runs (ts, "trigger", sources, found, filtered_out, '
+                'filter_reasons, dup_url, dup_ct, dup_cooldown, "new", capped, queued, '
+                "applied_inline, duration_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    _iso(ts),
+                    trig,
+                    json.dumps(srcs),
+                    found,
+                    filt,
+                    json.dumps(reasons),
+                    du,
+                    dc,
+                    dcool,
+                    new,
+                    cap,
+                    q,
+                    0,
+                    5000,
+                ),  # fmt: skip
+            )
 
         for src, y, ok in (("justjoin", 120, 1), ("pracuj", 0, 0), ("justjoin", 110, 1)):
             c.execute(
@@ -80,8 +118,12 @@ def fixture_db(tmp_path: Path) -> Path:
                 tuple(cols.values()),
             )
 
-        app("p1", "PENDING", "Acme")
-        app("p2", "PENDING", "Beta")
+        # queued_at (M1) in the queue's own `%Y-%m-%dT%H:%M:%SZ` format
+        def _q(minutes: int) -> str:
+            return (now - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        app("p1", "PENDING", "Acme", queued_at=_q(45))
+        app("p2", "PENDING", "Beta", queued_at=_q(20))
         app(
             "ip",
             "IN_PROGRESS",
@@ -108,9 +150,10 @@ def fixture_db(tmp_path: Path) -> Path:
             started: datetime,
             finished: datetime | None,
             outcome: str | None,
-            events: list[tuple[int, str, str]],
+            events: list[tuple],
             pipeline: str = "cli",
         ) -> None:
+            """`events`: (minutes_offset, stage, event[, payload_dict])."""
             c.execute(
                 "INSERT INTO generation_runs (run_id, user_id, url_norm, started_at, finished_at, "
                 "pipeline, outcome, verdict_first, verdict_final, refine_rounds) "
@@ -128,15 +171,23 @@ def fixture_db(tmp_path: Path) -> Path:
                     1,
                 ),
             )
-            for off, stage, event in events:
+            for off, stage, event, *rest in events:
+                payload = json.dumps(rest[0]) if rest else ""
                 c.execute(
                     "INSERT INTO pipeline_events (run_id, ts, stage, event, duration_ms, payload) "
                     "VALUES (?,?,?,?,?,?)",
-                    (rid, _iso(started + timedelta(minutes=off)), stage, event, 1000, ""),
+                    (rid, _iso(started + timedelta(minutes=off)), stage, event, 1000, payload),
                 )
 
         std = [(0, "fetch", "ok"), (5, "generate", "ok"), (7, "judge", "ok"), (10, "verdict", "ok")]
-        run("r_ip", "ex.com/ip", now - timedelta(minutes=14), None, None, std)
+        # The in-progress run is M1-shaped: the refine loop opened with a
+        # `start` 3 min ago and has decided two rounds since.
+        m1_refine = [
+            (11, "refine", "start", {"target": 95, "max_rounds": 5, "verdict_first": 85}),
+            (12, "refine", "rejected", {"round": 1, "kind": "honest", "score": 84, "best": 85}),
+            (13, "refine", "accepted", {"round": 2, "kind": "honest", "score": 90, "best": 90}),
+        ]
+        run("r_ip", "ex.com/ip", now - timedelta(minutes=14), None, None, std + m1_refine)
         for rid, un in (("r_a1", "ex.com/a1"), ("r_a2", "ex.com/a2"), ("r_a4", "ex.com/a4")):
             s = now - timedelta(minutes=200)
             run(rid, un, s, s + timedelta(minutes=30), "ok", std)
@@ -155,6 +206,18 @@ def fixture_db(tmp_path: Path) -> Path:
         run("bf_f2", "ex.com/f2", s, s, "ok", [], pipeline="backfill")
         # a leaked open run, older than the CLI timeout
         run("r_leak", "ex.com/leak", now - timedelta(hours=5), None, None, [(0, "fetch", "ok")])
+        # a run the PARENT stamped after the subprocess was killed (M1 orphan
+        # stamp) — closed, so not a leak; counted as orphan_stamped. Under a
+        # minute so it stays out of rule 2's shares; no applications row, so
+        # rule 1 is unchanged.
+        run(
+            "r_orph",
+            "ex.com/orph",
+            s,
+            s + timedelta(seconds=30),
+            "orphan:cli_timeout",
+            [(0, "fetch", "ok")],
+        )
         c.execute(
             "INSERT INTO config (key, value) VALUES ('llm_outage_until', ?)",
             (str(int(now.timestamp()) + 1800),),
@@ -185,20 +248,54 @@ def test_hunt_tier_counts(fixture_db: Path) -> None:
     assert h["entered_tracker"]["by_status"]["PENDING"] == 2
 
 
+def test_hunt_runs_block_is_the_loops_own_funnel(fixture_db: Path) -> None:
+    hr = _snap(fixture_db)["hunt"]["hunt_runs"]
+    assert hr["hunts"] == 2  # the 3-day-old row is outside the window
+    assert (hr["found"], hr["filtered_out"], hr["dup_url"], hr["dup_ct"], hr["dup_cooldown"]) == (
+        230, 190, 33, 2, 1,
+    )  # fmt: skip
+    assert (hr["new"], hr["capped"], hr["queued"], hr["applied_inline"]) == (4, 1, 3, 0)
+    assert hr["by_trigger"] == {"scheduled": 1, "manual": 1}
+    # merged across hunts; ties keep first-seen order (level before keyword)
+    assert hr["top_filter_reasons"] == [("location", 110), ("level", 40), ("keyword", 40)]
+    assert hr["last"]["trigger"] == "manual"
+    assert hr["last"]["sources"] == ["pracuj", "justjoin"]
+    assert (hr["last"]["found"], hr["last"]["new"]) == (110, 2)
+
+
 def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
     a = _snap(fixture_db)["apply"]
     assert a["queue_mode_observed"] is True  # the IN_PROGRESS row carries claimed_at
     assert a["pending"]["count"] == 2
     assert [r["company"] for r in a["pending"]["head"]] == ["Acme", "Beta"]  # FIFO by rowid
+    # queued_at (M1): the head row has waited ~45 min, the next ~20
+    assert 44 <= a["pending"]["oldest_wait_min"] <= 46
+    assert 44 <= a["pending"]["head"][0]["wait_min"] <= 46
+    assert 19 <= a["pending"]["head"][1]["wait_min"] <= 21
     card = a["in_progress"]["cards"][0]
     assert card["company"] == "Example Corp"
     assert 13 <= card["claimed_min_ago"] <= 15
     assert card["stale"] is False
     run = card["run"]
-    assert run["last_event"]["stage"] == "verdict"
-    # No start events exist today, so the stage after the last `ok` is inferred.
-    assert run["current_stage"]["stage"] == "refine"
-    assert "inferred" in run["current_stage"]["basis"]
+    # M1: the run's newest event is a refine-round decision, so the stage is
+    # OBSERVED (basis names the round outcome), not inferred from an `ok`.
+    assert run["last_event"] == {
+        "stage": "refine",
+        "event": "accepted",
+        "at": run["last_event"]["at"],
+    }
+    assert run["current_stage"] == {"stage": "refine", "basis": "refine round accepted"}
+    # minutes since the refine loop's own `start` event (+11 min into a run
+    # that began 14 min ago)
+    assert 2 <= run["stage_started_min_ago"] <= 4
+    assert run["refine_progress"] == {
+        "round": 2,
+        "kind": "honest",
+        "score": 90,
+        "best": 90,
+        "outcome": "accepted",
+        "at": run["refine_progress"]["at"],
+    }
     assert a["runs"]["cut_zero_cost"] == {"expired": 1, "skip_doomed_gate": 1}
     assert a["skipped_rows"]["by_reason"] == [("EXPIRED", 1), ("doomed", 1)]
     assert a["failures"]["in_window"] == 2
@@ -225,7 +322,10 @@ def test_result_tier(fixture_db: Path) -> None:
 
 def test_events_newest_first(fixture_db: Path) -> None:
     ev = _snap(fixture_db)["events"]
-    assert ev[0]["stage"] == "verdict" and ev[0]["company"] == "Example Corp"
+    # the newest event is now the in-progress run's last refine round (M1)
+    assert ev[0]["stage"] == "refine" and ev[0]["event"] == "accepted"
+    assert ev[0]["company"] == "Example Corp"
+    assert ev[0]["payload"].startswith('{"round": 2')
     assert [e["ts"] for e in ev] == sorted((e["ts"] for e in ev), reverse=True)
 
 
@@ -242,10 +342,17 @@ def test_coverage_rules(fixture_db: Path) -> None:
     assert r2["verdict"] == "FAIL"  # the 20-min tail after `verdict ok` dominates
     r3 = cov["3_hunt_funnel"]
     assert r3["found_raw"] == 230 and r3["unique_seen"] == 10 and r3["verdict"] == "FAIL"
+    # 3b (M1): the derived gap above still fails on this fixture, but the
+    # loop's own funnel exists — that is the rule the page now builds on.
+    r3b = cov["3b_hunt_runs_present"]
+    assert (r3b["hunts_in_window"], r3b["found"], r3b["new"], r3b["queued"]) == (2, 230, 4, 3)
+    assert r3b["verdict"] == "PASS"
     r4 = cov["4_ready_stack"]
     assert (r4["ready_by_snapshot"], r4["declined_by_owner_dash"], r4["verdict"]) == (3, 1, "PASS")
     r5 = cov["5_leaked_open_runs"]
     assert (r5["open_runs"], r5["older_than_timeout"], r5["verdict"]) == (2, 1, "FAIL")
+    # the parent-stamped run is closed (not a leak) and reported on its own
+    assert r5["orphan_stamped"] == 1
 
 
 def test_read_only(fixture_db: Path) -> None:
@@ -268,14 +375,47 @@ def test_unmeasured_on_bare_db(tmp_path: Path) -> None:
     db = tmp_path / "bare.db"
     init_db(db, xlsx_path=tmp_path / "none.xlsx")
     snap = _snap(db)
+    assert snap["hunt"]["hunt_runs"] is None
     assert snap["hunt"]["source_runs"] is None
     assert snap["hunt"]["postings_seen"] is None
+    assert snap["apply"]["pending"]["oldest_wait_min"] is None
     assert snap["apply"]["runs"] is None
     assert snap["apply"]["queue_mode_observed"] is False
     assert snap["events"] is None
-    for key in ("1_run_coverage", "2_stage_resolution", "3_hunt_funnel", "5_leaked_open_runs"):
+    for key in (
+        "1_run_coverage",
+        "2_stage_resolution",
+        "3_hunt_funnel",
+        "3b_hunt_runs_present",
+        "5_leaked_open_runs",
+    ):
         assert snap["coverage"][key]["verdict"] == "UNMEASURED", key
     assert snap["coverage"]["4_ready_stack"]["verdict"] == "PASS"
+
+
+def test_null_queued_at_at_queue_head_reports_no_wait(fixture_db: Path) -> None:
+    """Same rule as tracker.oldest_pending_wait_min: a legacy row (NULL
+    queued_at) at the HEAD of the queue reports None — the tool must not skip
+    ahead to the younger stamped row behind it."""
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("UPDATE applications SET queued_at = NULL WHERE id = 'p1'")
+    p = _snap(fixture_db)["apply"]["pending"]
+    assert p["count"] == 2
+    assert p["oldest_wait_min"] is None
+    assert p["head"][0]["wait_min"] is None
+    assert 19 <= p["head"][1]["wait_min"] <= 21
+
+
+def test_pre_m1_run_card_keeps_the_inference_branch(fixture_db: Path) -> None:
+    """A run with end-of-stage events only (pre-M1) still gets a card: the
+    stage is inferred and the M1-only fields are None, never an error."""
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("DELETE FROM pipeline_events WHERE run_id = 'r_ip' AND stage = 'refine'")
+    run = _snap(fixture_db)["apply"]["in_progress"]["cards"][0]["run"]
+    assert run["last_event"]["stage"] == "verdict"
+    assert run["current_stage"] == {"stage": "refine", "basis": "inferred: after 'verdict' ok"}
+    assert run["stage_started_min_ago"] is None
+    assert run["refine_progress"] is None
 
 
 def test_infer_stage_branches() -> None:
@@ -288,6 +428,11 @@ def test_infer_stage_branches() -> None:
     assert ps._infer_stage([Row(stage="judge", event="blocked")])["stage"] == "judge"
     assert ps._infer_stage([Row(stage="render", event="ok")])["stage"] == "verdict"
     assert ps._infer_stage([Row(stage="delivery", event="ok")])["stage"] == "delivery"
+    # M1: a refine-round event means the loop is still running — NOT "after
+    # refine", which the plain next-stage inference would say.
+    for outcome in ("accepted", "rejected", "discarded"):
+        got = ps._infer_stage([Row(stage="refine", event=outcome)])
+        assert got == {"stage": "refine", "basis": f"refine round {outcome}"}
 
 
 def test_parse_ts_shapes() -> None:
