@@ -75,10 +75,35 @@ def test_init_db_has_all_columns(db_path: Path) -> None:
         "skip_reason",
         "source",
         "pending_meta",
+        "queued_at",
     }
     with get_db(db_path) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
     assert expected == cols
+
+
+def test_init_db_adds_queued_at_to_pre_existing_db(tmp_path: Path) -> None:
+    """docs/PIPELINE_VIZ_PLAN.md M1: a DB created before `queued_at` existed
+    gains the column on the next init_db, NULL on every existing row."""
+    p = tmp_path / "tracker.db"
+    no_xlsx = tmp_path / "no_tracker.xlsx"
+    init_db(p, xlsx_path=no_xlsx)
+    with sqlite3.connect(p) as raw:
+        raw.execute("ALTER TABLE applications DROP COLUMN queued_at")
+        raw.execute(
+            "INSERT INTO applications (id, company, title, ats_status) "
+            "VALUES ('abc12345','Acme','Dev','PENDING')"
+        )
+        raw.commit()
+        assert "queued_at" not in {r[1] for r in raw.execute("PRAGMA table_info(applications)")}
+
+    init_db(p, xlsx_path=no_xlsx)
+
+    with get_db(p) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(applications)")}
+        assert "queued_at" in cols
+        row = conn.execute("SELECT queued_at FROM applications WHERE id='abc12345'").fetchone()
+    assert row["queued_at"] is None
 
 
 def test_init_db_wal_mode(db_path: Path) -> None:

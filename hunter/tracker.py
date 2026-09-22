@@ -1468,6 +1468,19 @@ def add_failed(job: Job) -> None:
 # APPLY_QUEUE_ENABLED — with the flag off nothing in this section is called.
 
 
+_QUEUE_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _utc_now_iso() -> str:
+    """UTC 'now' in the queue's own timestamp format (`queued_at`, `claimed_at`).
+
+    One format for both columns so a wait/age is a plain string compare in
+    SQL (`reset_stale_claims`) or a `strptime` subtraction in Python
+    (`oldest_pending_wait_min`).
+    """
+    return datetime.now(timezone.utc).strftime(_QUEUE_TS_FMT)
+
+
 def _serialize_pending_meta(job: Job) -> str:
     """JSON-encode everything apply_worker needs to rebuild this Job.
 
@@ -1502,18 +1515,25 @@ def add_pending(job: Job) -> str:
     Mirrors add_skipped/add_failed's contract: callers must check
     is_known()/should_skip_url() themselves first — this function does not
     dedup on its own.
+
+    `queued_at` (docs/PIPELINE_VIZ_PLAN.md M1) is stamped in the same UTC
+    format `claim_pending` uses for `claimed_at`, so the two subtract
+    cleanly; it survives release_claim/reset_stale_claims and is what
+    `oldest_pending_wait_min` reads.
     """
     row_id = _new_row_id()
     norm = normalize_url(job.url)
     today = date.today().strftime("%Y-%m-%d")
     source = _source_for_write(job.url, job.source)
+    queued_at = _utc_now_iso()
 
     with get_db(DB_PATH) as conn:
         conn.execute(
             """
             INSERT INTO applications
-            (id, date, user_id, company, title, ats_status, url, url_norm, pending_meta, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, user_id, company, title, ats_status, url, url_norm, pending_meta, source,
+             queued_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row_id,
@@ -1526,6 +1546,7 @@ def add_pending(job: Job) -> str:
                 norm,
                 _serialize_pending_meta(job),
                 source,
+                queued_at,
             ),
         )
     return row_id
@@ -1579,7 +1600,7 @@ def claim_pending(claimed_by: str = "") -> dict | None:
     while a row genuinely claimed by another host stays untouched (the
     cross-host case is still covered by `reset_stale_claims`' timeout sweep).
     """
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = _utc_now_iso()
     with get_db(DB_PATH) as conn:
         row = conn.execute(
             f"""
@@ -1606,6 +1627,9 @@ def release_claim(url: str) -> None:
     queue instead of being marked FAIL. Also the graceful-shutdown release
     path (hunter.apply_worker.shutdown_workers / apply_worker_loop's own
     CancelledError handling) — see docs/improvement-2026-09/06-OPS_PLAN.md M3.
+    `queued_at` is deliberately left untouched here and in the two bulk
+    resets below: a bounce back to PENDING continues the same wait, it does
+    not start a new one.
     """
     norm = normalize_url(url)
     if not norm:
@@ -1630,9 +1654,7 @@ def reset_stale_claims(timeout_min: int) -> int:
     that no longer exists. `release_claims_by_host` below is the faster,
     immediate counterpart for THIS host's own rows at startup.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min)).strftime(_QUEUE_TS_FMT)
     with get_db(DB_PATH) as conn:
         cur = conn.execute(
             f"UPDATE applications SET ats_status='{PENDING_ATS}', claimed_at=NULL, "  # noqa: S608
@@ -1690,14 +1712,47 @@ def count_in_progress() -> int:
 
 
 def list_pending(limit: int = 20) -> list[dict]:
-    """PENDING rows in queue order (oldest first) for /queue. Each: {company, title, url, date}."""
+    """PENDING rows in queue order (oldest first) for /queue.
+
+    Each: {company, title, url, date, queued_at} — `queued_at` is None for a
+    row written before the column existed.
+    """
     with get_db(DB_PATH) as conn:
         rows = conn.execute(
-            f"SELECT company, title, url, date FROM applications "  # noqa: S608
+            f"SELECT company, title, url, date, queued_at FROM applications "  # noqa: S608
             f"WHERE ats_status='{PENDING_ATS}' ORDER BY rowid LIMIT ?",
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def oldest_pending_wait_min(now: datetime | None = None) -> int | None:
+    """Minutes the oldest PENDING row of THIS user has waited, or None.
+
+    docs/PIPELINE_VIZ_PLAN.md M1 — the "oldest waits N min" line on /queue
+    and /status. "Oldest" is queue order (`rowid`, the same order
+    `claim_pending` drains in), not the smallest `queued_at`: the two agree
+    for rows written since the column exists, and a legacy row at the head
+    of the queue with a NULL `queued_at` reports None rather than silently
+    skipping ahead to a younger row that does carry a timestamp. User-scoped
+    like `iter_unsent_rows` (`count_pending`/`list_pending` are not — they
+    serve the owner's global view). `now` is injectable for tests. A
+    malformed timestamp reports None, never raises.
+    """
+    with get_db(DB_PATH) as conn:
+        row = conn.execute(
+            f"SELECT queued_at FROM applications "  # noqa: S608
+            f"WHERE ats_status='{PENDING_ATS}' AND user_id=? ORDER BY rowid LIMIT 1",
+            (_uid(),),
+        ).fetchone()
+    if not row or not row["queued_at"]:
+        return None
+    try:
+        queued = datetime.strptime(row["queued_at"], _QUEUE_TS_FMT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    current = now or datetime.now(timezone.utc)
+    return max(0, int((current - queued).total_seconds() // 60))
 
 
 def delete_pending_row(url: str) -> bool:

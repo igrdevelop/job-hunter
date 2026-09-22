@@ -23,14 +23,23 @@ _MAX_LIMIT = 50
 
 def _build_report(limit: int) -> str:
     from hunter.config import APPLY_QUEUE_ENABLED
-    from hunter.tracker import count_in_progress, count_pending, list_pending
+    from hunter.tracker import (
+        count_in_progress,
+        count_pending,
+        list_pending,
+        oldest_pending_wait_min,
+    )
 
     pending = count_pending()
     in_progress = count_in_progress()
+    wait_min = oldest_pending_wait_min() if pending else None
 
-    lines = [
+    header = (
         f"📥 <b>Apply queue</b>  |  PENDING: <b>{pending}</b>  IN_PROGRESS: <b>{in_progress}</b>"
-    ]
+    )
+    if wait_min is not None:
+        header += f"  |  oldest waits <b>{wait_min} min</b>"
+    lines = [header]
     if not APPLY_QUEUE_ENABLED:
         lines.append(
             "<i>APPLY_QUEUE_ENABLED is off — hunts apply inline, this queue stays empty.</i>"
