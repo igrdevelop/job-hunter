@@ -21,7 +21,11 @@ Escalating rounds (owner decision 2026-07-07: max 3, stretch on the last):
 
 Both functions are pure orchestration: no Telegram, no tracker writes. The
 caller (apply_api / apply_cli) decides what to notify and persists the
-final content.json.
+final content.json. The one side channel is telemetry: when the caller
+passes a ``run_id``, every round lands as one ``pipeline_events`` row
+(``hunter.metrics``, stage ``refine`` — docs/PIPELINE_VIZ_PLAN.md M1), so
+"where is the current vacancy" is readable while the longest part of a run
+is still in flight. Every such write is best-effort inside ``metrics``.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from hunter import candidate, gen_profile, gen_prompt
+from hunter import candidate, gen_profile, gen_prompt, metrics
 from hunter.apply_shared import CANDIDATE_DIR, _llm_p, validate_content
 
 # Recommendations the independent verdict sometimes returns that no CV edit
@@ -351,6 +355,7 @@ def refine_loop(
     regenerate_docs: Callable[[Path], None],
     target: float = 95.0,
     max_rounds: int = 1,
+    run_id: str | None = None,
 ) -> tuple[dict, dict]:
     """Round N (1-based): rounds below STRETCH_FROM_ROUND (4) = HONEST,
     round 4+ = STRETCH (owner decision 2026-07-07: honest visibility passes
@@ -379,6 +384,14 @@ def refine_loop(
     ``content["verdict_history"]`` — see ``_round_entry`` for the shape and
     ``hunter.ats_pdf_roundtrip.format_verdict_history`` for the Telegram
     rendering. A no-op run leaves the key absent entirely.
+
+    ``run_id`` (optional, docs/PIPELINE_VIZ_PLAN.md M1): when given, the loop
+    also writes one ``pipeline_events`` row per attempted round — stage
+    ``refine``, event = the round's outcome (``accepted``/``rejected``/
+    ``discarded``, exactly the ``verdict_history`` vocabulary), payload
+    ``{round, kind, score, best, reason}`` — plus one ``start`` event before
+    the first round. ``None`` (the default) makes every ``metrics.stage``
+    call a no-op, so a caller without telemetry is byte-for-byte unchanged.
     """
     if max_rounds <= 0 or not isinstance(verdict, dict):
         return content, verdict
@@ -390,6 +403,17 @@ def refine_loop(
     content_path = folder / "content.json"
     best_content = content
     best_verdict = verdict
+
+    metrics.stage(
+        run_id,
+        "refine",
+        "start",
+        payload={
+            "target": target,
+            "max_rounds": max_rounds,
+            "verdict_first": verdict.get("score"),
+        },
+    )
 
     # M1 (docs/LLM_COST_REDUCTION_PLAN.md): a round that fails (discarded
     # before verdict, or rolled back after) leaves best_content/best_verdict
@@ -404,6 +428,28 @@ def refine_loop(
     # 7-day retention. Rolled-back rounds are recorded too — they're what
     # shows where the loop hits its ceiling.
     history: list[dict] = []
+
+    def _record(entry: dict, best: float | None) -> None:
+        """Append one round to the history AND emit it as a pipeline event.
+
+        One helper for both so the telemetry can never drift from the
+        persisted audit trail: `best` is the best verdict score AFTER this
+        round's decision (the new score on an accepted round, the unchanged
+        score otherwise).
+        """
+        history.append(entry)
+        metrics.stage(
+            run_id,
+            "refine",
+            entry["outcome"],
+            payload={
+                "round": entry["round"],
+                "kind": entry["kind"],
+                "score": entry["score_after"],
+                "best": best,
+                "reason": entry["reason"],
+            },
+        )
 
     # Whether this call wrote content_path at least once. A round discarded
     # before reaching the write point (no actionable feedback, a bad
@@ -434,10 +480,11 @@ def refine_loop(
             feedback = build_refine_feedback(best_verdict)
             if feedback is None:
                 print(f"[verdict_refine] round {round_num}: no actionable feedback — stopping")
-                history.append(
+                _record(
                     _round_entry(
                         round_num, kind, score, None, "discarded", "no actionable feedback"
-                    )
+                    ),
+                    score,
                 )
                 break
 
@@ -453,7 +500,7 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: rewrite returned no usable resume — stopping"
                 )
-                history.append(
+                _record(
                     _round_entry(
                         round_num,
                         kind,
@@ -461,7 +508,8 @@ def refine_loop(
                         None,
                         "discarded",
                         "rewrite returned no usable resume",
-                    )
+                    ),
+                    score,
                 )
                 break
 
@@ -472,8 +520,11 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: rewrite dropped roles — discarding round"
                 )
-                history.append(
-                    _round_entry(round_num, kind, score, None, "discarded", "rewrite dropped roles")
+                _record(
+                    _round_entry(
+                        round_num, kind, score, None, "discarded", "rewrite dropped roles"
+                    ),
+                    score,
                 )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
@@ -491,8 +542,11 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: language gate blocked — discarding round"
                 )
-                history.append(
-                    _round_entry(round_num, kind, score, None, "discarded", "language gate blocked")
+                _record(
+                    _round_entry(
+                        round_num, kind, score, None, "discarded", "language gate blocked"
+                    ),
+                    score,
                 )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
@@ -504,10 +558,11 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: rewrite broke validation — discarding round"
                 )
-                history.append(
+                _record(
                     _round_entry(
                         round_num, kind, score, None, "discarded", "rewrite broke validation"
-                    )
+                    ),
+                    score,
                 )
                 if last_round_failed and kind == "stretch":
                     print(f"[verdict_refine] round {round_num}: stretch also failed — stopping")
@@ -527,7 +582,9 @@ def refine_loop(
                 print(
                     f"[verdict_refine] round {round_num}: verdict improved {score} -> {new_score} — accepted"
                 )
-                history.append(_round_entry(round_num, kind, score, new_score, "accepted", None))
+                _record(
+                    _round_entry(round_num, kind, score, new_score, "accepted", None), new_score
+                )
                 best_content, best_verdict = candidate, new_verdict
                 last_round_failed = False
             else:
@@ -535,10 +592,11 @@ def refine_loop(
                     f"[verdict_refine] round {round_num}: verdict did not improve "
                     f"({score} -> {new_score}) — rolling back"
                 )
-                history.append(
+                _record(
                     _round_entry(
                         round_num, kind, score, new_score, "rejected", "verdict did not improve"
-                    )
+                    ),
+                    score,
                 )
                 _rollback(content_path, best_content, folder, regenerate_docs)
                 if last_round_failed and kind == "stretch":
@@ -547,8 +605,9 @@ def refine_loop(
                 last_round_failed = True
         except Exception as e:  # noqa: BLE001 — best-effort: stop, keep current best
             print(f"[verdict_refine] round {round_num} failed unexpectedly (keeping best): {e}")
-            history.append(
-                _round_entry(round_num, kind, score, None, "discarded", f"unexpected error: {e}")
+            _record(
+                _round_entry(round_num, kind, score, None, "discarded", f"unexpected error: {e}"),
+                score,
             )
             break
 

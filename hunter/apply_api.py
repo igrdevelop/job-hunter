@@ -247,6 +247,7 @@ def _run_main_api(
     )
 
     # Step 1 — Get job text: either use pasted text or fetch
+    metrics.stage(run_id, "fetch", "start")
     if paste_text:
         job_text = paste_text
         print(f"[apply_agent] Step 1: Using pasted text ({len(job_text)} chars, no fetch)")
@@ -498,6 +499,7 @@ def _run_main_api(
 
     # Step 3 — Call LLM
     print(f"[apply_agent] Step 3: Calling {_llm_prof.provider}/{_llm_prof.model}...")
+    metrics.stage(run_id, "generate", "start")
     try:
         from llm_client import call_llm, LLMError, LLMOutageError
 
@@ -742,6 +744,7 @@ def _run_main_api(
 
     # Step 4.6 — Independent ATS check + rewrite loop for resume (target ≥ 95%)
     print("[apply_agent] Step 4.6: Running independent ATS check on resume...")
+    metrics.stage(run_id, "ats_loop", "start")
     content = _ats_check_loop(content, job_text)
     _ats_check_result = content.get("ats_check") or {}
     metrics.update_run(
@@ -804,6 +807,7 @@ def _run_main_api(
 
     if JUDGE_ENABLED:
         print("[apply_agent] Step 4.72: Claim judge verifying content...")
+        metrics.stage(run_id, "judge", "start")
         try:
             from hunter.claim_judge import run_judge_stage
 
@@ -844,6 +848,7 @@ def _run_main_api(
     # posting_lang was computed earlier (before Step 3) so the first generation
     # call could skip the _pl fields for an EN posting — reused here unchanged.
     print(f"[apply_agent] Step 4.75: Language gate (posting language: {posting_lang})...")
+    metrics.stage(run_id, "lang_gate", "start")
     try:
         from hunter.apply_shared import enforce_language_separation
 
@@ -1017,6 +1022,7 @@ def _run_main_api(
     )
     mode_label = "FULL" if full_mode else "SHORT"
     print(f"[apply_agent] Step 4: Generating docs ({mode_label})...")
+    metrics.stage(run_id, "render", "start")
     gen_ok = True
     try:
         result = subprocess.run(
@@ -1119,6 +1125,7 @@ def _run_main_api(
     # scoring exactly what a real ATS parses. Informational, never blocks.
     verdict = None
     if gen_ok:
+        metrics.stage(run_id, "verdict", "start")
         try:
             from hunter.ats_pdf_roundtrip import format_verdict, run_llm_verdict
 
@@ -1177,6 +1184,7 @@ def _run_main_api(
                         regenerate_docs=_regen_for_refine,
                         target=ATS_VERDICT_TARGET,
                         max_rounds=ATS_VERDICT_MAX_REFINES,
+                        run_id=run_id,
                     )
                     # Round-2 stretch additions land in content["to_learn"]
                     # AFTER the tracker row was created (Step 7, with the
