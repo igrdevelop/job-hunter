@@ -489,12 +489,27 @@ def apply_tier(
     cols = _columns(conn, "applications")
     # Queue mode is read from the DATA, not from this machine's .env: an
     # off-host run (a backup copy on a laptop) would otherwise label prod's
-    # queue mode with the laptop's APPLY_QUEUE_ENABLED. A row that ever
-    # carried claimed_at went through claim_pending, which only the worker
-    # calls.
+    # queue mode with the laptop's APPLY_QUEUE_ENABLED. Three signals, any
+    # one is enough: a hunt_runs row that queued something (survives forever
+    # — the one durable trace, since `_clear_own_placeholder` deletes the
+    # PENDING/IN_PROGRESS row, and its claimed_at/queued_at with it, before
+    # the terminal row is written; on prod, 2026-09-23, a quiet queue read
+    # "never used" from claimed_at alone), a live PENDING/IN_PROGRESS row, or
+    # a claimed_at still on a row.
     queue_seen = bool(
-        "claimed_at" in cols
-        and _scalar(conn, "SELECT 1 FROM applications WHERE claimed_at IS NOT NULL LIMIT 1")
+        (
+            _table_exists(conn, "hunt_runs")
+            and "queued" in _columns(conn, "hunt_runs")
+            and _scalar(conn, "SELECT 1 FROM hunt_runs WHERE queued > 0 LIMIT 1")
+        )
+        or _scalar(
+            conn,
+            "SELECT 1 FROM applications WHERE ats_status IN ('PENDING','IN_PROGRESS') LIMIT 1",
+        )
+        or (
+            "claimed_at" in cols
+            and _scalar(conn, "SELECT 1 FROM applications WHERE claimed_at IS NOT NULL LIMIT 1")
+        )
     )
     out: dict[str, Any] = {
         "queue_mode_observed": queue_seen,
