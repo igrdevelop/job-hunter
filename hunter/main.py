@@ -12,7 +12,9 @@ import asyncio
 import logging
 import subprocess
 import sys
-from datetime import datetime
+import time
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 
 from telegram.ext import ContextTypes
 
@@ -28,12 +30,14 @@ from hunter.config import (
     MAX_JOBS_PER_RUN,
     APPLY_AGENT_TIMEOUT_SEC,
     GMAIL_MAX_RESULTS,
+    HUNT_RUNS_ENABLED,
     POSTINGS_SEEN_ENABLED,
 )
 from hunter.best_effort import best_effort
 from hunter.filters import apply_filters_with_stats, classify_job
 from hunter.gmail_report import build_gmail_report, JobOutcome
 from hunter import llm_outage
+from hunter.hunt_runs import record_hunt
 from hunter.models import Job
 from hunter.postings_seen import record_listings
 from hunter.services.apply_service import run_apply_agent_subprocess
@@ -68,6 +72,7 @@ async def run_hunt(
     source_names: list[str] | None = None,
     *,
     notify_queued: bool = False,
+    trigger: str | None = None,
 ) -> None:
     """Entry point for scheduled and manual hunts.
 
@@ -85,6 +90,11 @@ async def run_hunt(
                       busy. True only for the manual /hunt command (a human is
                       waiting for feedback); scheduled hunts queue silently —
                       their hunt report arrives when they actually run.
+        trigger:      what started this hunt, stored on its ``hunt_runs`` row
+                      (hunter/hunt_runs.py). None derives it from
+                      ``notify_queued`` — today only the manual /hunt command
+                      sets that, so "manual" when it is set, "scheduled"
+                      otherwise; a caller that knows better passes it.
     """
     if _hunt_lock.locked():
         label = ", ".join(source_names) if source_names else "all"
@@ -95,8 +105,11 @@ async def run_hunt(
                 "⏳ Hunt queued — will start when the current hunt/auto-apply finishes.",
             )
 
+    if trigger is None:
+        trigger = "manual" if notify_queued else "scheduled"
+
     async with _hunt_lock:
-        await _run_hunt_impl(context, source_names=source_names)
+        await _run_hunt_impl(context, source_names=source_names, trigger=trigger)
 
 
 async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -165,6 +178,7 @@ def _check_apply_ready() -> str | None:
 async def _run_hunt_impl(
     context: ContextTypes.DEFAULT_TYPE,
     source_names: list[str] | None = None,
+    trigger: str = "scheduled",
 ) -> None:
     """
     Full hunt cycle:
@@ -173,7 +187,10 @@ async def _run_hunt_impl(
       3. Deduplicate against tracker.xlsx
       4. AUTO_APPLY=true  → generate docs (with delay between jobs)
          AUTO_APPLY=false → send Telegram cards with Apply/Skip buttons
+      3b. (after 3, around 4) persist the funnel numbers as ONE hunt_runs row
     """
+    hunt_started = time.monotonic()
+    hunt_started_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     ts = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"[Hunt] Starting at {ts} sources={source_names or 'all'}")
     mode = "CLI" if (APPLY_USE_CLI or not LLM_API_KEY) else f"API ({LLM_MODEL})"
@@ -334,6 +351,92 @@ async def _run_hunt_impl(
         f"[Hunt] New: {len(new_jobs)} (dup_url={dup_url}, dup_ct={dup_ct}, cooldown={dup_cooldown})"
     )
 
+    # ── Step 3b: hunt_runs row (docs/PIPELINE_VIZ_PLAN.md M1) ────────────────
+    # The funnel above is final here; only the ACT step's decision (queued vs
+    # applied inline, and how many the cap dropped) is still open. The row is
+    # written ONCE, by the idempotent flush below: explicitly right before an
+    # inline apply batch (so a batch that runs for hours does not delay the
+    # row), and from the `finally` for every other exit of the ACT step —
+    # early returns and exceptions alike, since the numbers are real either
+    # way. best_effort: a broken table must never cost a hunt slot, but
+    # repeated failures still alert instead of degrading silently.
+    act_stats = {"capped": 0, "queued": 0, "applied_inline": 0}
+    hunt_recorded = False
+
+    async def _flush_hunt_run() -> None:
+        nonlocal hunt_recorded
+        if hunt_recorded or not HUNT_RUNS_ENABLED or not active_sources:
+            return
+        hunt_recorded = True
+        with best_effort("hunt.record"):
+            await asyncio.to_thread(
+                record_hunt,
+                trigger=trigger,
+                sources=[s.name for s in active_sources],
+                found=len(all_jobs),
+                filtered_out=filtered_out,
+                filter_reasons=filter_reasons,
+                dup_url=dup_url,
+                dup_ct=dup_ct,
+                dup_cooldown=dup_cooldown,
+                new=len(new_jobs),
+                capped=act_stats["capped"],
+                queued=act_stats["queued"],
+                applied_inline=act_stats["applied_inline"],
+                duration_ms=int((time.monotonic() - hunt_started) * 1000),
+                ts=hunt_started_iso,
+            )
+
+    try:
+        await _report_and_act(
+            context,
+            ts=ts,
+            mode=mode,
+            fetch_lines=fetch_lines,
+            total_raw=total_raw,
+            filtered=filtered,
+            filtered_out=filtered_out,
+            filter_reasons=filter_reasons,
+            new_jobs=new_jobs,
+            dup_url=dup_url,
+            dup_ct=dup_ct,
+            gmail_source=gmail_source,
+            gmail_outcomes=gmail_outcomes,
+            active_sources=active_sources,
+            act_stats=act_stats,
+            flush_hunt_run=_flush_hunt_run,
+        )
+    finally:
+        await _flush_hunt_run()
+
+
+async def _report_and_act(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    ts: str,
+    mode: str,
+    fetch_lines: str,
+    total_raw: int,
+    filtered: list[Job],
+    filtered_out: int,
+    filter_reasons: dict[str, int],
+    new_jobs: list[Job],
+    dup_url: int,
+    dup_ct: int,
+    gmail_source: object | None,
+    gmail_outcomes: list[JobOutcome],
+    active_sources: list,
+    act_stats: dict[str, int],
+    flush_hunt_run: Callable[[], Awaitable[None]],
+) -> None:
+    """The tail of _run_hunt_impl — the Telegram report + Step 4 (ACT).
+
+    Moved verbatim into its own function (2026-09-22, hunt_runs) so the
+    hunt_runs flush can wrap it in ONE try/finally instead of a call before
+    each of the ACT step's seven exits. Every step, message and early return
+    is exactly as before; the only additions are the ``act_stats`` writes and
+    the explicit ``flush_hunt_run()`` right before the inline apply batch.
+    """
     # ── Send detailed report ─────────────────────────────────────────────────
     report = (
         f"🔍 <b>Hunt {ts}</b>\n"
@@ -407,8 +510,10 @@ async def _run_hunt_impl(
 
         capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
         skipped_count = len(auto_eligible_jobs) - len(capped)
+        act_stats["capped"] = skipped_count
         for j in capped:
             await asyncio.to_thread(add_pending, j)
+            act_stats["queued"] += 1
         if skipped_count:
             await send_text(
                 context,
@@ -446,12 +551,18 @@ async def _run_hunt_impl(
 
         capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
         skipped_count = len(auto_eligible_jobs) - len(capped)
+        act_stats["capped"] = skipped_count
+        act_stats["applied_inline"] = len(capped)
 
         if skipped_count:
             await send_text(
                 context,
                 f"⚠️ Capped to {MAX_JOBS_PER_RUN} (skipped {skipped_count})",
             )
+        # Record the hunt NOW — the inline batch below can hold the lock for
+        # hours, and the funnel is already decided (applied_inline = handed
+        # to the batch; per-job outcomes land in the tracker, not here).
+        await flush_hunt_run()
         await _auto_apply_all(context, capped)
         # NOTE: _retry_failed intentionally NOT called here anymore — retrying
         # the global FAIL list after every per-source hunt (72 slots/day) was
