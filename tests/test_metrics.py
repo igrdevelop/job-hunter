@@ -226,6 +226,149 @@ def test_finish_run_swallows_db_failure(metrics_db, monkeypatch):
     metrics.finish_run(run_id, outcome="ok", exit_code=0)  # must not raise
 
 
+# ── orphan runs: finish_open_runs_for_url (parent-side stamp) ────────────────
+# docs/PIPELINE_VIZ_PLAN.md M1 "orphan runs" (2026-09-22): a subprocess killed
+# by the parent's timeout / dying on an unhandled exception never reaches
+# finish_run, and the row stayed open forever (5 such rows on prod).
+
+
+def _backdate(db, run_id, started_at: str) -> None:
+    conn = sqlite3.connect(str(db))
+    conn.execute("UPDATE generation_runs SET started_at = ? WHERE run_id = ?", (started_at, run_id))
+    conn.commit()
+    conn.close()
+
+
+def _insert_backfill_row(db, run_id: str, url_norm: str) -> None:
+    """A tools/backfill_runs.py-shaped row: pipeline='backfill', started_at NULL."""
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "INSERT INTO generation_runs (run_id, url_norm, pipeline, started_at) VALUES (?,?,?,NULL)",
+        (run_id, url_norm, "backfill"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_finish_open_runs_for_url_stamps_only_open_rows_of_that_url(metrics_db):
+    open_same = metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    open_other = metrics.start_run(pipeline="api", url_norm="example.com/jobs/2")
+    finished_same = metrics.start_run(pipeline="cli", url_norm="example.com/jobs/1")
+    metrics.finish_run(finished_same, outcome="ok", exit_code=0)
+
+    n = metrics.finish_open_runs_for_url("example.com/jobs/1", "orphan:cli_timeout", exit_code=None)
+    assert n == 1
+
+    row = _fetch_run(metrics_db, open_same)
+    assert row["outcome"] == "orphan:cli_timeout"
+    assert row["exit_code"] is None
+    assert row["finished_at"]
+
+    # The other url's open run is untouched...
+    other = _fetch_run(metrics_db, open_other)
+    assert other["finished_at"] is None and other["outcome"] is None
+    # ...and the run the pipeline finished itself keeps ITS outcome.
+    done = _fetch_run(metrics_db, finished_same)
+    assert done["outcome"] == "ok" and done["exit_code"] == 0
+
+
+def test_finish_open_runs_for_url_is_a_noop_for_a_finished_run(metrics_db):
+    """The common case: the subprocess wrote finish_run itself, the parent's
+    stamp afterwards must change nothing and report 0."""
+    run_id = metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    metrics.finish_run(run_id, outcome="expired", exit_code=0)
+    before = _fetch_run(metrics_db, run_id)
+
+    assert metrics.finish_open_runs_for_url("example.com/jobs/1", "orphan:ok", 0) == 0
+    assert _fetch_run(metrics_db, run_id) == before
+
+
+def test_finish_open_runs_for_url_ignores_backfill_rows(metrics_db):
+    metrics.start_run(pipeline="api")  # creates the tables
+    _insert_backfill_row(metrics_db, "bf1", "example.com/jobs/1")
+
+    assert metrics.finish_open_runs_for_url("example.com/jobs/1", "orphan:fail", 1) == 0
+    row = _fetch_run(metrics_db, "bf1")
+    assert row["finished_at"] is None and row["outcome"] is None
+
+
+def test_finish_open_runs_for_url_noop_on_empty_url_norm(metrics_db):
+    """A paste-mode run has url_norm='' — an empty key must never stamp every
+    url-less open row in the table (that is reset_stale_open_runs's job, by age)."""
+    run_id = metrics.start_run(pipeline="api", url_norm="")
+    assert metrics.finish_open_runs_for_url("", "orphan:fail", 1) == 0
+    assert _fetch_run(metrics_db, run_id)["finished_at"] is None
+
+
+def test_finish_open_runs_for_url_stamps_exit_code(metrics_db):
+    run_id = metrics.start_run(pipeline="api", url_norm="example.com/jobs/9")
+    assert metrics.finish_open_runs_for_url("example.com/jobs/9", "orphan:fail", exit_code=1) == 1
+    row = _fetch_run(metrics_db, run_id)
+    assert row["outcome"] == "orphan:fail"
+    assert row["exit_code"] == 1
+
+
+def test_finish_open_runs_for_url_older_than_sec_skips_a_fresh_run(metrics_db):
+    fresh = metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    old = metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    _backdate(metrics_db, old, "2000-01-01T00:00:00+00:00")
+
+    assert (
+        metrics.finish_open_runs_for_url("example.com/jobs/1", "orphan:fail", older_than_sec=60)
+        == 1
+    )
+    assert _fetch_run(metrics_db, old)["outcome"] == "orphan:fail"
+    assert _fetch_run(metrics_db, fresh)["finished_at"] is None
+
+
+def test_finish_open_runs_for_url_swallows_db_failure(metrics_db, monkeypatch):
+    metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+
+    def _boom(*_a, **_kw):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(metrics, "get_db", _boom)
+    assert metrics.finish_open_runs_for_url("example.com/jobs/1", "orphan:fail", 1) == 0
+
+
+# ── orphan runs: reset_stale_open_runs (sweeper) ─────────────────────────────
+
+
+def test_reset_stale_open_runs_respects_the_cutoff(metrics_db):
+    fresh = metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    stale_open = metrics.start_run(pipeline="cli", url_norm="")
+    stale_done = metrics.start_run(pipeline="api", url_norm="example.com/jobs/3")
+    metrics.finish_run(stale_done, outcome="ok", exit_code=0)
+    _backdate(metrics_db, stale_open, "2000-01-01T00:00:00+00:00")
+    _backdate(metrics_db, stale_done, "2000-01-01T00:00:00+00:00")
+    _insert_backfill_row(metrics_db, "bf1", "example.com/jobs/4")
+
+    assert metrics.reset_stale_open_runs(timeout_sec=3 * 3600) == 1
+
+    row = _fetch_run(metrics_db, stale_open)
+    assert row["outcome"] == metrics.STALE_OUTCOME == "orphan:stale"
+    assert row["finished_at"]
+    assert row["exit_code"] is None
+    # A run still within the widest legitimate wall clock is in progress, not stale.
+    assert _fetch_run(metrics_db, fresh)["finished_at"] is None
+    # A finished run keeps its own outcome; a backfill row (NULL started_at) has no age.
+    assert _fetch_run(metrics_db, stale_done)["outcome"] == "ok"
+    assert _fetch_run(metrics_db, "bf1")["finished_at"] is None
+
+
+def test_reset_stale_open_runs_zero_when_nothing_is_stale(metrics_db):
+    metrics.start_run(pipeline="api", url_norm="example.com/jobs/1")
+    assert metrics.reset_stale_open_runs(timeout_sec=3 * 3600) == 0
+
+
+def test_reset_stale_open_runs_swallows_db_failure(metrics_db, monkeypatch):
+    def _boom(*_a, **_kw):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(metrics, "get_db", _boom)
+    assert metrics.reset_stale_open_runs(timeout_sec=1) == 0
+
+
 # ── read: count_runs_since ───────────────────────────────────────────────────
 
 
