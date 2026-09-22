@@ -227,6 +227,173 @@ def test_list_pending_respects_limit(tracker_db):
     assert len(tracker.list_pending(limit=2)) == 2
 
 
+# ── queued_at / oldest_pending_wait_min (docs/PIPELINE_VIZ_PLAN.md M1) ─────────
+
+
+def _set_queued_at(tracker, url: str, value: str | None) -> None:
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET queued_at=? WHERE url_norm=?",
+            (value, tracker.normalize_url(url)),
+        )
+
+
+def test_add_pending_stamps_queued_at_in_claim_format(tracker_db):
+    from datetime import datetime, timezone
+
+    from hunter import tracker
+
+    before = datetime.now(timezone.utc).replace(microsecond=0)
+    row_id = tracker.add_pending(_job(1))
+    after = datetime.now(timezone.utc)
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute("SELECT queued_at FROM applications WHERE id=?", (row_id,)).fetchone()
+    assert row["queued_at"]
+    # Same format claim_pending uses for claimed_at, so the two subtract cleanly.
+    stamped = datetime.strptime(row["queued_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert before <= stamped <= after
+
+
+def test_release_claim_preserves_queued_at(tracker_db):
+    from hunter import tracker
+
+    job = _job(1)
+    tracker.add_pending(job)
+    _set_queued_at(tracker, job.url, "2026-01-01T10:00:00Z")
+    tracker.claim_pending()
+    tracker.release_claim(job.url)
+
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT ats_status, claimed_at, queued_at FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(job.url),),
+        ).fetchone()
+    assert row["ats_status"] == "PENDING"
+    assert row["claimed_at"] is None
+    assert row["queued_at"] == "2026-01-01T10:00:00Z"
+
+
+def test_reset_stale_claims_preserves_queued_at(tracker_db):
+    from hunter import tracker
+
+    job = _job(1)
+    tracker.add_pending(job)
+    _set_queued_at(tracker, job.url, "2026-01-01T10:00:00Z")
+    tracker.claim_pending()
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        conn.execute(
+            "UPDATE applications SET claimed_at='2000-01-01T00:00:00Z' WHERE url_norm=?",
+            (tracker.normalize_url(job.url),),
+        )
+
+    assert tracker.reset_stale_claims(timeout_min=60) == 1
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT queued_at FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(job.url),),
+        ).fetchone()
+    assert row["queued_at"] == "2026-01-01T10:00:00Z"
+
+
+def test_release_claims_by_host_preserves_queued_at(tracker_db):
+    from hunter import tracker
+
+    job = _job(1)
+    tracker.add_pending(job)
+    _set_queued_at(tracker, job.url, "2026-01-01T10:00:00Z")
+    tracker.claim_pending(claimed_by="host-a:123")
+
+    assert tracker.release_claims_by_host("host-a") == 1
+    with tracker.get_db(tracker.DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT ats_status, queued_at FROM applications WHERE url_norm=?",
+            (tracker.normalize_url(job.url),),
+        ).fetchone()
+    assert row["ats_status"] == "PENDING"
+    assert row["queued_at"] == "2026-01-01T10:00:00Z"
+
+
+def test_oldest_pending_wait_min_none_on_empty_queue(tracker_db):
+    from hunter import tracker
+
+    assert tracker.oldest_pending_wait_min() is None
+
+
+def test_oldest_pending_wait_min_returns_oldest(tracker_db):
+    from datetime import datetime, timezone
+
+    from hunter import tracker
+
+    j1, j2 = _job(1), _job(2)
+    tracker.add_pending(j1)
+    tracker.add_pending(j2)
+    _set_queued_at(tracker, j1.url, "2026-01-01T10:00:00Z")
+    _set_queued_at(tracker, j2.url, "2026-01-01T10:30:00Z")
+
+    now = datetime(2026, 1, 1, 10, 38, 30, tzinfo=timezone.utc)
+    assert tracker.oldest_pending_wait_min(now=now) == 38
+
+
+def test_oldest_pending_wait_min_ignores_in_progress(tracker_db):
+    from datetime import datetime, timezone
+
+    from hunter import tracker
+
+    j1, j2 = _job(1), _job(2)
+    tracker.add_pending(j1)
+    tracker.add_pending(j2)
+    _set_queued_at(tracker, j1.url, "2026-01-01T09:00:00Z")
+    _set_queued_at(tracker, j2.url, "2026-01-01T10:00:00Z")
+    tracker.claim_pending()  # j1 -> IN_PROGRESS, no longer "waiting"
+
+    now = datetime(2026, 1, 1, 10, 5, 0, tzinfo=timezone.utc)
+    assert tracker.oldest_pending_wait_min(now=now) == 5
+
+
+def test_oldest_pending_wait_min_none_when_oldest_row_predates_column(tracker_db):
+    """A legacy PENDING row (NULL queued_at) at the head of the queue reports
+    None rather than skipping ahead to a younger, stamped row."""
+    from hunter import tracker
+
+    j1, j2 = _job(1), _job(2)
+    tracker.add_pending(j1)
+    tracker.add_pending(j2)
+    _set_queued_at(tracker, j1.url, None)
+
+    assert tracker.oldest_pending_wait_min() is None
+
+
+def test_oldest_pending_wait_min_never_negative(tracker_db):
+    from datetime import datetime, timezone
+
+    from hunter import tracker
+
+    job = _job(1)
+    tracker.add_pending(job)
+    _set_queued_at(tracker, job.url, "2026-01-01T10:00:00Z")
+    now = datetime(2026, 1, 1, 9, 0, 0, tzinfo=timezone.utc)  # clock skew
+    assert tracker.oldest_pending_wait_min(now=now) == 0
+
+
+def test_oldest_pending_wait_min_is_user_scoped(tracker_db, monkeypatch):
+    from hunter import tracker
+
+    job = _job(1)
+    tracker.add_pending(job)  # written under the current uid
+    monkeypatch.setattr(tracker, "_uid", lambda: "someone-else")
+    assert tracker.oldest_pending_wait_min() is None
+
+
+def test_list_pending_includes_queued_at(tracker_db):
+    from hunter import tracker
+
+    tracker.add_pending(_job(1))
+    listed = tracker.list_pending()
+    assert len(listed) == 1
+    assert listed[0]["queued_at"]
+
+
 # ── delete_pending_row ─────────────────────────────────────────────────────────
 
 
