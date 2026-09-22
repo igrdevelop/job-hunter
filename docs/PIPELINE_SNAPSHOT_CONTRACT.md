@@ -61,14 +61,20 @@ Two comparison modes, decided per column by how its writer stamps it:
 | **parsed, `≥ start`** | `applications.outcome_at`, `apply_failures.jsonl` `ts`, `applications.sent` (via `sent_parse`) | Parsed with `_parse_ts` (accepts `…+00:00`, `…Z`, and a naive ISO string treated as UTC; `None` on garbage), then compared as datetimes; `sent` is parsed by `hunter.sent_parse.parse_sent_date` into a date and matched against `dates`. |
 | **parsed, "minutes ago"** | `applications.queued_at`, `applications.claimed_at` (`%Y-%m-%dT%H:%M:%SZ`, `tracker._QUEUE_TS_FMT`), `generation_runs.started_at`, `pipeline_events.ts` | `_minutes_ago(v, now) = max(0, floor((now − v) / 60 s))`; `None` when NULL/unparseable. Clock skew clamps to 0, never negative. |
 
-Caveat (not pinned by this document): `applications.date` is `date.today()`
-of the process that wrote the row, i.e. that process's local date. The tool
-compares it to Warsaw calendar days. `docker-compose.yml` / `Dockerfile` set
-no `TZ`; whether the prod container's local date is Warsaw or UTC was not
-verified for this document. If it is UTC, a row written between Warsaw
-midnight and 02:00 CEST carries the previous day's `date` and is missed by
-the 1-day window until the next day — a 7-day window is unaffected. Verify on
-prod before the page ships its "today" toggle.
+Caveat — VERIFIED on prod 2026-09-22: the container runs in **UTC** (`date`
+→ `UTC`, `TZ` unset, `time.tzname == ('UTC', 'UTC')`), so `applications.date`
+is the UTC calendar day of the writing process, while the window is Warsaw
+calendar days. A row written between Warsaw midnight and 02:00 CEST (01:00
+CET) carries the previous day's `date` and is missed by the 1-day window until
+the next day; the night hunt slots (02:00, 02:45, 05:00) sit just past that
+gap, but a queued apply that finishes at 00:30 Warsaw does not. A 7-day
+window is unaffected apart from its first and last day edge. Two fixes, either
+closes it: set `TZ=Europe/Warsaw` on the bot container (`docker-compose.yml`,
+one env line — every `date.today()` writer in `hunter/tracker.py` then agrees
+with the schedule's own timezone; log timestamps shift too), or have the API
+port compare `date` against the UTC day set for the same window. Until one
+ships, the page's "today" toggle is documented as "since 00:00 UTC" for the
+`applications`-derived stacks.
 
 ### User scoping
 
