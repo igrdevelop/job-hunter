@@ -250,6 +250,25 @@ no endpoint. The contract is the snapshot JSON shape:
   every 10–15 s is enough; no WebSocket (a run changes stage every few
   minutes, not every second).
 
+**Contract written 2026-09-22 — `docs/PIPELINE_SNAPSHOT_CONTRACT.md`.** It is
+derived from the tool, not designed: the key set is the tool's `--json`
+output over the `test_pipeline_snapshot_tool.py` fixture at 0cdc330 (PRs
+#292/#293 in), every key with its type, the table + WHERE clause that
+produces it, the window mode (string-compared `+00:00` columns vs
+`applications.date` set membership vs parsed `outcome_at`/`sent`), the
+user-scoping rule per table, the UNMEASURED/`null` conventions, the
+`queue_mode_observed` three-signal rule, `_infer_stage` incl. the refine-round
+case, and the five coverage rules + 3b verbatim. It specifies the fixture pair
+above as `tests/fixtures/pipeline_snapshot/{fixture.sql, expected.json}` (SQL
+derived from the test's inserts with the clock frozen at
+`2026-09-22T12:00:00+00:00`, the expected JSON generated from it, volatile
+fields listed as normalised-before-compare) without creating the files — the
+bot-side test that pins them needs a `now=` seam in `build_snapshot` and is
+the next PR. Four things are explicitly NOT in the contract: `next_slot`
+(needs the scheduler roster), `events[].payload` (free-form, only a few shapes
+stable), `coverage` (bot diagnostic), and every key read from the local
+`.env` (`queue_enabled_local_config`, `failures.next_retry`, `timeout_sec`).
+
 ## M3 — Page (job-hunter-site)
 
 `/pipeline` route, three tiers as in the mockup, a today/7-days toggle, the
