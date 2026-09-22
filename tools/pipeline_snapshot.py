@@ -102,7 +102,9 @@ except Exception:  # noqa: BLE001
 # writable connection, and this tool owns one read-only connection.
 try:
     from hunter.hunt_runs import COUNT_COLUMNS as HUNT_RUN_COUNT_COLUMNS
-except Exception:  # noqa: BLE001
+except ImportError:  # a bare DB copy on a machine without the package — a real
+    # error INSIDE hunter.hunt_runs must surface, so only the missing-module
+    # case falls back to the pinned list
     HUNT_RUN_COUNT_COLUMNS = (
         "found",
         "filtered_out",
@@ -286,7 +288,18 @@ def hunt_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str, 
     # decided, so found → filtered → dup → new → queued adds up by
     # construction. source_runs / postings_seen below stay as the secondary,
     # per-source and per-listing views (and as the pre-M1 comparison).
-    out["hunt_runs"] = _hunt_runs_window(conn, win) if _table_exists(conn, "hunt_runs") else None
+    # A table that exists but predates a column (a DB written by an older
+    # bot, a hand-created fixture) must report UNMEASURED with the reason —
+    # never raise out of a read-only snapshot.
+    out["hunt_runs"], out["hunt_runs_unmeasured"] = None, None
+    if _table_exists(conn, "hunt_runs"):
+        missing = sorted(set(HUNT_RUN_REQUIRED_COLUMNS) - _columns(conn, "hunt_runs"))
+        if missing:
+            out["hunt_runs_unmeasured"] = f"hunt_runs table lacks columns: {', '.join(missing)}"
+        else:
+            out["hunt_runs"] = _hunt_runs_window(conn, win)
+    else:
+        out["hunt_runs_unmeasured"] = "hunt_runs table missing"
 
     if _table_exists(conn, "source_runs"):
         rows = conn.execute(
@@ -352,6 +365,11 @@ def hunt_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str, 
 
     out["next_slot"] = _next_hunt_slot(win.now)
     return out
+
+
+# Every column _hunt_runs_window reads; checked against PRAGMA table_info
+# before the query so a partial schema degrades to UNMEASURED.
+HUNT_RUN_REQUIRED_COLUMNS = ("ts", "trigger", "sources", "filter_reasons", *HUNT_RUN_COUNT_COLUMNS)
 
 
 def _hunt_runs_window(conn: sqlite3.Connection, win: Window) -> dict[str, Any]:
@@ -933,7 +951,10 @@ def coverage(
     # as a separate key so the pre-M1 comparison still prints next to it.
     hr = hunt.get("hunt_runs")
     if hr is None:
-        rules["3b_hunt_runs_present"] = {"verdict": "UNMEASURED", "why": "hunt_runs table missing"}
+        rules["3b_hunt_runs_present"] = {
+            "verdict": "UNMEASURED",
+            "why": hunt.get("hunt_runs_unmeasured") or "hunt_runs table missing",
+        }
     else:
         rules["3b_hunt_runs_present"] = {
             "hunts_in_window": hr["hunts"],
@@ -1090,7 +1111,9 @@ def print_report(snap: dict[str, Any]) -> None:
     print("HUNT")
     hr = h["hunt_runs"]
     if hr is None:
-        print("  hunts              —   (no hunt_runs table — pre-M1 DB; funnel below is derived)")
+        print(
+            f"  hunts              —   ({h.get('hunt_runs_unmeasured') or 'no hunt_runs table'} — funnel below is derived)"
+        )
     elif not hr["hunts"]:
         print("  hunts              0   (hunt_runs present, no hunt in window)")
     else:

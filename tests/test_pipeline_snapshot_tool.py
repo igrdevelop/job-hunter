@@ -447,3 +447,27 @@ def test_parse_ts_shapes() -> None:
 def test_main_rejects_missing_db(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert ps.main(["--db", str(tmp_path / "missing.db")]) == 1
     assert "not found" in capsys.readouterr().err
+
+
+def test_partial_hunt_runs_schema_is_unmeasured_not_a_crash(tmp_path: Path) -> None:
+    # A hunt_runs table written by an older bot (or a hand-made fixture) that
+    # lacks a column the reader needs must degrade to UNMEASURED with the
+    # missing columns named — a read-only snapshot never raises on a schema.
+    db = tmp_path / "partial.db"
+    init_db(db, xlsx_path=tmp_path / "none.xlsx")
+    with sqlite3.connect(db) as c:
+        c.execute(
+            'CREATE TABLE hunt_runs (id INTEGER PRIMARY KEY, ts TEXT, "trigger" TEXT, '
+            "sources TEXT, found INTEGER)"
+        )
+        c.execute(
+            'INSERT INTO hunt_runs (ts, "trigger", sources, found) VALUES (?,?,?,?)',
+            (datetime.now(timezone.utc).isoformat(timespec="seconds"), "scheduled", "[]", 5),
+        )
+    snap = _snap(db)
+    assert snap["hunt"]["hunt_runs"] is None
+    assert snap["hunt"]["hunt_runs_unmeasured"].startswith("hunt_runs table lacks columns: ")
+    assert "filter_reasons" in snap["hunt"]["hunt_runs_unmeasured"]
+    r3b = snap["coverage"]["3b_hunt_runs_present"]
+    assert r3b["verdict"] == "UNMEASURED"
+    assert "lacks columns" in r3b["why"]
