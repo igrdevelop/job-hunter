@@ -91,6 +91,10 @@ def fixture_db(tmp_path: Path) -> Path:
         app("a1", "94", "Gamma", ats_verdict=96, cost_usd=0.31)
         app("a2", "88", "Delta", ats_verdict=90)
         app("a4", "95", "Zeta", sent=today, ats_verdict=97, cost_usd=0.5)
+        # CLI-served run: cost_usd is 0.0, not NULL — must count as unpriced
+        app("a5", "92", "Omega", ats_verdict=91, cost_usd=0.0)
+        # owner declined by hand (web-UI "Filter miss" writes a dash): not ready
+        app("a6", "89", "Psi", sent="—", ats_verdict=80)
         app("s1", "SKIP", "Theta", sent="—", skip_reason="doomed:pl_onsite")
         app("e1", "EXPIRED", "Kappa", sent="EXPIRED")
         app("f1", "FAIL", "Lambda", sent="—", fail_count=1)
@@ -177,12 +181,13 @@ def test_hunt_tier_counts(fixture_db: Path) -> None:
         "rejected": 7,
         "top_reasons": [("location", 7)],
     }
-    assert h["entered_tracker"]["rows"] == 10  # u2's row excluded
+    assert h["entered_tracker"]["rows"] == 12  # u2's row excluded
     assert h["entered_tracker"]["by_status"]["PENDING"] == 2
 
 
 def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
     a = _snap(fixture_db)["apply"]
+    assert a["queue_mode_observed"] is True  # the IN_PROGRESS row carries claimed_at
     assert a["pending"]["count"] == 2
     assert [r["company"] for r in a["pending"]["head"]] == ["Acme", "Beta"]  # FIFO by rowid
     card = a["in_progress"]["cards"][0]
@@ -206,13 +211,14 @@ def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
 
 def test_result_tier(fixture_db: Path) -> None:
     r = _snap(fixture_db)["result"]
-    assert r["ready"]["count"] == 2  # a1 + a2; a4 is sent; u2's row excluded
-    assert r["ready"]["mean_verdict"] == 93.0
+    # a1 + a2 + a5; a4 is sent, a6 is owner-declined (dash), u2's row excluded
+    assert r["ready"]["count"] == 3
+    assert r["ready"]["mean_verdict"] == 92.3
     assert r["sent_in_window"] == 1
     assert r["cost"] == {
         "total_usd": 0.81,
         "priced_rows": 2,
-        "unpriced_rows": 1,
+        "unpriced_rows": 3,  # a2 NULL, a5 0.0 (CLI-served), a6 NULL
         "per_priced_row_usd": 0.41,
     }
 
@@ -225,16 +231,19 @@ def test_events_newest_first(fixture_db: Path) -> None:
 
 def test_coverage_rules(fixture_db: Path) -> None:
     cov = _snap(fixture_db)["coverage"]
-    # 7 produced rows (a1 a2 a4 s1 e1 f1 f2); f2 has only a backfill run → 6/7.
+    # 9 produced rows (a1 a2 a4 a5 a6 s1 e1 f1 f2); a5, a6 have no run and f2
+    # has only a backfill run → 6/9.
     r1 = cov["1_run_coverage"]
-    assert (r1["rows_produced"], r1["with_generation_run"], r1["verdict"]) == (7, 6, "FAIL")
+    assert (r1["rows_produced"], r1["with_generation_run"], r1["verdict"]) == (9, 6, "FAIL")
+    assert r1["excluded_blank_source"] == 0
     r2 = cov["2_stage_resolution"]
     assert r2["finished_runs_over_1min"] == 3
     assert r2["start_events_seen"] == 0
     assert r2["verdict"] == "FAIL"  # the 20-min tail after `verdict ok` dominates
     r3 = cov["3_hunt_funnel"]
     assert r3["found_raw"] == 230 and r3["unique_seen"] == 10 and r3["verdict"] == "FAIL"
-    assert cov["4_ready_stack"]["verdict"] == "PASS"
+    r4 = cov["4_ready_stack"]
+    assert (r4["ready_by_snapshot"], r4["declined_by_owner_dash"], r4["verdict"]) == (3, 1, "PASS")
     r5 = cov["5_leaked_open_runs"]
     assert (r5["open_runs"], r5["older_than_timeout"], r5["verdict"]) == (2, 1, "FAIL")
 
@@ -262,6 +271,7 @@ def test_unmeasured_on_bare_db(tmp_path: Path) -> None:
     assert snap["hunt"]["source_runs"] is None
     assert snap["hunt"]["postings_seen"] is None
     assert snap["apply"]["runs"] is None
+    assert snap["apply"]["queue_mode_observed"] is False
     assert snap["events"] is None
     for key in ("1_run_coverage", "2_stage_resolution", "3_hunt_funnel", "5_leaked_open_runs"):
         assert snap["coverage"][key]["verdict"] == "UNMEASURED", key

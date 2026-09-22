@@ -373,8 +373,20 @@ def _next_hhmm(times: list[str], now: datetime) -> dict[str, Any] | None:
 def apply_tier(
     conn: sqlite3.Connection, win: Window, user_id: str, failures_log: Path
 ) -> dict[str, Any]:
-    out: dict[str, Any] = {"queue_enabled": APPLY_QUEUE_ENABLED}
     cols = _columns(conn, "applications")
+    # Queue mode is read from the DATA, not from this machine's .env: an
+    # off-host run (a backup copy on a laptop) would otherwise label prod's
+    # queue mode with the laptop's APPLY_QUEUE_ENABLED. A row that ever
+    # carried claimed_at went through claim_pending, which only the worker
+    # calls.
+    queue_seen = bool(
+        "claimed_at" in cols
+        and _scalar(conn, "SELECT 1 FROM applications WHERE claimed_at IS NOT NULL LIMIT 1")
+    )
+    out: dict[str, Any] = {
+        "queue_mode_observed": queue_seen,
+        "queue_enabled_local_config": APPLY_QUEUE_ENABLED,
+    }
     has_metrics = _table_exists(conn, "generation_runs") and _table_exists(conn, "pipeline_events")
 
     # PENDING — the queue. No insertion timestamp exists (plan M1: queued_at);
@@ -599,7 +611,10 @@ def result_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str
     )
 
     produced = [r for r in applied if r["date"] in win.dates]
-    cost_rows = [r for r in produced if r["cost_usd"] is not None]
+    # cost_usd is 0.0 (not NULL) for a CLI-served run since the M4b fallback
+    # — 42 of 51 prod rows in the 30-day window on 2026-09-22. Zero is
+    # "unpriced", not "free": counting it as priced printed "$0.0 each".
+    cost_rows = [r for r in produced if r["cost_usd"] is not None and float(r["cost_usd"]) > 0]
     total_cost = round(sum(float(r["cost_usd"]) for r in cost_rows), 2)
 
     return {
@@ -670,11 +685,15 @@ def coverage(
     # Rule 1 — run coverage: produced rows ↔ generation_runs rows.
     if has_runs and "source" in cols:
         produced = conn.execute(
-            f"SELECT url_norm FROM applications WHERE user_id = ? AND date IN ({ph}) "  # noqa: S608
-            "AND ats_status NOT IN ('PENDING','IN_PROGRESS') AND source != '' AND url_norm != ''",
+            f"SELECT url_norm, source FROM applications WHERE user_id = ? AND date IN ({ph}) "  # noqa: S608
+            "AND ats_status NOT IN ('PENDING','IN_PROGRESS') AND url_norm != ''",
             (user_id, *win.dates),
         ).fetchall()
-        urls = {r["url_norm"] for r in produced}
+        # Rows with a blank `source` predate MARKET_MEMORY M3 (2026-09-13) —
+        # and metrics itself (2026-09-10) — so they can't be expected to have
+        # a run; they are reported, not counted.
+        urls = {r["url_norm"] for r in produced if (r["source"] or "") != ""}
+        excluded_blank_source = sum(1 for r in produced if (r["source"] or "") == "")
         covered = 0
         if urls:
             q = ",".join("?" for _ in urls)
@@ -690,6 +709,7 @@ def coverage(
         share = _pct(covered, len(urls))
         rules["1_run_coverage"] = {
             "rows_produced": len(urls),
+            "excluded_blank_source": excluded_blank_source,
             "with_generation_run": covered,
             "share_pct": share,
             "threshold": ">= 90",
@@ -770,17 +790,24 @@ def coverage(
         )
         or 0
     )
-    # iter_unsent_rows()'s WHERE, verbatim, then minus FAIL/EXPIRED/MANUAL/blank.
+    # iter_unsent_rows()'s WHERE, verbatim. It also accepts a DASH in `sent`,
+    # which on an APPLIED row means the owner declined it by hand (web-UI
+    # "Filter miss"/"Skipped", or an old manual dash) — those are not "ready
+    # to send" (M0 on prod, 2026-09-22: 19 vs 24, the 5 were exactly these).
+    # The page's "ready" is sent='' only; declined rows get their own count.
     unsent_rows = conn.execute(
-        "SELECT ats_status FROM applications WHERE ats_status != 'SKIP' "
+        "SELECT ats_status, sent FROM applications WHERE ats_status != 'SKIP' "
         "AND ats_status NOT IN ('PENDING','IN_PROGRESS') AND id != '' "
         "AND (sent = '' OR sent IN ('—', '–', '-')) AND user_id = ?",
         (user_id,),
     ).fetchall()
-    unsent_applied = sum(1 for r in unsent_rows if _bucket_status(r["ats_status"]) == "APPLIED")
+    unsent_applied_all = [r for r in unsent_rows if _bucket_status(r["ats_status"]) == "APPLIED"]
+    declined = sum(1 for r in unsent_applied_all if (r["sent"] or "").strip() != "")
+    unsent_applied = len(unsent_applied_all) - declined
     rules["4_ready_stack"] = {
         "ready_by_snapshot": ready,
         "unsent_applied_by_tracker_sql": unsent_applied,
+        "declined_by_owner_dash": declined,
         "verdict": "PASS" if ready == unsent_applied else "FAIL",
         "consequence_if_fail": "fix the 'ready' definition before anything else",
     }
@@ -916,8 +943,8 @@ def print_report(snap: dict[str, Any]) -> None:
         "\nAPPLY"
         + (
             ""
-            if a["queue_enabled"]
-            else "   (APPLY_QUEUE_ENABLED=false — inline mode, PENDING never used)"
+            if a["queue_mode_observed"]
+            else "   (no row ever claimed — inline mode, or the queue was never used)"
         )
     )
     p = a["pending"]
@@ -967,7 +994,7 @@ def print_report(snap: dict[str, Any]) -> None:
     f = a["failures"]
     nr = f["next_retry"]
     print(
-        f"  FAIL rows          {f['in_window']:>6}   retryable {f['retryable_total']}, gave up {f['gave_up_total']}"
+        f"  FAIL rows          {f['in_window']:>6}   all-time: retryable {f['retryable_total']}, gave up {f['gave_up_total']}"
         + (f", next retry {nr['at']} (in {nr['in_min']} min)" if nr else "")
     )
     lr = f["log_records"]
@@ -992,7 +1019,7 @@ def print_report(snap: dict[str, Any]) -> None:
     print(
         f"  LLM spend          ${c['total_usd']:>5}   {c['priced_rows']} priced rows"
         + (f" (${c['per_priced_row_usd']} each)" if c["per_priced_row_usd"] is not None else "")
-        + (f", {c['unpriced_rows']} unpriced (CLI)" if c["unpriced_rows"] else "")
+        + (f", {c['unpriced_rows']} unpriced (CLI-served / no cost)" if c["unpriced_rows"] else "")
     )
 
     ev = snap["events"]

@@ -1,6 +1,6 @@
 # Pipeline Visualization Plan
 
-**Status:** draft. M0 tool shipped, not yet run on prod.
+**Status:** in progress. M0 run on prod 2026-09-22 (result below); M1 in flight.
 **Date:** 2026-09-22
 **Motivation:** The owner keeps asking the same question — "do we have
 independent processing queues, and where is each vacancy right now?" — and the
@@ -147,9 +147,52 @@ prune today, and at ~10 events/run × 6 runs/day it is ~2k rows/month, which
 is fine, but the number should be on record before a per-round event
 multiplies it).
 
+### M0 result (prod, 2026-09-22)
+
+Run locally against the 06:05 Warsaw backup snapshot
+(`backups/tracker_db_20260922_040500_*.db`, `integrity_check` ok — never the
+live WAL file) plus `logs/apply_failures.jsonl`; one `user_id`, 1,541
+`applications` rows, 233 `generation_runs` (169 `api`, 64 `cli`, 0 backfill —
+`tools/backfill_runs.py` was never run on prod), 402 `pipeline_events`.
+
+| Rule | 1 day | 7 days | 30 days | Verdict |
+|---|---|---|---|---|
+| 1 run coverage (≥ 90%) | 1/1 | 48/48 | 64/64 | **PASS** — metrics wiring is complete; nothing to fix |
+| 2 stage resolution (median ≤ 50%) | 100% | 99.8% (75 runs) | 99.8% (132 runs) | **FAIL** — 0 `start`, 0 `refine` events; the page would sit on "after verdict" for the whole refine loop |
+| 3 hunt funnel gap (≤ 30%) | 13.5% | 94.3% (49,356 raw / 2,825 unique) | 96.5% | **FAIL** — as the rule anticipated, `source_runs` counts a listing once per sweep, so the derived funnel cannot add up over more than one sweep |
+| 4 ready stack | 19 vs 24 | same | same | **FAIL** — see below |
+| 5 leaked open runs (= 0) | 5 | 5 | 5 | **FAIL** — all `api`, 2026-09-10..15, outcome NULL; one stopped after `render`, the rest after `fetch`/`generate` |
+
+Rule 4 was a definition, not data: the 5-row gap is exactly the APPLIED rows
+carrying a dash in `sent` — three web-UI declines (`app_status='Filter
+miss'`, `owner_reason=location`) and two old manual dashes. `/unsent`'s SQL
+accepts those; "ready to send" must not. Decision: the page's ready stack is
+`sent=''` only, owner-declined rows get their own count
+(`declined_by_owner_dash` in the snapshot). The tool was fixed the same day
+to compare like with like; the old assertion could never pass on real data.
+
+Tool defects the prod run exposed, fixed before merge: the APPLY header
+labelled prod's queue mode from the LOCAL `.env` (now inferred from the data
+— any row that ever carried `claimed_at`); `cost_usd = 0.0` (every CLI-served
+row since 2026-08-04, 42 of 51 in the 30-day window) was counted as "priced"
+and printed "$0.0 each" (zero is unpriced now); the FAIL line mixed in-window
+and all-time numbers without saying so; rule 1 silently dropped pre-M3 rows
+with a blank `source` (152 of 216 in the 30-day window — now reported as
+`excluded_blank_source`).
+
+Side observation, not this plan's concern: every `api` run in the window hit
+`Anthropic outage (400)` and fell back to the CLI (no `cost_usd > 0` since
+2026-08-04), and the 63 `cli_error` outcomes are the 2026-09-10..21 argv
+incident fixed in #284 — the same URL was fetched and failed four times on
+09-21 alone. The page will make both visible at a glance, which is the point.
+
+**M1 scope, decided by the numbers:** `start` + per-refine-round events
+(rule 2), `hunt_runs` (rule 3), `queued_at` (no rule needed), orphan-run
+stamping (rule 5). Rule 1 needs nothing.
+
 ## M1 — Instrumentation (bot repo)
 
-One PR, only what M0 says is needed. Candidates, in order of certainty:
+Four small PRs, one per item, each cut from `origin/master`:
 
 - **`start` events** (`metrics.stage(run_id, <stage>, "start")`) at the top
   of every stage that already has an `ok`/`error`, in BOTH `apply_api` and
