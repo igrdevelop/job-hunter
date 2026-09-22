@@ -283,6 +283,22 @@ def _env_int(name: str, default: int) -> int:
 # Nightly prune deletes postings_seen rows whose last_seen is older than this.
 POSTINGS_TTL_DAYS: int = _env_int("POSTINGS_TTL_DAYS", 180)
 
+# ── Hunt funnel: hunt_runs (docs/PIPELINE_VIZ_PLAN.md M1) ────────────────────
+# One row per hunt with the funnel the loop already computed for its Telegram
+# report (found / filtered_out + reasons / dup_url / dup_ct / dup_cooldown /
+# new / capped / queued / applied_inline / duration). Counts only — never a
+# job, URL or title. Reports-only: nothing reads it back into the hunt or the
+# apply pipeline. `false` skips the write and leaves the table in place
+# (rollback is the flag, not a migration).
+HUNT_RUNS_ENABLED: bool = os.getenv("HUNT_RUNS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# Rows retained (ring buffer, pruned inside every write). ~100 hunts/day in
+# prod, so 2000 is ~3 weeks — enough for a 7-day window with headroom.
+HUNT_RUNS_KEEP: int = _env_int("HUNT_RUNS_KEEP", 2000)
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"

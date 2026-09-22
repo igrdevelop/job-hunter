@@ -50,6 +50,21 @@ def _isolated_apply_stdout_log(tmp_path) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_hunt_runs_db(tmp_path, monkeypatch) -> None:
+    """Point ``hunter.hunt_runs.DB_PATH`` at a per-test file for EVERY test.
+
+    ``hunt_runs.record_hunt`` runs at the end of every real ``run_hunt``
+    (HUNT_RUNS_ENABLED defaults to true), and a dozen hunt-loop tests drive
+    ``run_hunt`` without the ``tracker_db`` fixture — without this they would
+    each append a row to the repo's own ./tracker.db. A test that wants the
+    rows next to its tracker rows re-points it at ``tracker_db`` itself.
+    """
+    from hunter import hunt_runs
+
+    monkeypatch.setattr(hunt_runs, "DB_PATH", tmp_path / "hunt_runs.db")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_metrics_db(tmp_path, monkeypatch) -> None:
     """Point hunter.metrics at a per-test temp DB by default.
 
