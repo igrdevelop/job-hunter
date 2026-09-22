@@ -471,3 +471,23 @@ def test_partial_hunt_runs_schema_is_unmeasured_not_a_crash(tmp_path: Path) -> N
     r3b = snap["coverage"]["3b_hunt_runs_present"]
     assert r3b["verdict"] == "UNMEASURED"
     assert "lacks columns" in r3b["why"]
+
+
+def test_queue_mode_seen_from_hunt_runs_after_placeholders_are_gone(tmp_path: Path) -> None:
+    # On a quiet prod queue no row carries claimed_at: _clear_own_placeholder
+    # deletes the PENDING/IN_PROGRESS row before the terminal row is written.
+    # A hunt_runs row that queued something is the durable trace.
+    from hunter import hunt_runs
+
+    db = tmp_path / "quiet.db"
+    init_db(db, xlsx_path=tmp_path / "none.xlsx")
+    with sqlite3.connect(db) as c:
+        hunt_runs._ensure_table(c)
+        cols = ", ".join(f'"{col}"' for col in hunt_runs.COUNT_COLUMNS)
+        vals = ", ".join("1" if col == "queued" else "0" for col in hunt_runs.COUNT_COLUMNS)
+        c.execute(
+            f'INSERT INTO hunt_runs (ts, "trigger", sources, filter_reasons, {cols}) '  # noqa: S608 — test fixture
+            f"VALUES (?, 'scheduled', '[]', '{{}}', {vals})",
+            (datetime.now(timezone.utc).isoformat(timespec="seconds"),),
+        )
+    assert _snap(db)["apply"]["queue_mode_observed"] is True
