@@ -874,9 +874,48 @@ def recent_events(conn: sqlite3.Connection, limit: int) -> list[dict[str, Any]] 
                 "company": r["company"] or "",
                 "pipeline": r["pipeline"],
                 "payload": payload[:80],
+                "details": _event_details(payload),
             }
         )
     return out
+
+
+# Payload keys stable enough for a client to render (docs/
+# PIPELINE_SNAPSHOT_CONTRACT.md, "events[].details"). Parsed from the FULL
+# payload column — `payload` above is cut at 80 chars, and a refine round
+# carrying `reason` routinely arrives there as broken JSON.
+EVENT_DETAIL_KEYS = (
+    "round",
+    "kind",
+    "score",
+    "best",
+    "target",
+    "max_rounds",
+    "verdict_first",
+    "chars",
+)
+EVENT_DETAIL_TEXT_KEYS = {"error": 200, "reason": 120}
+
+
+def _event_details(payload: str) -> dict[str, Any] | None:
+    """The stable fields of one event payload, or None when there are none.
+
+    Numbers and short strings pass through; `error` / `reason` are cut to a
+    fixed length so a stack trace never reaches the page. Anything not in the
+    two lists above is dropped — it is telemetry the writer may change."""
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    out: dict[str, Any] = {k: data[k] for k in EVENT_DETAIL_KEYS if k in data}
+    for k, cap in EVENT_DETAIL_TEXT_KEYS.items():
+        if isinstance(data.get(k), str):
+            out[k] = data[k][:cap]
+    return out or None
 
 
 # ── Coverage — the plan's decision rules ──────────────────────────────────────

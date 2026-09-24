@@ -495,3 +495,45 @@ def test_queue_mode_seen_from_hunt_runs_after_placeholders_are_gone(tmp_path: Pa
             (datetime.now(timezone.utc).isoformat(timespec="seconds"),),
         )
     assert _snap(db)["apply"]["queue_mode_observed"] is True
+
+
+def test_event_details_survive_the_payload_cut() -> None:
+    # A real refine round carries `reason`, which pushes the payload past the
+    # footer's 80-char cut — the truncated `payload` string is then invalid
+    # JSON, so clients read `details`, parsed from the FULL column.
+    import json as _json
+
+    full = _json.dumps(
+        {
+            "round": 3,
+            "kind": "stretch",
+            "score": 88,
+            "best": 90,
+            "reason": "rolled back: verdict did not improve over the best round " * 4,
+        }
+    )
+    assert len(full) > 80
+    details = ps._event_details(full)
+    assert details is not None
+    assert (details["round"], details["kind"], details["score"], details["best"]) == (
+        3,
+        "stretch",
+        88,
+        90,
+    )
+    assert len(details["reason"]) == 120
+    assert ps._event_details('{"error": "' + "x" * 500 + '"}') == {"error": "x" * 200}
+    # unknown keys are telemetry the writer may change — dropped
+    assert ps._event_details('{"payload_version": 2}') is None
+    assert ps._event_details("") is None
+    assert ps._event_details(full[:80]) is None  # the truncated string never parses
+
+
+def test_events_carry_details(fixture_db: Path) -> None:
+    ev = _snap(fixture_db)["events"]
+    refine = [e for e in ev if e["stage"] == "refine" and e["event"] == "accepted"][0]
+    assert refine["details"] == {"round": 2, "kind": "honest", "score": 90, "best": 90}
+    start = [e for e in ev if e["stage"] == "refine" and e["event"] == "start"][0]
+    assert start["details"] == {"target": 95, "max_rounds": 5, "verdict_first": 85}
+    plain = [e for e in ev if e["stage"] == "judge"][0]
+    assert plain["details"] is None

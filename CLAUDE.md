@@ -2033,7 +2033,7 @@ tools/pipeline_snapshot.py  Read-only M0 measurement (docs/PIPELINE_VIZ_PLAN.md)
                             table (pre-M1 checkout, fresh dev DB — the dev
                             `tracker.db` has NO `applications` table at all, only the
                             lazily-created ones) reports UNMEASURED, never 0. `--json`
-                            is the shape the M2 API contract will be cut from. Each in-progress card's `run` also carries `refine_target` / `refine_max_rounds` (2026-09-24), read from THAT run's `refine`/`start` event payload — the value the apply subprocess actually resolved through `gen_profile`, so the page never hardcodes 95 / 5.
+                            is the shape the M2 API contract will be cut from. Each in-progress card's `run` also carries `refine_target` / `refine_max_rounds` (2026-09-24), read from THAT run's `refine`/`start` event payload — the value the apply subprocess actually resolved through `gen_profile`, so the page never hardcodes 95 / 5. Every event also carries `details` (2026-09-24): the stable payload fields parsed from the FULL `pipeline_events.payload` column — the 80-char `payload` string cuts a refine round carrying `reason` into invalid JSON, so clients must never parse it.
                             **Reads the M1 data since 2026-09-22** (PRs #288–#291; still
                             read-only, still `mode=ro`): `hunt.hunt_runs` sums the
                             `hunt_runs` rows in the window over the tool's own connection
