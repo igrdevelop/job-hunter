@@ -571,7 +571,7 @@ def apply_tier(
         mins = card["claimed_min_ago"]
         card["stale"] = mins is not None and mins > APPLY_CLAIM_TIMEOUT_MIN
         if has_metrics and r["url_norm"]:
-            card["run"] = _open_run_for(conn, r["url_norm"], win.now)
+            card["run"] = _open_run_for(conn, r["url_norm"], win.now, user_id)
         cards.append(card)
     out["in_progress"] = {"count": len(prog), "cards": cards}
 
@@ -632,12 +632,17 @@ def apply_tier(
     return out
 
 
-def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dict[str, Any] | None:
+def _open_run_for(
+    conn: sqlite3.Connection, url_norm: str, now: datetime, user_id: str
+) -> dict[str, Any] | None:
+    # Scoped like apply.runs (`user_id = ? OR user_id = ''`): two users can
+    # hold the same vacancy, and one must never see the other's open run.
     run = conn.execute(
         "SELECT run_id, pipeline, profile, gen_model, started_at, verdict_first, verdict_final, "
         "refine_rounds, refine_accepted FROM generation_runs "
-        "WHERE url_norm = ? AND finished_at IS NULL ORDER BY started_at DESC LIMIT 1",
-        (url_norm,),
+        "WHERE url_norm = ? AND finished_at IS NULL AND (user_id = ? OR user_id = '') "
+        "ORDER BY started_at DESC LIMIT 1",
+        (url_norm, user_id),
     ).fetchone()
     if run is None:
         return None
@@ -655,7 +660,12 @@ def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dic
         "elapsed_min": _minutes_ago(run["started_at"], now),
         "events": len(events),
         "last_event": (
-            {"stage": last["stage"], "event": last["event"], "at": _local_hhmm(last["ts"])}
+            {
+                "stage": last["stage"],
+                "event": last["event"],
+                "at": _local_hhmm(last["ts"]),
+                "ts": last["ts"],
+            }
             if last
             else None
         ),
@@ -700,6 +710,7 @@ def _refine_progress(events: list[sqlite3.Row]) -> dict[str, Any] | None:
             "best": payload.get("best"),
             "outcome": e["event"],
             "at": _local_hhmm(e["ts"]),
+            "ts": e["ts"],
         }
     return None
 
@@ -848,18 +859,26 @@ def result_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str
 # ── Events footer ─────────────────────────────────────────────────────────────
 
 
-def recent_events(conn: sqlite3.Connection, limit: int) -> list[dict[str, Any]] | None:
+def recent_events(
+    conn: sqlite3.Connection, limit: int, user_id: str
+) -> list[dict[str, Any]] | None:
     if not (_table_exists(conn, "pipeline_events") and _table_exists(conn, "generation_runs")):
         return None
+    # Scoped to the caller like apply.runs; the company lookup is scoped too
+    # and skips a blank url_norm (a paste-mode run), which used to match an
+    # arbitrary url-less row.
     rows = conn.execute(
         """
         SELECT e.ts, e.stage, e.event, e.duration_ms, e.payload, r.pipeline, r.url_norm,
-               (SELECT company FROM applications a WHERE a.url_norm = r.url_norm LIMIT 1) AS company
+               (SELECT company FROM applications a
+                 WHERE a.url_norm = r.url_norm AND r.url_norm != '' AND a.user_id = ?
+                 LIMIT 1) AS company
         FROM pipeline_events e
         JOIN generation_runs r ON r.run_id = e.run_id
+        WHERE (r.user_id = ? OR r.user_id = '')
         ORDER BY e.ts DESC, e.id DESC LIMIT ?
         """,
-        (limit,),
+        (user_id, user_id, limit),
     ).fetchall()
     out = []
     for r in rows:
@@ -874,9 +893,48 @@ def recent_events(conn: sqlite3.Connection, limit: int) -> list[dict[str, Any]] 
                 "company": r["company"] or "",
                 "pipeline": r["pipeline"],
                 "payload": payload[:80],
+                "details": _event_details(payload),
             }
         )
     return out
+
+
+# Payload keys stable enough for a client to render (docs/
+# PIPELINE_SNAPSHOT_CONTRACT.md, "events[].details"). Parsed from the FULL
+# payload column — `payload` above is cut at 80 chars, and a refine round
+# carrying `reason` routinely arrives there as broken JSON.
+EVENT_DETAIL_KEYS = (
+    "round",
+    "kind",
+    "score",
+    "best",
+    "target",
+    "max_rounds",
+    "verdict_first",
+    "chars",
+)
+EVENT_DETAIL_TEXT_KEYS = {"error": 200, "reason": 120}
+
+
+def _event_details(payload: str) -> dict[str, Any] | None:
+    """The stable fields of one event payload, or None when there are none.
+
+    Numbers and short strings pass through; `error` / `reason` are cut to a
+    fixed length so a stack trace never reaches the page. Anything not in the
+    two lists above is dropped — it is telemetry the writer may change."""
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    out: dict[str, Any] = {k: data[k] for k in EVENT_DETAIL_KEYS if k in data}
+    for k, cap in EVENT_DETAIL_TEXT_KEYS.items():
+        if isinstance(data.get(k), str):
+            out[k] = data[k][:cap]
+    return out or None
 
 
 # ── Coverage — the plan's decision rules ──────────────────────────────────────
@@ -1129,7 +1187,7 @@ def build_snapshot(
             "hunt": hunt,
             "apply": apply_tier(conn, win, user_id, failures_log),
             "result": result_tier(conn, win, user_id),
-            "events": recent_events(conn, events_limit),
+            "events": recent_events(conn, events_limit, user_id),
             "coverage": coverage(conn, win, user_id, hunt),
         }
     finally:

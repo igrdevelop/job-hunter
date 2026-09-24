@@ -82,13 +82,17 @@ process TZ is not this contract's concern).
   is one process for every user, and none of these tables has a `user_id`
   column (`hunter/erasure.py` discovers tables by that column and correctly
   skips them). The Hunt tier is the same for every viewer.
-- `generation_runs` carries `user_id` but is only PARTLY scoped: `apply.runs`
-  uses `(user_id = ? OR user_id = '')` (a pre-multi-user row has `''`);
-  `in_progress.cards[].run` matches by `url_norm` only (the card itself
-  came from a user-scoped `applications` row); the `coverage` rules and
-  `events` read `generation_runs`/`pipeline_events` with no user predicate at
-  all. The API should scope `apply.runs` exactly as the tool does and treat
-  the rest as global diagnostics.
+- `generation_runs` / `pipeline_events`: scoped with `(generation_runs.user_id
+  = ? OR generation_runs.user_id = '')` (a pre-multi-user row has `''`) in
+  **three** places — `apply.runs`, the open-run lookup behind
+  `in_progress.cards[].run` (two users can hold the same vacancy; one must
+  never see the other's run), and the `events` footer. The footer's `company`
+  lookup is scoped too (`applications.user_id = ?`) and skips a blank
+  `url_norm` (a paste-mode run), which used to match an arbitrary url-less
+  row. Adopted 2026-09-24 from the API port (job-hunter-api
+  `feat/pipeline-snapshot`), which found the gap; identical output for a
+  single user. Only the `coverage` rules stay unscoped — a bot-side
+  diagnostic, not served.
 
 ### UNMEASURED / `null`
 
@@ -135,6 +139,7 @@ Top level:
 | `user_id` | str | The `--user` value, or `"(unscoped: empty user_id)"` when empty. |
 | `hunt` / `apply` / `result` | object | The three tiers, below. |
 | `events` | list \| null | Footer, below. `null` when `pipeline_events` or `generation_runs` is missing. |
+| `events[].details` | object \| null | The stable fields of the event's FULL `pipeline_events.payload` (`_event_details`), added 2026-09-24 because the 80-char `payload` string broke refine-round JSON. Only these keys, each present only when the payload has it: `round`, `kind`, `score`, `best`, `target`, `max_rounds`, `verdict_first`, `chars` (passed through as-is), `error` (cut to 200 chars), `reason` (cut to 120). `null` for an empty, unparseable or non-object payload, or one with none of those keys. Shapes by event: `fetch ok` → `{chars}`; `ats_loop`/`verdict ok` → `{score}`; any `error` → `{error}`; refine round → `{round, kind, score, best, reason}` (`discarded` → `score: null`); refine `start` → `{target, max_rounds, verdict_first}`. |
 | `coverage` | object | Diagnostic rules, below (see also "Not in the contract"). |
 
 ### `hunt`
@@ -192,10 +197,10 @@ Top level:
 | `run.profile` | str | `profile` if non-empty else `gen_model`; `''` when both are (the fixture's case). |
 | `run.elapsed_min` | int \| null | `_minutes_ago(started_at)`. |
 | `run.events` | int | Count of `pipeline_events` rows for the run (`SELECT ts, stage, event, duration_ms, payload FROM pipeline_events WHERE run_id = ? ORDER BY id`). |
-| `run.last_event` | object \| null | `{stage, event, at}` of the last event by `id`; `null` with no events. |
+| `run.last_event` | object \| null | `{stage, event, at, ts}` of the last event by `id` — `ts` is the raw UTC timestamp (added 2026-09-24: `at` is display-only and not served by the API, so a client needs `ts` to format its own time); `null` with no events. |
 | `run.current_stage` | object | `{stage: str, basis: str}` from `_infer_stage`, below. |
 | `run.stage_started_min_ago` | int \| null | Minutes since the `start` event of `current_stage.stage`. Walk the events backwards to the LAST `start` row: if its `stage` equals the current stage → `_minutes_ago(ts)`, otherwise `null` (the current stage was inferred, or its `start` predates M1). `null` when no `start` row exists at all (pre-M1 run). |
-| `run.refine_progress` | object \| null | The latest refine ROUND: the last event (by `id`) with `stage = 'refine'` and `event IN ('accepted','rejected','discarded')` (`REFINE_ROUND_EVENTS` — the loop's `start` row carries no round). `{round, kind, score, best, outcome: event, at}` where `round`/`kind`/`score`/`best` come from the JSON `payload` (`{round, kind, score, best, reason}` written by `verdict_refine.refine_loop::_record`; a missing/garbage payload yields `null`s, `discarded` carries `score: null`). `null` before the first round or on a pre-M1 run. |
+| `run.refine_progress` | object \| null | The latest refine ROUND: the last event (by `id`) with `stage = 'refine'` and `event IN ('accepted','rejected','discarded')` (`REFINE_ROUND_EVENTS` — the loop's `start` row carries no round). `{round, kind, score, best, outcome: event, at, ts}` where `round`/`kind`/`score`/`best` come from the JSON `payload` (`{round, kind, score, best, reason}` written by `verdict_refine.refine_loop::_record`; a missing/garbage payload yields `null`s, `discarded` carries `score: null`). `null` before the first round or on a pre-M1 run. |
 | `run.refine_target` / `run.refine_max_rounds` | number \| null | From THIS run's `refine`/`start` event payload (`{target, max_rounds, verdict_first}`, written by `verdict_refine.refine_loop` since #289) — the last such event by `id`. Read per run, not from config: the apply subprocess resolves both through `hunter.gen_profile` (env > the user's `generation.yaml` > builtin), so the run's own event is the only record of the value it used. `null` before the loop starts, when it never runs (verdict already at target, `ATS_VERDICT_MAX_REFINES=0`) and on a pre-M1 run — a client falls back to its own display defaults. Added 2026-09-24 so the page stops hardcoding 95 / 5. |
 | `run.verdict_first` / `verdict_final` | float \| null | Raw `generation_runs` columns (REAL). |
 | `run.refine_rounds` / `refine_accepted` | int \| null | Raw columns; both are stamped by `update_run` AFTER the loop, so on a live card they are usually `null` until the loop ends (the fixture pre-stamps `refine_rounds = 1`). |
@@ -624,11 +629,11 @@ are in the normalised list above.
         "claimed_min_ago": 14, "stale": false,
         "run": {
           "run_id": "r_ip", "pipeline": "cli", "profile": "", "elapsed_min": 14, "events": 7,
-          "last_event": {"stage": "refine", "event": "accepted", "at": "13:59"},
+          "last_event": {"stage": "refine", "event": "accepted", "at": "13:59", "ts": "2026-09-22T11:59:00+00:00"},
           "current_stage": {"stage": "refine", "basis": "refine round accepted"},
           "stage_started_min_ago": 3,
           "refine_progress": {"round": 2, "kind": "honest", "score": 90, "best": 90,
-                              "outcome": "accepted", "at": "13:59"},
+                              "outcome": "accepted", "at": "13:59", "ts": "2026-09-22T11:59:00+00:00"},
           "refine_target": 95, "refine_max_rounds": 5,
           "verdict_first": 85.0, "verdict_final": 88.0, "refine_rounds": 1, "refine_accepted": null
         }
@@ -653,16 +658,16 @@ are in the normalised list above.
     "cost": {"total_usd": 0.81, "priced_rows": 2, "unpriced_rows": 3, "per_priced_row_usd": 0.41}
   },
   "events": [
-    {"at": "13:59", "ts": "2026-09-22T11:59:00+00:00", "stage": "refine", "event": "accepted", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"round\": 2, \"kind\": \"honest\", \"score\": 90, \"best\": 90}"},
-    {"at": "13:58", "ts": "2026-09-22T11:58:00+00:00", "stage": "refine", "event": "rejected", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"round\": 1, \"kind\": \"honest\", \"score\": 84, \"best\": 85}"},
-    {"at": "13:57", "ts": "2026-09-22T11:57:00+00:00", "stage": "refine", "event": "start", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"target\": 95, \"max_rounds\": 5, \"verdict_first\": 85}"},
-    {"at": "13:56", "ts": "2026-09-22T11:56:00+00:00", "stage": "verdict", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": ""},
-    {"at": "13:53", "ts": "2026-09-22T11:53:00+00:00", "stage": "judge", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": ""},
-    {"at": "13:51", "ts": "2026-09-22T11:51:00+00:00", "stage": "generate", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": ""},
-    {"at": "13:46", "ts": "2026-09-22T11:46:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": ""},
-    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "", "pipeline": "cli", "payload": ""},
-    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Lambda", "pipeline": "cli", "payload": ""},
-    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Kappa", "pipeline": "cli", "payload": ""}
+    {"at": "13:59", "ts": "2026-09-22T11:59:00+00:00", "stage": "refine", "event": "accepted", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"round\": 2, \"kind\": \"honest\", \"score\": 90, \"best\": 90}", "details": {"round": 2, "kind": "honest", "score": 90, "best": 90}},
+    {"at": "13:58", "ts": "2026-09-22T11:58:00+00:00", "stage": "refine", "event": "rejected", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"round\": 1, \"kind\": \"honest\", \"score\": 84, \"best\": 85}", "details": {"round": 1, "kind": "honest", "score": 84, "best": 85}},
+    {"at": "13:57", "ts": "2026-09-22T11:57:00+00:00", "stage": "refine", "event": "start", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "{\"target\": 95, \"max_rounds\": 5, \"verdict_first\": 85}", "details": {"target": 95, "max_rounds": 5, "verdict_first": 85}},
+    {"at": "13:56", "ts": "2026-09-22T11:56:00+00:00", "stage": "verdict", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "13:53", "ts": "2026-09-22T11:53:00+00:00", "stage": "judge", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "13:51", "ts": "2026-09-22T11:51:00+00:00", "stage": "generate", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "13:46", "ts": "2026-09-22T11:46:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Example Corp", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Lambda", "pipeline": "cli", "payload": "", "details": null},
+    {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Kappa", "pipeline": "cli", "payload": "", "details": null}
   ],
   "coverage": {
     "1_run_coverage": {"rows_produced": 9, "excluded_blank_source": 0, "with_generation_run": 6, "share_pct": 66.7,
@@ -703,13 +708,10 @@ returns `null`.
   slot later (a `config` KV row written by the scheduler, or a `hunt_runs`
   "next" column) — a separate change.
 - **`events[].payload`** — free-form JSON, truncated to 80 characters in the
-  footer. Only these payload shapes are stable enough to rely on, and only
-  when read from the FULL `pipeline_events.payload` column, not the
-  truncated footer string: `{"score": …}` (`ats_loop`/`verdict` ok),
-  `{"chars": …}` (`fetch` ok), `{"error": "<first 200 chars>"}` (`error`),
-  the refine round `{round, kind, score, best, reason}` and the refine
-  `start` `{target, max_rounds, verdict_first}`. Everything else is
-  telemetry the writer may change.
+  footer; kept for display/debugging only. A refine round carrying `reason`
+  routinely exceeds 80 characters, so the truncated string is often invalid
+  JSON — never parse it. Use `events[].details` (below), which the tool parses
+  from the FULL column.
 - **`coverage`** (the whole object) — the plan's M0 decision rules and the
   `growth` counters, a bot-side diagnostic. The page shows it on an "about
   this data" tab at most; the API may port it verbatim (the rules are fully
