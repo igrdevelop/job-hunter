@@ -130,6 +130,9 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
     payload     TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pipeline_events_run_id ON pipeline_events(run_id, id);
+-- The snapshot footer (tools/pipeline_snapshot.py, GET /api/pipeline/snapshot)
+-- reads the newest events by ts; the table is append-only and unpruned.
+CREATE INDEX IF NOT EXISTS idx_pipeline_events_ts ON pipeline_events(ts);
 """
 
 # Whitelist of columns update_run()/finish_run() may write — fields come from

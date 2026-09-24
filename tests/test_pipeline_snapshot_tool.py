@@ -283,6 +283,7 @@ def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
         "stage": "refine",
         "event": "accepted",
         "at": run["last_event"]["at"],
+        "ts": run["last_event"]["ts"],
     }
     assert run["current_stage"] == {"stage": "refine", "basis": "refine round accepted"}
     # minutes since the refine loop's own `start` event (+11 min into a run
@@ -295,6 +296,7 @@ def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
         "best": 90,
         "outcome": "accepted",
         "at": run["refine_progress"]["at"],
+        "ts": run["refine_progress"]["ts"],
     }
     # the loop's own `refine`/`start` payload, per run (the value the apply
     # subprocess actually resolved), so the page never hardcodes 95 / 5
@@ -537,3 +539,25 @@ def test_events_carry_details(fixture_db: Path) -> None:
     assert start["details"] == {"target": 95, "max_rounds": 5, "verdict_first": 85}
     plain = [e for e in ev if e["stage"] == "judge"][0]
     assert plain["details"] is None
+
+
+def test_events_and_open_run_are_user_scoped(fixture_db: Path) -> None:
+    # A second user holding the SAME vacancy: their open run and their events
+    # must never surface in u1's in-progress card or footer.
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(fixture_db) as c:
+        c.execute(
+            "INSERT INTO generation_runs (run_id, user_id, url_norm, started_at, pipeline) "
+            "VALUES ('r_u2', 'u2', 'ex.com/ip', ?, 'api')",
+            (_iso(now - timedelta(minutes=1)),),
+        )
+        c.execute(
+            "INSERT INTO pipeline_events (run_id, ts, stage, event, payload) "
+            "VALUES ('r_u2', ?, 'generate', 'start', '')",
+            (_iso(now),),
+        )
+    snap = _snap(fixture_db)
+    run = snap["apply"]["in_progress"]["cards"][0]["run"]
+    assert run["run_id"] == "r_ip"  # not the newer u2 run on the same url
+    assert "ts" in run["last_event"] and "ts" in run["refine_progress"]
+    assert all(e["stage"] != "generate" or e["event"] != "start" for e in snap["events"])

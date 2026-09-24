@@ -82,13 +82,17 @@ process TZ is not this contract's concern).
   is one process for every user, and none of these tables has a `user_id`
   column (`hunter/erasure.py` discovers tables by that column and correctly
   skips them). The Hunt tier is the same for every viewer.
-- `generation_runs` carries `user_id` but is only PARTLY scoped: `apply.runs`
-  uses `(user_id = ? OR user_id = '')` (a pre-multi-user row has `''`);
-  `in_progress.cards[].run` matches by `url_norm` only (the card itself
-  came from a user-scoped `applications` row); the `coverage` rules and
-  `events` read `generation_runs`/`pipeline_events` with no user predicate at
-  all. The API should scope `apply.runs` exactly as the tool does and treat
-  the rest as global diagnostics.
+- `generation_runs` / `pipeline_events`: scoped with `(generation_runs.user_id
+  = ? OR generation_runs.user_id = '')` (a pre-multi-user row has `''`) in
+  **three** places — `apply.runs`, the open-run lookup behind
+  `in_progress.cards[].run` (two users can hold the same vacancy; one must
+  never see the other's run), and the `events` footer. The footer's `company`
+  lookup is scoped too (`applications.user_id = ?`) and skips a blank
+  `url_norm` (a paste-mode run), which used to match an arbitrary url-less
+  row. Adopted 2026-09-24 from the API port (job-hunter-api
+  `feat/pipeline-snapshot`), which found the gap; identical output for a
+  single user. Only the `coverage` rules stay unscoped — a bot-side
+  diagnostic, not served.
 
 ### UNMEASURED / `null`
 
@@ -193,10 +197,10 @@ Top level:
 | `run.profile` | str | `profile` if non-empty else `gen_model`; `''` when both are (the fixture's case). |
 | `run.elapsed_min` | int \| null | `_minutes_ago(started_at)`. |
 | `run.events` | int | Count of `pipeline_events` rows for the run (`SELECT ts, stage, event, duration_ms, payload FROM pipeline_events WHERE run_id = ? ORDER BY id`). |
-| `run.last_event` | object \| null | `{stage, event, at}` of the last event by `id`; `null` with no events. |
+| `run.last_event` | object \| null | `{stage, event, at, ts}` of the last event by `id` — `ts` is the raw UTC timestamp (added 2026-09-24: `at` is display-only and not served by the API, so a client needs `ts` to format its own time); `null` with no events. |
 | `run.current_stage` | object | `{stage: str, basis: str}` from `_infer_stage`, below. |
 | `run.stage_started_min_ago` | int \| null | Minutes since the `start` event of `current_stage.stage`. Walk the events backwards to the LAST `start` row: if its `stage` equals the current stage → `_minutes_ago(ts)`, otherwise `null` (the current stage was inferred, or its `start` predates M1). `null` when no `start` row exists at all (pre-M1 run). |
-| `run.refine_progress` | object \| null | The latest refine ROUND: the last event (by `id`) with `stage = 'refine'` and `event IN ('accepted','rejected','discarded')` (`REFINE_ROUND_EVENTS` — the loop's `start` row carries no round). `{round, kind, score, best, outcome: event, at}` where `round`/`kind`/`score`/`best` come from the JSON `payload` (`{round, kind, score, best, reason}` written by `verdict_refine.refine_loop::_record`; a missing/garbage payload yields `null`s, `discarded` carries `score: null`). `null` before the first round or on a pre-M1 run. |
+| `run.refine_progress` | object \| null | The latest refine ROUND: the last event (by `id`) with `stage = 'refine'` and `event IN ('accepted','rejected','discarded')` (`REFINE_ROUND_EVENTS` — the loop's `start` row carries no round). `{round, kind, score, best, outcome: event, at, ts}` where `round`/`kind`/`score`/`best` come from the JSON `payload` (`{round, kind, score, best, reason}` written by `verdict_refine.refine_loop::_record`; a missing/garbage payload yields `null`s, `discarded` carries `score: null`). `null` before the first round or on a pre-M1 run. |
 | `run.refine_target` / `run.refine_max_rounds` | number \| null | From THIS run's `refine`/`start` event payload (`{target, max_rounds, verdict_first}`, written by `verdict_refine.refine_loop` since #289) — the last such event by `id`. Read per run, not from config: the apply subprocess resolves both through `hunter.gen_profile` (env > the user's `generation.yaml` > builtin), so the run's own event is the only record of the value it used. `null` before the loop starts, when it never runs (verdict already at target, `ATS_VERDICT_MAX_REFINES=0`) and on a pre-M1 run — a client falls back to its own display defaults. Added 2026-09-24 so the page stops hardcoding 95 / 5. |
 | `run.verdict_first` / `verdict_final` | float \| null | Raw `generation_runs` columns (REAL). |
 | `run.refine_rounds` / `refine_accepted` | int \| null | Raw columns; both are stamped by `update_run` AFTER the loop, so on a live card they are usually `null` until the loop ends (the fixture pre-stamps `refine_rounds = 1`). |
@@ -625,11 +629,11 @@ are in the normalised list above.
         "claimed_min_ago": 14, "stale": false,
         "run": {
           "run_id": "r_ip", "pipeline": "cli", "profile": "", "elapsed_min": 14, "events": 7,
-          "last_event": {"stage": "refine", "event": "accepted", "at": "13:59"},
+          "last_event": {"stage": "refine", "event": "accepted", "at": "13:59", "ts": "2026-09-22T11:59:00+00:00"},
           "current_stage": {"stage": "refine", "basis": "refine round accepted"},
           "stage_started_min_ago": 3,
           "refine_progress": {"round": 2, "kind": "honest", "score": 90, "best": 90,
-                              "outcome": "accepted", "at": "13:59"},
+                              "outcome": "accepted", "at": "13:59", "ts": "2026-09-22T11:59:00+00:00"},
           "refine_target": 95, "refine_max_rounds": 5,
           "verdict_first": 85.0, "verdict_final": 88.0, "refine_rounds": 1, "refine_accepted": null
         }
