@@ -23,6 +23,16 @@ services:
       # diverged and corrupted the db (2026-08-07 incident). One-time host
       # migration: mkdir -p db && mv tracker.db* db/
       TRACKER_DB_PATH: /app/db/tracker.db
+      # Local time = the schedule's own timezone. Every `date.today()` /
+      # naive `datetime.now()` in the bot (tracker `date` column,
+      # Applications/<date>/ folders, daily-summary "yesterday", funnel
+      # cutoffs, backup filenames) used to run in UTC while SCHEDULE_TIMES,
+      # the blackout and /schedule are Warsaw — a row written between 00:00
+      # and 02:00 Warsaw carried the previous day (docs/
+      # PIPELINE_SNAPSHOT_CONTRACT.md, verified 2026-09-22). Every UTC
+      # timestamp the bot stores is written with an explicit tz and is
+      # unaffected; the image already ships /usr/share/zoneinfo.
+      TZ: Europe/Warsaw
     volumes:
       # Holds tracker.db + its WAL sidecars; shared with job-hunter-api's
       # compose (mounted there as /app/data/db). Create before first run:
