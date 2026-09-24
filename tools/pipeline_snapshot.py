@@ -662,6 +662,7 @@ def _open_run_for(conn: sqlite3.Connection, url_norm: str, now: datetime) -> dic
         "current_stage": current,
         "stage_started_min_ago": _stage_started_min_ago(events, current["stage"], now),
         "refine_progress": _refine_progress(events),
+        **_refine_config(events),
         "verdict_first": run["verdict_first"],
         "verdict_final": run["verdict_final"],
         "refine_rounds": run["refine_rounds"],
@@ -701,6 +702,32 @@ def _refine_progress(events: list[sqlite3.Row]) -> dict[str, Any] | None:
             "at": _local_hhmm(e["ts"]),
         }
     return None
+
+
+def _refine_config(events: list[sqlite3.Row]) -> dict[str, Any]:
+    """`refine_target` / `refine_max_rounds` from THIS run's `refine`/`start`
+    event (payload `{target, max_rounds, verdict_first}`, written by
+    `verdict_refine.refine_loop` since #289). Read per run rather than from
+    config because the apply subprocess resolves both through
+    `hunter.gen_profile` — env > the user's generation.yaml > builtin — so the
+    run's own event is the only place the value it actually used is recorded.
+    Both None before the loop starts, when it never runs (verdict already at
+    target, ATS_VERDICT_MAX_REFINES=0) and on a pre-M1 run — the page then
+    falls back to its own defaults."""
+    for e in reversed(events):
+        if e["stage"] != "refine" or e["event"] != "start":
+            continue
+        try:
+            payload = json.loads(e["payload"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "refine_target": payload.get("target"),
+            "refine_max_rounds": payload.get("max_rounds"),
+        }
+    return {"refine_target": None, "refine_max_rounds": None}
 
 
 def _infer_stage(events: list[sqlite3.Row]) -> dict[str, Any]:
@@ -1222,9 +1249,11 @@ def print_report(snap: dict[str, Any]) -> None:
             )
             rp = run["refine_progress"]
             if rp:
+                cap = run["refine_max_rounds"] or "?"
+                tgt = run["refine_target"] or "?"
                 print(
-                    f"        refine: round {rp['round']} {rp['kind'] or '?'} {rp['outcome']} @ {rp['at']}, "
-                    f"score {rp['score']}, best {rp['best']}"
+                    f"        refine: round {rp['round']}/{cap} {rp['kind'] or '?'} {rp['outcome']} @ {rp['at']}, "
+                    f"score {rp['score']}, best {rp['best']} (target {tgt})"
                 )
         else:
             print("        no open generation_runs row for this url (metrics gap or pre-M1 DB)")

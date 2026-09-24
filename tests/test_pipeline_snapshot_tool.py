@@ -296,6 +296,9 @@ def test_apply_tier_queue_and_card(fixture_db: Path) -> None:
         "outcome": "accepted",
         "at": run["refine_progress"]["at"],
     }
+    # the loop's own `refine`/`start` payload, per run (the value the apply
+    # subprocess actually resolved), so the page never hardcodes 95 / 5
+    assert (run["refine_target"], run["refine_max_rounds"]) == (95, 5)
     assert a["runs"]["cut_zero_cost"] == {"expired": 1, "skip_doomed_gate": 1}
     assert a["skipped_rows"]["by_reason"] == [("EXPIRED", 1), ("doomed", 1)]
     assert a["failures"]["in_window"] == 2
@@ -416,6 +419,7 @@ def test_pre_m1_run_card_keeps_the_inference_branch(fixture_db: Path) -> None:
     assert run["current_stage"] == {"stage": "refine", "basis": "inferred: after 'verdict' ok"}
     assert run["stage_started_min_ago"] is None
     assert run["refine_progress"] is None
+    assert (run["refine_target"], run["refine_max_rounds"]) == (None, None)
 
 
 def test_infer_stage_branches() -> None:
