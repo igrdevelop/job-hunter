@@ -458,13 +458,45 @@ def test_register_wires_the_drain_and_the_state_tick() -> None:
 
 
 def test_post_init_cleans_up_the_previous_process() -> None:
-    """Wiring guard: startup stamps leftover running commands and unfinished
-    hunt_live rows as error, and publishes the scheduler facts once."""
+    """Wiring guard: startup runs the cleanup and publishes the scheduler
+    facts once."""
     import inspect
 
     from hunter import telegram_bot
 
     src = inspect.getsource(telegram_bot._post_init)
-    assert "bot_commands.fail_orphaned_running" in src
-    assert "hunt_live.fail_unfinished" in src
+    assert "await _startup_pipeline_cleanup()" in src
     assert "bot_state.publish(app)" in src
+
+
+def test_startup_cleanup_stamps_running_commands_and_open_hunts() -> None:
+    """A crash mid-hunt must not leave the page (and the API's 409 rule)
+    believing a hunt is live forever."""
+    from hunter import hunt_live
+    from hunter.telegram_bot import _startup_pipeline_cleanup
+
+    _insert("run", status="running")
+    _insert("pend")
+    open_hunt = hunt_live.start(trigger="web", sources=["linkedin"], command_id="run")
+    hunt_live.set_step(open_hunt, "fetch")
+    closed = hunt_live.start(trigger="scheduled", sources=["justjoin"])
+    hunt_live.finish(closed)
+
+    assert asyncio.run(_startup_pipeline_cleanup()) == (1, 1)
+
+    assert (_row("run")["status"], _row("run")["error"]) == ("error", "bot restarted")
+    assert _row("pend")["status"] == "pending"  # still claimable after restart
+    rows = {r["hunt_id"]: r for r in hunt_live.latest(10)}
+    assert rows[open_hunt]["step"] == "error"
+    assert rows[open_hunt]["finished_at"] is not None
+    assert rows[closed]["step"] == "done"
+    assert asyncio.run(_startup_pipeline_cleanup()) == (0, 0)  # idempotent
+
+
+def test_startup_cleanup_survives_a_broken_db(tmp_path, monkeypatch) -> None:
+    from hunter import hunt_live
+    from hunter.telegram_bot import _startup_pipeline_cleanup
+
+    monkeypatch.setattr(bot_commands, "DB_PATH", tmp_path / "missing" / "a.db")
+    monkeypatch.setattr(hunt_live, "DB_PATH", tmp_path / "missing" / "b.db")
+    assert asyncio.run(_startup_pipeline_cleanup()) == (0, 0)  # must not raise

@@ -143,6 +143,34 @@ def __getattr__(name: str):
 # ── Application factory ───────────────────────────────────────────────────────
 
 
+async def _startup_pipeline_cleanup() -> tuple[int, int]:
+    """Stamp leftovers of the previous process as error (pipeline control plan).
+
+    Nothing can be running in a process that has just started: a `running`
+    bot_commands row or a hunt_live row with `finished_at IS NULL` belongs to
+    a process that died mid-command / mid-hunt. Left alone, the site's control
+    bar would treat the hunt as live forever (buttons disabled, the API
+    answering 409). Returns (commands, hunts) stamped; best-effort — a broken
+    table must not stop the bot from starting.
+    """
+    from hunter import bot_commands, hunt_live
+    from hunter.best_effort import best_effort
+
+    stale_cmds = stale_hunts = 0
+    with best_effort("bot.commands"):
+        stale_cmds = await asyncio.to_thread(bot_commands.fail_orphaned_running, "bot restarted")
+    with best_effort("hunt.live"):
+        stale_hunts = await asyncio.to_thread(hunt_live.fail_unfinished)
+    if stale_cmds or stale_hunts:
+        logger.warning(
+            "[startup] marked %d running bot command(s) and %d unfinished hunt_live "
+            "row(s) as error (bot restarted)",
+            stale_cmds,
+            stale_hunts,
+        )
+    return stale_cmds, stale_hunts
+
+
 async def _post_init(app: Application) -> None:
     """Post-init hook: register bot commands + validate gsheets startup."""
     from telegram import BotCommand
@@ -220,26 +248,9 @@ async def _post_init(app: Application) -> None:
         register_worker_task(0, task)
         logger.info("[apply_worker] background task started (APPLY_QUEUE_ENABLED=true)")
 
-    # Pipeline page (pipeline control plan, PR 1): nothing can be running in
-    # a process that has just started — a `running` bot_commands row or an
-    # unfinished hunt_live row belongs to the previous process. Stamp them
-    # error so the page's buttons are not disabled forever. Then publish the
-    # scheduler facts once (the 60 s tick refreshes them; next run times are
-    # only known once the JobQueue has started, so they may be null here for
-    # the first second).
-    from hunter import bot_commands, hunt_live
-    from hunter.best_effort import best_effort
-
-    with best_effort("bot.commands"):
-        stale_cmds = await asyncio.to_thread(bot_commands.fail_orphaned_running, "bot restarted")
-        stale_hunts = await asyncio.to_thread(hunt_live.fail_unfinished)
-        if stale_cmds or stale_hunts:
-            logger.warning(
-                "[startup] marked %d running bot command(s) and %d unfinished hunt_live "
-                "row(s) as error (bot restarted)",
-                stale_cmds,
-                stale_hunts,
-            )
+    # Pipeline page (pipeline control plan, PR 1): stale bot_commands /
+    # hunt_live rows from the previous process, then the scheduler facts.
+    await _startup_pipeline_cleanup()
     from hunter.schedules import bot_state
 
     await bot_state.publish(app)
