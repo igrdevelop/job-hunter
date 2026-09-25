@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 from datetime import datetime, timezone
 
 from telegram.ext import ContextTypes
@@ -36,7 +37,7 @@ from hunter.config import (
 from hunter.best_effort import best_effort
 from hunter.filters import apply_filters_with_stats, classify_job
 from hunter.gmail_report import build_gmail_report, JobOutcome
-from hunter import llm_outage
+from hunter import hunt_live, llm_outage
 from hunter.hunt_runs import record_hunt
 from hunter.models import Job
 from hunter.postings_seen import record_listings
@@ -73,8 +74,9 @@ async def run_hunt(
     *,
     notify_queued: bool = False,
     trigger: str | None = None,
+    command_id: str = "",
 ) -> None:
-    """Entry point for scheduled and manual hunts.
+    """Entry point for scheduled, manual and web hunts.
 
     Serialized through _hunt_lock. A hunt that fires while another is running
     WAITS for its turn instead of being skipped (waiters are FIFO) — a queued
@@ -94,7 +96,15 @@ async def run_hunt(
                       (hunter/hunt_runs.py). None derives it from
                       ``notify_queued`` — today only the manual /hunt command
                       sets that, so "manual" when it is set, "scheduled"
-                      otherwise; a caller that knows better passes it.
+                      otherwise; a caller that knows better passes it
+                      (the web control bar passes "web").
+        command_id:   the ``bot_commands`` row that asked for this hunt (web
+                      control bar), stored on its ``hunt_live`` row; "" else.
+
+    Live state: a ``hunt_live`` row (hunter/hunt_live.py) is written with
+    step ``waiting`` BEFORE the lock is acquired, advanced by
+    ``_run_hunt_impl`` at every step boundary, and stamped done/error in the
+    ``finally`` below — the one place every exit of the hunt passes through.
     """
     if _hunt_lock.locked():
         label = ", ".join(source_names) if source_names else "all"
@@ -108,11 +118,41 @@ async def run_hunt(
     if trigger is None:
         trigger = "manual" if notify_queued else "scheduled"
 
-    async with _hunt_lock:
-        await _run_hunt_impl(context, source_names=source_names, trigger=trigger)
+    live_names = [s.name for s in _select_sources(source_names)]
+    hunt_id = (
+        await _live(hunt_live.start, trigger=trigger, sources=live_names, command_id=command_id)
+        or ""
+    )
+    ok = False
+    try:
+        async with _hunt_lock:
+            await _run_hunt_impl(
+                context, source_names=source_names, trigger=trigger, hunt_id=hunt_id
+            )
+        ok = True
+    finally:
+        if hunt_id:
+            await _live(hunt_live.finish, hunt_id, ok=ok)
 
 
-async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
+def _select_sources(source_names: list[str] | None) -> list:
+    """The sources a hunt runs: all registered ones, or the named subset."""
+    return [s for s in ALL_SOURCES if s.name in source_names] if source_names else ALL_SOURCES
+
+
+async def _live(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run one hunter.hunt_live write off the event loop, best-effort.
+
+    The page's loader is telemetry: a broken table must never cost a hunt,
+    but repeated failures still alert (best_effort counts them). Returns the
+    call's result, or None when it failed.
+    """
+    with best_effort("hunt.live"):
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    return None
+
+
+async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE, *, command_id: str = "") -> None:
     """Scheduled retry of FAILed tracker rows (hunter/schedules/retry_failed.py).
 
     Runs the same _retry_failed loop that used to piggyback on every AUTO_APPLY
@@ -124,25 +164,41 @@ async def run_retry_failed(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if _hunt_lock.locked():
         logger.info("[Retry] Busy — queued behind the running hunt")
-    async with _hunt_lock:
-        # M2: skip silently while the outage pause is armed (alert was sent at
-        # arm time). FAIL rows keep their counts and wait for the next slot.
-        pause_left = await asyncio.to_thread(llm_outage.pause_remaining)
-        if pause_left:
-            logger.warning(
-                "[Retry] LLM outage pause active (%dm left) — retry pass skipped",
-                (pause_left + 59) // 60,
-            )
-            return
+    # Live state for the pipeline page: waiting -> act -> done|error, trigger
+    # "retry", no sources (hunter/hunt_live.py).
+    hunt_id = await _live(hunt_live.start, trigger="retry", sources=[], command_id=command_id) or ""
+    ok = False
+    try:
+        async with _hunt_lock:
+            if hunt_id:
+                await _live(hunt_live.set_step, hunt_id, "act")
+            await _run_retry_locked(context)
+        ok = True
+    finally:
+        if hunt_id:
+            await _live(hunt_live.finish, hunt_id, ok=ok)
 
-        auth_error = await asyncio.to_thread(_check_apply_ready)
-        if auth_error:
-            await send_text(
-                context,
-                f"🔐 <b>Retry skipped — apply not ready</b>\n<pre>{auth_error[:300]}</pre>",
-            )
-            return
-        await _retry_failed(context)
+
+async def _run_retry_locked(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The body of run_retry_failed, called with _hunt_lock held."""
+    # M2: skip silently while the outage pause is armed (alert was sent at
+    # arm time). FAIL rows keep their counts and wait for the next slot.
+    pause_left = await asyncio.to_thread(llm_outage.pause_remaining)
+    if pause_left:
+        logger.warning(
+            "[Retry] LLM outage pause active (%dm left) — retry pass skipped",
+            (pause_left + 59) // 60,
+        )
+        return
+
+    auth_error = await asyncio.to_thread(_check_apply_ready)
+    if auth_error:
+        await send_text(
+            context,
+            f"🔐 <b>Retry skipped — apply not ready</b>\n<pre>{auth_error[:300]}</pre>",
+        )
+        return
+    await _retry_failed(context)
 
 
 def _check_apply_ready() -> str | None:
@@ -179,6 +235,7 @@ async def _run_hunt_impl(
     context: ContextTypes.DEFAULT_TYPE,
     source_names: list[str] | None = None,
     trigger: str = "scheduled",
+    hunt_id: str = "",
 ) -> None:
     """
     Full hunt cycle:
@@ -196,16 +253,23 @@ async def _run_hunt_impl(
     mode = "CLI" if (APPLY_USE_CLI or not LLM_API_KEY) else f"API ({LLM_MODEL})"
 
     # Select sources for this run
-    active_sources = (
-        [s for s in ALL_SOURCES if s.name in source_names] if source_names else ALL_SOURCES
-    )
+    active_sources = _select_sources(source_names)
+
+    # hunt_live (pipeline page loader): one write per step boundary and two per
+    # source; a no-op when run_hunt could not create the row.
+    async def _step(step: str) -> None:
+        if hunt_id:
+            await _live(hunt_live.set_step, hunt_id, step)
 
     # ── Step 1: Fetch ────────────────────────────────────────────────────────
+    await _step("fetch")
     all_jobs: list[Job] = []
     fetch_stats: dict[str, int | str] = {}
     gmail_source = None  # captured for its per-email diagnostics (last_email_log)
     broken_sources: list[str] = []  # sources that just crossed the breakage threshold
-    for source in active_sources:
+    for sources_done, source in enumerate(active_sources, 1):
+        if hunt_id:
+            await _live(hunt_live.source_started, hunt_id, source.name)
         try:
             jobs = await asyncio.to_thread(source.search)
             all_jobs.extend(jobs)
@@ -216,6 +280,13 @@ async def _run_hunt_impl(
             fetch_stats[source.name] = f"ERR: {e}"
             logger.error(f"[Hunt] {source.name} error: {e}")
             _record_source_health(source.name, 0, ok=False, error=str(e), broken=broken_sources)
+        if hunt_id:
+            await _live(
+                hunt_live.source_done,
+                hunt_id,
+                sources_done=sources_done,
+                found_so_far=len(all_jobs),
+            )
 
         # Gmail: capture the source for its per-email diagnostics, and upload the
         # log snapshot to Drive right after the scan so the Drive copy reflects the
@@ -245,6 +316,7 @@ async def _run_hunt_impl(
         )
 
     # ── Step 2: Filter ───────────────────────────────────────────────────────
+    await _step("filter")
     # Reload filters.yaml each hunt so edits apply without a bot restart
     # (docs/FILTERS_YAML_PLAN.md M3 — mtime-keyed load_profile cache).
     from hunter.filter_profile import load_profile
@@ -286,6 +358,7 @@ async def _run_hunt_impl(
             )
 
     # ── Step 3: Dedup (URL + company+title) ──────────────────────────────────
+    await _step("dedup")
     # sent-company filter is intentionally disabled: a company may have multiple
     # open roles and we don't want to block all of them just because one was sent.
     try:
@@ -298,6 +371,10 @@ async def _run_hunt_impl(
             context,
             f"❌ <b>Failed to read tracker DB</b> (dedup before hunt).\n\n<pre>{hint}</pre>",
         )
+        # The hunt bailed: stamp error now (run_hunt's done-stamp is a no-op
+        # on a finished row).
+        if hunt_id:
+            await _live(hunt_live.finish, hunt_id, ok=False)
         return
 
     seen_urls_this_run: set[str] = set()
@@ -387,6 +464,7 @@ async def _run_hunt_impl(
                 ts=hunt_started_iso,
             )
 
+    await _step("act")
     try:
         await _report_and_act(
             context,

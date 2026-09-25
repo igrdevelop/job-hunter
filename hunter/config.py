@@ -299,6 +299,21 @@ HUNT_RUNS_ENABLED: bool = os.getenv("HUNT_RUNS_ENABLED", "true").lower() in (
 # prod, so 2000 is ~3 weeks — enough for a 7-day window with headroom.
 HUNT_RUNS_KEEP: int = _env_int("HUNT_RUNS_KEEP", 2000)
 
+# ── Pipeline page control: bot_commands + hunt_live (pipeline control plan) ──
+# The site's /pipeline page (owner only) inserts a row into the shared
+# `bot_commands` table — hunt all / hunt <source> / retry failed / check
+# expired — and a 3 s drain on the bot's own event loop runs it
+# (hunter/schedules/bot_commands.py). `false` stops the drain: rows stay
+# `pending` and nothing the web page asks for ever runs.
+BOT_COMMANDS_ENABLED: bool = os.getenv("BOT_COMMANDS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# hunt_live rows retained (one per hunt / retry pass; ring buffer pruned on
+# every new row). The page only ever reads the newest two.
+HUNT_LIVE_KEEP: int = _env_int("HUNT_LIVE_KEEP", 500)
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 TRACKER_PATH = PROJECT_DIR / "tracker.xlsx"
