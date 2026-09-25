@@ -1131,12 +1131,47 @@ hunter/
                             in the hunt or the apply pipeline reads it back (owner
                             decision); `tracker._source_for_write` reads it for the M3
                             `source` column, `tools/market_memory_m0.py` never writes it
+  hunt_live.py              The step a hunt is on RIGHT NOW (pipeline control plan, PR 1,
+                            2026-09-25 — the site's /pipeline loaders). ONE `hunt_live` row per
+                            hunt: `hunt_id`, `trigger` (scheduled/manual/web/retry), `sources`
+                            JSON, `started_at`, `step` (waiting → fetch → filter → dedup → act →
+                            done | error), `step_started_at`, `current_source`, `sources_done` /
+                            `sources_total` / `found_so_far`, `command_id` (the bot_commands row
+                            that asked for it), `finished_at`. Columns are a SHARED CONTRACT with
+                            job-hunter-api (docs/PIPELINE_SNAPSHOT_CONTRACT.md `hunt.live`) — do
+                            not rename. `run_hunt` writes the `waiting` row BEFORE taking
+                            `_hunt_lock`, `_run_hunt_impl` calls `set_step` at each step boundary
+                            and `source_started`/`source_done` around every `source.search()`,
+                            and `run_hunt`'s `finally` stamps done/error (`finish` is idempotent —
+                            the dedup-read bail-out stamps `error` itself first). `run_retry_failed`
+                            writes a `trigger="retry"` row (waiting → act → done). Every write goes
+                            through `main._live()` = `best_effort("hunt.live")` + `to_thread`;
+                            the module itself RAISES. `fail_unfinished()` runs at startup
+                            (`telegram_bot._startup_pipeline_cleanup`) so a crash mid-hunt never
+                            leaves the page (and the API's 409 rule) believing a hunt is live.
+                            Lazy DDL (source_health/hunt_runs pattern, NOT in `init_db()`), no
+                            `user_id`, pruned to `HUNT_LIVE_KEEP`. `tests/conftest.py` repoints
+                            `hunt_live.DB_PATH` (and `bot_commands.DB_PATH`) for EVERY test
+  bot_commands.py           The web control bar's command queue (pipeline control plan, PR 1,
+                            2026-09-25). Claim/finish/fail/reject primitives over the shared
+                            `bot_commands` table (DDL in hunter/db.py next to `profile_jobs`,
+                            mirrored by job-hunter-api's tracker-migrations.ts — the API inserts
+                            owner-only rows via `POST /pipeline/commands`, the bot is the sole
+                            consumer). Kinds `hunt {sources: [..]|null}` / `retry_failed {}` /
+                            `check_expired {}`; statuses pending → running → done | error, or
+                            rejected (reason in `error`). `claim_next()` IS the pending → running
+                            transition (one `UPDATE…RETURNING`, stamps `started_at`) — there is
+                            no separate "mark running" write. `fail_orphaned_running()` stamps
+                            rows the previous process left `running` as `error: bot restarted`
+                            at startup. Timestamps UTC `%Y-%m-%dT%H:%M:%S+00:00`. Raises on a
+                            broken DB (callers wrap in `best_effort("bot.commands")`)
   hunt_runs.py              Hunt funnel memory (docs/PIPELINE_VIZ_PLAN.md M1, 2026-09-22):
                             ONE row per hunt with the numbers `main._run_hunt_impl` already
                             computes for its Telegram report — `ts` (UTC ISO seconds, the
                             hunt's START), `trigger` (`scheduled`/`manual` — derived in
                             `run_hunt` from `notify_queued`, which only the `/hunt` command
-                            sets; `force` reserved), `sources` (JSON list of the names that
+                            sets; `web` passed explicitly by the site control bar's drain,
+                            2026-09-25; `force` reserved), `sources` (JSON list of the names that
                             ran), `found`, `filtered_out`, `filter_reasons` (JSON reason→count,
                             non-zero only), `dup_url`, `dup_ct`, `dup_cooldown`, `new`,
                             `capped` (dropped by `MAX_JOBS_PER_RUN`), `queued` (PENDING rows
@@ -1210,7 +1245,11 @@ hunter/
                             "postings.prune" in schedules/postings_prune.py — both
                             reports-only, both must never cost a hunt slot), and the hunt
                             funnel row ("hunt.record" in hunter/main.py Step 3b —
-                            hunter/hunt_runs.py, same reports-only posture). Existing try/except are NOT
+                            hunter/hunt_runs.py, same reports-only posture), and the
+                            pipeline-page control plane ("hunt.live" — every hunter/hunt_live.py
+                            write from the hunt/retry loop; "bot.commands" — the 3 s drain tick,
+                            each command's terminal stamp and the startup cleanup; "bot.state" —
+                            the 60 s scheduler-facts tick). Existing try/except are NOT
                             removed — the wrapper goes around them; a block that already
                             returns None/False on error re-raises from its except clause so the
                             failure still reaches best_effort() for counting
@@ -1451,7 +1490,35 @@ hunter/
                             `(base + i*offset) % 1440` grid
     hunt.py                 scheduled_hunt
     retry_failed.py         scheduled_retry_failed (RETRY_FAILED_TIMES, default 02:45/07:45)
-    check_expired.py        scheduled_check_expired
+    check_expired.py        scheduled_check_expired; `run_expired_check_and_report()` is
+                            the shared body (the web `check_expired` command calls it with
+                            `report_when_nothing_expired=True`)
+    bot_commands.py         scheduled_bot_commands_drain (every 3 s, ON the PTB event loop —
+                            not a thread: the work shares the in-process `_hunt_lock`). Pipeline
+                            control plan, PR 1. Per claimed row: owner re-check (`user_id` ==
+                            `config.DEFAULT_USER_ID`, read at call time; empty = single-user
+                            mode, accept), kind whitelist, `hunt` sources validated with
+                            `commands/hunt.py::parse_hunt_source_args` against `ALL_SOURCES`,
+                            then the BUSY rule — rejected, never queued (owner decision
+                            2026-09-24): `hunt`/`retry_failed` are busy while `_hunt_lock` is
+                            held OR a web-launched hunt/retry task has not taken it yet (two
+                            rows claimed in one tick must not both pass — mutation-verified);
+                            `check_expired` has its own in-process guard; `retry_failed` is
+                            also rejected when `AUTO_APPLY` is off (it would be a no-op).
+                            Accepted work runs via `context.application.create_task` and stamps
+                            done/error when it returns/raises/is cancelled; hunts run with
+                            `trigger="web"` + `command_id` (lands on `hunt_live`/`hunt_runs`).
+                            Telegram still gets the normal report plus a one-line "🌐 Web: …"
+                            notice. Gated by `BOT_COMMANDS_ENABLED` (checked in the callback)
+    bot_state.py            scheduled_bot_state (every 60 s, first after 1 s, plus once in
+                            `_post_init`) — writes the `config` KV keys `bot_state.next_hunt`
+                            (`{at, source, sources_total}`), `bot_state.next_retry` (`{at}`),
+                            `bot_state.sources` (ALL_SOURCES names) and `bot_state.updated_at`
+                            (written LAST; the page calls the bot offline when it is > 5 min
+                            old), JSON values, through `llm_profiles._db_set`. Next times come
+                            from the JobQueue's OWN `Job.next_t` of the `hunt_*` /
+                            `retry_failed_*` jobs — never a re-derivation of the grid; PTB
+                            raises AttributeError before the queue starts, read as null
     tracker_backup.py       scheduled_tracker_backup
     gdrive.py               scheduled_gdrive_upload_missing (every GDRIVE_UPLOAD_MISSING_INTERVAL_MIN)
     gsheets.py              scheduled_gsheets_resync + scheduled_gsheets_pull
@@ -2033,7 +2100,7 @@ tools/pipeline_snapshot.py  Read-only M0 measurement (docs/PIPELINE_VIZ_PLAN.md)
                             table (pre-M1 checkout, fresh dev DB — the dev
                             `tracker.db` has NO `applications` table at all, only the
                             lazily-created ones) reports UNMEASURED, never 0. `--json`
-                            is the shape the M2 API contract will be cut from. Each in-progress card's `run` also carries `refine_target` / `refine_max_rounds` (2026-09-24), read from THAT run's `refine`/`start` event payload — the value the apply subprocess actually resolved through `gen_profile`, so the page never hardcodes 95 / 5. Every event also carries `details` (2026-09-24): the stable payload fields parsed from the FULL `pipeline_events.payload` column — the 80-char `payload` string cuts a refine round carrying `reason` into invalid JSON, so clients must never parse it.
+                            is the shape the M2 API contract will be cut from. Each in-progress card's `run` also carries `refine_target` / `refine_max_rounds` (2026-09-24), read from THAT run's `refine`/`start` event payload — the value the apply subprocess actually resolved through `gen_profile`, so the page never hardcodes 95 / 5. Every event also carries `details` (2026-09-24): the stable payload fields parsed from the FULL `pipeline_events.payload` column — the 80-char `payload` string cuts a refine round carrying `reason` into invalid JSON, so clients must never parse it. **Control plane (2026-09-25, pipeline control plan PR 1):** `hunt.live` = `{active, last}` from `hunt_live` (the newest row when unfinished; the newest finished row), `hunt.next` = `{hunt, retry, updated_at}` from the `bot_state.*` KV, top-level `control` = `{sources, commands}` (the `bot_state.sources` KV + the 10 newest `bot_commands`, payload parsed); a missing table/key is `null`, never 0.
                             **Reads the M1 data since 2026-09-22** (PRs #288–#291; still
                             read-only, still `mode=ro`): `hunt.hunt_runs` sums the
                             `hunt_runs` rows in the window over the tool's own connection
@@ -2575,6 +2642,8 @@ Applications/               Generated documents (gitignored)
 | `POSTINGS_SEEN_ENABLED` | `true` | Market memory (docs/MARKET_MEMORY_PLAN.md M1): hunt Step 2.5 upserts every listing the sweep saw into `postings_seen` (listing metadata only — never posting text). `false` skips the write and the nightly prune while leaving the table in place — rollback is the flag, not a migration. Reports-only: nothing reads the table back into the hunt or the apply pipeline. |
 | `POSTINGS_TTL_DAYS` | `180` | Nightly prune (00:40, `hunter/schedules/postings_prune.py`) deletes `postings_seen` rows whose `last_seen` is older than this. Read via `config._env_int` — a non-integer value logs a warning and falls back to the default (same posture as `SCHEDULE_BLACKOUT`: a typo in `.env` must never stop the bot). The plan's M0 volume rule may lower it to 90 once prod numbers exist. |
 | `HUNT_RUNS_ENABLED` | `true` | Hunt funnel memory (docs/PIPELINE_VIZ_PLAN.md M1): `main._run_hunt_impl` writes ONE `hunt_runs` row per hunt (`hunter/hunt_runs.py`) with the numbers its Telegram report already shows — found / filtered_out + reasons / dup_url / dup_ct / dup_cooldown / new / capped / queued / applied_inline / duration_ms. Counts only, never a job, URL or title. Reports-only: nothing reads it back into the hunt or the apply pipeline. `false` skips the write and leaves the table in place — rollback is the flag, not a migration. |
+| `BOT_COMMANDS_ENABLED` | `true` | Pipeline control plan, PR 1: the 3 s drain of the shared `bot_commands` table (hunter/schedules/bot_commands.py) through which the site's /pipeline page (owner only) starts a hunt (all sources / one source), a retry of FAILed rows or an expired check. `false` stops the drain — rows stay `pending`, nothing the page asks for runs. Checked inside the callback, so no re-registration is needed. |
+| `HUNT_LIVE_KEEP` | `500` | Rows the `hunt_live` ring buffer retains (one per hunt / retry pass, pruned when a row is started). The page reads only the newest two. Read via `config._env_int`. |
 | `HUNT_RUNS_KEEP` | `2000` | Rows the `hunt_runs` ring buffer retains (pruned inside every write, like `SOURCE_HEALTH_KEEP`). ~100 hunt slots/day in prod, so 2000 is ~3 weeks — enough for a 7-day window with headroom. Read via `config._env_int` (a non-integer value warns and keeps the default). |
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
@@ -3704,6 +3773,7 @@ These items from `PROJECT_REVIEW_AND_REFACTOR_PLAN.md` are done:
 
 | Date | Agent | Work |
 |------|-------|------|
+| 2026-09-25 | opus | **Pipeline control plane — PR 1, bot side (branch `feat/pipeline-control`; plan: live loaders, next-run time, action buttons on the site's /pipeline page).** Three things the page needed that the bot never persisted: (1) which step a hunt is on — new lazy `hunt_live` table (`hunter/hunt_live.py`), one row per hunt, `waiting` written by `run_hunt` before `_hunt_lock`, advanced at every step boundary and per source in `_run_hunt_impl`, done/error in `run_hunt`'s `finally`; retry passes write `trigger="retry"` rows; every write `best_effort("hunt.live")`. (2) When the next run fires — `hunter/schedules/bot_state.py` publishes the JobQueue's own `next_t` for the `hunt_*`/`retry_failed_*` jobs, the source list and a heartbeat into the `config` KV every 60 s and at startup. (3) A way to start work from the page — shared `bot_commands` table (DDL in `hunter/db.py`, primitives in `hunter/bot_commands.py`) drained every 3 s ON the event loop by `hunter/schedules/bot_commands.py`: owner re-check, kind whitelist (hunt / retry_failed / check_expired), source names via the /hunt parser, and busy → rejected (not queued), with the in-flight-task half of the busy rule closing a same-tick double launch. Startup (`telegram_bot._startup_pipeline_cleanup`) stamps leftover `running` commands and unfinished `hunt_live` rows as error, so a crash never leaves the page/API believing a hunt is live. `hunt_runs.TRIGGERS` gains `web`; `run_retry_failed`'s body moved verbatim into `_run_retry_locked`; the expired check's report became `run_expired_check_and_report()` shared with the web command. `tools/pipeline_snapshot.py` serves `hunt.live` / `hunt.next` / `control` and docs/PIPELINE_SNAPSHOT_CONTRACT.md gained them with fixture rows + expected JSON (verified: the tool over the doc's SQL equals the doc's JSON for the three blocks). Tests: test_bot_commands.py (primitives, drain, owner, busy, same-tick, startup cleanup, registration), test_hunt_live.py (module + real `run_hunt` step sequence, waiting row, error paths, retry row), test_bot_state.py, snapshot tests. Mutation-verified: busy rule (`_hunt_busy` → False fails 4 tests; lock-only fails the same-tick test), owner check (disabled → the non-owner test fails with run_hunt awaited), startup hunt_live cleanup. Not pushed, no PR. |
 | 2026-09-24 | opus | **Container `TZ=Europe/Warsaw` (docker-compose.yml).** Found while writing docs/PIPELINE_SNAPSHOT_CONTRACT.md (#294): the bot container runs in UTC (`TZ` unset, verified on prod), so `applications.date` — written with `date.today()` — was the UTC day while the schedule, the blackout, `/schedule` and the planned pipeline page all count Warsaw days; a row written 00:00–02:00 Warsaw landed on the previous day. Audit before the change: 23 naive local-time call sites (`date.today()` in tracker writers, `pipeline/folders.py`, `funnel.py`, `daily_summary.py`, `sent_parse.py`; naive `datetime.now()` in `main.py`'s report stamp, `dual_apply.py`/`tracker_backup.py` filenames, `generate_docs.py`'s year) — all mean "today where the owner is", none is compared against a UTC string; every stored UTC timestamp is written with an explicit tz, and `apply_failures.jsonl` uses `timezone.utc`. The prod image already ships `/usr/share/zoneinfo/Europe/Warsaw` (checked; `TZ=Europe/Warsaw date` → CEST). The deploy workflow curls `docker-compose.yml` from master, so the change ships with the next deploy. No backfill of older `date` values. Contract caveat marked resolved. |
 | 2026-09-22 | fable | **`docs/PIPELINE_SNAPSHOT_CONTRACT.md` — docs/PIPELINE_VIZ_PLAN.md M2, the bot-repo half (branch `docs/pipeline-snapshot-contract`, cut from `origin/master` at 0cdc330, PRs #292 + #293 in; docs-only).** job-hunter-api ports the snapshot queries to TypeScript against this document and the site page (M3) consumes the API, so the contract had to be DERIVED from the tool, not designed: a throwaway script rebuilt the exact `tests/test_pipeline_snapshot_tool.py::fixture_db` DB and ran `tools/pipeline_snapshot.py --json` over it; every key in that output is in the document and every key in the document is in that output (checked by a second throwaway script over the key paths). Per key: type, the table + WHERE clause quoted from the tool, the window mode — three of them, decided by the writer: text `>= start_utc` for the `+00:00` `isoformat` columns (`hunt_runs.ts`, `source_runs.ts`, `postings_seen.first_seen`/`last_seen`, `generation_runs.started_at`, `pipeline_events.ts`), `date IN (Warsaw calendar days)` for `applications.date`, parsed datetimes for `outcome_at`/`sent`/the queue's `%Y-%m-%dT%H:%M:%SZ` `queued_at`/`claimed_at` — and user scoping (`applications` always `user_id = ?`; `source_runs`/`postings_seen`/`hunt_runs` global by design; `generation_runs` scoped `(user_id = ? OR user_id = '')` in `apply.runs` ONLY — the in-progress card matches by `url_norm`, and `events` + every `coverage` rule read the metrics tables unscoped, which the doc says out loud rather than papering over). Pinned verbatim: `_bucket_status`, the `queue_mode_observed` three-signal rule (#293), `_infer_stage` with its refine-round branch, `stage_started_min_ago`'s last-`start`-must-match rule, the HEAD-row `oldest_wait_min` rule, the `cost_usd > 0` priced rule, the five coverage rules + 3b with thresholds/verdict strings, and the open-ended `generation_runs.outcome` value list (incl. the `orphan:` stamps). **Contract test specified, not created:** `tests/fixtures/pipeline_snapshot/{fixture.sql, expected.json}` — the SQL is the test's inserts with the clock frozen at `2026-09-22T12:00:00+00:00` (Warsaw 14:00), the JSON was GENERATED from that DB under a frozen `datetime` and reproduces every assertion in the test file (hunts 2 / found 230 / ready 3 / mean verdict 92.3 / rule verdicts FAIL-FAIL-FAIL-PASS-PASS-FAIL); a doc-vs-generated equality check passed before commit. Volatile fields (`generated_at`, `start_utc`, every `*_min_ago`/`wait_min`/`in_min`, the `at` display strings, `next_slot`, local-config keys) are listed as normalised-before-compare; the bot-side test that pins the pair needs a `now=` seam in `build_snapshot` (`Window` already takes one, `_local_hhmm`/`_minutes_ago` do not) and is the next PR — a tool change, so not in this docs-only one. **Not in the contract:** `next_slot` (scheduler roster + schedule env), `events[].payload` (free-form; only `score`/`chars`/`error`/the refine `{round, kind, score, best, reason}` shapes are stable, and only from the full column — the footer truncates to 80 chars), `coverage` (bot diagnostic, an "about this data" tab at most), and everything read from `.env` (`queue_enabled_local_config`, `failures.next_retry`, `5_leaked_open_runs.timeout_sec`); the thresholds contract keys DO need are pinned as constants (`stale` > 60 min, `fail_count >= 3`). Two things found while pinning, both written down instead of guessed: `applications.date` is `date.today()` of the WRITING process and `docker-compose.yml`/`Dockerfile` set no `TZ`, so whether prod's local day is Warsaw or UTC is unverified (a 1-day-window edge between Warsaw midnight and 02:00 CEST if it is UTC — the 7-day window is unaffected; verify on prod before the page ships its "today" toggle); and the events footer's `company` subquery (`LIMIT 1`, no `ORDER BY`, no `user_id`) returns an arbitrary user's row when several share a `url_norm` — harmless with one prod user, flagged for the multi-user day. Also: one paragraph in PIPELINE_VIZ_PLAN.md's M2 section pointing at the contract, a CLAUDE.md docs entry next to the plan's. Gates: ruff clean, `test_pipeline_snapshot_tool.py` + `test_handoff_readiness.py` green. Not pushed, no PR. |
 | 2026-09-22 | fable | **`tools/pipeline_snapshot.py` reads the M1 instrumentation (docs/PIPELINE_VIZ_PLAN.md; branch `feat/pipeline-snapshot-m1-readers`, cut from `origin/master` at 7f4e88f, the merge of PRs #288–#291).** The M0 tool was written to MEASURE whether `start`/refine events, `hunt_runs`, `queued_at` and orphan stamping were needed; all four landed the same day, and the tool still inferred everything. Now it reads them, still read-only (`mode=ro`), still never importing a writer: `hunt.hunt_runs` sums the window's `hunt_runs` rows over the tool's own connection (only `hunt_runs.COUNT_COLUMNS` is imported, so the summed set can't drift from `sum_window`) — hunts, every count column, `filter_reasons` merged across hunts, `by_trigger`, and the last hunt's ts/trigger/sources — and becomes the PRIMARY funnel line of the text report ("found 230 → filtered 190 → dup 33 url / 2 company+title / 1 cooldown → new 4 → capped 1 → queued 3"), with `source_runs`/`postings_seen` demoted to secondary. `apply.pending.oldest_wait_min` + `wait_min` per head entry from `queued_at`, HEAD-row rule copied from `tracker.oldest_pending_wait_min` (queue order = rowid; a NULL at the head reports None rather than skipping to a younger stamped row) — that function itself is not called, it opens the bot's DB path under the process's own user scope. The in-progress card gains `stage_started_min_ago` (minutes since the current stage's `start` event, None when the stage was inferred) and `refine_progress` (round/kind/score/best/outcome from the latest refine-round event payload); `_infer_stage` now reads a refine `accepted`/`rejected`/`discarded` as "still in refine" — the plain next-stage guess would have said "delivery" for the whole loop — and keeps the pre-M1 inference branch for runs without those events. Coverage: `3b_hunt_runs_present` (PASS with the hunts-in-window count, UNMEASURED when the table is missing — always present in the JSON so the M2 contract has a stable key set; the derived-gap rule 3 stays for the pre-M1 comparison) and `orphan_stamped` on rule 5 (informational: `outcome LIKE 'orphan:%'` in the window — a stamped run is CLOSED, which is what the rule wants). Tests: the fixture now mixes shapes on purpose — finished runs stay pre-M1 (end-of-stage events only, so rule 2's `start_events_seen == 0`/FAIL assertions are untouched), the in-progress run is M1-shaped (`start` + rejected/accepted rounds), both PENDING rows carry `queued_at`, an `orphan:cli_timeout` run under a minute (out of rule 2's shares, no applications row so rule 1 is unchanged), three `hunt_runs` rows one of which is 3 days old to prove the window cut. Two assertions changed BECAUSE of the fixture: the card's last event and the events footer's newest row are now the refine round, not `verdict ok`. Three new tests: the hunt_runs block, a NULL-head `queued_at` (oldest None, second entry still timed), and a pre-M1 card (refine events deleted → inferred basis, M1 fields None); `_infer_stage` gains the three round outcomes. 13 tests in the file, fast suite 3819 pass, ruff clean, mypy ratchet 224 → 205 no regression. Not pushed, no PR — the `--json` key additions are what the M2 contract is cut from. |

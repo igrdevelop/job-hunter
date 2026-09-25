@@ -161,7 +161,7 @@ Top level:
 | `hunt_runs.hunts` | int | Row count in the window. |
 | `hunt_runs.found` … `duration_ms` | int ×10 | `SUM` of each `hunter.hunt_runs.COUNT_COLUMNS` entry, in DDL order: `found`, `filtered_out`, `dup_url`, `dup_ct`, `dup_cooldown`, `new`, `capped`, `queued`, `applied_inline`, `duration_ms` (NULL → 0). Same arithmetic as `hunt_runs.sum_window`. |
 | `hunt_runs.last` | object \| null | The newest row (last by `id`): `{ts: str (raw), at: str (display), trigger: str, sources: list[str] (JSON column parsed; non-list/garbage → []), found: int, new: int}`. |
-| `hunt_runs.by_trigger` | map | `trigger → count`; `''`/NULL trigger → `"?"`. Values today: `scheduled` \| `manual` (`force` reserved, never written). |
+| `hunt_runs.by_trigger` | map | `trigger → count`; `''`/NULL trigger → `"?"`. Values today: `scheduled` \| `manual` \| `web` (the site control bar, since 2026-09-25; `force` reserved, never written). |
 | `hunt_runs.top_filter_reasons` | pairs | `filter_reasons` JSON (`reason → count`) merged across the window's rows, `most_common(8)`; non-dict JSON ignored, non-int values skipped, negatives clamped to 0. |
 | `hunt_runs_unmeasured` | str \| null | `"hunt_runs table missing"` / `"hunt_runs table lacks columns: …"`; `null` when `hunt_runs` is populated. |
 | `source_runs` | object \| null | `SELECT source, ts, yield, ok, error FROM source_runs WHERE ts >= ? ORDER BY id`. `null` when the table is missing. |
