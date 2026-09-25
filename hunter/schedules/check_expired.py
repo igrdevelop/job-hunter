@@ -16,6 +16,19 @@ from hunter.config import TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
+# One expired check at a time per process: the nightly job and the web
+# command both land here, and two concurrent run_check passes would fetch
+# every unsent URL twice and send two reports.
+_running = False
+
+
+class ExpiredCheckBusy(RuntimeError):
+    """Another expired check is already running in this process."""
+
+
+def is_running() -> bool:
+    return _running
+
 
 async def run_expired_check_and_report(
     context: ContextTypes.DEFAULT_TYPE,
@@ -25,9 +38,28 @@ async def run_expired_check_and_report(
 ) -> dict[str, Any]:
     """Run hunter.expired_marker.run_check and send the Telegram summary.
 
-    Raises whatever run_check raises — the caller decides how to report a
-    failure. Returns run_check's result dict.
+    Raises ExpiredCheckBusy when another check is already running, and
+    whatever run_check raises — the caller decides how to report a failure.
+    Returns run_check's result dict.
     """
+    global _running
+    if _running:
+        raise ExpiredCheckBusy("check_expired already running")
+    _running = True
+    try:
+        return await _run_and_report(
+            context, header=header, report_when_nothing_expired=report_when_nothing_expired
+        )
+    finally:
+        _running = False
+
+
+async def _run_and_report(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    header: str,
+    report_when_nothing_expired: bool,
+) -> dict[str, Any]:
     from hunter.expired_marker import run_check
 
     result = await run_check()
@@ -64,6 +96,8 @@ async def scheduled_check_expired(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         await run_expired_check_and_report(context)
+    except ExpiredCheckBusy:
+        logger.info("[scheduled_check_expired] Skipped — a web-triggered check is running")
     except Exception as e:
         logger.exception("[scheduled_check_expired] run_check failed: %s", e)
         await context.bot.send_message(

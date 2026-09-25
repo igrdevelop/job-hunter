@@ -434,22 +434,26 @@ def _live_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def hunt_live(conn: sqlite3.Connection) -> dict[str, Any] | None:
     """`{active, last}` from `hunt_live`, or None when the table (or one of
-    its columns) is missing. `active` = the newest row (by `started_at`,
-    then rowid) when it has not finished; `last` = the newest finished row.
+    its columns) is missing. `active` = the newest unfinished row past
+    `waiting` (the hunt holding the lock), else the newest unfinished row
+    (a hunt still waiting for it), else None; `last` = the newest finished row.
     Global — no user scoping, like `hunt_runs`."""
     if not _table_exists(conn, "hunt_live"):
         return None
     if set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live"):
         return None
     cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
-    newest = conn.execute(
-        f"SELECT {cols} FROM hunt_live ORDER BY started_at DESC, rowid DESC LIMIT 1"  # noqa: S608 — constant column list
+    # A hunt queued behind the lock writes its own `waiting` row, so the
+    # newest unfinished row is not necessarily the one doing work: prefer the
+    # unfinished row past `waiting` (the lock holder), then any unfinished one.
+    active = conn.execute(
+        f"SELECT {cols} FROM hunt_live WHERE finished_at IS NULL "  # noqa: S608 — constant column list
+        "ORDER BY (step = 'waiting'), started_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     last = conn.execute(
         f"SELECT {cols} FROM hunt_live WHERE finished_at IS NOT NULL "  # noqa: S608 — constant column list
         "ORDER BY started_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
-    active = newest if newest is not None and newest["finished_at"] is None else None
     return {"active": _live_row(active), "last": _live_row(last)}
 
 

@@ -74,7 +74,11 @@ def _hunt_busy() -> bool:
 
 
 def _expired_busy() -> bool:
-    return any(not t.done() for t in _expired_tasks)
+    """True while a web check is in flight or ANY expired check (incl. the
+    nightly job) is running in this process."""
+    from hunter.schedules.check_expired import is_running
+
+    return is_running() or any(not t.done() for t in _expired_tasks)
 
 
 def _parse_payload(raw: Any) -> dict | None:

@@ -424,6 +424,24 @@ def test_hunt_live_idle_when_newest_row_finished(fixture_db: Path) -> None:
     assert live["last"]["hunt_id"] == "h_live"
 
 
+def test_hunt_live_active_is_the_lock_holder_not_a_queued_waiter(fixture_db: Path) -> None:
+    # A second hunt queued behind the running one writes a NEWER `waiting`
+    # row; the page must keep showing the hunt that is actually fetching.
+    with sqlite3.connect(fixture_db) as c:
+        c.execute(
+            'INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, '
+            "step_started_at, sources_total) VALUES ('h_wait', 'scheduled', '[\"justjoin\"]', "
+            "'2099-01-01T00:00:00+00:00', 'waiting', '2099-01-01T00:00:00+00:00', 1)"
+        )
+    live = _snap(fixture_db)["hunt"]["live"]
+    assert (live["active"]["hunt_id"], live["active"]["step"]) == ("h_live", "fetch")
+    # Once the running one finishes, the waiter is what is left.
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("UPDATE hunt_live SET step='done', finished_at=started_at WHERE hunt_id='h_live'")
+    live = _snap(fixture_db)["hunt"]["live"]
+    assert (live["active"]["hunt_id"], live["active"]["step"]) == ("h_wait", "waiting")
+
+
 def test_hunt_next_from_the_bot_state_kv(fixture_db: Path) -> None:
     nx = _snap(fixture_db)["hunt"]["next"]
     assert set(nx) == {"hunt", "retry", "updated_at"}

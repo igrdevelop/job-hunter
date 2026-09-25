@@ -402,6 +402,36 @@ def test_check_expired_runs_reports_and_has_its_own_guard() -> None:
     assert (_row("e2")["status"], _row("e2")["error"]) == ("rejected", drain.REASON_EXPIRED_BUSY)
 
 
+def test_check_expired_rejected_while_the_nightly_check_runs(monkeypatch) -> None:
+    from hunter.schedules import check_expired as ce
+
+    _insert("e1", kind="check_expired")
+    monkeypatch.setattr(ce, "_running", True)
+    asyncio.run(drain.drain_once(_context()))
+    assert (_row("e1")["status"], _row("e1")["error"]) == ("rejected", drain.REASON_EXPIRED_BUSY)
+
+
+def test_nightly_check_skips_while_another_check_runs(monkeypatch) -> None:
+    from hunter.schedules import check_expired as ce
+
+    run_check = AsyncMock()
+    monkeypatch.setattr("hunter.expired_marker.run_check", run_check)
+    monkeypatch.setattr(ce, "_running", True)
+    ctx = _context()
+    asyncio.run(ce.scheduled_check_expired(ctx))
+    run_check.assert_not_awaited()
+    assert ce.is_running() is True  # the other check still owns the guard
+
+
+def test_expired_guard_released_after_a_failed_check(monkeypatch) -> None:
+    from hunter.schedules import check_expired as ce
+
+    monkeypatch.setattr("hunter.expired_marker.run_check", AsyncMock(side_effect=RuntimeError("x")))
+    with pytest.raises(RuntimeError):
+        asyncio.run(ce.run_expired_check_and_report(_context()))
+    assert ce.is_running() is False
+
+
 def test_check_expired_does_not_block_a_hunt() -> None:
     _insert("e1", kind="check_expired", created_at="2026-09-25T10:00:01+00:00")
     _insert("h1", payload={"sources": None}, created_at="2026-09-25T10:00:02+00:00")
