@@ -253,7 +253,14 @@ async def drain_once(context: ContextTypes.DEFAULT_TYPE) -> int:
         if row is None:
             return n
         n += 1
-        await dispatch(context, row)
+        try:
+            await dispatch(context, row)
+        except Exception as e:
+            # The row is already claimed (`running`): terminalize it, or the
+            # API keeps answering 409 until the next bot restart. Re-raise so
+            # the tick's best_effort still counts the failure.
+            await _db(bot_commands.fail, str(row.get("id") or ""), f"dispatch failed: {e}")
+            raise
 
 
 async def scheduled_bot_commands_drain(context: ContextTypes.DEFAULT_TYPE) -> None:

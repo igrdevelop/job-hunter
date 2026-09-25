@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check all unsent tracker rows for expired job offers."""
     from hunter.expired_marker import run_check
+    from hunter.schedules.check_expired import ExpiredCheckBusy, exclusive
 
     status_msg = await update.message.reply_text(
         "🔍 Checking tracker for expired vacancies…\n"
@@ -28,7 +29,13 @@ async def cmd_check_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             pass
 
     try:
-        result = await run_check(progress_cb=progress_cb)
+        # Same per-process guard as the nightly job and the web command, so
+        # two checks never fetch the same unsent URLs at once.
+        with exclusive():
+            result = await run_check(progress_cb=progress_cb)
+    except ExpiredCheckBusy:
+        await status_msg.edit_text("⏳ An expired check is already running — try again later.")
+        return
     except Exception as e:
         logger.exception("[check_expired] Failed: %s", e)
         await status_msg.edit_text(

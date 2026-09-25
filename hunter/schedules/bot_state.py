@@ -99,11 +99,22 @@ def collect_state(job_queue: Any, source_names: list[str]) -> dict[str, str]:
 
 
 def write_state(values: dict[str, str]) -> None:
-    """Write the KV rows in order (updated_at last)."""
-    from hunter.llm_profiles import _db_set
+    """Write the KV rows in order (updated_at last). RAISES on a DB error —
+    unlike hunter.llm_profiles._db_set, which swallows it — so
+    best_effort("bot.state") counts the failure; with updated_at written last,
+    a failed pass never looks fresh to the page."""
+    import sqlite3
 
-    for key, value in values.items():
-        _db_set(key, value)
+    from hunter.llm_profiles import _ensure_config_table, _get_db_path
+
+    with sqlite3.connect(_get_db_path()) as conn:
+        _ensure_config_table(conn)
+        for key, value in values.items():
+            conn.execute(
+                "INSERT INTO config (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
 
 
 async def publish(app_or_context: Any) -> None:

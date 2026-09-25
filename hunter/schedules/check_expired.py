@@ -6,7 +6,9 @@ same Telegram report — the web command just reports even when nothing
 expired, since a human pressed the button and is waiting for an answer.
 """
 
+import contextlib
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 from telegram.ext import ContextTypes
@@ -30,6 +32,21 @@ def is_running() -> bool:
     return _running
 
 
+@contextlib.contextmanager
+def exclusive() -> Iterator[None]:
+    """Hold the per-process expired-check guard for the block, or raise
+    ExpiredCheckBusy. Every entry point takes it: the nightly job, the web
+    command and the /check_expired Telegram command."""
+    global _running
+    if _running:
+        raise ExpiredCheckBusy("check_expired already running")
+    _running = True
+    try:
+        yield
+    finally:
+        _running = False
+
+
 async def run_expired_check_and_report(
     context: ContextTypes.DEFAULT_TYPE,
     *,
@@ -42,16 +59,10 @@ async def run_expired_check_and_report(
     whatever run_check raises — the caller decides how to report a failure.
     Returns run_check's result dict.
     """
-    global _running
-    if _running:
-        raise ExpiredCheckBusy("check_expired already running")
-    _running = True
-    try:
+    with exclusive():
         return await _run_and_report(
             context, header=header, report_when_nothing_expired=report_when_nothing_expired
         )
-    finally:
-        _running = False
 
 
 async def _run_and_report(

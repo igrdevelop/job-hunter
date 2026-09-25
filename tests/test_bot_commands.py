@@ -530,3 +530,31 @@ def test_startup_cleanup_survives_a_broken_db(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(bot_commands, "DB_PATH", tmp_path / "missing" / "a.db")
     monkeypatch.setattr(hunt_live, "DB_PATH", tmp_path / "missing" / "b.db")
     assert asyncio.run(_startup_pipeline_cleanup()) == (0, 0)  # must not raise
+
+
+def test_a_dispatch_crash_terminalizes_the_claimed_row(monkeypatch) -> None:
+    # The row is claimed (running) before dispatch; a crash there must not
+    # leave it running — the API would answer 409 until the next restart.
+    _insert("h1", payload={"sources": None})
+    monkeypatch.setattr(
+        drain, "_launch", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    with pytest.raises(RuntimeError):
+        asyncio.run(drain.drain_once(_context()))
+    row = _row("h1")
+    assert row["status"] == "error"
+    assert "boom" in row["error"]
+
+
+def test_telegram_check_expired_respects_the_shared_guard(monkeypatch) -> None:
+    from hunter.commands.check_expired import cmd_check_expired
+    from hunter.schedules import check_expired as ce
+
+    run_check = AsyncMock()
+    monkeypatch.setattr("hunter.expired_marker.run_check", run_check)
+    monkeypatch.setattr(ce, "_running", True)
+    status = SimpleNamespace(edit_text=AsyncMock())
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock(return_value=status)))
+    asyncio.run(cmd_check_expired(update, _context()))
+    run_check.assert_not_awaited()
+    assert "already running" in status.edit_text.await_args.args[0]

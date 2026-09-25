@@ -125,3 +125,10 @@ def test_publish_swallows_a_collect_failure(kv_db) -> None:
             raise RuntimeError("scheduler gone")
 
     asyncio.run(bot_state.publish(SimpleNamespace(job_queue=_Broken())))  # must not raise
+
+
+def test_write_state_raises_on_a_broken_db(tmp_path, monkeypatch) -> None:
+    # A swallowed write would count as a best_effort success and never alert.
+    monkeypatch.setattr("hunter.config.TRACKER_DB_PATH", tmp_path / "missing_dir" / "t.db")
+    with pytest.raises(sqlite3.Error):
+        bot_state.write_state({bot_state.KEY_UPDATED_AT: json.dumps("x")})
