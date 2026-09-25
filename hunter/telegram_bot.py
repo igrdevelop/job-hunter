@@ -220,6 +220,30 @@ async def _post_init(app: Application) -> None:
         register_worker_task(0, task)
         logger.info("[apply_worker] background task started (APPLY_QUEUE_ENABLED=true)")
 
+    # Pipeline page (pipeline control plan, PR 1): nothing can be running in
+    # a process that has just started — a `running` bot_commands row or an
+    # unfinished hunt_live row belongs to the previous process. Stamp them
+    # error so the page's buttons are not disabled forever. Then publish the
+    # scheduler facts once (the 60 s tick refreshes them; next run times are
+    # only known once the JobQueue has started, so they may be null here for
+    # the first second).
+    from hunter import bot_commands, hunt_live
+    from hunter.best_effort import best_effort
+
+    with best_effort("bot.commands"):
+        stale_cmds = await asyncio.to_thread(bot_commands.fail_orphaned_running, "bot restarted")
+        stale_hunts = await asyncio.to_thread(hunt_live.fail_unfinished)
+        if stale_cmds or stale_hunts:
+            logger.warning(
+                "[startup] marked %d running bot command(s) and %d unfinished hunt_live "
+                "row(s) as error (bot restarted)",
+                stale_cmds,
+                stale_hunts,
+            )
+    from hunter.schedules import bot_state
+
+    await bot_state.publish(app)
+
     # Post-start CLI canary (docs/APPLY_FAILURE_QUEUES_PLAN.md M1): one
     # trivial `claude -p` through the apply pipeline's own argv builder, in the
     # background, alerting only on failure. No-op without a CLI login or when
