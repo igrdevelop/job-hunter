@@ -65,6 +65,22 @@ def _isolated_hunt_runs_db(tmp_path, monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_hunt_live_db(tmp_path, monkeypatch) -> None:
+    """Point ``hunter.hunt_live.DB_PATH`` (and ``hunter.bot_commands.DB_PATH``)
+    at per-test files for EVERY test.
+
+    Every real ``run_hunt`` / ``run_retry_failed`` writes ``hunt_live`` rows
+    (pipeline control plan, PR 1) — the same dozen hunt-loop tests that drive
+    ``run_hunt`` without ``tracker_db`` would otherwise append rows to the
+    repo's own ./tracker.db, exactly like ``hunt_runs`` above.
+    """
+    from hunter import bot_commands, hunt_live
+
+    monkeypatch.setattr(hunt_live, "DB_PATH", tmp_path / "hunt_live.db")
+    monkeypatch.setattr(bot_commands, "DB_PATH", tmp_path / "bot_commands.db")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_metrics_db(tmp_path, monkeypatch) -> None:
     """Point hunter.metrics at a per-test temp DB by default.
 

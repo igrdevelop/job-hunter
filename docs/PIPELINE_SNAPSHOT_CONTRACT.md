@@ -13,7 +13,11 @@ only in the bot → API direction.
 exists in the tool's `--json` output over the fixture DB
 `tests/test_pipeline_snapshot_tool.py::fixture_db` (run 2026-09-22 at
 `origin/master` 0cdc330, PRs #292 + #293 included), and every key in that
-output is listed here. When the tool and this document disagree, the tool is
+output is listed here. The `hunt.live`, `hunt.next` and `control` blocks were
+added 2026-09-25 (pipeline control plan, PR 1 — live loaders, next-run time,
+action buttons) and checked the same way: the tool's output over the
+`fixture.sql` below equals the `expected.json` below for those three keys.
+When the tool and this document disagree, the tool is
 wrong OR this document is stale — either way, fix both in the same PR, the
 same discipline as tracker.py's column constants. The reference
 implementation is the tool itself (`build_snapshot(db_path, *, days, user_id,
@@ -31,9 +35,11 @@ package move has not happened, and nothing here depends on it.
   `applications` (`hunter/db.py` + `hunter/tracker.py`), `generation_runs` +
   `pipeline_events` (`hunter/metrics.py`), `hunt_runs` (`hunter/hunt_runs.py`),
   `source_runs` (`hunter/source_health.py`), `postings_seen`
-  (`hunter/postings_seen.py`), `config` (KV; key `llm_outage_until`,
-  `hunter/llm_outage.py`). Plus ONE file: `logs/apply_failures.jsonl`
-  (`hunter/apply_failures_log.py`).
+  (`hunter/postings_seen.py`), `hunt_live` (`hunter/hunt_live.py`),
+  `bot_commands` (`hunter/db.py` DDL + `hunter/bot_commands.py`; the API
+  writes rows, the bot drains them), `config` (KV; keys `llm_outage_until`,
+  `hunter/llm_outage.py`, and `bot_state.*`, `hunter/schedules/bot_state.py`).
+  Plus ONE file: `logs/apply_failures.jsonl` (`hunter/apply_failures_log.py`).
 - Consumers: job-hunter-api (M2 port), job-hunter-site (M3 page). The
   Telegram commands (`/status` `/queue` `/health` `/funnel` `/unsent`
   `/fails`) do NOT read this shape and are not changed by it.
@@ -78,6 +84,9 @@ process TZ is not this contract's concern).
   `config.current_user_id()`; an empty string is accepted and then matches
   only rows with `user_id = ''`, and the top-level `user_id` key reads
   `"(unscoped: empty user_id)"`). The API passes the authenticated user's id.
+- `hunt_live`, `bot_commands`, the `bot_state.*` KV: **global**, not
+  windowed — the latest rows only (the control bar is owner-only; the API
+  gates who sees `control`).
 - `source_runs`, `postings_seen`, `hunt_runs`: **global by design** — the hunt
   is one process for every user, and none of these tables has a `user_id`
   column (`hunter/erasure.py` discovers tables by that column and correctly
@@ -140,6 +149,7 @@ Top level:
 | `hunt` / `apply` / `result` | object | The three tiers, below. |
 | `events` | list \| null | Footer, below. `null` when `pipeline_events` or `generation_runs` is missing. |
 | `events[].details` | object \| null | The stable fields of the event's FULL `pipeline_events.payload` (`_event_details`), added 2026-09-24 because the 80-char `payload` string broke refine-round JSON. Only these keys, each present only when the payload has it: `round`, `kind`, `score`, `best`, `target`, `max_rounds`, `verdict_first`, `chars` (passed through as-is), `error` (cut to 200 chars), `reason` (cut to 120). `null` for an empty, unparseable or non-object payload, or one with none of those keys. Shapes by event: `fetch ok` → `{chars}`; `ats_loop`/`verdict ok` → `{score}`; any `error` → `{error}`; refine round → `{round, kind, score, best, reason}` (`discarded` → `score: null`); refine `start` → `{target, max_rounds, verdict_first}`. |
+| `control` | object \| null | The web control bar's data (pipeline control plan, 2026-09-25), below. |
 | `coverage` | object | Diagnostic rules, below (see also "Not in the contract"). |
 
 ### `hunt`
@@ -151,7 +161,7 @@ Top level:
 | `hunt_runs.hunts` | int | Row count in the window. |
 | `hunt_runs.found` … `duration_ms` | int ×10 | `SUM` of each `hunter.hunt_runs.COUNT_COLUMNS` entry, in DDL order: `found`, `filtered_out`, `dup_url`, `dup_ct`, `dup_cooldown`, `new`, `capped`, `queued`, `applied_inline`, `duration_ms` (NULL → 0). Same arithmetic as `hunt_runs.sum_window`. |
 | `hunt_runs.last` | object \| null | The newest row (last by `id`): `{ts: str (raw), at: str (display), trigger: str, sources: list[str] (JSON column parsed; non-list/garbage → []), found: int, new: int}`. |
-| `hunt_runs.by_trigger` | map | `trigger → count`; `''`/NULL trigger → `"?"`. Values today: `scheduled` \| `manual` (`force` reserved, never written). |
+| `hunt_runs.by_trigger` | map | `trigger → count`; `''`/NULL trigger → `"?"`. Values today: `scheduled` \| `manual` \| `web` (the site control bar, since 2026-09-25; `force` reserved, never written). |
 | `hunt_runs.top_filter_reasons` | pairs | `filter_reasons` JSON (`reason → count`) merged across the window's rows, `most_common(8)`; non-dict JSON ignored, non-int values skipped, negatives clamped to 0. |
 | `hunt_runs_unmeasured` | str \| null | `"hunt_runs table missing"` / `"hunt_runs table lacks columns: …"`; `null` when `hunt_runs` is populated. |
 | `source_runs` | object \| null | `SELECT source, ts, yield, ok, error FROM source_runs WHERE ts >= ? ORDER BY id`. `null` when the table is missing. |
@@ -171,7 +181,10 @@ Top level:
 | `entered_tracker.rows` | int | Row count. |
 | `entered_tracker.by_status` | map | `_bucket_status(ats_status) → count`. Buckets: `PENDING`, `IN_PROGRESS`, `SKIP`, `FAIL`, `MANUAL`, `EXPIRED` (upper-cased exact matches), `(blank)` for `''`/`—`/`–`/`-`, else `APPLIED` (any other value is a score string like `"94"`). |
 | `entered_tracker.by_source` | pairs | `source → count`, `''` → `"(blank)"`, `most_common(10)`. |
-| `next_slot` | object \| null | `{at: "HH:MM", in_min: int, source: str, sources_total: int}` from the local scheduler grid, `{error: str}` when `hunter.sources`/`hunter.schedules.grid` cannot be imported, `null` when no base time parses. **Not in the contract** — see below. |
+| `next_slot` | object \| null | `{at: "HH:MM", in_min: int, source: str, sources_total: int}` from the local scheduler grid, `{error: str}` when `hunter.sources`/`hunter.schedules.grid` cannot be imported, `null` when no base time parses. **Not in the contract** — see below; `next` is the contract key. |
+| `live` | object \| null | The hunt running right now (pipeline control plan, 2026-09-25). `null` when the `hunt_live` table (created lazily by the first hunt) is missing or lacks a column. Otherwise `{active: row \| null, last: row \| null}`: `active` = the newest UNFINISHED row, preferring one past `waiting` (`WHERE finished_at IS NULL ORDER BY (step = 'waiting'), started_at DESC, rowid DESC LIMIT 1`), else `null` — a hunt queued behind the lock writes its own newer `waiting` row, and the page must keep showing the lock holder; `last` = the newest row with `finished_at IS NOT NULL` (same order). Not windowed. |
+| `live.*` row | object | Every `hunt_live` column, raw: `hunt_id` (uuid4 hex), `trigger` (`scheduled` \| `manual` \| `web` \| `retry`), `sources` (JSON column PARSED into a list; garbage → `[]`; `[]` for a retry pass), `started_at`, `step` (`waiting` → `fetch` → `filter` → `dedup` → `act` → `done` \| `error`; a retry pass goes `waiting` → `act` → `done` \| `error`), `step_started_at` (when the current step began — elapsed = now − this), `current_source` (the source being fetched; `''` outside `fetch`), `sources_done` / `sources_total` / `found_so_far` (ints; `found_so_far` = raw listings fetched so far), `command_id` (the `bot_commands.id` that asked for it, `''` otherwise), `finished_at` (`null` while running). All timestamps `%Y-%m-%dT%H:%M:%S+00:00`. A row the previous bot process never finished is stamped `error` at the next startup, so `active` never sticks after a crash. |
+| `next` | object \| null | What the bot's OWN JobQueue will fire next, published into `config` by `hunter/schedules/bot_state.py` every 60 s and at startup: `{hunt: {at: str, source: str, sources_total: int} \| null, retry: {at: str} \| null, updated_at: str \| null}` — the JSON values of `bot_state.next_hunt` / `bot_state.next_retry` / `bot_state.updated_at` (each `null` when the key is absent, unparseable or not the expected JSON type; `hunt`/`retry` are `null` when nothing of that kind is scheduled). `at` / `updated_at` are UTC `%Y-%m-%dT%H:%M:%S+00:00`. `null` when the `config` table is missing or no `bot_state.*` key exists at all (a bot older than this contract). `updated_at` older than 5 min ⇒ the page shows "bot offline". |
 
 ### `apply`
 
@@ -267,6 +280,19 @@ it returns an arbitrary one; today prod has one user).
 | `company` | str | Subquery result or `''` (no `applications` row for that `url_norm` — e.g. a paste-mode run or the fixture's `r_orph`). |
 | `pipeline` | str | `generation_runs.pipeline`. |
 | `payload` | str | `pipeline_events.payload` TRUNCATED to 80 characters — a display string, not JSON to parse. **Not in the contract** as data; see below. |
+
+### `control`
+
+`null` when BOTH the `bot_commands` table and the `bot_state.sources` KV are
+missing; otherwise:
+
+| Key | Type | Definition |
+|---|---|---|
+| `sources` | list[str] \| null | JSON value of `config` key `bot_state.sources` — the names of every source the bot has registered (`ALL_SOURCES`, i.e. enabled), the set the per-source buttons offer and the names a `hunt` command may carry. `null` when the key is absent. |
+| `commands` | list \| null | The 10 newest `bot_commands` rows, `SELECT id, kind, payload, status, error, created_at, started_at, finished_at FROM bot_commands ORDER BY created_at DESC, rowid DESC LIMIT 10`. `null` when the table is missing. Not user-scoped (owner-only feature). |
+| `commands[].id` / `kind` / `status` / `error` | str | Raw. `kind`: `hunt` \| `retry_failed` \| `check_expired`. `status`: `pending` → `running` → `done` \| `error`, or `rejected` (`error` holds the reason: `not the owner`, `unknown kind: …`, `unknown source(s): …`, `invalid payload…`, `hunt already running`, `check_expired already running`, `AUTO_APPLY is off…`; an `error` row carries the exception text, or `bot restarted` for a row the previous process left `running`). |
+| `commands[].payload` | object \| null | The `payload` column PARSED (`{"sources": [..] \| null}` for `hunt`, `{}` otherwise); `null` when unparseable. |
+| `commands[].created_at` / `started_at` / `finished_at` | str \| null | Raw UTC `%Y-%m-%dT%H:%M:%S+00:00`; `started_at` is stamped when the bot claims the row (also for a row it then rejects), `finished_at` on the terminal status. |
 
 ### `coverage`
 
@@ -417,9 +443,11 @@ day should be.
 The shared fixture pair the plan calls for:
 
 - `tests/fixtures/pipeline_snapshot/fixture.sql` — INSERT statements only,
-  applied on top of an empty DB prepared by `hunter.db.init_db()` plus the
-  four lazy DDLs (`postings_seen._ensure_table`, `source_health._ensure_table`,
-  `metrics._ensure_tables`, `hunt_runs._ensure_table`), with every timestamp
+  applied on top of an empty DB prepared by `hunter.db.init_db()` (which
+  also creates `bot_commands`) plus the five lazy DDLs
+  (`postings_seen._ensure_table`, `source_health._ensure_table`,
+  `metrics._ensure_tables`, `hunt_runs._ensure_table`,
+  `hunt_live._ensure_table`), with every timestamp
   fixed relative to the frozen instant **`NOW = 2026-09-22T12:00:00+00:00`**
   (Warsaw 14:00 CEST, calendar day 2026-09-22). It is the test fixture
   `tests/test_pipeline_snapshot_tool.py::fixture_db` with `now` substituted —
@@ -569,6 +597,30 @@ INSERT INTO pipeline_events (run_id, ts, stage, event, duration_ms, payload) VAL
 
 -- LLM outage pause armed until NOW + 30 min (epoch seconds of 2026-09-22T12:30:00Z)
 INSERT INTO config (key, value) VALUES ('llm_outage_until', '1790080200');
+
+-- hunt_live: a finished scheduled hunt + a web hunt fetching its 2nd source now
+INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, step_started_at,
+    current_source, sources_done, sources_total, found_so_far, command_id, finished_at) VALUES
+  ('h_done', 'scheduled', '["justjoin"]', '2026-09-22T11:10:00+00:00', 'done',
+   '2026-09-22T11:11:00+00:00', '', 1, 1, 120, '', '2026-09-22T11:11:00+00:00'),
+  ('h_live', 'web', '["linkedin", "pracuj"]', '2026-09-22T11:58:00+00:00', 'fetch',
+   '2026-09-22T11:58:00+00:00', 'pracuj', 1, 2, 40, 'c_run', NULL);
+
+-- bot_commands: one done, one running, one rejected while the running one held the lock
+INSERT INTO bot_commands (id, user_id, kind, payload, status, error, created_at, started_at, finished_at) VALUES
+  ('c_old', 'u1', 'hunt', '{"sources": null}', 'done', '',
+   '2026-09-22T11:00:00+00:00', '2026-09-22T11:00:00+00:00', '2026-09-22T11:02:00+00:00'),
+  ('c_run', 'u1', 'hunt', '{"sources": ["linkedin", "pracuj"]}', 'running', '',
+   '2026-09-22T11:57:00+00:00', '2026-09-22T11:58:00+00:00', NULL),
+  ('c_rej', 'u1', 'hunt', '{"sources": ["linkedin"]}', 'rejected', 'hunt already running',
+   '2026-09-22T11:59:00+00:00', '2026-09-22T11:59:00+00:00', '2026-09-22T11:59:00+00:00');
+
+-- bot_state KV (JSON values)
+INSERT INTO config (key, value) VALUES
+  ('bot_state.next_hunt', '{"at": "2026-09-22T12:20:00+00:00", "source": "justremote", "sources_total": 25}'),
+  ('bot_state.next_retry', '{"at": "2026-09-23T02:45:00+00:00"}'),
+  ('bot_state.sources', '["justjoin", "linkedin", "pracuj"]'),
+  ('bot_state.updated_at', '"2026-09-22T11:59:30+00:00"');
 ```
 
 ### `expected.json`
@@ -578,7 +630,9 @@ frozen at `NOW` (`--days 1 --user u1 --events 10`, no failures log). It
 reproduces every count `tests/test_pipeline_snapshot_tool.py` asserts.
 `next_slot` and `queue_enabled_local_config` show the values of the machine
 it was generated on (25 registered sources, `APPLY_QUEUE_ENABLED=false`) and
-are in the normalised list above.
+are in the normalised list above. The `hunt.live` / `hunt.next` / `control`
+blocks (2026-09-25) carry raw timestamps only, nothing clock-relative, so they
+compare exactly without normalisation.
 
 ```json
 {
@@ -610,7 +664,24 @@ are in the normalised list above.
       "by_status": {"APPLIED": 5, "EXPIRED": 1, "FAIL": 2, "IN_PROGRESS": 1, "PENDING": 2, "SKIP": 1},
       "by_source": [["justjoin", 12]]
     },
-    "next_slot": {"at": "14:20", "in_min": 20, "source": "justremote", "sources_total": 25}
+    "next_slot": {"at": "14:20", "in_min": 20, "source": "justremote", "sources_total": 25},
+    "live": {
+      "active": {"hunt_id": "h_live", "trigger": "web", "sources": ["linkedin", "pracuj"],
+                 "started_at": "2026-09-22T11:58:00+00:00", "step": "fetch",
+                 "step_started_at": "2026-09-22T11:58:00+00:00", "current_source": "pracuj",
+                 "sources_done": 1, "sources_total": 2, "found_so_far": 40, "command_id": "c_run",
+                 "finished_at": null},
+      "last": {"hunt_id": "h_done", "trigger": "scheduled", "sources": ["justjoin"],
+               "started_at": "2026-09-22T11:10:00+00:00", "step": "done",
+               "step_started_at": "2026-09-22T11:11:00+00:00", "current_source": "",
+               "sources_done": 1, "sources_total": 1, "found_so_far": 120, "command_id": "",
+               "finished_at": "2026-09-22T11:11:00+00:00"}
+    },
+    "next": {
+      "hunt": {"at": "2026-09-22T12:20:00+00:00", "source": "justremote", "sources_total": 25},
+      "retry": {"at": "2026-09-23T02:45:00+00:00"},
+      "updated_at": "2026-09-22T11:59:30+00:00"
+    }
   },
   "apply": {
     "queue_mode_observed": true,
@@ -669,6 +740,20 @@ are in the normalised list above.
     {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Lambda", "pipeline": "cli", "payload": "", "details": null},
     {"at": "12:20", "ts": "2026-09-22T10:20:00+00:00", "stage": "fetch", "event": "ok", "duration_ms": 1000, "company": "Kappa", "pipeline": "cli", "payload": "", "details": null}
   ],
+  "control": {
+    "sources": ["justjoin", "linkedin", "pracuj"],
+    "commands": [
+      {"id": "c_rej", "kind": "hunt", "payload": {"sources": ["linkedin"]}, "status": "rejected",
+       "error": "hunt already running", "created_at": "2026-09-22T11:59:00+00:00",
+       "started_at": "2026-09-22T11:59:00+00:00", "finished_at": "2026-09-22T11:59:00+00:00"},
+      {"id": "c_run", "kind": "hunt", "payload": {"sources": ["linkedin", "pracuj"]}, "status": "running",
+       "error": "", "created_at": "2026-09-22T11:57:00+00:00",
+       "started_at": "2026-09-22T11:58:00+00:00", "finished_at": null},
+      {"id": "c_old", "kind": "hunt", "payload": {"sources": null}, "status": "done",
+       "error": "", "created_at": "2026-09-22T11:00:00+00:00",
+       "started_at": "2026-09-22T11:00:00+00:00", "finished_at": "2026-09-22T11:02:00+00:00"}
+    ]
+  },
   "coverage": {
     "1_run_coverage": {"rows_produced": 9, "excluded_blank_source": 0, "with_generation_run": 6, "share_pct": 66.7,
                        "threshold": ">= 90", "verdict": "FAIL",
@@ -704,9 +789,9 @@ returns `null`.
   (`hunter.sources.ALL_SOURCES` filtered by the `*_ENABLED` toggles) and the
   schedule env (`SCHEDULE_TIMES`, `SCHEDULE_SOURCE_OFFSET_MIN`,
   `SCHEDULE_BLACKOUT`) through `hunter.schedules.grid.fire_minute`. The API
-  has none of that and computes nothing here; the bot could expose the next
-  slot later (a `config` KV row written by the scheduler, or a `hunt_runs`
-  "next" column) — a separate change.
+  has none of that and computes nothing here. Since 2026-09-25 the bot
+  publishes its scheduler's own next run times into `config`
+  (`bot_state.*`), served as `hunt.next` — use that key.
 - **`events[].payload`** — free-form JSON, truncated to 80 characters in the
   footer; kept for display/debugging only. A refine round carrying `reason`
   routinely exceeds 80 characters, so the truncated string is often invalid

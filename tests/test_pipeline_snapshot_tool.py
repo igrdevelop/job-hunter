@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import tools.pipeline_snapshot as ps
-from hunter import hunt_runs, metrics, postings_seen, source_health
+from hunter import hunt_live, hunt_runs, metrics, postings_seen, source_health
 from hunter.db import init_db
 
 UID = "u1"
@@ -222,6 +222,50 @@ def fixture_db(tmp_path: Path) -> Path:
             "INSERT INTO config (key, value) VALUES ('llm_outage_until', ?)",
             (str(int(now.timestamp()) + 1800),),
         )
+
+        # hunt_live (pipeline control plan, PR 1): a finished scheduled hunt
+        # and a web hunt fetching its second source right now.
+        hunt_live._ensure_table(c)
+        for hid, trig, srcs, started, step, step_at, cur, done, found, cmd, fin in (
+            ("h_done", "scheduled", ["justjoin"], now - timedelta(minutes=50), "done",
+             now - timedelta(minutes=49), "", 1, 120, "", now - timedelta(minutes=49)),
+            ("h_live", "web", ["linkedin", "pracuj"], now - timedelta(minutes=2), "fetch",
+             now - timedelta(minutes=2), "pracuj", 1, 40, "c_run", None),
+        ):  # fmt: skip
+            c.execute(
+                'INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, '
+                "step_started_at, current_source, sources_done, sources_total, found_so_far, "
+                "command_id, finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (hid, trig, json.dumps(srcs), _iso(started), step, _iso(step_at), cur,
+                 done, len(srcs), found, cmd, _iso(fin) if fin else None),
+            )  # fmt: skip
+
+        # bot_commands (init_db created the table): one done, one rejected
+        # while the running one held the lock, one running.
+        for cid, payload, status, err, created, started_, fin in (
+            ("c_old", {"sources": None}, "done", "", now - timedelta(minutes=60),
+             now - timedelta(minutes=60), now - timedelta(minutes=58)),
+            ("c_run", {"sources": ["linkedin", "pracuj"]}, "running", "",
+             now - timedelta(minutes=3), now - timedelta(minutes=2), None),
+            ("c_rej", {"sources": ["linkedin"]}, "rejected", "hunt already running",
+             now - timedelta(minutes=1), now - timedelta(minutes=1), now - timedelta(minutes=1)),
+        ):  # fmt: skip
+            c.execute(
+                "INSERT INTO bot_commands (id, user_id, kind, payload, status, error, "
+                "created_at, started_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (cid, UID, "hunt", json.dumps(payload), status, err, _iso(created),
+                 _iso(started_), _iso(fin) if fin else None),
+            )  # fmt: skip
+
+        # bot_state KV (hunter/schedules/bot_state.py), JSON values.
+        for key, value in (
+            ("bot_state.next_hunt",
+             {"at": _iso(now + timedelta(minutes=20)), "source": "justremote", "sources_total": 25}),
+            ("bot_state.next_retry", {"at": _iso(now + timedelta(hours=14, minutes=45))}),
+            ("bot_state.sources", ["justjoin", "linkedin", "pracuj"]),
+            ("bot_state.updated_at", _iso(now - timedelta(seconds=30))),
+        ):  # fmt: skip
+            c.execute("INSERT INTO config (key, value) VALUES (?, ?)", (key, json.dumps(value)))
     return db
 
 
@@ -360,6 +404,86 @@ def test_coverage_rules(fixture_db: Path) -> None:
     assert r5["orphan_stamped"] == 1
 
 
+def test_hunt_live_active_and_last(fixture_db: Path) -> None:
+    live = _snap(fixture_db)["hunt"]["live"]
+    act, last = live["active"], live["last"]
+    assert set(act) == set(ps.HUNT_LIVE_COLUMNS)
+    assert (act["hunt_id"], act["trigger"], act["step"]) == ("h_live", "web", "fetch")
+    assert act["sources"] == ["linkedin", "pracuj"]  # JSON column parsed
+    assert (act["current_source"], act["sources_done"], act["sources_total"]) == ("pracuj", 1, 2)
+    assert (act["found_so_far"], act["command_id"], act["finished_at"]) == (40, "c_run", None)
+    assert (last["hunt_id"], last["step"], last["found_so_far"]) == ("h_done", "done", 120)
+    assert last["finished_at"] is not None
+
+
+def test_hunt_live_idle_when_newest_row_finished(fixture_db: Path) -> None:
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("UPDATE hunt_live SET step='done', finished_at=started_at WHERE hunt_id='h_live'")
+    live = _snap(fixture_db)["hunt"]["live"]
+    assert live["active"] is None
+    assert live["last"]["hunt_id"] == "h_live"
+
+
+def test_hunt_live_active_is_the_lock_holder_not_a_queued_waiter(fixture_db: Path) -> None:
+    # A second hunt queued behind the running one writes a NEWER `waiting`
+    # row; the page must keep showing the hunt that is actually fetching.
+    with sqlite3.connect(fixture_db) as c:
+        c.execute(
+            'INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, '
+            "step_started_at, sources_total) VALUES ('h_wait', 'scheduled', '[\"justjoin\"]', "
+            "'2099-01-01T00:00:00+00:00', 'waiting', '2099-01-01T00:00:00+00:00', 1)"
+        )
+    live = _snap(fixture_db)["hunt"]["live"]
+    assert (live["active"]["hunt_id"], live["active"]["step"]) == ("h_live", "fetch")
+    # Once the running one finishes, the waiter is what is left.
+    with sqlite3.connect(fixture_db) as c:
+        c.execute("UPDATE hunt_live SET step='done', finished_at=started_at WHERE hunt_id='h_live'")
+    live = _snap(fixture_db)["hunt"]["live"]
+    assert (live["active"]["hunt_id"], live["active"]["step"]) == ("h_wait", "waiting")
+
+
+def test_hunt_next_from_the_bot_state_kv(fixture_db: Path) -> None:
+    nx = _snap(fixture_db)["hunt"]["next"]
+    assert set(nx) == {"hunt", "retry", "updated_at"}
+    assert nx["hunt"]["source"] == "justremote"
+    assert nx["hunt"]["sources_total"] == 25
+    assert nx["hunt"]["at"].endswith("+00:00")
+    assert set(nx["retry"]) == {"at"}
+    assert nx["updated_at"].endswith("+00:00")
+
+
+def test_control_sources_and_newest_commands(fixture_db: Path) -> None:
+    ctl = _snap(fixture_db)["control"]
+    assert ctl["sources"] == ["justjoin", "linkedin", "pracuj"]
+    cmds = ctl["commands"]
+    assert [c["id"] for c in cmds] == ["c_rej", "c_run", "c_old"]  # newest first
+    assert set(cmds[0]) == set(ps.BOT_COMMAND_FIELDS)
+    assert cmds[0]["payload"] == {"sources": ["linkedin"]}  # parsed, not a string
+    assert (cmds[0]["status"], cmds[0]["error"]) == ("rejected", "hunt already running")
+    assert cmds[2]["payload"] == {"sources": None}
+    assert cmds[1]["finished_at"] is None
+
+
+def test_control_commands_cap_at_ten(fixture_db: Path) -> None:
+    with sqlite3.connect(fixture_db) as c:
+        for i in range(12):
+            c.execute(
+                "INSERT INTO bot_commands (id, user_id, kind, payload, status, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    f"n{i:02d}",
+                    UID,
+                    "check_expired",
+                    "{}",
+                    "done",
+                    f"2099-01-01T00:00:{i:02d}+00:00",
+                ),
+            )
+    cmds = _snap(fixture_db)["control"]["commands"]
+    assert len(cmds) == 10
+    assert cmds[0]["id"] == "n11"
+
+
 def test_read_only(fixture_db: Path) -> None:
     # init_db() puts the DB in WAL mode, so a -wal sidecar can exist from the
     # fixture itself; the contract is that the snapshot changes NO bytes of
@@ -387,6 +511,11 @@ def test_unmeasured_on_bare_db(tmp_path: Path) -> None:
     assert snap["apply"]["runs"] is None
     assert snap["apply"]["queue_mode_observed"] is False
     assert snap["events"] is None
+    # hunt_live is lazy and config is created by its writers: both missing.
+    assert snap["hunt"]["live"] is None
+    assert snap["hunt"]["next"] is None
+    # init_db creates bot_commands, so the queue is present and empty.
+    assert snap["control"] == {"sources": None, "commands": []}
     for key in (
         "1_run_coverage",
         "2_stage_resolution",
@@ -561,3 +690,11 @@ def test_events_and_open_run_are_user_scoped(fixture_db: Path) -> None:
     assert run["run_id"] == "r_ip"  # not the newer u2 run on the same url
     assert "ts" in run["last_event"] and "ts" in run["refine_progress"]
     assert all(e["stage"] != "generate" or e["event"] != "start" for e in snap["events"])
+
+
+def test_control_null_when_table_and_kv_are_missing(tmp_path: Path) -> None:
+    db = tmp_path / "old.db"
+    init_db(db, xlsx_path=tmp_path / "none.xlsx")
+    with sqlite3.connect(db) as c:
+        c.execute("DROP TABLE bot_commands")
+    assert _snap(db)["control"] is None

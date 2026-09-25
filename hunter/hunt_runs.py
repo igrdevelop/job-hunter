@@ -65,9 +65,10 @@ __all__ = [
 DB_PATH = TRACKER_DB_PATH
 
 # What started the hunt. The loop can tell a manual /hunt from a scheduled
-# slot; "force" is reserved for a future caller that runs the loop with dedup
+# slot; "web" is the site's /pipeline control bar (hunter/schedules/
+# bot_commands.py); "force" is reserved for a future caller that runs the loop with dedup
 # disabled — today /force applies to one URL and never runs the hunt.
-TRIGGERS: tuple[str, ...] = ("scheduled", "manual", "force")
+TRIGGERS: tuple[str, ...] = ("scheduled", "manual", "web", "force")
 
 # "trigger" and "new" are SQLite keywords — quoted everywhere they appear.
 _DDL = """

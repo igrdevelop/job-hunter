@@ -33,7 +33,7 @@ def test_run_hunt_waits_for_lock_instead_of_skipping() -> None:
     async def scenario():
         order: list[str] = []
 
-        async def fake_impl(context, source_names=None, trigger="scheduled"):
+        async def fake_impl(context, source_names=None, trigger="scheduled", hunt_id=""):
             order.append(f"impl:{(source_names or ['all'])[0]}")
 
         with (
@@ -95,7 +95,7 @@ def test_concurrent_hunts_all_complete_serially() -> None:
         max_running = 0
         done: list[str] = []
 
-        async def fake_impl(context, source_names=None, trigger="scheduled"):
+        async def fake_impl(context, source_names=None, trigger="scheduled", hunt_id=""):
             nonlocal running, max_running
             running += 1
             max_running = max(max_running, running)

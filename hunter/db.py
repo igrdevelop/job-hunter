@@ -127,6 +127,32 @@ CREATE INDEX IF NOT EXISTS idx_profile_jobs_status
     ON profile_jobs(status, created_at);
 """
 
+# Operational command queue for the site's /pipeline control bar (pipeline
+# control plan, PR 1). Shared contract with job-hunter-api
+# (tracker-migrations.ts mirrors this DDL): the API inserts an owner-only row
+# (kind hunt / retry_failed / check_expired), hunter/bot_commands.py +
+# hunter/schedules/bot_commands.py claim and run it on the bot's own event
+# loop. Statuses: pending -> running -> done | error, or rejected (error holds
+# the reason). All timestamps UTC `%Y-%m-%dT%H:%M:%S+00:00`. DDL must not
+# change unilaterally on this side.
+_BOT_COMMANDS_DDL = """
+CREATE TABLE IF NOT EXISTS bot_commands (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL,
+    payload     TEXT NOT NULL DEFAULT '{}',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    result      TEXT NOT NULL DEFAULT '',
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    started_at  TEXT,
+    finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_commands_status
+    ON bot_commands(status, created_at);
+"""
+
 # Backs hunter.best_effort — consecutive-failure counters for best-effort
 # subsystems (Sheets mirror, Drive upload, delivery, outreach, dual-shadow,
 # cost/verdict writers). One row per subsystem name; `consecutive_failures`
@@ -180,6 +206,16 @@ def ensure_link_attempts_table(conn: sqlite3.Connection) -> None:
     standalone script may never have gone through init_db()).
     """
     conn.executescript(_LINK_ATTEMPTS_DDL)
+
+
+def ensure_bot_commands_table(conn: sqlite3.Connection) -> None:
+    """Idempotent CREATE for the `bot_commands` table.
+
+    Called from init_db() at bot startup, and defensively by
+    hunter.bot_commands itself (a bare temp DB in a test or a standalone
+    script may never have gone through init_db()).
+    """
+    conn.executescript(_BOT_COMMANDS_DDL)
 
 
 # ── Connection factory ────────────────────────────────────────────────────────
@@ -453,6 +489,7 @@ def init_db(
         ensure_subsystem_health_table(conn)
         conn.executescript(_MULTI_USER_DDL)
         conn.executescript(_PROFILE_JOBS_DDL)
+        ensure_bot_commands_table(conn)
         ensure_link_attempts_table(conn)
         # Deduplicate existing rows before applying the unique (user_id, url_norm)
         # constraint — _ensure_user_url_index must run AFTER this.

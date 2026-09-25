@@ -44,6 +44,8 @@ from hunter.schedules.normalize_sent import scheduled_normalize_sent
 from hunter.schedules.apply_queue import scheduled_reset_stale_claims
 from hunter.schedules.profile_jobs import scheduled_profile_jobs_drain
 from hunter.schedules.postings_prune import scheduled_postings_prune
+from hunter.schedules.bot_commands import scheduled_bot_commands_drain
+from hunter.schedules.bot_state import scheduled_bot_state
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,8 @@ __all__ = [
     "scheduled_reset_stale_claims",
     "scheduled_profile_jobs_drain",
     "scheduled_postings_prune",
+    "scheduled_bot_commands_drain",
+    "scheduled_bot_state",
 ]
 
 
@@ -286,3 +290,26 @@ def register(app: "Application", tz: "_pytz.BaseTzInfo") -> None:
         name="profile_jobs_drain",
     )
     logger.info("[Schedule] profile_jobs_drain every 20s")
+
+    # ── Pipeline page control bar: bot_commands drain every 3 s (pipeline
+    # control plan, PR 1) ──────────────────────────────────────────────────────
+    # On the PTB event loop (not a thread): the commands it launches share
+    # _hunt_lock with the scheduled hunts. The callback itself checks
+    # BOT_COMMANDS_ENABLED, so the flag works without a re-registration.
+    job_queue.run_repeating(
+        callback=scheduled_bot_commands_drain,
+        interval=3,
+        first=3,
+        name="bot_commands_drain",
+    )
+    logger.info("[Schedule] bot_commands_drain every 3s")
+
+    # ── Scheduler facts for the pipeline page: next hunt / next retry /
+    # sources / heartbeat into the config KV table every 60 s ─────────────────
+    job_queue.run_repeating(
+        callback=scheduled_bot_state,
+        interval=60,
+        first=1,
+        name="bot_state",
+    )
+    logger.info("[Schedule] bot_state every 60s")
