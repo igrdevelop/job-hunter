@@ -31,6 +31,12 @@ Sections:
   result    ready-to-send (applied, sent=''), sent in the window, recorded
             outcomes, LLM spend
   events    the last N pipeline_events joined to company/title
+  control   the web control bar's data (pipeline control plan, PR 1): the
+            source names the bot publishes (`bot_state.sources` KV) and the
+            10 newest `bot_commands` rows. The hunt tier also carries
+            `live` (the running / last finished `hunt_live` row — which step
+            a hunt is on right now) and `next` (the next hunt / retry the
+            bot's own JobQueue will fire, from the `bot_state.*` KV)
   coverage  the five decision rules with PASS / FAIL / UNMEASURED
 
 Read-only: the DB is opened with `mode=ro`, nothing is written, no network,
@@ -364,7 +370,145 @@ def hunt_tier(conn: sqlite3.Connection, win: Window, user_id: str) -> dict[str, 
     }
 
     out["next_slot"] = _next_hunt_slot(win.now)
+    out["live"] = hunt_live(conn)
+    out["next"] = hunt_next(conn)
     return out
+
+
+# ── Live hunt state + web control (pipeline control plan, PR 1) ──────────────
+
+# Every hunt_live column, in DDL order (hunter/hunt_live.py) — the row shape
+# `hunt.live.active` / `hunt.live.last` serve.
+HUNT_LIVE_COLUMNS = (
+    "hunt_id",
+    "trigger",
+    "sources",
+    "started_at",
+    "step",
+    "step_started_at",
+    "current_source",
+    "sources_done",
+    "sources_total",
+    "found_so_far",
+    "command_id",
+    "finished_at",
+)
+
+# The bot_commands fields `control.commands[]` serves (no user_id / result).
+BOT_COMMAND_FIELDS = (
+    "id",
+    "kind",
+    "payload",
+    "status",
+    "error",
+    "created_at",
+    "started_at",
+    "finished_at",
+)
+
+BOT_STATE_KEYS = (
+    "bot_state.next_hunt",
+    "bot_state.next_retry",
+    "bot_state.sources",
+    "bot_state.updated_at",
+)
+
+
+def _json_or_none(raw: Any) -> Any:
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _live_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    d = {c: row[c] for c in HUNT_LIVE_COLUMNS}
+    parsed = _json_or_none(d["sources"])
+    d["sources"] = parsed if isinstance(parsed, list) else []
+    return d
+
+
+def hunt_live(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """`{active, last}` from `hunt_live`, or None when the table (or one of
+    its columns) is missing. `active` = the newest row (by `started_at`,
+    then rowid) when it has not finished; `last` = the newest finished row.
+    Global — no user scoping, like `hunt_runs`."""
+    if not _table_exists(conn, "hunt_live"):
+        return None
+    if set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live"):
+        return None
+    cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
+    newest = conn.execute(
+        f"SELECT {cols} FROM hunt_live ORDER BY started_at DESC, rowid DESC LIMIT 1"  # noqa: S608 — constant column list
+    ).fetchone()
+    last = conn.execute(
+        f"SELECT {cols} FROM hunt_live WHERE finished_at IS NOT NULL "  # noqa: S608 — constant column list
+        "ORDER BY started_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    active = newest if newest is not None and newest["finished_at"] is None else None
+    return {"active": _live_row(active), "last": _live_row(last)}
+
+
+def _bot_state(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """The `bot_state.*` config KV rows, JSON-decoded (absent key or
+    unparseable value -> None). None when the `config` table is missing."""
+    if not _table_exists(conn, "config"):
+        return None
+    ph = ",".join("?" for _ in BOT_STATE_KEYS)
+    rows = conn.execute(
+        f"SELECT key, value FROM config WHERE key IN ({ph})",  # noqa: S608 — placeholders only
+        BOT_STATE_KEYS,
+    ).fetchall()
+    raw = {r["key"]: r["value"] for r in rows}
+    return {k: (_json_or_none(raw[k]) if k in raw else None) for k in BOT_STATE_KEYS} | {
+        "_present": bool(raw)
+    }
+
+
+def hunt_next(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """`{hunt, retry, updated_at}` from the bot's own scheduler, as
+    published by hunter/schedules/bot_state.py. None when the config table
+    is missing or the bot never published any `bot_state.*` key."""
+    state = _bot_state(conn)
+    if state is None or not state["_present"]:
+        return None
+    hunt, retry = state["bot_state.next_hunt"], state["bot_state.next_retry"]
+    updated = state["bot_state.updated_at"]
+    return {
+        "hunt": hunt if isinstance(hunt, dict) else None,
+        "retry": retry if isinstance(retry, dict) else None,
+        "updated_at": updated if isinstance(updated, str) else None,
+    }
+
+
+def control(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """`{sources, commands}` for the web control bar. `sources` = the
+    `bot_state.sources` KV (None when absent); `commands` = the 10 newest
+    `bot_commands` rows (None when the table is missing), `payload` parsed.
+    None when neither exists. Global — the control bar is owner-only."""
+    state = _bot_state(conn)
+    sources = state["bot_state.sources"] if state is not None else None
+    commands: list[dict[str, Any]] | None = None
+    if _table_exists(conn, "bot_commands"):
+        cols = ", ".join(BOT_COMMAND_FIELDS)
+        rows = conn.execute(
+            f"SELECT {cols} FROM bot_commands ORDER BY created_at DESC, rowid DESC LIMIT 10"  # noqa: S608 — constant column list
+        ).fetchall()
+        commands = []
+        for r in rows:
+            d = {c: r[c] for c in BOT_COMMAND_FIELDS}
+            d["payload"] = _json_or_none(d["payload"])
+            commands.append(d)
+    if sources is None and commands is None:
+        return None
+    return {
+        "sources": sources if isinstance(sources, list) else None,
+        "commands": commands,
+    }
 
 
 # Every column _hunt_runs_window reads; checked against PRAGMA table_info
@@ -1188,6 +1332,7 @@ def build_snapshot(
             "apply": apply_tier(conn, win, user_id, failures_log),
             "result": result_tier(conn, win, user_id),
             "events": recent_events(conn, events_limit, user_id),
+            "control": control(conn),
             "coverage": coverage(conn, win, user_id, hunt),
         }
     finally:
@@ -1257,6 +1402,37 @@ def print_report(snap: dict[str, Any]) -> None:
         )
     elif ns:
         print(f"  next slot          {ns['error']}")
+    nx = h.get("next")
+    if nx:
+        nh, nr = nx["hunt"], nx["retry"]
+        print(
+            "  bot scheduler      "
+            + (
+                f"next hunt {_local_hhmm(nh.get('at'))} ({nh.get('source') or '?'})"
+                if nh
+                else "no hunt scheduled"
+            )
+            + (f", next retry {_local_hhmm(nr.get('at'))}" if nr else "")
+            + f"; published {_local_hhmm(nx['updated_at'])}"
+        )
+    lv = h.get("live")
+    if lv:
+        act = lv["active"]
+        if act:
+            print(
+                f"  live               {act['step']} ({act['trigger']}) since {_local_hhmm(act['step_started_at'])}"
+                f", sources {act['sources_done']}/{act['sources_total']}"
+                + (f", now {act['current_source']}" if act["current_source"] else "")
+                + f", found {act['found_so_far']}"
+            )
+        else:
+            print("  live               idle")
+        if lv["last"]:
+            last = lv["last"]
+            print(
+                f"    last hunt        {last['step']} at {_local_hhmm(last['finished_at'])} "
+                f"({last['trigger']}, {last['sources_done']}/{last['sources_total']} sources, found {last['found_so_far']})"
+            )
 
     a = snap["apply"]
     print(
@@ -1368,6 +1544,25 @@ def print_report(snap: dict[str, Any]) -> None:
         print(
             f"  {e['at']}  {e['stage']:<10} {e['event']:<8}{dur:>6}  {e['company'][:28]:<28} {e['payload']}"
         )
+
+    ctl = snap.get("control")
+    print("\nCONTROL")
+    if ctl is None:
+        print("  (no bot_commands table, no bot_state.sources)")
+    else:
+        srcs = ctl["sources"]
+        print(f"  sources            {len(srcs) if srcs is not None else '—'}")
+        cmds = ctl["commands"]
+        if cmds is None:
+            print("  commands           —   (no bot_commands table)")
+        elif not cmds:
+            print("  commands           (none)")
+        for cmd in cmds or []:
+            err = f"  — {cmd['error'][:60]}" if cmd["error"] else ""
+            print(
+                f"  {_local_hhmm(cmd['created_at'])}  {cmd['kind']:<14} {cmd['status']:<9}"
+                f" {json.dumps(cmd['payload'], ensure_ascii=False)}{err}"
+            )
 
     print("\nCOVERAGE — docs/PIPELINE_VIZ_PLAN.md M0 decision rules")
     cov = snap["coverage"]
