@@ -3,6 +3,9 @@
     "days": 1,
     "start_utc": "2026-09-26T22:00:00+00:00"
   },
+  "total": 5,
+  "offset": 0,
+  "limit": 100,
   "hunts": [
     {
       "hunt_id": "h_run",
@@ -141,6 +144,5 @@
         "by_state": {}
       }
     }
-  ],
-  "truncated": false
+  ]
 }

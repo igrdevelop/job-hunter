@@ -787,10 +787,10 @@ def _hunt_row(live: dict[str, Any], counts: dict[str, Any] | None) -> dict[str, 
     }
 
 
-# Safety cap on one hunts-table answer. Not a page size: a 7-day window is
-# ~510 hunts at prod's ~73/day, so the cap only bites on a runaway schedule —
-# and says so via `truncated`.
-HUNTS_MAX = 2000
+# One page of the hunts table. Today (~75 hunts in prod) fits on one page;
+# a 7-day window (~510) is paged. Hard ceiling on a caller-chosen page size.
+HUNTS_PAGE = 100
+HUNTS_PAGE_MAX = 500
 
 
 def hunts_list(
@@ -798,13 +798,15 @@ def hunts_list(
     user_id: str,
     *,
     days: int = 1,
-    limit: int = HUNTS_MAX,
+    offset: int = 0,
+    limit: int = HUNTS_PAGE,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
-    """`{window, hunts: [...], truncated}` — EVERY hunt started inside the
-    Warsaw calendar-day window (`days`, 1 = today, same `Window` as the
-    snapshot), newest first, capped at `limit` (`truncated` says the cap cut
-    rows) — or None when `hunt_live` (or one of its columns) is missing. One
+    """`{window, total, offset, limit, hunts: [...]}` — one page of EVERY hunt
+    started inside the Warsaw calendar-day window (`days`, 1 = today, same
+    `Window` as the snapshot), newest first; `total` counts the whole window
+    so the page can offer the rest — or None when `hunt_live` (or one of its
+    columns) is missing. One
     row per `hunt_live` row, so a hunt shows up while it is still waiting or
     running, and retry
     passes (`trigger` "retry") are listed too. `counts` is the hunt's
@@ -817,17 +819,19 @@ def hunts_list(
         return None
     now = now or datetime.now(timezone.utc)
     win = Window(max(1, int(days)), now)
-    cap = max(1, int(limit))
+    page = min(max(1, int(limit)), HUNTS_PAGE_MAX)
+    skip = max(0, int(offset))
     cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
     # started_at is `+00:00` isoformat, like win.start_iso: text comparison is
     # the snapshot's first window mode.
+    total = int(
+        _scalar(conn, "SELECT COUNT(*) FROM hunt_live WHERE started_at >= ?", (win.start_iso,)) or 0
+    )
     live_rows = conn.execute(
         f"SELECT {cols} FROM hunt_live WHERE started_at >= ? "  # noqa: S608 — constant column list
-        "ORDER BY started_at DESC, rowid DESC LIMIT ?",
-        (win.start_iso, cap + 1),
+        "ORDER BY started_at DESC, rowid DESC LIMIT ? OFFSET ?",
+        (win.start_iso, page, skip),
     ).fetchall()
-    truncated = len(live_rows) > cap
-    live_rows = live_rows[:cap]
     lives = [row for row in (_live_row(r) for r in live_rows) if row is not None]
     ids = [lv["hunt_id"] for lv in lives]
     counts = _hunt_counts(conn, ids)
@@ -845,8 +849,10 @@ def hunts_list(
         hunts.append(row)
     return {
         "window": {"days": win.days, "start_utc": win.start_iso},
+        "total": total,
+        "offset": skip,
+        "limit": page,
         "hunts": hunts,
-        "truncated": truncated,
     }
 
 

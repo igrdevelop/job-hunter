@@ -82,7 +82,7 @@ def test_list_is_every_hunt_of_today_newest_first(hunts_db: Path) -> None:
     # Warsaw "today" starts at 2026-09-26T22:00Z: h_midn is in, h_yday is not.
     assert [h["hunt_id"] for h in hunts] == ["h_run", "h_done", "h_retry", "h_err", "h_midn"]
     assert out["window"] == {"days": 1, "start_utc": "2026-09-26T22:00:00+00:00"}
-    assert out["truncated"] is False
+    assert (out["total"], out["offset"], out["limit"]) == (5, 0, 100)
     by_id = {h["hunt_id"]: h for h in hunts}
     assert by_id["h_run"]["status"] == "running"
     assert by_id["h_done"]["status"] == "done"
@@ -122,10 +122,13 @@ def test_seven_day_window(hunts_db: Path) -> None:
     assert ids == ["h_run", "h_done", "h_retry", "h_err", "h_midn", "h_yday"]  # not h_old
 
 
-def test_cap_reports_truncation(hunts_db: Path) -> None:
-    out = _list(hunts_db, limit=2)
-    assert [h["hunt_id"] for h in out["hunts"]] == ["h_run", "h_done"]
-    assert out["truncated"] is True
+def test_pages_through_the_window(hunts_db: Path) -> None:
+    first = _list(hunts_db, days=7, limit=4)
+    second = _list(hunts_db, days=7, limit=4, offset=4)
+    assert [h["hunt_id"] for h in first["hunts"]] == ["h_run", "h_done", "h_retry", "h_err"]
+    assert [h["hunt_id"] for h in second["hunts"]] == ["h_midn", "h_yday"]
+    assert first["total"] == second["total"] == 6
+    assert _list(hunts_db, days=7, offset=6)["hunts"] == []
 
 
 def test_detail_states_and_blocks(hunts_db: Path) -> None:
