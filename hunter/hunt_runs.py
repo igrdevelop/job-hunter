@@ -15,7 +15,9 @@ them, once per hunt, $0.
 
 What it stores
 --------------
-Counts only, plus two small JSON columns: ``sources`` (the names that ran in
+Counts only, plus the hunt's ``hunt_id`` (the ``hunt_live`` uuid — the join
+key for ``hunter.hunt_jobs``, docs/HUNT_DRILLDOWN_PLAN.md) and three small JSON
+columns: ``per_source`` (raw count per source), ``sources`` (the names that ran in
 this hunt — one per staggered slot in prod) and ``filter_reasons`` (reason →
 count, non-zero entries only, the same dict the Telegram report renders).
 Never a job, a URL or a title — ``postings_seen`` and ``applications`` own
@@ -87,10 +89,20 @@ CREATE TABLE IF NOT EXISTS hunt_runs (
     capped          INTEGER NOT NULL DEFAULT 0,
     queued          INTEGER NOT NULL DEFAULT 0,
     applied_inline  INTEGER NOT NULL DEFAULT 0,
-    duration_ms     INTEGER NOT NULL DEFAULT 0
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    hunt_id         TEXT    NOT NULL DEFAULT '',
+    per_source      TEXT    NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_hunt_runs_ts ON hunt_runs(ts);
 """
+
+# Columns added after the table first shipped (docs/HUNT_DRILLDOWN_PLAN.md M1).
+# A table created before them gets them via ALTER in _ensure_table; the index
+# on hunt_id is created only after the column is guaranteed to exist.
+_LATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("hunt_id", "TEXT NOT NULL DEFAULT ''"),
+    ("per_source", "TEXT NOT NULL DEFAULT '{}'"),
+)
 
 # Every integer column, in DDL order — the set sum_window() totals.
 COUNT_COLUMNS: tuple[str, ...] = (
@@ -108,18 +120,24 @@ COUNT_COLUMNS: tuple[str, ...] = (
 
 _INSERT_SQL = (
     'INSERT INTO hunt_runs (ts, "trigger", sources, found, filtered_out, filter_reasons, '
-    'dup_url, dup_ct, dup_cooldown, "new", capped, queued, applied_inline, duration_ms) '
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    'dup_url, dup_ct, dup_cooldown, "new", capped, queued, applied_inline, duration_ms, '
+    "hunt_id, per_source) "
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
 _SELECT_COLUMNS = (
     'id, ts, "trigger", sources, found, filtered_out, filter_reasons, dup_url, dup_ct, '
-    'dup_cooldown, "new", capped, queued, applied_inline, duration_ms'
+    'dup_cooldown, "new", capped, queued, applied_inline, duration_ms, hunt_id, per_source'
 )
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(hunt_runs)").fetchall()}
+    for name, definition in _LATE_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE hunt_runs ADD COLUMN {name} {definition}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hunt_runs_hunt_id ON hunt_runs(hunt_id)")
 
 
 def _utc_now_iso() -> str:
@@ -138,6 +156,18 @@ def _reasons_json(reasons: Mapping[str, Any] | None) -> str:
     """reason -> count, non-zero entries only, keys sorted for a stable text."""
     cleaned = {str(k): _nonneg(v) for k, v in (reasons or {}).items()}
     return json.dumps({k: v for k, v in sorted(cleaned.items()) if v > 0}, ensure_ascii=False)
+
+
+def _per_source_json(per_source: Mapping[str, Any] | None) -> str:
+    """source -> raw count, or "ERR" for a source whose search() raised.
+
+    Keeps zero counts (a source that ran and found nothing is information)
+    and the source order the loop ran them in.
+    """
+    cleaned: dict[str, int | str] = {}
+    for k, v in (per_source or {}).items():
+        cleaned[str(k)] = _nonneg(v) if isinstance(v, int | float) else "ERR"
+    return json.dumps(cleaned, ensure_ascii=False)
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
@@ -159,6 +189,8 @@ def record_hunt(
     applied_inline: int = 0,
     duration_ms: int = 0,
     ts: str | None = None,
+    hunt_id: str = "",
+    per_source: Mapping[str, Any] | None = None,
 ) -> int:
     """Insert ONE ``hunt_runs`` row and return its id.
 
@@ -166,7 +198,11 @@ def record_hunt(
     start time so the row is stamped when the sweep began, not when the ACT
     step finished deciding. An unknown ``trigger`` is stored as given (a
     report column, never a gate) but logged. Prunes to ``HUNT_RUNS_KEEP``
-    rows in the same transaction.
+    rows in the same transaction. ``hunt_id`` is the hunt's
+    ``hunt_live.hunt_id`` ("" when that row could not be written) — the key
+    ``hunter.hunt_jobs`` rows and the pipeline page's drill-down join on;
+    ``per_source`` is the loop's ``fetch_stats`` (raw count per source, or an
+    error string, stored as "ERR").
 
     Raises on a broken DB — see the module docstring.
     """
@@ -187,6 +223,8 @@ def record_hunt(
         _nonneg(queued),
         _nonneg(applied_inline),
         _nonneg(duration_ms),
+        str(hunt_id or ""),
+        _per_source_json(per_source),
     )
     with get_db(DB_PATH) as conn:
         _ensure_table(conn)
@@ -229,6 +267,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d["filter_reasons"] = json.loads(d.get("filter_reasons") or "{}")
     except (TypeError, ValueError):
         d["filter_reasons"] = {}
+    try:
+        d["per_source"] = json.loads(d.get("per_source") or "{}")
+    except (TypeError, ValueError):
+        d["per_source"] = {}
     return d
 
 

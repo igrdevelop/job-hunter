@@ -39,6 +39,12 @@ Sections:
             bot's own JobQueue will fire, from the `bot_state.*` KV)
   coverage  the five decision rules with PASS / FAIL / UNMEASURED
 
+Two further reads sit next to the snapshot (docs/HUNT_DRILLDOWN_PLAN.md M2):
+`--hunts N` lists the N newest hunts (live state + funnel counts + a summary
+of their vacancies by where each is now) and `--hunt ID` opens one hunt —
+raw yield per source, filter reasons and every vacancy that passed the
+filter, with its fate in that hunt and its current tracker / run state.
+
 Read-only: the DB is opened with `mode=ro`, nothing is written, no network,
 no LLM. A table that does not exist on the target DB (a pre-M1 checkout, a
 fresh dev DB) reports UNMEASURED for the rules that need it — never 0.
@@ -47,6 +53,8 @@ Usage:
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --days 7
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --json
+    docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --hunts 20
+    docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --hunt <id>
 """
 
 from __future__ import annotations
@@ -513,6 +521,367 @@ def control(conn: sqlite3.Connection) -> dict[str, Any] | None:
         "sources": sources if isinstance(sources, list) else None,
         "commands": commands,
     }
+
+
+# ── Hunts table + one hunt's drill-down (docs/HUNT_DRILLDOWN_PLAN.md M2) ─────
+#
+# Two reads served next to the snapshot, not inside it: the list of recent
+# hunts (one row per `hunt_live` row, joined to its `hunt_runs` counts and a
+# summary of its `hunt_jobs` vacancies) and the detail of ONE hunt (its
+# counts, raw yield per source, filter reasons and every filter-passed
+# vacancy with where it is NOW). "Now" is joined at read time by `url_norm`
+# to the user's `applications` row and the newest `generation_runs` row —
+# nothing threads a hunt id through the apply pipeline.
+
+# The fates hunter/hunt_jobs.py writes for a duplicate.
+HUNT_JOB_DUP_FATES = ("dup_url", "dup_ct", "dup_cooldown")
+
+# Every state a hunt's vacancy can be in now, in the order the page lists
+# them. `duplicate` wins over the tracker status (the row it duplicated is
+# someone else's story); the rest come from the tracker row, an open run,
+# or — with neither — the fate the hunt itself gave the vacancy.
+HUNT_JOB_STATES = (
+    "generating",
+    "queued",
+    "ready",
+    "sent",
+    "declined",
+    "skipped",
+    "failed",
+    "expired",
+    "manual",
+    "awaiting_decision",
+    "capped",
+    "not_acted",
+    "no_record",
+    "duplicate",
+)
+
+HUNT_JOB_FIELDS = ("url", "url_norm", "source", "title", "company", "fate", "fate_detail")
+
+# `applications` columns a job's `tracker` block serves when present.
+HUNT_JOB_TRACKER_OPTIONAL = (
+    "skip_reason",
+    "folder",
+    "drive_url",
+    "ats_verdict",
+    "cost_usd",
+    "queued_at",
+)
+
+
+def _hunt_status(live: dict[str, Any]) -> str:
+    if live.get("finished_at"):
+        return "error" if live.get("step") == "error" else "done"
+    return "waiting" if live.get("step") == "waiting" else "running"
+
+
+def _hunt_counts(conn: sqlite3.Connection, hunt_ids: list[str]) -> dict[str, dict[str, Any]] | None:
+    """hunt_id -> {counts, per_source, filter_reasons} from `hunt_runs`, or
+    None when that table (or its `hunt_id` column, pre-drill-down) is missing."""
+    if not _table_exists(conn, "hunt_runs"):
+        return None
+    cols = _columns(conn, "hunt_runs")
+    if "hunt_id" not in cols or set(HUNT_RUN_COUNT_COLUMNS) - cols:
+        return None
+    if not hunt_ids:
+        return {}
+    per_source_col = "per_source" if "per_source" in cols else "'{}'"
+    count_cols = ", ".join(f'"{c}"' for c in HUNT_RUN_COUNT_COLUMNS)
+    ph = ",".join("?" for _ in hunt_ids)
+    rows = conn.execute(
+        f"SELECT hunt_id, {count_cols}, filter_reasons, {per_source_col} AS per_source "  # noqa: S608 — constant columns, ? placeholders
+        f"FROM hunt_runs WHERE hunt_id IN ({ph}) ORDER BY id",
+        tuple(hunt_ids),
+    ).fetchall()
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        reasons = _json_or_none(r["filter_reasons"])
+        per_source = _json_or_none(r["per_source"])
+        out[r["hunt_id"]] = {
+            "counts": {c: int(r[c] or 0) for c in HUNT_RUN_COUNT_COLUMNS},
+            "filter_reasons": sorted(
+                ((str(k), int(v or 0)) for k, v in (reasons or {}).items()),
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+            if isinstance(reasons, dict)
+            else [],
+            "per_source": per_source if isinstance(per_source, dict) else {},
+        }
+    return out
+
+
+def _hunt_job_rows(conn: sqlite3.Connection, hunt_ids: list[str]) -> list[sqlite3.Row] | None:
+    """Every `hunt_jobs` row of these hunts in decision order, or None when
+    the table is missing (a DB from before the drill-down)."""
+    if not _table_exists(conn, "hunt_jobs"):
+        return None
+    if not hunt_ids:
+        return []
+    ph = ",".join("?" for _ in hunt_ids)
+    cols = ", ".join(HUNT_JOB_FIELDS)
+    return conn.execute(
+        f"SELECT hunt_id, {cols} FROM hunt_jobs WHERE hunt_id IN ({ph}) ORDER BY id",  # noqa: S608 — constant columns, ? placeholders
+        tuple(hunt_ids),
+    ).fetchall()
+
+
+def _tracker_rows_for(
+    conn: sqlite3.Connection, url_norms: set[str], user_id: str, now: datetime
+) -> dict[str, dict[str, Any]]:
+    """url_norm -> the user's CURRENT applications row (newest rowid) as the
+    `tracker` block, with the queue position for a PENDING row (1 = next to
+    be claimed; the order claim_pending drains, rowid)."""
+    keys = sorted(k for k in url_norms if k)
+    if not keys:
+        return {}
+    cols = _columns(conn, "applications")
+    extra = [c for c in HUNT_JOB_TRACKER_OPTIONAL if c in cols]
+    select = ", ".join(["url_norm", "ats_status", "sent", "rowid", *extra])
+    ph = ",".join("?" for _ in keys)
+    rows = conn.execute(
+        f"SELECT {select} FROM applications "  # noqa: S608 — literal column names, ? placeholders
+        f"WHERE user_id = ? AND url_norm IN ({ph}) ORDER BY rowid",
+        (user_id, *keys),
+    ).fetchall()
+    pending = [
+        r[0]
+        for r in conn.execute(
+            "SELECT rowid FROM applications WHERE user_id = ? AND ats_status = 'PENDING' "
+            "ORDER BY rowid",
+            (user_id,),
+        ).fetchall()
+    ]
+    position = {rid: i for i, rid in enumerate(pending, 1)}
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:  # ascending rowid: the newest row per url_norm wins
+        status = _bucket_status(r["ats_status"])
+        block: dict[str, Any] = {
+            "status": status,
+            "sent": r["sent"] or "",
+            "queue_position": position.get(r["rowid"]) if status == "PENDING" else None,
+        }
+        for c in HUNT_JOB_TRACKER_OPTIONAL:
+            block[c] = r[c] if c in extra else None
+        queued_at = block.pop("queued_at")
+        block["wait_min"] = _minutes_ago(queued_at, now) if status == "PENDING" else None
+        out[r["url_norm"]] = block
+    return out
+
+
+def _runs_for(
+    conn: sqlite3.Connection, url_norms: set[str], user_id: str, now: datetime
+) -> dict[str, dict[str, Any]]:
+    """url_norm -> the newest non-backfill `generation_runs` row for it, with
+    the live stage block (`_open_run_for`'s shape) when the run is still open.
+    Scoped like apply.runs: `user_id = ? OR user_id = ''`."""
+    keys = sorted(k for k in url_norms if k)
+    if not keys or not _table_exists(conn, "generation_runs"):
+        return {}
+    has_events = _table_exists(conn, "pipeline_events")
+    gcols = _columns(conn, "generation_runs")
+    cost = "cost_usd" if "cost_usd" in gcols else "NULL"
+    ph = ",".join("?" for _ in keys)
+    rows = conn.execute(
+        f"SELECT run_id, url_norm, pipeline, started_at, finished_at, outcome, "  # noqa: S608 — literal column names, ? placeholders
+        f"verdict_first, verdict_final, refine_rounds, {cost} AS cost_usd FROM generation_runs "
+        f"WHERE url_norm IN ({ph}) AND pipeline != 'backfill' AND (user_id = ? OR user_id = '') "
+        "ORDER BY started_at, rowid",
+        (*keys, user_id),
+    ).fetchall()
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:  # ascending start: the newest run per url_norm wins
+        out[r["url_norm"]] = {
+            "run_id": r["run_id"],
+            "pipeline": r["pipeline"],
+            "started_at": r["started_at"],
+            "finished_at": r["finished_at"],
+            "outcome": r["outcome"],
+            "verdict_first": r["verdict_first"],
+            "verdict_final": r["verdict_final"],
+            "refine_rounds": r["refine_rounds"],
+            "cost_usd": r["cost_usd"],
+            "live": None,
+        }
+    if has_events:
+        for key, run in out.items():
+            if run["finished_at"] is None:
+                run["live"] = _open_run_for(conn, key, now, user_id)
+    return out
+
+
+def _job_state(fate: str, tracker: dict[str, Any] | None, run: dict[str, Any] | None) -> str:
+    """Where one of a hunt's vacancies is NOW — one of HUNT_JOB_STATES."""
+    if fate in HUNT_JOB_DUP_FATES:
+        return "duplicate"
+    if tracker is not None:
+        status = tracker["status"]
+        if status == "PENDING":
+            return "queued"
+        if status == "IN_PROGRESS":
+            return "generating"
+        if status == "APPLIED":
+            kind = _classify_sent(tracker["sent"])
+            if kind == "applied":
+                return "sent"
+            return "ready" if kind == "blank" else "declined"
+        return {
+            "FAIL": "failed",
+            "EXPIRED": "expired",
+            "MANUAL": "manual",
+        }.get(status, "skipped")
+    if run is not None and run["finished_at"] is None:
+        return "generating"  # inline batch: no tracker row until it ends
+    return {
+        "card": "awaiting_decision",
+        "capped": "capped",
+        "new": "not_acted",
+    }.get(fate, "no_record")
+
+
+def _hunt_jobs_resolved(
+    conn: sqlite3.Connection, rows: list[sqlite3.Row], user_id: str, now: datetime
+) -> list[dict[str, Any]]:
+    keys = {r["url_norm"] for r in rows}
+    trackers = _tracker_rows_for(conn, keys, user_id, now)
+    runs = _runs_for(conn, keys, user_id, now)
+    jobs = []
+    for r in rows:
+        job: dict[str, Any] = {"hunt_id": r["hunt_id"], **{f: r[f] for f in HUNT_JOB_FIELDS}}
+        job["tracker"] = trackers.get(r["url_norm"])
+        job["run"] = runs.get(r["url_norm"])
+        job["state"] = _job_state(r["fate"], job["tracker"], job["run"])
+        jobs.append(job)
+    return jobs
+
+
+def _vacancy_summary(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    states = Counter(j["state"] for j in jobs)
+    return {
+        "total": len(jobs),
+        "by_state": {s: states[s] for s in HUNT_JOB_STATES if states[s]},
+    }
+
+
+def _hunt_row(live: dict[str, Any], counts: dict[str, Any] | None) -> dict[str, Any]:
+    started = _parse_ts(live.get("started_at"))
+    finished = _parse_ts(live.get("finished_at"))
+    return {
+        **live,
+        "status": _hunt_status(live),
+        "duration_sec": (
+            int((finished - started).total_seconds()) if started and finished else None
+        ),
+        "counts": counts["counts"] if counts else None,
+    }
+
+
+def hunts_list(
+    conn: sqlite3.Connection, user_id: str, *, limit: int = 50, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """`{hunts: [...]}` — the newest `limit` hunts, newest first, or None when
+    `hunt_live` (or one of its columns) is missing. One row per `hunt_live`
+    row, so a hunt shows up while it is still waiting or running, and retry
+    passes (`trigger` "retry") are listed too. `counts` is the hunt's
+    `hunt_runs` row (None while it runs, for a retry pass, or on a DB whose
+    hunt_runs has no `hunt_id`); `vacancies` summarises its `hunt_jobs`
+    rows by current state (None when that table is missing)."""
+    if not _table_exists(conn, "hunt_live"):
+        return None
+    if set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live"):
+        return None
+    now = now or datetime.now(timezone.utc)
+    cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
+    live_rows = conn.execute(
+        f"SELECT {cols} FROM hunt_live ORDER BY started_at DESC, rowid DESC LIMIT ?",  # noqa: S608 — constant column list
+        (max(1, int(limit)),),
+    ).fetchall()
+    lives = [row for row in (_live_row(r) for r in live_rows) if row is not None]
+    ids = [lv["hunt_id"] for lv in lives]
+    counts = _hunt_counts(conn, ids)
+    job_rows = _hunt_job_rows(conn, ids)
+    jobs_by_hunt: dict[str, list[dict[str, Any]]] = {}
+    if job_rows is not None:
+        for job in _hunt_jobs_resolved(conn, job_rows, user_id, now):
+            jobs_by_hunt.setdefault(job["hunt_id"], []).append(job)
+    hunts = []
+    for lv in lives:
+        row = _hunt_row(lv, (counts or {}).get(lv["hunt_id"]))
+        row["vacancies"] = (
+            None if job_rows is None else _vacancy_summary(jobs_by_hunt.get(lv["hunt_id"], []))
+        )
+        hunts.append(row)
+    return {"hunts": hunts}
+
+
+def hunt_detail(
+    conn: sqlite3.Connection, hunt_id: str, user_id: str, *, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """One hunt, or None when neither `hunt_live` nor `hunt_runs` knows it.
+
+    `{hunt, per_source, filter_reasons, vacancies, jobs}`: `hunt` is the
+    hunts_list row shape; `per_source` (raw count or "ERR" per source) and
+    `filter_reasons` ([reason, count] pairs, most frequent first) come from
+    `hunt_runs` and are None without it; `jobs` is every filter-passed
+    vacancy in the order the loop decided it — listing fields, the hunt's
+    `fate`, the `state` it is in now, and the `tracker` / `run` blocks that
+    state was read from (None when there is none) — or None when `hunt_jobs`
+    is missing."""
+    now = now or datetime.now(timezone.utc)
+    live: dict[str, Any] | None = None
+    if _table_exists(conn, "hunt_live") and not (
+        set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live")
+    ):
+        cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
+        live = _live_row(
+            conn.execute(
+                f"SELECT {cols} FROM hunt_live WHERE hunt_id = ?",  # noqa: S608 — constant column list
+                (hunt_id,),
+            ).fetchone()
+        )
+    counts = (_hunt_counts(conn, [hunt_id]) or {}).get(hunt_id)
+    if live is None and counts is None:
+        return None
+    synthesized = live is None
+    if live is None:  # the hunt_live ring already dropped it; hunt_runs still has it
+        live = dict.fromkeys(HUNT_LIVE_COLUMNS)
+        live.update(hunt_id=hunt_id, sources=[], step="done")
+    job_rows = _hunt_job_rows(conn, [hunt_id])
+    jobs = None if job_rows is None else _hunt_jobs_resolved(conn, job_rows, user_id, now)
+    for job in jobs or []:
+        job.pop("hunt_id", None)
+    hunt = _hunt_row(live, counts)
+    if synthesized:  # a hunt_runs row is only ever written by a hunt that ran
+        hunt["status"] = "done"
+    return {
+        "hunt": hunt,
+        "per_source": counts["per_source"] if counts else None,
+        "filter_reasons": counts["filter_reasons"] if counts else None,
+        "vacancies": None if jobs is None else _vacancy_summary(jobs),
+        "jobs": jobs,
+    }
+
+
+def _open_ro(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(f"file:{db_path.resolve().as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def build_hunts(db_path: Path, *, user_id: str, limit: int = 50) -> dict[str, Any] | None:
+    conn = _open_ro(db_path)
+    try:
+        return hunts_list(conn, user_id, limit=limit)
+    finally:
+        conn.close()
+
+
+def build_hunt_detail(db_path: Path, hunt_id: str, *, user_id: str) -> dict[str, Any] | None:
+    conn = _open_ro(db_path)
+    try:
+        return hunt_detail(conn, hunt_id, user_id)
+    finally:
+        conn.close()
 
 
 # Every column _hunt_runs_window reads; checked against PRAGMA table_info
@@ -1611,6 +1980,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--events", type=int, default=15, help="how many recent events to show")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument(
+        "--hunts",
+        type=int,
+        metavar="N",
+        help="print the N newest hunts (hunts table, JSON) instead of the snapshot",
+    )
+    ap.add_argument("--hunt", metavar="HUNT_ID", help="print one hunt's drill-down (JSON) instead")
     args = ap.parse_args(argv)
 
     db_path = Path(args.db)
@@ -1620,6 +1996,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.days < 1:
         print("ERROR: --days must be >= 1", file=sys.stderr)
         return 1
+
+    if args.hunts is not None or args.hunt:
+        # docs/HUNT_DRILLDOWN_PLAN.md M2 — always JSON: these two exist for
+        # the API port and its fixture, not for reading in a terminal.
+        if args.hunt:
+            data = build_hunt_detail(db_path, args.hunt, user_id=args.user or "")
+            if data is None:
+                print(f"ERROR: hunt {args.hunt} not found", file=sys.stderr)
+                return 1
+        else:
+            data = build_hunts(db_path, user_id=args.user or "", limit=max(1, args.hunts))
+        print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return 0
 
     snap = build_snapshot(
         db_path,
