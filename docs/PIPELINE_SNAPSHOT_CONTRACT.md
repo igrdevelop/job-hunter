@@ -895,14 +895,20 @@ newest rowid), or `null`:
 2. `tracker` is present:
    - `PENDING` → `queued`;
    - `IN_PROGRESS` → `generating`;
+   - an OPEN run (`run.finished_at` NULL) → `generating` — a retry or manual
+     re-run of a FAIL / SKIP row keeps that row until the run ends;
    - `APPLIED` → `ready` when `sent` is empty after trimming (the result
      tier's ready rule — a dash is the owner declining, NOT blank here, even
      though `sent_parse.classify` calls it blank), `sent` when
-     `sent_parse.classify(sent) == "applied"`, else `declined`;
+     `sent_parse.classify(sent) == "applied"`, `expired` when it is
+     `"expired"` (the nightly expiry sweep / Sheets reconcile write
+     `sent = 'EXPIRED'` on an applied row), else `declined`. A port passes the
+     Warsaw calendar year as the parser's default year, as the result tier does;
    - `FAIL` → `failed`, `EXPIRED` → `expired`, `MANUAL` → `manual`;
    - anything else (SKIP, a blank or dash status) → `skipped`.
 3. No tracker row, but an open run → `generating`. This is an inline batch:
-   its tracker row is written only when the run ends.
+   its tracker row is written only when the run ends. (No `applications`
+   table at all — a dev DB — is the same as no tracker row.)
 4. Otherwise, from the hunt's own fate:
    - `card` → `awaiting_decision`;
    - `capped` → `capped`;

@@ -633,7 +633,7 @@ def _tracker_rows_for(
     `tracker` block, with the queue position for a PENDING row (1 = next to
     be claimed; the order claim_pending drains, rowid)."""
     keys = sorted(k for k in url_norms if k)
-    if not keys:
+    if not keys or not _table_exists(conn, "applications"):
         return {}
     cols = _columns(conn, "applications")
     extra = [c for c in HUNT_JOB_TRACKER_OPTIONAL if c in cols]
@@ -714,25 +714,34 @@ def _job_state(fate: str, tracker: dict[str, Any] | None, run: dict[str, Any] | 
     """Where one of a hunt's vacancies is NOW — one of HUNT_JOB_STATES."""
     if fate in HUNT_JOB_DUP_FATES:
         return "duplicate"
+    run_open = run is not None and run["finished_at"] is None
     if tracker is not None:
         status = tracker["status"]
         if status == "PENDING":
             return "queued"
         if status == "IN_PROGRESS":
             return "generating"
+        # A retry / manual re-run of a FAIL or SKIP row keeps that row until
+        # it ends: the open run is the truth while it lasts.
+        if run_open:
+            return "generating"
         if status == "APPLIED":
             # Same line as the result tier's ready stack: only an EMPTY Sent
-            # is waiting to be sent — a dash is the owner declining by hand.
+            # is waiting to be sent — a dash is the owner declining by hand,
+            # "EXPIRED" is the nightly expiry sweep / Sheets reconcile.
             sent = (tracker["sent"] or "").strip()
             if not sent:
                 return "ready"
-            return "sent" if _classify_sent(sent) == "applied" else "declined"
+            kind = _classify_sent(sent)
+            if kind == "applied":
+                return "sent"
+            return "expired" if kind == "expired" else "declined"
         return {
             "FAIL": "failed",
             "EXPIRED": "expired",
             "MANUAL": "manual",
         }.get(status, "skipped")
-    if run is not None and run["finished_at"] is None:
+    if run_open:
         return "generating"  # inline batch: no tracker row until it ends
     return {
         "card": "awaiting_decision",

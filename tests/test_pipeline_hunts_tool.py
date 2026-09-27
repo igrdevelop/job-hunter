@@ -87,7 +87,7 @@ def test_list_is_every_hunt_live_row_newest_first(hunts_db: Path) -> None:
     assert by_id["h_run"]["duration_sec"] is None
     # counts only where a hunt_runs row carries this hunt_id
     assert by_id["h_done"]["counts"]["found"] == 57
-    assert by_id["h_done"]["counts"]["queued"] == 8
+    assert by_id["h_done"]["counts"]["queued"] == 10
     assert by_id["h_run"]["counts"] is None
     assert by_id["h_retry"]["counts"] is None
 
@@ -95,15 +95,16 @@ def test_list_is_every_hunt_live_row_newest_first(hunts_db: Path) -> None:
 def test_list_vacancy_summary_by_current_state(hunts_db: Path) -> None:
     h = {x["hunt_id"]: x for x in _list(hunts_db)["hunts"]}
     assert h["h_done"]["vacancies"] == {
-        "total": 11,
+        "total": 13,
         "by_state": {
-            "generating": 1,
+            "generating": 2,
             "queued": 1,
             "ready": 1,
             "sent": 1,
             "skipped": 1,
             "declined": 1,
             "failed": 1,
+            "expired": 1,
             "capped": 1,
             "no_record": 1,
             "duplicate": 2,
@@ -143,6 +144,8 @@ def test_detail_states_and_blocks(hunts_db: Path) -> None:
 
     assert jobs["Delta"]["state"] == "sent"
     assert jobs["Lambda"]["state"] == "declined"  # a dash in Sent is not "ready"
+    assert jobs["Mu"]["state"] == "expired"  # the nightly sweep's EXPIRED, not "declined"
+    assert jobs["Nu"]["state"] == "generating"  # an open re-run beats its old FAIL row
     assert jobs["Eps"]["state"] == "skipped"
     assert jobs["Eps"]["tracker"]["skip_reason"] == "doomed:pl_onsite"
     assert jobs["Zeta"]["state"] == "failed"
@@ -175,7 +178,7 @@ def test_detail_of_a_hunt_the_live_ring_dropped(hunts_db: Path) -> None:
     assert d is not None
     assert d["hunt"]["status"] == "done"
     assert d["hunt"]["counts"]["found"] == 57
-    assert len(d["jobs"]) == 11
+    assert len(d["jobs"]) == 13
 
 
 def test_missing_tables_are_none_never_zero(tmp_path: Path) -> None:
@@ -201,7 +204,7 @@ def test_cli_reads_read_only(hunts_db: Path, capsys) -> None:
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunts", "5"]) == 0
     assert len(json.loads(capsys.readouterr().out)["hunts"]) == 4
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunt", "h_done"]) == 0
-    assert len(json.loads(capsys.readouterr().out)["jobs"]) == 11
+    assert len(json.loads(capsys.readouterr().out)["jobs"]) == 13
     assert ps.main(["--db", str(hunts_db), "--hunt", "missing"]) == 1
     assert hunts_db.read_bytes() == before
 
@@ -259,3 +262,25 @@ def test_schema_sql_matches_the_bots_ddl(tmp_path: Path) -> None:
         if not line.startswith("-- Generated")
     )
     assert body == actual
+
+
+def test_no_applications_table_is_no_tracker_block(tmp_path: Path) -> None:
+    """The dev tracker.db holds only the lazy tables: never crash on it."""
+    db = tmp_path / "dev.db"
+    with closing(sqlite3.connect(db)) as c, c:
+        hunt_live._ensure_table(c)
+        hunt_runs._ensure_table(c)
+        hunt_jobs._ensure_table(c)
+        c.execute(
+            'INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, '
+            "step_started_at, finished_at) VALUES ('h1', 'scheduled', '[]', "
+            "'2026-09-27T08:00:00+00:00', 'done', '2026-09-27T08:00:00+00:00', "
+            "'2026-09-27T08:01:00+00:00')"
+        )
+        c.execute(
+            "INSERT INTO hunt_jobs (hunt_id, ts, url_norm, url, fate) VALUES "
+            "('h1', '2026-09-27T08:00:00+00:00', 'ex.com/a', 'https://ex.com/a', 'card')"
+        )
+    job = _detail(db, "h1")["jobs"][0]
+    assert (job["tracker"], job["state"]) == (None, "awaiting_decision")
+    assert _list(db)["hunts"][0]["vacancies"]["total"] == 1

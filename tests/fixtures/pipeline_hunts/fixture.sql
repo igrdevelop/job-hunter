@@ -22,10 +22,10 @@ INSERT INTO hunt_runs (ts, "trigger", sources, found, filtered_out, filter_reaso
   dup_ct, dup_cooldown, "new", capped, queued, applied_inline, duration_ms, hunt_id,
   per_source) VALUES
  ('2026-09-27T08:00:00+00:00', 'scheduled', '["justjoin","pracuj"]', 57, 47,
-  '{"level":30,"location":17}', 1, 1, 0, 9, 1, 8, 0, 90000, 'h_done',
+  '{"level":30,"location":17}', 1, 1, 0, 11, 1, 10, 0, 90000, 'h_done',
   '{"justjoin":57,"pracuj":"ERR"}');
 
--- h_done's eleven filter-passed vacancies, in the order the loop decided them.
+-- h_done's thirteen filter-passed vacancies, in the order the loop decided them.
 INSERT INTO hunt_jobs (hunt_id, ts, url_norm, url, source, title, company, fate, fate_detail) VALUES
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j1','https://ex.com/j1','justjoin','Angular Dev','Acme','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j2','https://ex.com/j2','justjoin','Angular Dev','Beta','queued',''),
@@ -35,6 +35,8 @@ INSERT INTO hunt_jobs (hunt_id, ts, url_norm, url, source, title, company, fate,
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j6','https://ex.com/j6','justjoin','Angular Dev','Zeta','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j7','https://ex.com/j7','justjoin','Angular Dev','Eta','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j9','https://ex.com/j9','justjoin','Angular Dev','Lambda','queued',''),
+ ('h_done','2026-09-27T08:00:00+00:00','ex.com/j10','https://ex.com/j10','justjoin','Angular Dev','Mu','queued',''),
+ ('h_done','2026-09-27T08:00:00+00:00','ex.com/j11','https://ex.com/j11','justjoin','Angular Dev','Nu','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j8','https://ex.com/j8','justjoin','Angular Dev','Theta','capped',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/d1','https://ex.com/d1','justjoin','Angular Dev','Iota','dup_url','tracker'),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/d2','https://ex.com/d2','justjoin','Angular Dev','Kappa','dup_ct','fuzzy');
@@ -52,6 +54,10 @@ INSERT INTO applications (id, date, user_id, company, title, ats_status, url, ur
  ('r6','2026-09-27','u1','Zeta','Angular Dev','FAIL','https://ex.com/j6','ex.com/j6','—','',NULL,'','','',NULL,NULL),
  -- generated, then declined by the owner by hand (a dash in Sent): not ready
  ('r9','2026-09-27','u1','Lambda','Angular Dev','88','https://ex.com/j9','ex.com/j9','—','',NULL,'','','',88,NULL),
+ -- generated, never sent, then stamped by the nightly expiry sweep
+ ('r10','2026-09-27','u1','Mu','Angular Dev','87','https://ex.com/j10','ex.com/j10','EXPIRED','',NULL,'','','',87,NULL),
+ -- failed once, being re-run right now (the FAIL row stays until the run ends)
+ ('r11','2026-09-27','u1','Nu','Angular Dev','FAIL','https://ex.com/j11','ex.com/j11','—','',NULL,'','','',NULL,NULL),
  ('rd','2026-08-01','u1','Iota','Angular Dev','91','https://ex.com/d1','ex.com/d1','2026-08-02','',NULL,'','','',91,NULL),
  -- another user's row for the capped vacancy must never leak into u1's view
  ('x8','2026-09-27','u2','Theta','Angular Dev','95','https://ex.com/j8','ex.com/j8','','',NULL,'','','',95,NULL);
@@ -63,6 +69,7 @@ INSERT INTO generation_runs (run_id, user_id, url_norm, started_at, finished_at,
  ('g2','u1','ex.com/j2','2026-09-27T09:40:00+00:00',NULL,'api',NULL,85,NULL,NULL,NULL),
  ('g3','u1','ex.com/j3','2026-09-27T08:05:00+00:00','2026-09-27T08:35:00+00:00','api','ok',86,93,2,0.42),
  ('g3b','u1','ex.com/j3','2026-09-27T09:00:00+00:00','2026-09-27T09:00:00+00:00','backfill','ok',NULL,NULL,NULL,NULL),
+ ('g11','u1','ex.com/j11','2026-09-27T09:58:00+00:00',NULL,'api',NULL,NULL,NULL,NULL,NULL),
  ('g6','u1','ex.com/j6','2026-09-27T08:40:00+00:00','2026-09-27T08:42:00+00:00','api','fail',NULL,NULL,NULL,0.05);
 
 INSERT INTO pipeline_events (run_id, ts, stage, event, duration_ms, payload) VALUES
