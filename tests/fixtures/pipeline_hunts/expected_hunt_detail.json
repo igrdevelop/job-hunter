@@ -1,0 +1,414 @@
+{
+  "hunt": {
+    "hunt_id": "h_done",
+    "trigger": "scheduled",
+    "sources": [
+      "justjoin",
+      "pracuj"
+    ],
+    "started_at": "2026-09-27T08:00:00+00:00",
+    "step": "done",
+    "step_started_at": "2026-09-27T08:01:30+00:00",
+    "current_source": "",
+    "sources_done": 2,
+    "sources_total": 2,
+    "found_so_far": 57,
+    "command_id": "",
+    "finished_at": "2026-09-27T08:01:30+00:00",
+    "status": "done",
+    "duration_sec": 90,
+    "counts": {
+      "found": 57,
+      "filtered_out": 47,
+      "dup_url": 1,
+      "dup_ct": 1,
+      "dup_cooldown": 0,
+      "new": 11,
+      "capped": 1,
+      "queued": 10,
+      "applied_inline": 0,
+      "duration_ms": 90000
+    }
+  },
+  "per_source": {
+    "justjoin": 57,
+    "pracuj": "ERR"
+  },
+  "filter_reasons": [
+    [
+      "level",
+      30
+    ],
+    [
+      "location",
+      17
+    ]
+  ],
+  "vacancies": {
+    "total": 13,
+    "by_state": {
+      "generating": 2,
+      "queued": 1,
+      "ready": 1,
+      "sent": 1,
+      "declined": 1,
+      "skipped": 1,
+      "failed": 1,
+      "expired": 1,
+      "capped": 1,
+      "no_record": 1,
+      "duplicate": 2
+    }
+  },
+  "jobs": [
+    {
+      "url": "https://ex.com/j1",
+      "url_norm": "ex.com/j1",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Acme",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "PENDING",
+        "sent": "",
+        "queue_position": 2,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": null,
+        "cost_usd": null,
+        "wait_min": 119
+      },
+      "run": null,
+      "state": "queued"
+    },
+    {
+      "url": "https://ex.com/j2",
+      "url_norm": "ex.com/j2",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Beta",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "IN_PROGRESS",
+        "sent": "",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": null,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": {
+        "run_id": "g2",
+        "pipeline": "api",
+        "started_at": "2026-09-27T09:40:00+00:00",
+        "finished_at": null,
+        "outcome": null,
+        "verdict_first": 85.0,
+        "verdict_final": null,
+        "refine_rounds": null,
+        "cost_usd": null,
+        "live": {
+          "run_id": "g2",
+          "pipeline": "api",
+          "profile": "",
+          "elapsed_min": 20,
+          "events": 4,
+          "last_event": {
+            "stage": "refine",
+            "event": "accepted",
+            "ts": "2026-09-27T09:55:00+00:00"
+          },
+          "current_stage": {
+            "stage": "refine",
+            "basis": "refine round accepted"
+          },
+          "stage_started_min_ago": 10,
+          "refine_progress": {
+            "round": 2,
+            "kind": "honest",
+            "score": 90,
+            "best": 90,
+            "outcome": "accepted",
+            "ts": "2026-09-27T09:55:00+00:00"
+          },
+          "refine_target": 95,
+          "refine_max_rounds": 5,
+          "verdict_first": 85.0,
+          "verdict_final": null,
+          "refine_rounds": null,
+          "refine_accepted": null
+        }
+      },
+      "state": "generating"
+    },
+    {
+      "url": "https://ex.com/j3",
+      "url_norm": "ex.com/j3",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Gamma",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "/app/users/u1/Applications/2026-09-27/Gamma",
+        "drive_url": "https://drive.test/g",
+        "ats_verdict": 93.0,
+        "cost_usd": 0.42,
+        "wait_min": null
+      },
+      "run": {
+        "run_id": "g3",
+        "pipeline": "api",
+        "started_at": "2026-09-27T08:05:00+00:00",
+        "finished_at": "2026-09-27T08:35:00+00:00",
+        "outcome": "ok",
+        "verdict_first": 86.0,
+        "verdict_final": 93.0,
+        "refine_rounds": 2,
+        "cost_usd": 0.42,
+        "live": null
+      },
+      "state": "ready"
+    },
+    {
+      "url": "https://ex.com/j4",
+      "url_norm": "ex.com/j4",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Delta",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "2026-09-27",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "/app/users/u1/Applications/2026-09-27/Delta",
+        "drive_url": "",
+        "ats_verdict": 90.0,
+        "cost_usd": 0.3,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "sent"
+    },
+    {
+      "url": "https://ex.com/j5",
+      "url_norm": "ex.com/j5",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Eps",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "SKIP",
+        "sent": "—",
+        "queue_position": null,
+        "skip_reason": "doomed:pl_onsite",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": null,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "skipped"
+    },
+    {
+      "url": "https://ex.com/j6",
+      "url_norm": "ex.com/j6",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Zeta",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "FAIL",
+        "sent": "—",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": null,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": {
+        "run_id": "g6",
+        "pipeline": "api",
+        "started_at": "2026-09-27T08:40:00+00:00",
+        "finished_at": "2026-09-27T08:42:00+00:00",
+        "outcome": "fail",
+        "verdict_first": null,
+        "verdict_final": null,
+        "refine_rounds": null,
+        "cost_usd": 0.05,
+        "live": null
+      },
+      "state": "failed"
+    },
+    {
+      "url": "https://ex.com/j7",
+      "url_norm": "ex.com/j7",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Eta",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": null,
+      "run": null,
+      "state": "no_record"
+    },
+    {
+      "url": "https://ex.com/j9",
+      "url_norm": "ex.com/j9",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Lambda",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "—",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": 88.0,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "declined"
+    },
+    {
+      "url": "https://ex.com/j10",
+      "url_norm": "ex.com/j10",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Mu",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "EXPIRED",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": 87.0,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "expired"
+    },
+    {
+      "url": "https://ex.com/j11",
+      "url_norm": "ex.com/j11",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Nu",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "FAIL",
+        "sent": "—",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": null,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": {
+        "run_id": "g11",
+        "pipeline": "api",
+        "started_at": "2026-09-27T09:58:00+00:00",
+        "finished_at": null,
+        "outcome": null,
+        "verdict_first": null,
+        "verdict_final": null,
+        "refine_rounds": null,
+        "cost_usd": null,
+        "live": {
+          "run_id": "g11",
+          "pipeline": "api",
+          "profile": "",
+          "elapsed_min": 2,
+          "events": 0,
+          "last_event": null,
+          "current_stage": {
+            "stage": "fetch",
+            "basis": "no events yet"
+          },
+          "stage_started_min_ago": null,
+          "refine_progress": null,
+          "refine_target": null,
+          "refine_max_rounds": null,
+          "verdict_first": null,
+          "verdict_final": null,
+          "refine_rounds": null,
+          "refine_accepted": null
+        }
+      },
+      "state": "generating"
+    },
+    {
+      "url": "https://ex.com/j8",
+      "url_norm": "ex.com/j8",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Theta",
+      "fate": "capped",
+      "fate_detail": "",
+      "tracker": null,
+      "run": null,
+      "state": "capped"
+    },
+    {
+      "url": "https://ex.com/d1",
+      "url_norm": "ex.com/d1",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Iota",
+      "fate": "dup_url",
+      "fate_detail": "tracker",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "2026-08-02",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": 91.0,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "duplicate"
+    },
+    {
+      "url": "https://ex.com/d2",
+      "url_norm": "ex.com/d2",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Kappa",
+      "fate": "dup_ct",
+      "fate_detail": "fuzzy",
+      "tracker": null,
+      "run": null,
+      "state": "duplicate"
+    }
+  ]
+}

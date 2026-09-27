@@ -298,6 +298,18 @@ HUNT_RUNS_ENABLED: bool = os.getenv("HUNT_RUNS_ENABLED", "true").lower() in (
 # Rows retained (ring buffer, pruned inside every write). ~100 hunts/day in
 # prod, so 2000 is ~3 weeks — enough for a 7-day window with headroom.
 HUNT_RUNS_KEEP: int = _env_int("HUNT_RUNS_KEEP", 2000)
+# hunt_jobs (docs/HUNT_DRILLDOWN_PLAN.md M1): one row per vacancy that passed
+# the filter in a hunt, with its fate there (dup / queued / capped / ...), so
+# the pipeline page can drill into one hunt. Listing metadata only, pruned
+# together with hunt_runs (M0: ~7 rows per hunt). `false` skips the write.
+HUNT_JOBS_ENABLED: bool = os.getenv("HUNT_JOBS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# Days a hunt's per-vacancy rows are kept (owner decision 2026-09-27: a month).
+# The hunts table's counts (hunt_runs) follow their own HUNT_RUNS_KEEP ring.
+HUNT_JOBS_TTL_DAYS: int = _env_int("HUNT_JOBS_TTL_DAYS", 30)
 
 # ── Pipeline page control: bot_commands + hunt_live (pipeline control plan) ──
 # The site's /pipeline page (owner only) inserts a row into the shared

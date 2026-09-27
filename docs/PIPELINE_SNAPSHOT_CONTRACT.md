@@ -778,6 +778,157 @@ object reflowed for reading — compare parsed JSON, not text. Note the events
 footer's tie order for equal `ts`: `id DESC`, so the last-inserted row —
 `r_orph`, `company: ""` — sorts first among the four `10:20:00` rows.)
 
+## Hunts table + one hunt's drill-down (added 2026-09-27)
+
+docs/HUNT_DRILLDOWN_PLAN.md M2. These are two reads that sit NEXT to the
+snapshot; they are not part of it. Each has its own endpoint, because the
+detail is fetched only for the one row the owner opened:
+
+- `GET /pipeline/hunts?limit=` ports `hunts_list(conn, user_id, *, limit, now)`.
+  The CLI is `--hunts N`.
+- `GET /pipeline/hunts/:huntId` ports `hunt_detail(conn, hunt_id, user_id, *, now)`.
+  The CLI is `--hunt ID`. The tool returns `None` for an unknown hunt, and the
+  CLI exits 1; the API maps that to 404.
+
+The same rules hold as for the snapshot: `mode=ro`, and a missing table or
+column is `null`, never 0.
+
+**Fixtures.** They are FILES, not copies inside this document:
+`tests/fixtures/pipeline_hunts/{schema.sql, fixture.sql, expected_hunts.json,
+expected_hunt_detail.json}`. `schema.sql` is a dump of the bot's real DDL
+(`init_db` + the lazy `hunt_live` / `hunt_runs` / `hunt_jobs` / metrics
+tables); `test_schema_sql_matches_the_bots_ddl` fails when that DDL drifts.
+- The clock is frozen at `2026-09-27T10:00:00+00:00` and the user is `u1`.
+- `tests/test_pipeline_hunts_tool.py::test_golden_contract` compares the
+  tool's output to the JSON files after dropping every display-only `at` key.
+- job-hunter-api copies all three files verbatim.
+- To regenerate after a deliberate change: `UPDATE_PIPELINE_HUNTS_FIXTURE=1
+  pytest tests/test_pipeline_hunts_tool.py`. Update this section and the API
+  copy in the same change.
+
+### Tables
+
+- `hunt_live` lists every hunt, including the ones still waiting or running,
+  and retry passes.
+- `hunt_runs` holds the funnel counts. Rows are joined by the `hunt_id` and
+  `per_source` columns, which were added 2026-09-27 by a lazy `ALTER`. A
+  `hunt_runs` row written before that has `hunt_id = ''` and never joins.
+- `hunt_jobs` (`hunter/hunt_jobs.py`) holds one row per vacancy that PASSED
+  the filter, with its `fate` in that hunt. See the fate table in the plan.
+  Filtered-out listings are only `hunt_runs.filter_reasons` counts.
+- `applications` and `generation_runs` / `pipeline_events` supply each
+  vacancy's CURRENT state, joined by `url_norm`.
+
+**Access.** job-hunter-api serves both routes OWNER-ONLY (403 otherwise):
+the hunt is the one bot's hunt — no per-user hunts exist — and a
+`duplicate` row would show another user which URLs the owner already
+applied to.
+
+**Scoping.** `hunt_*` tables are global. `applications` is always
+`user_id = ?`. `generation_runs` is `(user_id = ? OR user_id = '')` and
+excludes `pipeline = 'backfill'`, the same rule as `apply.runs`.
+
+### `hunts_list` → `{hunts: [row]}` or `null`
+
+`null` when `hunt_live` or any of its columns is missing. Otherwise the query
+is:
+
+```sql
+SELECT <hunt_live columns> FROM hunt_live
+ORDER BY started_at DESC, rowid DESC
+LIMIT ?
+```
+
+Each row is the full `hunt_live` row (the `hunt.live` shape, with `sources`
+parsed) plus:
+
+| key | value |
+|---|---|
+| `status` | `waiting` / `running` / `done` / `error` — see the rule below |
+| `duration_sec` | `finished_at − started_at` in whole seconds; `null` while unfinished |
+| `counts` | `{found, filtered_out, dup_url, dup_ct, dup_cooldown, new, capped, queued, applied_inline, duration_ms}` from the `hunt_runs` row with this `hunt_id`. `null` while running, for a retry pass (retries write no `hunt_runs` row), for a hunt that bailed before dedup, and when `hunt_runs` has no `hunt_id` column. |
+| `vacancies` | `{total, by_state: {state: n}}` over this hunt's `hunt_jobs` rows. Only non-zero states are included, in `HUNT_JOB_STATES` order. `{total: 0, by_state: {}}` for a hunt with none; `null` when the `hunt_jobs` table is missing. |
+
+The `status` rule:
+- `finished_at` NULL → `waiting` if `step = 'waiting'`, else `running`;
+- otherwise → `error` if `step = 'error'`, else `done`.
+
+### `hunt_detail` → object or `null`
+
+`null` when neither `hunt_live` nor `hunt_runs` has the id.
+
+When `hunt_live`'s ring has already dropped the row but `hunt_runs` still has
+it, the `hunt` block is synthesized:
+- every live column is `null`, except `hunt_id`, `sources: []` and `step: "done"`;
+- `status: "done"`.
+
+| key | value |
+|---|---|
+| `hunt` | the `hunts_list` row shape, without `vacancies` |
+| `per_source` | `{source: int \| "ERR"}` — the loop's raw count per source, `"ERR"` for a source whose `search()` raised; `null` without a `hunt_runs` row |
+| `filter_reasons` | `[[reason, count], ...]`, most frequent first (ties by name); `null` without a `hunt_runs` row |
+| `vacancies` | the summary above; `null` without `hunt_jobs` |
+| `jobs` | `[job]` in the order the loop decided them (`hunt_jobs.id`); `null` without `hunt_jobs` |
+
+**`job`** carries:
+- `url`, `url_norm`, `source`, `title`, `company`, `fate`, `fate_detail`, all
+  from `hunt_jobs`;
+- `tracker`, `run` and `state`, defined below.
+
+**`tracker`** is the user's `applications` row for that `url_norm` (the
+newest rowid), or `null`:
+- `status`: `_bucket_status(ats_status)`, so a score is `APPLIED`;
+- `sent`;
+- `queue_position`: rank among the user's PENDING rows by rowid, where 1 is
+  claimed next; `null` unless PENDING;
+- `wait_min`: minutes since `queued_at`; `null` unless PENDING;
+- `skip_reason`, `folder`, `drive_url`, `ats_verdict`, `cost_usd`: `null`
+  when the column is missing.
+
+**`run`** is the newest non-backfill `generation_runs` row for that
+`url_norm` (`ORDER BY started_at, rowid`, the last one wins), or `null`:
+- `run_id`, `pipeline`, `started_at`, `finished_at`, `outcome`,
+  `verdict_first`, `verdict_final`, `refine_rounds`, `cost_usd`;
+- `live`: the in-progress card's `run` object (`apply.in_progress.cards[].run`:
+  `current_stage`, `stage_started_min_ago`, `refine_progress`,
+  `refine_target`, …) while `finished_at` is NULL, else `null`.
+
+**`state`** is the first rule that matches (`_job_state`):
+
+1. `fate` in `dup_url` / `dup_ct` / `dup_cooldown` → `duplicate`. The
+   `tracker` block then describes the row it duplicated.
+2. `tracker` is present:
+   - `PENDING` → `queued`;
+   - `IN_PROGRESS` → `generating`;
+   - an OPEN run (`run.finished_at` NULL) → `generating` — a retry or manual
+     re-run of a FAIL / SKIP row keeps that row until the run ends;
+   - `APPLIED` → `ready` when `sent` is empty after trimming (the result
+     tier's ready rule — a dash is the owner declining, NOT blank here, even
+     though `sent_parse.classify` calls it blank), `sent` when
+     `sent_parse.classify(sent) == "applied"`, `expired` when it is
+     `"expired"` (the nightly expiry sweep / Sheets reconcile write
+     `sent = 'EXPIRED'` on an applied row), else `declined`. A port passes the
+     Warsaw calendar year as the parser's default year, as the result tier does;
+   - `FAIL` → `failed`, `EXPIRED` → `expired`, `MANUAL` → `manual`;
+   - anything else (SKIP, a blank or dash status) → `skipped`.
+3. No tracker row, but an open run → `generating`. This is an inline batch:
+   its tracker row is written only when the run ends. (No `applications`
+   table at all — a dev DB — is the same as no tracker row.)
+4. Otherwise, from the hunt's own fate:
+   - `card` → `awaiting_decision`;
+   - `capped` → `capped`;
+   - `new` → `not_acted` (outage pause or apply not ready; it returns next hunt);
+   - anything else → `no_record` (a queued vacancy whose placeholder a soft
+     abort deleted).
+
+`HUNT_JOB_STATES` order: `generating, queued, ready, sent, declined, skipped,
+failed, expired, manual, awaiting_decision, capped, not_acted, no_record,
+duplicate`.
+
+**Trade-off, by design.** The state is the vacancy's state NOW, not what this
+hunt did with it. If a later hunt or a manual paste handled the same URL, both
+hunts show that same current state. `fate` is the per-hunt fact.
+
 ## Not in the contract
 
 Keys the tool emits that the API does NOT port and the page does NOT depend
@@ -824,6 +975,8 @@ returns `null`.
   says the API "returns ids"; no `ids` key exists in the snapshot today, so
   that is a contract ADDITION when M3 needs it, not something to infer from
   the counts.
+  (The per-HUNT row list is that kind of addition, made 2026-09-27 as its own
+  two reads — see "Hunts table + one hunt's drill-down" above.)
 - A `blocked` key for the `BLOCKED` queue (docs/APPLY_FAILURE_QUEUES_PLAN.md
   M3, closed by its own M0 result) and a shadow-run card — both listed under
   the plan's "Later".

@@ -31,6 +31,7 @@ from hunter.config import (
     MAX_JOBS_PER_RUN,
     APPLY_AGENT_TIMEOUT_SEC,
     GMAIL_MAX_RESULTS,
+    HUNT_JOBS_ENABLED,
     HUNT_RUNS_ENABLED,
     POSTINGS_SEEN_ENABLED,
 )
@@ -38,6 +39,7 @@ from hunter.best_effort import best_effort
 from hunter.filters import apply_filters_with_stats, classify_job
 from hunter.gmail_report import build_gmail_report, JobOutcome
 from hunter import hunt_live, llm_outage
+from hunter.hunt_jobs import record_hunt_jobs
 from hunter.hunt_runs import record_hunt
 from hunter.models import Job
 from hunter.postings_seen import record_listings
@@ -383,11 +385,16 @@ async def _run_hunt_impl(
     dup_url = 0
     dup_ct = 0
     dup_cooldown = 0
+    # hunt_jobs (docs/HUNT_DRILLDOWN_PLAN.md): the fate of every filter-passed
+    # vacancy, in decision order, keyed by id(job) so the ACT step can update
+    # it. Written with the hunt_runs row by _flush_hunt_run.
+    job_fates: dict[int, dict[str, str]] = {}
     for j in filtered:
         is_gmail = j.source.startswith("gmail_")
         norm = normalize_url(j.url)
         if norm in known_urls or norm in seen_urls_this_run:
             dup_url += 1
+            _note_fate(job_fates, j, "dup_url", "tracker" if norm in known_urls else "same hunt")
             if is_gmail:
                 gmail_outcomes.append(JobOutcome.from_job(j, "dup_url"))
             continue
@@ -395,6 +402,7 @@ async def _run_hunt_impl(
         if key in known_ct or key in seen_ct_this_run:
             logger.info(f"[Hunt] Dup company+title: {j.company} / {j.title}")
             dup_ct += 1
+            _note_fate(job_fates, j, "dup_ct", "tracker" if key in known_ct else "same hunt")
             if is_gmail:
                 gmail_outcomes.append(JobOutcome.from_job(j, "dup_ct"))
             continue
@@ -407,6 +415,7 @@ async def _run_hunt_impl(
             if await _cache.is_fuzzy_ct(j.company, j.title):
                 logger.info(f"[Hunt] Fuzzy dup company+title: {j.company} / {j.title}")
                 dup_ct += 1
+                _note_fate(job_fates, j, "dup_ct", "fuzzy")
                 if is_gmail:
                     gmail_outcomes.append(JobOutcome.from_job(j, "dup_ct"))
                 continue
@@ -415,12 +424,14 @@ async def _run_hunt_impl(
         if await asyncio.to_thread(is_in_cooldown, j.company, j.title):
             logger.info(f"[Hunt] Cooldown: {j.company} / {j.title}")
             dup_cooldown += 1
+            _note_fate(job_fates, j, "dup_cooldown")
             if is_gmail:
                 gmail_outcomes.append(JobOutcome.from_job(j, "cooldown"))
             continue
         seen_urls_this_run.add(norm)
         seen_ct_this_run.add(key)
         new_jobs.append(j)
+        _note_fate(job_fates, j, "new")
         if is_gmail:
             gmail_outcomes.append(JobOutcome.from_job(j, "taken"))
 
@@ -442,9 +453,20 @@ async def _run_hunt_impl(
 
     async def _flush_hunt_run() -> None:
         nonlocal hunt_recorded
-        if hunt_recorded or not HUNT_RUNS_ENABLED or not active_sources:
+        if hunt_recorded or not active_sources:
             return
         hunt_recorded = True
+        if HUNT_RUNS_ENABLED:
+            await _write_hunt_run()
+        # The vacancy list after the hunt_runs row: hunt_jobs prunes against
+        # that table. Same flush, so an inline batch sees both written first.
+        if HUNT_JOBS_ENABLED and hunt_id:
+            with best_effort("hunt.jobs"):
+                await asyncio.to_thread(
+                    record_hunt_jobs, hunt_id, list(job_fates.values()), ts=hunt_started_iso
+                )
+
+    async def _write_hunt_run() -> None:
         with best_effort("hunt.record"):
             await asyncio.to_thread(
                 record_hunt,
@@ -462,6 +484,8 @@ async def _run_hunt_impl(
                 applied_inline=act_stats["applied_inline"],
                 duration_ms=int((time.monotonic() - hunt_started) * 1000),
                 ts=hunt_started_iso,
+                hunt_id=hunt_id,
+                per_source=fetch_stats,
             )
 
     await _step("act")
@@ -482,6 +506,7 @@ async def _run_hunt_impl(
             gmail_outcomes=gmail_outcomes,
             active_sources=active_sources,
             act_stats=act_stats,
+            job_fates=job_fates,
             flush_hunt_run=_flush_hunt_run,
         )
     finally:
@@ -505,6 +530,7 @@ async def _report_and_act(
     gmail_outcomes: list[JobOutcome],
     active_sources: list,
     act_stats: dict[str, int],
+    job_fates: dict[int, dict[str, str]],
     flush_hunt_run: Callable[[], Awaitable[None]],
 ) -> None:
     """The tail of _run_hunt_impl — the Telegram report + Step 4 (ACT).
@@ -512,8 +538,9 @@ async def _report_and_act(
     Moved verbatim into its own function (2026-09-22, hunt_runs) so the
     hunt_runs flush can wrap it in ONE try/finally instead of a call before
     each of the ACT step's seven exits. Every step, message and early return
-    is exactly as before; the only additions are the ``act_stats`` writes and
-    the explicit ``flush_hunt_run()`` right before the inline apply batch.
+    is exactly as before; the only additions are the ``act_stats`` / ``job_fates``
+    writes and the explicit ``flush_hunt_run()`` right before the inline apply
+    batch.
     """
     # ── Send detailed report ─────────────────────────────────────────────────
     report = (
@@ -561,6 +588,7 @@ async def _report_and_act(
             auto_eligible_jobs.append(j)
 
     if manual_only_jobs:
+        _set_fates(job_fates, manual_only_jobs, "card")
         await send_job_cards(context, manual_only_jobs)
 
     if not auto_eligible_jobs:
@@ -589,9 +617,11 @@ async def _report_and_act(
         capped = auto_eligible_jobs[:MAX_JOBS_PER_RUN]
         skipped_count = len(auto_eligible_jobs) - len(capped)
         act_stats["capped"] = skipped_count
+        _set_fates(job_fates, auto_eligible_jobs[MAX_JOBS_PER_RUN:], "capped")
         for j in capped:
             await asyncio.to_thread(add_pending, j)
             act_stats["queued"] += 1
+            _set_fates(job_fates, [j], "queued")
         if skipped_count:
             await send_text(
                 context,
@@ -631,6 +661,8 @@ async def _report_and_act(
         skipped_count = len(auto_eligible_jobs) - len(capped)
         act_stats["capped"] = skipped_count
         act_stats["applied_inline"] = len(capped)
+        _set_fates(job_fates, auto_eligible_jobs[MAX_JOBS_PER_RUN:], "capped")
+        _set_fates(job_fates, capped, "applied_inline")
 
         if skipped_count:
             await send_text(
@@ -648,7 +680,29 @@ async def _report_and_act(
         # Retries run on their own schedule now: run_retry_failed() below,
         # registered at RETRY_FAILED_TIMES (hunter/schedules/retry_failed.py).
     else:
+        _set_fates(job_fates, auto_eligible_jobs, "card")
         await send_job_cards(context, auto_eligible_jobs)
+
+
+def _note_fate(fates: dict[int, dict[str, str]], job: Job, fate: str, detail: str = "") -> None:
+    """Record one filter-passed vacancy's fate in this hunt (a hunt_jobs row)."""
+    fates[id(job)] = {
+        "url_norm": normalize_url(job.url) if job.url else "",
+        "url": job.url or "",
+        "source": job.source or "",
+        "title": job.title or "",
+        "company": job.company or "",
+        "fate": fate,
+        "fate_detail": detail,
+    }
+
+
+def _set_fates(fates: dict[int, dict[str, str]], jobs: list[Job], fate: str) -> None:
+    """Move already-noted vacancies to the ACT step's decision for them."""
+    for j in jobs:
+        entry = fates.get(id(j))
+        if entry is not None:
+            entry["fate"] = fate
 
 
 # ── Scraper health ────────────────────────────────────────────────────────────

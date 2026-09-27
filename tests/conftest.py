@@ -59,9 +59,12 @@ def _isolated_hunt_runs_db(tmp_path, monkeypatch) -> None:
     each append a row to the repo's own ./tracker.db. A test that wants the
     rows next to its tracker rows re-points it at ``tracker_db`` itself.
     """
-    from hunter import hunt_runs
+    from hunter import hunt_jobs, hunt_runs
 
     monkeypatch.setattr(hunt_runs, "DB_PATH", tmp_path / "hunt_runs.db")
+    # hunt_jobs (docs/HUNT_DRILLDOWN_PLAN.md) is flushed by the same hunt-loop
+    # call, and prunes against hunt_runs — so it shares that file.
+    monkeypatch.setattr(hunt_jobs, "DB_PATH", tmp_path / "hunt_runs.db")
 
 
 @pytest.fixture(autouse=True)
