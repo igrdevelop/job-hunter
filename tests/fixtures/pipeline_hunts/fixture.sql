@@ -16,7 +16,16 @@ INSERT INTO hunt_live (hunt_id, "trigger", sources, started_at, step, step_start
  ('h_retry', 'retry',     '[]',                    '2026-09-27T07:45:00+00:00', 'done',
   '2026-09-27T07:45:10+00:00', '', 0, 0, 0, '', '2026-09-27T07:45:10+00:00'),
  ('h_err',   'manual',    '["justjoin"]',          '2026-09-27T06:00:00+00:00', 'error',
-  '2026-09-27T06:00:20+00:00', '', 1, 1, 30, '', '2026-09-27T06:00:20+00:00');
+  '2026-09-27T06:00:20+00:00', '', 1, 1, 30, '', '2026-09-27T06:00:20+00:00'),
+ -- 23:30 Warsaw on the previous day: outside "today", inside the 7-day window
+ ('h_yday',  'scheduled', '["justjoin"]',          '2026-09-26T21:30:00+00:00', 'done',
+  '2026-09-26T21:31:00+00:00', '', 1, 1, 12, '', '2026-09-26T21:31:00+00:00'),
+ -- 22:00 UTC = 00:00 Warsaw on the 27th: the first minute of "today"
+ ('h_midn',  'scheduled', '["justjoin"]',          '2026-09-26T22:00:00+00:00', 'done',
+  '2026-09-26T22:01:00+00:00', '', 1, 1, 9, '', '2026-09-26T22:01:00+00:00'),
+ -- eight days back: outside both windows
+ ('h_old',   'scheduled', '["justjoin"]',          '2026-09-19T08:00:00+00:00', 'done',
+  '2026-09-19T08:01:00+00:00', '', 1, 1, 40, '', '2026-09-19T08:01:00+00:00');
 
 INSERT INTO hunt_runs (ts, "trigger", sources, found, filtered_out, filter_reasons, dup_url,
   dup_ct, dup_cooldown, "new", capped, queued, applied_inline, duration_ms, hunt_id,

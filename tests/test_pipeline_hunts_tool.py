@@ -76,9 +76,13 @@ def _stable(value: Any) -> Any:
 # ── The rules ─────────────────────────────────────────────────────────────────
 
 
-def test_list_is_every_hunt_live_row_newest_first(hunts_db: Path) -> None:
-    hunts = _list(hunts_db)["hunts"]
-    assert [h["hunt_id"] for h in hunts] == ["h_run", "h_done", "h_retry", "h_err"]
+def test_list_is_every_hunt_of_today_newest_first(hunts_db: Path) -> None:
+    out = _list(hunts_db)
+    hunts = out["hunts"]
+    # Warsaw "today" starts at 2026-09-26T22:00Z: h_midn is in, h_yday is not.
+    assert [h["hunt_id"] for h in hunts] == ["h_run", "h_done", "h_retry", "h_err", "h_midn"]
+    assert out["window"] == {"days": 1, "start_utc": "2026-09-26T22:00:00+00:00"}
+    assert (out["total"], out["offset"], out["limit"]) == (5, 0, 100)
     by_id = {h["hunt_id"]: h for h in hunts}
     assert by_id["h_run"]["status"] == "running"
     assert by_id["h_done"]["status"] == "done"
@@ -113,8 +117,18 @@ def test_list_vacancy_summary_by_current_state(hunts_db: Path) -> None:
     assert h["h_run"]["vacancies"] == {"total": 0, "by_state": {}}
 
 
-def test_list_limit(hunts_db: Path) -> None:
-    assert [h["hunt_id"] for h in _list(hunts_db, limit=2)["hunts"]] == ["h_run", "h_done"]
+def test_seven_day_window(hunts_db: Path) -> None:
+    ids = [h["hunt_id"] for h in _list(hunts_db, days=7)["hunts"]]
+    assert ids == ["h_run", "h_done", "h_retry", "h_err", "h_midn", "h_yday"]  # not h_old
+
+
+def test_pages_through_the_window(hunts_db: Path) -> None:
+    first = _list(hunts_db, days=7, limit=4)
+    second = _list(hunts_db, days=7, limit=4, offset=4)
+    assert [h["hunt_id"] for h in first["hunts"]] == ["h_run", "h_done", "h_retry", "h_err"]
+    assert [h["hunt_id"] for h in second["hunts"]] == ["h_midn", "h_yday"]
+    assert first["total"] == second["total"] == 6
+    assert _list(hunts_db, days=7, offset=6)["hunts"] == []
 
 
 def test_detail_states_and_blocks(hunts_db: Path) -> None:
@@ -201,8 +215,12 @@ def test_missing_tables_are_none_never_zero(tmp_path: Path) -> None:
 
 def test_cli_reads_read_only(hunts_db: Path, capsys) -> None:
     before = hunts_db.read_bytes()
-    assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunts", "5"]) == 0
-    assert len(json.loads(capsys.readouterr().out)["hunts"]) == 4
+    assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunts", "7"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["hunts"]) >= 5
+    args = ["--db", str(hunts_db), "--user", UID, "--hunts", "7", "--offset", "1", "--limit", "1"]
+    assert ps.main(args) == 0
+    page = json.loads(capsys.readouterr().out)
+    assert (page["offset"], page["limit"], len(page["hunts"])) == (1, 1, 1)
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunt", "h_done"]) == 0
     assert len(json.loads(capsys.readouterr().out)["jobs"]) == 13
     assert ps.main(["--db", str(hunts_db), "--hunt", "missing"]) == 1

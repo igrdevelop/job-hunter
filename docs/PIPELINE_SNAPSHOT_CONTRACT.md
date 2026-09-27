@@ -828,16 +828,27 @@ applied to.
 `user_id = ?`. `generation_runs` is `(user_id = ? OR user_id = '')` and
 excludes `pipeline = 'backfill'`, the same rule as `apply.runs`.
 
-### `hunts_list` → `{hunts: [row]}` or `null`
+### `hunts_list` → `{window, total, offset, limit, hunts: [row]}` or `null`
 
-`null` when `hunt_live` or any of its columns is missing. Otherwise the query
-is:
+`null` when `hunt_live` or any of its columns is missing. Otherwise ONE PAGE of
+every hunt started inside the window — Warsaw calendar days, `days` = 1
+(today, the default) or more, the same `Window` as the snapshot, compared as
+text against `hunt_live.started_at` (`+00:00` isoformat) — newest first:
 
 ```sql
+SELECT COUNT(*) FROM hunt_live WHERE started_at >= :start_utc        -- total
 SELECT <hunt_live columns> FROM hunt_live
+WHERE started_at >= :start_utc
 ORDER BY started_at DESC, rowid DESC
-LIMIT ?
+LIMIT :limit OFFSET :offset
 ```
+
+`window` = `{days, start_utc}`; `limit` defaults to 100 (prod's whole day
+fits) and is clamped to 1..500; `offset` ≥ 0; `total` counts the whole
+window, so a client pages until `offset + len(hunts) >= total`. (Changed
+2026-09-27 from "the newest N rows": the owner wants every run of the day,
+and N=30 covered only ~10 hours.) `hunt_live` keeps `HUNT_LIVE_KEEP` = 1500
+rows, ~20 days.
 
 Each row is the full `hunt_live` row (the `hunt.live` shape, with `sources`
 parsed) plus:

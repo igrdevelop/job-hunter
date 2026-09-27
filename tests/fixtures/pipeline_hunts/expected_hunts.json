@@ -1,4 +1,11 @@
 {
+  "window": {
+    "days": 1,
+    "start_utc": "2026-09-26T22:00:00+00:00"
+  },
+  "total": 5,
+  "offset": 0,
+  "limit": 100,
   "hunts": [
     {
       "hunt_id": "h_run",
@@ -108,6 +115,29 @@
       "finished_at": "2026-09-27T06:00:20+00:00",
       "status": "error",
       "duration_sec": 20,
+      "counts": null,
+      "vacancies": {
+        "total": 0,
+        "by_state": {}
+      }
+    },
+    {
+      "hunt_id": "h_midn",
+      "trigger": "scheduled",
+      "sources": [
+        "justjoin"
+      ],
+      "started_at": "2026-09-26T22:00:00+00:00",
+      "step": "done",
+      "step_started_at": "2026-09-26T22:01:00+00:00",
+      "current_source": "",
+      "sources_done": 1,
+      "sources_total": 1,
+      "found_so_far": 9,
+      "command_id": "",
+      "finished_at": "2026-09-26T22:01:00+00:00",
+      "status": "done",
+      "duration_sec": 60,
       "counts": null,
       "vacancies": {
         "total": 0,

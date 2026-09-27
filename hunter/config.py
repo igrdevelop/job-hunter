@@ -323,8 +323,9 @@ BOT_COMMANDS_ENABLED: bool = os.getenv("BOT_COMMANDS_ENABLED", "true").lower() i
     "yes",
 )
 # hunt_live rows retained (one per hunt / retry pass; ring buffer pruned on
-# every new row). The page only ever reads the newest two.
-HUNT_LIVE_KEEP: int = _env_int("HUNT_LIVE_KEEP", 500)
+# every new row). The site's hunts table lists every row of a 7-day window
+# from here (~75 rows/day in prod incl. retries), so 1500 is ~20 days.
+HUNT_LIVE_KEEP: int = _env_int("HUNT_LIVE_KEEP", 1500)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
