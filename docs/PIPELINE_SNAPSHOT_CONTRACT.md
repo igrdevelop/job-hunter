@@ -794,8 +794,10 @@ The same rules hold as for the snapshot: `mode=ro`, and a missing table or
 column is `null`, never 0.
 
 **Fixtures.** They are FILES, not copies inside this document:
-`tests/fixtures/pipeline_hunts/{fixture.sql, expected_hunts.json,
-expected_hunt_detail.json}`.
+`tests/fixtures/pipeline_hunts/{schema.sql, fixture.sql, expected_hunts.json,
+expected_hunt_detail.json}`. `schema.sql` is a dump of the bot's real DDL
+(`init_db` + the lazy `hunt_live` / `hunt_runs` / `hunt_jobs` / metrics
+tables); `test_schema_sql_matches_the_bots_ddl` fails when that DDL drifts.
 - The clock is frozen at `2026-09-27T10:00:00+00:00` and the user is `u1`.
 - `tests/test_pipeline_hunts_tool.py::test_golden_contract` compares the
   tool's output to the JSON files after dropping every display-only `at` key.

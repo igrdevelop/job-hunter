@@ -221,3 +221,39 @@ def test_golden_contract(hunts_db: Path, name: str, build) -> None:
         path.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     expected = json.loads(path.read_text(encoding="utf-8"))
     assert actual == expected
+
+
+def _schema_dump(db: Path) -> str:
+    """Every CREATE statement of the fixture DB, one per line group, stable order."""
+    with closing(sqlite3.connect(db)) as c:
+        rows = c.execute(
+            "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name"
+        ).fetchall()
+    return "".join(f"{r[0].strip()};\n" for r in rows)
+
+
+def test_schema_sql_matches_the_bots_ddl(tmp_path: Path) -> None:
+    """schema.sql is what job-hunter-api applies fixture.sql to: it must be
+    the bot's real DDL (init_db + the lazy tables this read touches)."""
+    db = tmp_path / "schema_only.db"
+    init_db(db, xlsx_path=tmp_path / "none.xlsx")
+    with closing(sqlite3.connect(db)) as c, c:
+        hunt_live._ensure_table(c)
+        hunt_runs._ensure_table(c)
+        hunt_jobs._ensure_table(c)
+        metrics._ensure_tables(c)
+    actual = _schema_dump(db)
+    path = FIXTURES / "schema.sql"
+    if os.environ.get("UPDATE_PIPELINE_HUNTS_FIXTURE") == "1":
+        path.write_text(
+            "-- Generated from the bot's DDL by tests/test_pipeline_hunts_tool.py"
+            " (UPDATE_PIPELINE_HUNTS_FIXTURE=1). Never edit by hand.\n" + actual,
+            encoding="utf-8",
+        )
+    body = "".join(
+        line + "\n"
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("-- Generated")
+    )
+    assert body == actual
