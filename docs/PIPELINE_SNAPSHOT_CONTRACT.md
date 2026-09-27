@@ -819,6 +819,11 @@ tables); `test_schema_sql_matches_the_bots_ddl` fails when that DDL drifts.
 - `applications` and `generation_runs` / `pipeline_events` supply each
   vacancy's CURRENT state, joined by `url_norm`.
 
+**Access.** job-hunter-api serves both routes OWNER-ONLY (403 otherwise):
+the hunt is the one bot's hunt — no per-user hunts exist — and a
+`duplicate` row would show another user which URLs the owner already
+applied to.
+
 **Scoping.** `hunt_*` tables are global. `applications` is always
 `user_id = ?`. `generation_runs` is `(user_id = ? OR user_id = '')` and
 excludes `pipeline = 'backfill'`, the same rule as `apply.runs`.

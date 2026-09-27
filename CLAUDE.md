@@ -1232,10 +1232,13 @@ hunter/
                             hunt: the vacancy's CURRENT state is joined at read time by
                             `url_norm` (tools/pipeline_snapshot.py `hunt_detail`). No
                             `user_id` (public listing metadata; erasure skips it). Lazy DDL,
-                            NOT in `init_db()`; pruned inside every write to rows whose
-                            hunt is still in `hunt_runs` and not older than its oldest row
-                            (retention = `HUNT_JOBS_TTL_DAYS`, default 30 days, owner decision
-                            2026-09-27; M0 on prod: ~7 rows per hunt, so ~15k rows).
+                            NOT in `init_db()`; pruned inside every write by two rules: rows
+                            older than `HUNT_JOBS_TTL_DAYS` (default 30 days, owner decision
+                            2026-09-27), plus rows whose hunt left the `hunt_runs` ring AND are
+                            older than its oldest row (skipped when `hunt_runs` is absent; a
+                            hunt whose own `hunt_runs` write failed keeps its rows until the
+                            TTL). M0 on prod: ~7 rows per hunt, so ~15k rows. The API serves
+                            the reads OWNER-ONLY (job-hunter-api#43).
                             `record_hunt_jobs` RAISES — the caller wraps it in
                             `best_effort("hunt.jobs")`. `HUNT_JOBS_ENABLED` gates it.
                             `tests/conftest.py` points `hunt_jobs.DB_PATH` at the same
