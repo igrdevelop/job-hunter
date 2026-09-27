@@ -40,7 +40,7 @@ Sections:
   coverage  the five decision rules with PASS / FAIL / UNMEASURED
 
 Two further reads sit next to the snapshot (docs/HUNT_DRILLDOWN_PLAN.md M2):
-`--hunts N` lists the N newest hunts (live state + funnel counts + a summary
+`--hunts DAYS` lists every hunt of the last DAYS Warsaw days (live state + funnel counts + a summary
 of their vacancies by where each is now) and `--hunt ID` opens one hunt —
 raw yield per source, filter reasons and every vacancy that passed the
 filter, with its fate in that hunt and its current tracker / run state.
@@ -53,7 +53,7 @@ Usage:
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --days 7
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --json
-    docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --hunts 20
+    docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --hunts 7
     docker compose exec -T job-hunter python tools/pipeline_snapshot.py --db tracker.db --hunt <id>
 """
 
@@ -787,12 +787,26 @@ def _hunt_row(live: dict[str, Any], counts: dict[str, Any] | None) -> dict[str, 
     }
 
 
+# Safety cap on one hunts-table answer. Not a page size: a 7-day window is
+# ~510 hunts at prod's ~73/day, so the cap only bites on a runaway schedule —
+# and says so via `truncated`.
+HUNTS_MAX = 2000
+
+
 def hunts_list(
-    conn: sqlite3.Connection, user_id: str, *, limit: int = 50, now: datetime | None = None
+    conn: sqlite3.Connection,
+    user_id: str,
+    *,
+    days: int = 1,
+    limit: int = HUNTS_MAX,
+    now: datetime | None = None,
 ) -> dict[str, Any] | None:
-    """`{hunts: [...]}` — the newest `limit` hunts, newest first, or None when
-    `hunt_live` (or one of its columns) is missing. One row per `hunt_live`
-    row, so a hunt shows up while it is still waiting or running, and retry
+    """`{window, hunts: [...], truncated}` — EVERY hunt started inside the
+    Warsaw calendar-day window (`days`, 1 = today, same `Window` as the
+    snapshot), newest first, capped at `limit` (`truncated` says the cap cut
+    rows) — or None when `hunt_live` (or one of its columns) is missing. One
+    row per `hunt_live` row, so a hunt shows up while it is still waiting or
+    running, and retry
     passes (`trigger` "retry") are listed too. `counts` is the hunt's
     `hunt_runs` row (None while it runs, for a retry pass, or on a DB whose
     hunt_runs has no `hunt_id`); `vacancies` summarises its `hunt_jobs`
@@ -802,11 +816,18 @@ def hunts_list(
     if set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live"):
         return None
     now = now or datetime.now(timezone.utc)
+    win = Window(max(1, int(days)), now)
+    cap = max(1, int(limit))
     cols = ", ".join(f'"{c}"' for c in HUNT_LIVE_COLUMNS)
+    # started_at is `+00:00` isoformat, like win.start_iso: text comparison is
+    # the snapshot's first window mode.
     live_rows = conn.execute(
-        f"SELECT {cols} FROM hunt_live ORDER BY started_at DESC, rowid DESC LIMIT ?",  # noqa: S608 — constant column list
-        (max(1, int(limit)),),
+        f"SELECT {cols} FROM hunt_live WHERE started_at >= ? "  # noqa: S608 — constant column list
+        "ORDER BY started_at DESC, rowid DESC LIMIT ?",
+        (win.start_iso, cap + 1),
     ).fetchall()
+    truncated = len(live_rows) > cap
+    live_rows = live_rows[:cap]
     lives = [row for row in (_live_row(r) for r in live_rows) if row is not None]
     ids = [lv["hunt_id"] for lv in lives]
     counts = _hunt_counts(conn, ids)
@@ -822,7 +843,11 @@ def hunts_list(
             None if job_rows is None else _vacancy_summary(jobs_by_hunt.get(lv["hunt_id"], []))
         )
         hunts.append(row)
-    return {"hunts": hunts}
+    return {
+        "window": {"days": win.days, "start_utc": win.start_iso},
+        "hunts": hunts,
+        "truncated": truncated,
+    }
 
 
 def hunt_detail(
@@ -879,10 +904,10 @@ def _open_ro(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def build_hunts(db_path: Path, *, user_id: str, limit: int = 50) -> dict[str, Any] | None:
+def build_hunts(db_path: Path, *, user_id: str, days: int = 1) -> dict[str, Any] | None:
     conn = _open_ro(db_path)
     try:
-        return hunts_list(conn, user_id, limit=limit)
+        return hunts_list(conn, user_id, days=days)
     finally:
         conn.close()
 
@@ -1994,8 +2019,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--hunts",
         type=int,
-        metavar="N",
-        help="print the N newest hunts (hunts table, JSON) instead of the snapshot",
+        metavar="DAYS",
+        help="print every hunt of the last DAYS Warsaw days (hunts table, JSON) instead",
     )
     ap.add_argument("--hunt", metavar="HUNT_ID", help="print one hunt's drill-down (JSON) instead")
     args = ap.parse_args(argv)
@@ -2017,7 +2042,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: hunt {args.hunt} not found", file=sys.stderr)
                 return 1
         else:
-            data = build_hunts(db_path, user_id=args.user or "", limit=max(1, args.hunts))
+            data = build_hunts(db_path, user_id=args.user or "", days=max(1, args.hunts))
         print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
         return 0
 
