@@ -307,6 +307,9 @@ HUNT_JOBS_ENABLED: bool = os.getenv("HUNT_JOBS_ENABLED", "true").lower() in (
     "1",
     "yes",
 )
+# Days a hunt's per-vacancy rows are kept (owner decision 2026-09-27: a month).
+# The hunts table's counts (hunt_runs) follow their own HUNT_RUNS_KEEP ring.
+HUNT_JOBS_TTL_DAYS: int = _env_int("HUNT_JOBS_TTL_DAYS", 30)
 
 # ── Pipeline page control: bot_commands + hunt_live (pipeline control plan) ──
 # The site's /pipeline page (owner only) inserts a row into the shared

@@ -61,8 +61,9 @@ Free and read-only, on prod (`mode=ro`), over the last 7 days of `hunt_runs`:
 hunt, store every post-filter row; otherwise store `dup_url` as a count only.
 
 **Result: 6.9, so store every row.** That is ≈ 500 rows/day at ~73 hunts/day.
-Retention follows the `hunt_runs` ring (`HUNT_RUNS_KEEP`=2000 ≈ 4 weeks), so
-under 20k rows. No separate knob.
+Retention: `HUNT_JOBS_TTL_DAYS`, default 30 days (owner decision 2026-09-27),
+so ≈ 15k rows. The `hunt_runs` counts keep their own ring; an older hunt still
+lists with its funnel, just without per-vacancy rows.
 
 ## M1 — bot records the per-hunt data
 

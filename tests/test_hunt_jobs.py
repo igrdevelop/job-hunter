@@ -35,6 +35,9 @@ def jobs_db(tmp_path, monkeypatch):
     db = tmp_path / "hunt_jobs_unit.db"
     monkeypatch.setattr(hunt_jobs, "DB_PATH", db)
     monkeypatch.setattr(hunt_runs, "DB_PATH", db)
+    # The unit tests below write fixed September dates; keep the TTL out of
+    # their way (test_rows_older_than_the_ttl_are_pruned sets its own).
+    monkeypatch.setattr(hunt_jobs, "HUNT_JOBS_TTL_DAYS", 36500)
     return db
 
 
@@ -254,3 +257,17 @@ def test_list_failure_is_swallowed_and_counted(loop_db) -> None:
     assert any(t.startswith("🔍 <b>Hunt ") for t in sent)
     assert len(_rows(loop_db)) == 1  # the counts row is independent
     assert _failures(loop_db, "hunt.jobs") == 1
+
+
+def test_rows_older_than_the_ttl_are_pruned(jobs_db, monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(hunt_jobs, "HUNT_JOBS_TTL_DAYS", 30)
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=31)).isoformat(timespec="seconds")
+    recent = (now - timedelta(days=29)).isoformat(timespec="seconds")
+    # No hunt_runs table: only the TTL rule can delete here.
+    hunt_jobs.record_hunt_jobs("h_old", [_entry("a.test/1", "queued")], ts=old)
+    hunt_jobs.record_hunt_jobs("h_recent", [_entry("a.test/2", "queued")], ts=recent)
+    assert hunt_jobs.jobs_for_hunt("h_old") == []
+    assert len(hunt_jobs.jobs_for_hunt("h_recent")) == 1

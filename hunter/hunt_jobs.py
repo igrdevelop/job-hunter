@@ -33,9 +33,9 @@ caller wraps it in ``best_effort("hunt.jobs")``, same as
 ``hunt_runs.record_hunt``.
 
 Storage: a ``hunt_jobs`` table in tracker.db, created lazily (the
-``hunt_runs`` / ``postings_seen`` pattern, NOT part of ``init_db()``). Rows
-whose ``hunt_id`` no longer has a ``hunt_runs`` row are pruned inside every
-write, so retention follows ``HUNT_RUNS_KEEP``.
+``hunt_runs`` / ``postings_seen`` pattern, NOT part of ``init_db()``). Pruned
+inside every write: rows older than ``HUNT_JOBS_TTL_DAYS`` (default 30, owner
+decision 2026-09-27), and rows whose hunt already left the ``hunt_runs`` ring.
 """
 
 from __future__ import annotations
@@ -43,10 +43,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from hunter.config import TRACKER_DB_PATH
+from hunter.config import HUNT_JOBS_TTL_DAYS, TRACKER_DB_PATH
 from hunter.db import get_db
 
 log = logging.getLogger(__name__)
@@ -143,13 +143,17 @@ def record_hunt_jobs(
 
 
 def _prune(conn: sqlite3.Connection) -> None:
-    """Drop rows whose hunt no longer has a ``hunt_runs`` row.
+    """Drop rows past the TTL, then rows whose hunt left the ``hunt_runs`` ring.
 
-    Retention therefore follows the ``hunt_runs`` ring (HUNT_RUNS_KEEP). When
-    ``hunt_runs`` does not exist in this database (an isolated test DB, or the
-    hunt_runs writer disabled), nothing is pruned — never delete everything
-    because the reference table is missing.
+    The TTL (``HUNT_JOBS_TTL_DAYS``) is the retention the owner chose; the
+    ring rule only matters when ``HUNT_RUNS_KEEP`` is shorter than the TTL.
+    When ``hunt_runs`` does not exist in this database (an isolated test DB,
+    or the hunt_runs writer disabled), the ring rule is skipped — never delete
+    everything because the reference table is missing.
     """
+    ttl_days = max(1, int(HUNT_JOBS_TTL_DAYS))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat(timespec="seconds")
+    conn.execute("DELETE FROM hunt_jobs WHERE ts < ?", (cutoff,))
     has_runs = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hunt_runs'"
     ).fetchone()

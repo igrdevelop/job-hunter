@@ -1234,7 +1234,8 @@ hunter/
                             `user_id` (public listing metadata; erasure skips it). Lazy DDL,
                             NOT in `init_db()`; pruned inside every write to rows whose
                             hunt is still in `hunt_runs` and not older than its oldest row
-                            (retention = `HUNT_RUNS_KEEP`; M0 on prod: ~7 rows per hunt).
+                            (retention = `HUNT_JOBS_TTL_DAYS`, default 30 days, owner decision
+                            2026-09-27; M0 on prod: ~7 rows per hunt, so ~15k rows).
                             `record_hunt_jobs` RAISES — the caller wraps it in
                             `best_effort("hunt.jobs")`. `HUNT_JOBS_ENABLED` gates it.
                             `tests/conftest.py` points `hunt_jobs.DB_PATH` at the same
@@ -2690,6 +2691,7 @@ Applications/               Generated documents (gitignored)
 | `BOT_COMMANDS_ENABLED` | `true` | Pipeline control plan, PR 1: the 3 s drain of the shared `bot_commands` table (hunter/schedules/bot_commands.py) through which the site's /pipeline page (owner only) starts a hunt (all sources / one source), a retry of FAILed rows or an expired check. `false` stops the drain — rows stay `pending`, nothing the page asks for runs. Checked inside the callback, so no re-registration is needed. |
 | `HUNT_LIVE_KEEP` | `500` | Rows the `hunt_live` ring buffer retains (one per hunt / retry pass, pruned when a row is started). The page reads only the newest two. Read via `config._env_int`. |
 | `HUNT_JOBS_ENABLED` | `true` | Per-hunt vacancy list (docs/HUNT_DRILLDOWN_PLAN.md): one `hunt_jobs` row per vacancy that passed the filter in a hunt, with its fate there (dup / queued / capped / card / inline), so the site's /pipeline page can open one hunt and show where each vacancy is now. Listing metadata only, pruned together with `hunt_runs`. `false` skips the write. |
+| `HUNT_JOBS_TTL_DAYS` | `30` | Days the `hunt_jobs` per-vacancy rows are kept (owner decision 2026-09-27: a month); older rows are deleted inside the next hunt's write. The hunts table's counts (`hunt_runs`) keep their own `HUNT_RUNS_KEEP` ring, so an old hunt still lists with its funnel, just without the vacancy rows. Read via `config._env_int`. |
 | `HUNT_RUNS_KEEP` | `2000` | Rows the `hunt_runs` ring buffer retains (pruned inside every write, like `SOURCE_HEALTH_KEEP`). ~100 hunt slots/day in prod, so 2000 is ~3 weeks — enough for a 7-day window with headroom. Read via `config._env_int` (a non-integer value warns and keeps the default). |
 | `GSHEETS_ENABLED` | `false` | Enable Google Sheets mirror |
 | `GSHEETS_TRACKER_ID` | — | Spreadsheet ID (set after first run or auto-created) |
