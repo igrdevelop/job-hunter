@@ -22,10 +22,10 @@ INSERT INTO hunt_runs (ts, "trigger", sources, found, filtered_out, filter_reaso
   dup_ct, dup_cooldown, "new", capped, queued, applied_inline, duration_ms, hunt_id,
   per_source) VALUES
  ('2026-09-27T08:00:00+00:00', 'scheduled', '["justjoin","pracuj"]', 57, 47,
-  '{"level":30,"location":17}', 1, 1, 0, 8, 1, 7, 0, 90000, 'h_done',
+  '{"level":30,"location":17}', 1, 1, 0, 9, 1, 8, 0, 90000, 'h_done',
   '{"justjoin":57,"pracuj":"ERR"}');
 
--- h_done's ten filter-passed vacancies, in the order the loop decided them.
+-- h_done's eleven filter-passed vacancies, in the order the loop decided them.
 INSERT INTO hunt_jobs (hunt_id, ts, url_norm, url, source, title, company, fate, fate_detail) VALUES
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j1','https://ex.com/j1','justjoin','Angular Dev','Acme','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j2','https://ex.com/j2','justjoin','Angular Dev','Beta','queued',''),
@@ -34,6 +34,7 @@ INSERT INTO hunt_jobs (hunt_id, ts, url_norm, url, source, title, company, fate,
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j5','https://ex.com/j5','justjoin','Angular Dev','Eps','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j6','https://ex.com/j6','justjoin','Angular Dev','Zeta','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j7','https://ex.com/j7','justjoin','Angular Dev','Eta','queued',''),
+ ('h_done','2026-09-27T08:00:00+00:00','ex.com/j9','https://ex.com/j9','justjoin','Angular Dev','Lambda','queued',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/j8','https://ex.com/j8','justjoin','Angular Dev','Theta','capped',''),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/d1','https://ex.com/d1','justjoin','Angular Dev','Iota','dup_url','tracker'),
  ('h_done','2026-09-27T08:00:00+00:00','ex.com/d2','https://ex.com/d2','justjoin','Angular Dev','Kappa','dup_ct','fuzzy');
@@ -49,6 +50,8 @@ INSERT INTO applications (id, date, user_id, company, title, ats_status, url, ur
  ('r4','2026-09-27','u1','Delta','Angular Dev','90','https://ex.com/j4','ex.com/j4','2026-09-27','',NULL,'','/app/users/u1/Applications/2026-09-27/Delta','',90,0.3),
  ('r5','2026-09-27','u1','Eps','Angular Dev','SKIP','https://ex.com/j5','ex.com/j5','—','',NULL,'doomed:pl_onsite','','',NULL,NULL),
  ('r6','2026-09-27','u1','Zeta','Angular Dev','FAIL','https://ex.com/j6','ex.com/j6','—','',NULL,'','','',NULL,NULL),
+ -- generated, then declined by the owner by hand (a dash in Sent): not ready
+ ('r9','2026-09-27','u1','Lambda','Angular Dev','88','https://ex.com/j9','ex.com/j9','—','',NULL,'','','',88,NULL),
  ('rd','2026-08-01','u1','Iota','Angular Dev','91','https://ex.com/d1','ex.com/d1','2026-08-02','',NULL,'','','',91,NULL),
  -- another user's row for the capped vacancy must never leak into u1's view
  ('x8','2026-09-27','u2','Theta','Angular Dev','95','https://ex.com/j8','ex.com/j8','','',NULL,'','','',95,NULL);

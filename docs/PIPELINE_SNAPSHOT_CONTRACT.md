@@ -895,8 +895,10 @@ newest rowid), or `null`:
 2. `tracker` is present:
    - `PENDING` → `queued`;
    - `IN_PROGRESS` → `generating`;
-   - `APPLIED` → `sent` when `sent_parse.classify(sent) == "applied"`,
-     `ready` when blank, else `declined`;
+   - `APPLIED` → `ready` when `sent` is empty after trimming (the result
+     tier's ready rule — a dash is the owner declining, NOT blank here, even
+     though `sent_parse.classify` calls it blank), `sent` when
+     `sent_parse.classify(sent) == "applied"`, else `declined`;
    - `FAIL` → `failed`, `EXPIRED` → `expired`, `MANUAL` → `manual`;
    - anything else (SKIP, a blank or dash status) → `skipped`.
 3. No tracker row, but an open run → `generating`. This is an inline batch:

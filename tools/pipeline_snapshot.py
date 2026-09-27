@@ -721,10 +721,12 @@ def _job_state(fate: str, tracker: dict[str, Any] | None, run: dict[str, Any] | 
         if status == "IN_PROGRESS":
             return "generating"
         if status == "APPLIED":
-            kind = _classify_sent(tracker["sent"])
-            if kind == "applied":
-                return "sent"
-            return "ready" if kind == "blank" else "declined"
+            # Same line as the result tier's ready stack: only an EMPTY Sent
+            # is waiting to be sent — a dash is the owner declining by hand.
+            sent = (tracker["sent"] or "").strip()
+            if not sent:
+                return "ready"
+            return "sent" if _classify_sent(sent) == "applied" else "declined"
         return {
             "FAIL": "failed",
             "EXPIRED": "expired",

@@ -23,9 +23,9 @@
       "dup_url": 1,
       "dup_ct": 1,
       "dup_cooldown": 0,
-      "new": 8,
+      "new": 9,
       "capped": 1,
-      "queued": 7,
+      "queued": 8,
       "applied_inline": 0,
       "duration_ms": 90000
     }
@@ -45,12 +45,13 @@
     ]
   ],
   "vacancies": {
-    "total": 10,
+    "total": 11,
     "by_state": {
       "generating": 1,
       "queued": 1,
       "ready": 1,
       "sent": 1,
+      "declined": 1,
       "skipped": 1,
       "failed": 1,
       "capped": 1,
@@ -265,6 +266,28 @@
       "tracker": null,
       "run": null,
       "state": "no_record"
+    },
+    {
+      "url": "https://ex.com/j9",
+      "url_norm": "ex.com/j9",
+      "source": "justjoin",
+      "title": "Angular Dev",
+      "company": "Lambda",
+      "fate": "queued",
+      "fate_detail": "",
+      "tracker": {
+        "status": "APPLIED",
+        "sent": "—",
+        "queue_position": null,
+        "skip_reason": "",
+        "folder": "",
+        "drive_url": "",
+        "ats_verdict": 88.0,
+        "cost_usd": null,
+        "wait_min": null
+      },
+      "run": null,
+      "state": "declined"
     },
     {
       "url": "https://ex.com/j8",
