@@ -1,6 +1,6 @@
 # FILTERS_YAML Plan — per-user job-filter settings as data files
 
-**Status:** M1–M3 done (2026-08-08); M4–M5 pending
+**Status:** M1–M3 done (2026-08-08); M4–M5 and open questions #3, #5, #6 superseded by [USER_SETTINGS_MODEL_PLAN](USER_SETTINGS_MODEL_PLAN.md) (2026-09-27)
 **Date:** 2026-08-08
 **Motivation:** owner request (chat, 2026-08-08): "надо бы вынести это в отдельные
 файлы с настройками, чтобы потом другие люди могли свои настройки юзать".
