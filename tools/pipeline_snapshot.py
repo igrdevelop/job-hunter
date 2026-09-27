@@ -910,10 +910,12 @@ def _open_ro(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def build_hunts(db_path: Path, *, user_id: str, days: int = 1) -> dict[str, Any] | None:
+def build_hunts(
+    db_path: Path, *, user_id: str, days: int = 1, offset: int = 0, limit: int = HUNTS_PAGE
+) -> dict[str, Any] | None:
     conn = _open_ro(db_path)
     try:
-        return hunts_list(conn, user_id, days=days)
+        return hunts_list(conn, user_id, days=days, offset=offset, limit=limit)
     finally:
         conn.close()
 
@@ -2029,6 +2031,10 @@ def main(argv: list[str] | None = None) -> int:
         help="print every hunt of the last DAYS Warsaw days (hunts table, JSON) instead",
     )
     ap.add_argument("--hunt", metavar="HUNT_ID", help="print one hunt's drill-down (JSON) instead")
+    ap.add_argument("--offset", type=int, default=0, help="--hunts: first row of the page")
+    ap.add_argument(
+        "--limit", type=int, default=HUNTS_PAGE, help=f"--hunts: page size (max {HUNTS_PAGE_MAX})"
+    )
     args = ap.parse_args(argv)
 
     db_path = Path(args.db)
@@ -2048,7 +2054,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: hunt {args.hunt} not found", file=sys.stderr)
                 return 1
         else:
-            data = build_hunts(db_path, user_id=args.user or "", days=max(1, args.hunts))
+            data = build_hunts(
+                db_path,
+                user_id=args.user or "",
+                days=max(1, args.hunts),
+                offset=max(0, args.offset),
+                limit=args.limit,
+            )
         print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
         return 0
 

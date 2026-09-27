@@ -217,6 +217,10 @@ def test_cli_reads_read_only(hunts_db: Path, capsys) -> None:
     before = hunts_db.read_bytes()
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunts", "7"]) == 0
     assert len(json.loads(capsys.readouterr().out)["hunts"]) >= 5
+    args = ["--db", str(hunts_db), "--user", UID, "--hunts", "7", "--offset", "1", "--limit", "1"]
+    assert ps.main(args) == 0
+    page = json.loads(capsys.readouterr().out)
+    assert (page["offset"], page["limit"], len(page["hunts"])) == (1, 1, 1)
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunt", "h_done"]) == 0
     assert len(json.loads(capsys.readouterr().out)["jobs"]) == 13
     assert ps.main(["--db", str(hunts_db), "--hunt", "missing"]) == 1
