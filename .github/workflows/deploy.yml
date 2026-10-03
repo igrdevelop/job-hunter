@@ -213,6 +213,37 @@ jobs:
             # deploy is now the rollback target, the one before it goes.
             sh docker_prune.sh
 
+      # Post-deploy live smoke. job-hunter-site's smoke.yml only reacts to the
+      # site's OWN deploy (workflow_run cannot see another repo's workflows),
+      # so a bot deploy that broke a profile render/preview job (the bot is the
+      # profile_jobs consumer the smoke exercises) stayed invisible until the
+      # next site deploy. Dispatch it explicitly. Needs
+      # SITE_SMOKE_DISPATCH_TOKEN: a fine-grained PAT scoped to
+      # igrdevelop/job-hunter-site with Actions: read & write (GITHUB_TOKEN
+      # cannot dispatch into another repository). Without the secret the step
+      # is skipped; a failed dispatch never fails the deploy -- the smoke run
+      # reports its own result. Placed before "Notify on failure" so a
+      # dispatch hiccup can never trigger a false deploy-failure alert
+      # (continue-on-error keeps the job's failure() false either way).
+      - name: Check smoke dispatch token
+        id: smoke
+        env:
+          SITE_SMOKE_DISPATCH_TOKEN: ${{ secrets.SITE_SMOKE_DISPATCH_TOKEN }}
+        run: |
+          if [ -n "$SITE_SMOKE_DISPATCH_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "SITE_SMOKE_DISPATCH_TOKEN not set - skipping the site smoke dispatch"
+          fi
+
+      - name: Trigger site live smoke
+        if: steps.smoke.outputs.enabled == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_SMOKE_DISPATCH_TOKEN }}
+        run: gh workflow run smoke.yml -R igrdevelop/job-hunter-site --ref master
+
       - name: Notify on failure
         if: failure()
         uses: appleboy/telegram-action@master
