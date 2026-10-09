@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -23,6 +23,19 @@ from hunter import hunt_live, hunt_runs, metrics, postings_seen, source_health
 from hunter.db import init_db
 
 UID = "u1"
+# Frozen clock (the contract doc's own fixture instant). 14:00 in Warsaw, so
+# every fixture row — the oldest in-window one is five hours old — lands on
+# the same Warsaw calendar day the 1-day window covers. A real clock put them
+# on the previous day between Warsaw midnight and ~05:00, and `applications.date`
+# (a local calendar day) disagreed with the UTC "now - N min" timestamps.
+NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+TODAY = NOW.astimezone(ps.TZ).strftime("%Y-%m-%d")
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every default `now` in the tool reads `ps._utcnow()`, the CLI included."""
+    monkeypatch.setattr(ps, "_utcnow", lambda: NOW)
 
 
 def _iso(dt: datetime) -> str:
@@ -33,8 +46,8 @@ def _iso(dt: datetime) -> str:
 def fixture_db(tmp_path: Path) -> Path:
     db = tmp_path / "tracker.db"
     init_db(db, xlsx_path=tmp_path / "none.xlsx")
-    now = datetime.now(timezone.utc)
-    today = date.today().strftime("%Y-%m-%d")
+    now = NOW
+    today = TODAY
 
     with sqlite3.connect(db) as c:
         postings_seen._ensure_table(c)
@@ -597,7 +610,7 @@ def test_partial_hunt_runs_schema_is_unmeasured_not_a_crash(tmp_path: Path) -> N
         )
         c.execute(
             'INSERT INTO hunt_runs (ts, "trigger", sources, found) VALUES (?,?,?,?)',
-            (datetime.now(timezone.utc).isoformat(timespec="seconds"), "scheduled", "[]", 5),
+            (NOW.isoformat(timespec="seconds"), "scheduled", "[]", 5),
         )
     snap = _snap(db)
     assert snap["hunt"]["hunt_runs"] is None
@@ -623,7 +636,7 @@ def test_queue_mode_seen_from_hunt_runs_after_placeholders_are_gone(tmp_path: Pa
         c.execute(
             f'INSERT INTO hunt_runs (ts, "trigger", sources, filter_reasons, {cols}) '  # noqa: S608 — test fixture
             f"VALUES (?, 'scheduled', '[]', '{{}}', {vals})",
-            (datetime.now(timezone.utc).isoformat(timespec="seconds"),),
+            (NOW.isoformat(timespec="seconds"),),
         )
     assert _snap(db)["apply"]["queue_mode_observed"] is True
 
@@ -673,7 +686,7 @@ def test_events_carry_details(fixture_db: Path) -> None:
 def test_events_and_open_run_are_user_scoped(fixture_db: Path) -> None:
     # A second user holding the SAME vacancy: their open run and their events
     # must never surface in u1's in-progress card or footer.
-    now = datetime.now(timezone.utc)
+    now = NOW
     with sqlite3.connect(fixture_db) as c:
         c.execute(
             "INSERT INTO generation_runs (run_id, user_id, url_norm, started_at, pipeline) "

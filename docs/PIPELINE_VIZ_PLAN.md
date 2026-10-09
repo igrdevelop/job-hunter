@@ -263,8 +263,8 @@ above as `tests/fixtures/pipeline_snapshot/{fixture.sql, expected.json}` (SQL
 derived from the test's inserts with the clock frozen at
 `2026-09-22T12:00:00+00:00`, the expected JSON generated from it, volatile
 fields listed as normalised-before-compare) without creating the files — the
-bot-side test that pins them needs a `now=` seam in `build_snapshot` and is
-the next PR. Four things are explicitly NOT in the contract: `next_slot`
+bot-side test that pins them needs a `now=` seam in `build_snapshot` (added
+2026-10-09) and is the next PR. Four things are explicitly NOT in the contract: `next_slot`
 (needs the scheduler roster), `events[].payload` (free-form, only a few shapes
 stable), `coverage` (bot diagnostic), and every key read from the local
 `.env` (`queue_enabled_local_config`, `failures.next_retry`, `timeout_sec`).

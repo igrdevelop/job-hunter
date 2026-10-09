@@ -32,6 +32,14 @@ NOW = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
 UID = "u1"
 
 
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the tool's clock to NOW for every path, the CLI included: `main()`
+    builds its Warsaw window from `ps._utcnow()`, and the fixture hunts sit on
+    2026-09-27, so a real clock drops them out of any window a week later."""
+    monkeypatch.setattr(ps, "_utcnow", lambda: NOW)
+
+
 @pytest.fixture
 def hunts_db(tmp_path: Path) -> Path:
     db = tmp_path / "tracker.db"
@@ -216,7 +224,9 @@ def test_missing_tables_are_none_never_zero(tmp_path: Path) -> None:
 def test_cli_reads_read_only(hunts_db: Path, capsys) -> None:
     before = hunts_db.read_bytes()
     assert ps.main(["--db", str(hunts_db), "--user", UID, "--hunts", "7"]) == 0
-    assert len(json.loads(capsys.readouterr().out)["hunts"]) >= 5
+    out = json.loads(capsys.readouterr().out)
+    assert len(out["hunts"]) >= 5
+    assert out == json.loads(json.dumps(_list(hunts_db, days=7), default=str))
     args = ["--db", str(hunts_db), "--user", UID, "--hunts", "7", "--offset", "1", "--limit", "1"]
     assert ps.main(args) == 0
     page = json.loads(capsys.readouterr().out)
