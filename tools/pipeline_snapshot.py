@@ -230,13 +230,19 @@ def _iso_utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _utcnow() -> datetime:
+    """The tool's one clock read. Every default `now` goes through here, so a
+    test can freeze the whole snapshot (CLI path included) by patching it."""
+    return datetime.now(timezone.utc)
+
+
 def _local_hhmm(value: Any) -> str:
     """Local HH:MM for a timestamp from today, MM-DD HH:MM for an older one."""
     dt = _parse_ts(value)
     if dt is None:
         return "--:--"
     local = dt.astimezone(TZ)
-    fmt = "%H:%M" if local.date() == datetime.now(TZ).date() else "%m-%d %H:%M"
+    fmt = "%H:%M" if local.date() == _utcnow().astimezone(TZ).date() else "%m-%d %H:%M"
     return local.strftime(fmt)
 
 
@@ -272,7 +278,7 @@ class Window:
     "today" means what the owner's clock and `/schedule` mean."""
 
     def __init__(self, days: int, now: datetime | None = None) -> None:
-        self.now = now or datetime.now(timezone.utc)
+        self.now = now or _utcnow()
         local_now = self.now.astimezone(TZ)
         start_local = (local_now - timedelta(days=days - 1)).replace(
             hour=0, minute=0, second=0, microsecond=0
@@ -817,7 +823,7 @@ def hunts_list(
         return None
     if set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live"):
         return None
-    now = now or datetime.now(timezone.utc)
+    now = now or _utcnow()
     win = Window(max(1, int(days)), now)
     page = min(max(1, int(limit)), HUNTS_PAGE_MAX)
     skip = max(0, int(offset))
@@ -869,7 +875,7 @@ def hunt_detail(
     `fate`, the `state` it is in now, and the `tracker` / `run` blocks that
     state was read from (None when there is none) — or None when `hunt_jobs`
     is missing."""
-    now = now or datetime.now(timezone.utc)
+    now = now or _utcnow()
     live: dict[str, Any] | None = None
     if _table_exists(conn, "hunt_live") and not (
         set(HUNT_LIVE_COLUMNS) - _columns(conn, "hunt_live")
@@ -1726,7 +1732,13 @@ def coverage(
 
 
 def build_snapshot(
-    db_path: Path, *, days: int, user_id: str, failures_log: Path, events_limit: int
+    db_path: Path,
+    *,
+    days: int,
+    user_id: str,
+    failures_log: Path,
+    events_limit: int,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
@@ -1734,7 +1746,7 @@ def build_snapshot(
     try:
         if not _table_exists(conn, "applications"):
             raise SystemExit(f"{db_path}: no applications table — not a tracker.db")
-        win = Window(days)
+        win = Window(days, now)
         hunt = hunt_tier(conn, win, user_id)
         snap = {
             "generated_at": _iso_utc(win.now),
